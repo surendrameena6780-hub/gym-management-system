@@ -43,6 +43,30 @@ const upload = multer({
     }
 });
 
+const uploadProfilePic = (req, res, next) => {
+    upload.single('profile_pic')(req, res, (err) => {
+        if (!err) return next();
+
+        if (err instanceof multer.MulterError) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({ error: 'Image too large. Max size is 2MB.' });
+            }
+            return res.status(400).json({ error: err.message || 'Invalid image upload.' });
+        }
+
+        const msg = String(err.message || '');
+        if (msg.includes('Only JPG') || msg.includes('Unexpected end of form') || msg.includes('Multipart')) {
+            return res.status(400).json({ error: 'Invalid image upload payload. Please reselect image and try again.' });
+        }
+
+        if (['ENOENT', 'EACCES', 'EPERM'].includes(err.code)) {
+            return res.status(500).json({ error: 'Unable to store uploaded image on server.' });
+        }
+
+        return res.status(500).json({ error: 'Image upload failed.' });
+    });
+};
+
 const buildPicUrl = (filename) => {
     return `/uploads/profiles/${filename}`;
 };
@@ -188,7 +212,7 @@ router.get('/:id', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 3. ADD MEMBER ---
-router.post('/add', auth, saasMiddleware, upload.single('profile_pic'), async (req, res) => {
+router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
     try {
         const { full_name, email, phone } = req.body;
         const normalizedPhone = normalizePhone(phone);
@@ -234,7 +258,7 @@ router.post('/add', auth, saasMiddleware, upload.single('profile_pic'), async (r
 });
 
 // --- 4. UPDATE MEMBER ---
-router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (req, res) => {
+router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
     const { full_name, email, phone } = req.body;
     const normalizedPhone = normalizePhone(phone);
     const normalizedName = String(full_name || '').trim();

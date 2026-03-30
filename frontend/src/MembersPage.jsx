@@ -360,11 +360,21 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
       toast?.('Phone must be exactly 10 digits.', 'error');
       return;
     }
-    const formData = new FormData();
-    formData.append('full_name', editFormData.full_name); formData.append('email', editFormData.email); formData.append('phone', normalizedPhone);
-    if (editFile) formData.append('profile_pic', editFile);
     try {
-      await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token } });
+      if (editFile) {
+        const formData = new FormData();
+        formData.append('full_name', editFormData.full_name);
+        formData.append('email', editFormData.email);
+        formData.append('phone', normalizedPhone);
+        formData.append('profile_pic', editFile);
+        await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token } });
+      } else {
+        await axios.put(
+          `/api/members/${editFormData.id}`,
+          { full_name: editFormData.full_name, email: editFormData.email, phone: normalizedPhone },
+          { headers: { 'x-auth-token': token } }
+        );
+      }
       setShowEditModal(false); setEditFile(null); fetchMembers(); toast?.('Member updated successfully!', 'success');
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Update failed. Please try again.';
