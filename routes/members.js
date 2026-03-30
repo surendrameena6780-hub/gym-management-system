@@ -219,9 +219,10 @@ router.post('/add', auth, saasMiddleware, upload.single('profile_pic'), async (r
 router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (req, res) => {
     const { full_name, email, phone } = req.body;
     const normalizedPhone = normalizePhone(phone);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
     const gym_id = req.user.gym_id;
 
-    if (!full_name || !email || !normalizedPhone) {
+    if (!full_name || !normalizedEmail || !normalizedPhone) {
         return res.status(400).json({ error: 'full_name, email and phone are required.' });
     }
     if (!isValidPhone(normalizedPhone)) {
@@ -237,17 +238,31 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
             return res.status(400).json({ error: 'This phone is already registered in your gym.' });
         }
 
+        const existingEmail = await pool.query(
+            'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
+            [gym_id, normalizedEmail, req.params.id]
+        );
+        if (existingEmail.rows.length > 0) {
+            return res.status(400).json({ error: 'This email is already registered in your gym.' });
+        }
+
         if (req.file) {
             const profile_pic = buildPicUrl(req.file.filename);
-            await pool.query(
+            const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3, profile_pic = $4 WHERE id = $5 AND gym_id = $6 AND deleted_at IS NULL",
-                [full_name, email, normalizedPhone, profile_pic, req.params.id, gym_id]
+                [full_name, normalizedEmail, normalizedPhone, profile_pic, req.params.id, gym_id]
             );
+            if (updateResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Member not found.' });
+            }
         } else {
-            await pool.query(
+            const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3 WHERE id = $4 AND gym_id = $5 AND deleted_at IS NULL",
-                [full_name, email, normalizedPhone, req.params.id, gym_id]
+                [full_name, normalizedEmail, normalizedPhone, req.params.id, gym_id]
             );
+            if (updateResult.rowCount === 0) {
+                return res.status(404).json({ error: 'Member not found.' });
+            }
         }
         res.json({ message: "Member updated" });
     } catch (err) {
@@ -258,7 +273,17 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
         if (err.message && err.message.includes('Only JPG')) {
             return res.status(400).json({ error: err.message });
         }
-        res.status(500).json({ error: err.message });
+        if (err.code === '23505') {
+            const detail = String(err.detail || '').toLowerCase();
+            if (detail.includes('(email)')) {
+                return res.status(400).json({ error: 'This email is already registered in your gym.' });
+            }
+            if (detail.includes('(phone)')) {
+                return res.status(400).json({ error: 'This phone is already registered in your gym.' });
+            }
+            return res.status(400).json({ error: 'This email or phone is already registered in your gym.' });
+        }
+        res.status(500).json({ error: 'Server Error' });
     }
 });
 

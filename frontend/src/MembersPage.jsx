@@ -71,6 +71,18 @@ const extractArray = (value, keys = []) => {
 
 const normalizePhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
 const isValidPhoneInput = (value) => /^\d{10}$/.test(normalizePhoneInput(value));
+const apiOrigin = String(import.meta.env.VITE_API_URL || axios.defaults.baseURL || '').trim().replace(/\/+$/, '');
+const toAbsoluteProfileUrl = (value) => {
+  const pathValue = String(value || '').trim();
+  if (!pathValue) return null;
+  if (/^https?:\/\//i.test(pathValue)) return pathValue;
+  const normalizedPath = pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
+  return apiOrigin ? `${apiOrigin}${normalizedPath}` : normalizedPath;
+};
+const normalizeMemberRecord = (member) => ({
+  ...member,
+  profile_pic: toAbsoluteProfileUrl(member?.profile_pic),
+});
 
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {
@@ -117,7 +129,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
     try {
       const url = `/api/members?paginate=true&page=${page}&limit=30${search ? `&search=${encodeURIComponent(search)}` : ''}`;
       const res = await axios.get(url, { headers: { 'x-auth-token': token } });
-      setMembers(extractArray(res.data, ['members', 'rows', 'items']));
+      const normalizedMembers = extractArray(res.data, ['members', 'rows', 'items']).map(normalizeMemberRecord);
+      setMembers(normalizedMembers);
       if (res.data?.pagination) {
         setPagination(res.data.pagination);
       }
@@ -353,7 +366,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
     try {
       await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' } });
       setShowEditModal(false); setEditFile(null); fetchMembers(); toast?.('Member updated successfully!', 'success');
-    } catch (err) { toast?.('Update failed. Please try again.', 'error'); }
+    } catch (err) {
+      const message = err?.response?.data?.error || err?.response?.data?.message || 'Update failed. Please try again.';
+      toast?.(message, 'error');
+    }
   };
 
   const handleDeleteMember = () => {
