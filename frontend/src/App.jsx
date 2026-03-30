@@ -490,6 +490,18 @@ function App() {
   }, [currentPage, token, isHQ, isSuspended, currentUser]);
 
   useEffect(() => {
+    if (!token || isHQ || isSuspended || currentUser?.role !== 'OWNER' || currentPage !== 'Dashboard') {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      fetchDashboard();
+    }, 45000);
+
+    return () => clearInterval(intervalId);
+  }, [token, isHQ, isSuspended, currentUser, currentPage]);
+
+  useEffect(() => {
     if (!token || isHQ || isSuspended || currentUser?.role !== 'OWNER' || currentPage !== 'Dashboard' || stats) {
       return;
     }

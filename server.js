@@ -167,6 +167,14 @@ app.get('/api/auth/me', auth, async (req, res) => {
     }
 });
 
+app.get('/healthz', (_req, res) => {
+    return res.status(200).json({
+        status: 'ok',
+        service: 'gym-management-system',
+        timestamp: new Date().toISOString(),
+    });
+});
+
 app.get('/', (req, res) => {
     res.send('Gym Management System API: Online');
 });

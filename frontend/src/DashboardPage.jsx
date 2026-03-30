@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -219,6 +219,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 // 🚨 ADDED startTour to props!
 const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startTour }) => {
   const navigateTo = navTo || ((page) => setCurrentPage?.(page));
+  const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
+  const MAX_WARMUP_RETRIES = 8;
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -238,6 +240,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   });
   const [isSkipped, setIsSkipped] = useState(localStorage.getItem('gymvault_skip_setup') === 'true');
   const [showTourBanner, setShowTourBanner] = useState(localStorage.getItem('gymvault_tour_completed') !== 'true');
+  const [isWarmupRetrying, setIsWarmupRetrying] = useState(false);
+  const warmupRetryTimerRef = useRef(null);
+  const warmupRetryCountRef = useRef(0);
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -287,21 +292,22 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   const fetchData = async () => {
     try {
+      const requestConfig = { ...headers, timeout: DASHBOARD_REQUEST_TIMEOUT_MS };
       const [
         membersRes, plansRes, statsRes,
         chart30Res, chart7Res, attendanceRes,
         todayRes, setupRes, churnRes, logsRes
       ] = await Promise.allSettled([
-        axios.get('/api/members', headers),
-        axios.get('/api/memberships/plans', headers),
-        axios.get('/api/payments/stats', headers),
-        axios.get('/api/payments/chart?days=30', headers),
-        axios.get('/api/payments/chart?days=7', headers),
-        axios.get('/api/attendance/summary', headers),
-        axios.get('/api/attendance/today', headers),
-        axios.get('/api/dashboard/setup-status', headers),
-        axios.get('/api/notifications/campaign/churn-scores?limit=30', headers),
-        axios.get('/api/notifications/campaign/logs?limit=50', headers)
+        axios.get('/api/members', requestConfig),
+        axios.get('/api/memberships/plans', requestConfig),
+        axios.get('/api/payments/stats', requestConfig),
+        axios.get('/api/payments/chart?days=30', requestConfig),
+        axios.get('/api/payments/chart?days=7', requestConfig),
+        axios.get('/api/attendance/summary', requestConfig),
+        axios.get('/api/attendance/today', requestConfig),
+        axios.get('/api/dashboard/setup-status', requestConfig),
+        axios.get('/api/notifications/campaign/churn-scores?limit=30', requestConfig),
+        axios.get('/api/notifications/campaign/logs?limit=50', requestConfig)
       ]);
 
       const pickData = (result, fallback) => {
@@ -331,8 +337,33 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       const failedCalls = [membersRes, plansRes, statsRes, chart30Res, chart7Res, attendanceRes, todayRes, setupRes, churnRes, logsRes]
         .filter((result) => result.status === 'rejected')
         .length;
-      if (failedCalls > 0) {
+      const successfulCalls = 10 - failedCalls;
+
+      if (failedCalls > 0 && successfulCalls > 0) {
         toast?.(`${failedCalls} dashboard section(s) failed to load.`, 'warning');
+      }
+
+      if (failedCalls === 10 && warmupRetryCountRef.current === 0) {
+        toast?.('Server is waking up. Dashboard will retry automatically.', 'warning');
+      }
+
+      if (successfulCalls === 0 && warmupRetryCountRef.current < MAX_WARMUP_RETRIES) {
+        warmupRetryCountRef.current += 1;
+        setIsWarmupRetrying(true);
+        const retryDelayMs = Math.min(4000 * warmupRetryCountRef.current, 30000);
+        if (warmupRetryTimerRef.current) {
+          clearTimeout(warmupRetryTimerRef.current);
+        }
+        warmupRetryTimerRef.current = setTimeout(() => {
+          fetchData();
+        }, retryDelayMs);
+      } else {
+        warmupRetryCountRef.current = 0;
+        setIsWarmupRetrying(false);
+        if (warmupRetryTimerRef.current) {
+          clearTimeout(warmupRetryTimerRef.current);
+          warmupRetryTimerRef.current = null;
+        }
       }
     } catch (err) {
       console.error('Dashboard fetch error:', err);
@@ -343,6 +374,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   useEffect(() => {
     return () => {
+      if (warmupRetryTimerRef.current) {
+        clearTimeout(warmupRetryTimerRef.current);
+      }
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
       }
@@ -376,7 +410,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     if (addFile) formData.append('profile_pic', addFile);
     try {
       const res = await axios.post('/api/members/add', formData, {
-        headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' }
+        headers: { 'x-auth-token': token }
       });
       setShowAddModal(false);
       const newMember = res.data;
@@ -943,6 +977,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   return (
     <div className="min-h-full pb-24 sm:pb-28 font-inter relative">
       {animationStyles}
+
+      {isWarmupRetrying && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm font-semibold">
+          Backend is waking up. Retrying dashboard data automatically...
+        </div>
+      )}
 
       {/* ════════════════════════════════════════
           🚀 AI AUTO-PILOT TOUR INITIALIZATION
