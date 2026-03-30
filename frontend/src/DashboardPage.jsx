@@ -852,7 +852,11 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       ? `Top priority: ${primary.title}. Estimated impact ₹${primary.impact.toLocaleString()} with ${primary.confidence}% confidence.`
       : `Gym health is ${healthScore}%. Operations are stable. Focus on growth by adding new members this week.`;
 
-    const actionRows = aiCandidates.slice(0, 4);
+    const ACTION_SLOT_COUNT = 3;
+    const actionRequiredRows = aiCandidates
+      .filter((item) => item.priority === 'P0' || item.priority === 'P1')
+      .slice(0, ACTION_SLOT_COUNT);
+
     const proactiveRows = [
       {
         id: 'PROACTIVE_GROWTH',
@@ -893,10 +897,11 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       },
     ];
 
-    const mergedActionRows = [...actionRows, ...proactiveRows]
+    // Required actions temporarily occupy proactive slots until resolved.
+    const mergedActionRows = [...actionRequiredRows, ...proactiveRows]
       .filter((item, index, arr) => arr.findIndex((x) => x.id === item.id) === index)
-      .slice(0, 4);
-    const urgentCount = aiCandidates.filter((item) => item.priority === 'P0').length;
+      .slice(0, ACTION_SLOT_COUNT);
+    const urgentCount = aiCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1').length;
 
     return {
       active: active.length, unpaid: unpaid.length, expired: expired.length,
