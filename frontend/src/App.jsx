@@ -17,7 +17,7 @@ import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
   ClipboardCheck, BarChart3, Settings, LogOut, Dumbbell, Lock, Bell, User, LifeBuoy,
-  Bot, ArrowRight, Target, Sparkles, Download // <-- 🚨 ADDED TOUR ICONS
+  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal // <-- 🚨 ADDED TOUR ICONS
 } from 'lucide-react';
 
 // ─── Navigation Config ────────────────────────────────────────────────────────
@@ -31,6 +31,8 @@ const NAV_ITEMS = [
   { name: 'Insights',   icon: BarChart3       },
   { name: 'Settings',   icon: Settings        },
 ];
+
+const MOBILE_PRIMARY_NAV = ['Dashboard', 'Members', 'Plans', 'Payments'];
 
 const PAGE_PERMISSIONS = {
   Dashboard: null,
@@ -201,6 +203,7 @@ function App() {
   const [canInstallApp, setCanInstallApp] = useState(false);
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [isStandaloneMode, setIsStandaloneMode] = useState(false);
+  const [showMobileMoreNav, setShowMobileMoreNav] = useState(false);
 
   // 🚨 MASTERCLASS TOUR STATE 🚨
   const [tour, setTour] = useState({ isActive: false, step: 0, isWaitingForAction: false });
@@ -306,6 +309,12 @@ function App() {
   }, [hasPermission]);
 
   const availableNavItems = NAV_ITEMS.filter((item) => canAccessPage(item.name));
+  const mobilePrimaryNavItems = availableNavItems.filter((item) => MOBILE_PRIMARY_NAV.includes(item.name));
+  const mobileMoreNavItems = [
+    ...availableNavItems.filter((item) => !MOBILE_PRIMARY_NAV.includes(item.name)),
+    ...(canAccessPage('Help & Support') ? [{ name: 'Help & Support', icon: LifeBuoy }] : []),
+  ].filter((item, index, list) => list.findIndex((candidate) => candidate.name === item.name) === index);
+  const isMoreActive = !MOBILE_PRIMARY_NAV.includes(currentPage);
 
   useEffect(() => {
     if (isHQ) return;
@@ -331,6 +340,10 @@ function App() {
     const firstAllowed = availableNavItems[0]?.name || 'Help & Support';
     setCurrentPage(firstAllowed);
   }, [currentPage, availableNavItems, canAccessPage, token, isHQ]);
+
+  useEffect(() => {
+    setShowMobileMoreNav(false);
+  }, [currentPage]);
 
   // --- NOTIFICATION STATE & LOGIC ---
   const [notifications, setNotifications] = useState([]);
@@ -772,7 +785,7 @@ function App() {
                 </>
               )}
             </div>
-            <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2 sm:gap-5">
               {token && !isStandaloneMode && canInstallApp && (
                 <button
                   onClick={handleInstallApp}
@@ -905,8 +918,8 @@ function App() {
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-8">
-            <div className="max-w-[1400px] mx-auto w-full">
+          <main className={`flex-1 p-4 md:p-6 lg:p-8 ${currentPage === 'Dashboard' ? 'app-main-scroll-dashboard' : 'app-main-scroll'} ${currentPage === 'Members' ? 'overflow-hidden md:overflow-y-auto' : 'overflow-y-auto'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full ${currentPage === 'Members' ? 'h-full min-h-0' : ''}`}>
               {/* 🚨 Passed startTour to Dashboard 🚨 */}
               {currentPage === 'Dashboard'  ? (currentUser?.role === 'OWNER'
                 ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} />
@@ -922,25 +935,82 @@ function App() {
           </main>
         </div>
 
-        <nav className="fixed bottom-0 left-0 right-0 md:hidden z-[120] border-t border-slate-200/80 bg-white/95 backdrop-blur-2xl">
-          <div className="flex overflow-x-auto no-scrollbar">
-            {availableNavItems.map(({ name, icon: Icon }) => {
-              const isActive = currentPage === name;
-              const isBlocked = isSuspended && name !== 'Settings';
-              return (
+        {showMobileMoreNav && (
+          <>
+            <div
+              className="fixed inset-0 z-[115] md:hidden bg-slate-900/25 backdrop-blur-[1px]"
+              onClick={() => setShowMobileMoreNav(false)}
+            />
+            <div
+              className="fixed left-3 right-3 z-[116] md:hidden rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl p-2 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.55)]"
+              style={{ bottom: 'calc(var(--mobile-nav-offset) + 0.5rem)' }}
+            >
+              <div className="grid grid-cols-2 gap-1.5">
+                {mobileMoreNavItems.map(({ name, icon: Icon }) => {
+                  const isActive = currentPage === name;
+                  const isBlocked = isSuspended && name !== 'Settings';
+                  return (
+                    <button
+                      key={`mobile-more-${name}`}
+                      onClick={() => {
+                        setShowMobileMoreNav(false);
+                        handleSidebarNav(name);
+                      }}
+                      disabled={isBlocked}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                        isActive ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100/70'
+                      } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      <Icon size={15} />
+                      <span className="truncate">{name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        <nav className="fixed inset-x-0 bottom-0 md:hidden z-[120] px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)]">
+          <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
+            <div
+              className="grid gap-1"
+              style={{ gridTemplateColumns: `repeat(${mobilePrimaryNavItems.length + (mobileMoreNavItems.length > 0 ? 1 : 0)}, minmax(0, 1fr))` }}
+            >
+              {mobilePrimaryNavItems.map(({ name, icon: Icon }) => {
+                const isActive = currentPage === name;
+                const isBlocked = isSuspended && name !== 'Settings';
+                return (
+                  <button
+                    key={`mobile-${name}`}
+                    onClick={() => handleSidebarNav(name)}
+                    disabled={isBlocked}
+                    className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-all ${
+                      isActive
+                        ? 'bg-slate-900 text-white shadow-[0_8px_18px_-10px_rgba(15,23,42,0.85)]'
+                        : 'text-slate-500 hover:bg-slate-100/75'
+                    } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  >
+                    <Icon size={16} />
+                    <span className="text-[10px] font-bold leading-none tracking-[0.01em]">{name}</span>
+                  </button>
+                );
+              })}
+
+              {mobileMoreNavItems.length > 0 && (
                 <button
-                  key={`mobile-${name}`}
-                  onClick={() => handleSidebarNav(name)}
-                  disabled={isBlocked}
-                  className={`py-2.5 px-4 min-w-[88px] flex flex-col items-center justify-center gap-1 transition-colors ${
-                    isActive ? 'text-indigo-600' : 'text-slate-400'
-                  } ${isBlocked ? 'opacity-40' : ''}`}
+                  onClick={() => setShowMobileMoreNav((prev) => !prev)}
+                  className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-all ${
+                    isMoreActive || showMobileMoreNav
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-slate-500 hover:bg-slate-100/75'
+                  }`}
                 >
-                  <Icon size={16} />
-                  <span className="text-[10px] font-bold leading-none">{name}</span>
+                  <MoreHorizontal size={17} />
+                  <span className="text-[10px] font-bold leading-none tracking-[0.01em]">More</span>
                 </button>
-              );
-            })}
+              )}
+            </div>
           </div>
         </nav>
       </div>

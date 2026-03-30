@@ -292,20 +292,36 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
     }
 
     try {
-        const existingPhone = await pool.query(
-            'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
-            [gym_id, normalizedPhone, memberId]
+        const currentMemberResult = await pool.query(
+            'SELECT id, email, phone FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+            [memberId, gym_id]
         );
-        if (existingPhone.rows.length > 0) {
-            return res.status(400).json({ error: 'This phone is already registered in your gym.' });
+        if (currentMemberResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Member not found.' });
         }
 
-        const existingEmail = await pool.query(
-            'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
-            [gym_id, normalizedEmail, memberId]
-        );
-        if (existingEmail.rows.length > 0) {
-            return res.status(400).json({ error: 'This email is already registered in your gym.' });
+        const currentMember = currentMemberResult.rows[0];
+        const currentPhone = normalizePhone(currentMember.phone);
+        const currentEmail = String(currentMember.email || '').trim().toLowerCase();
+
+        if (normalizedPhone !== currentPhone) {
+            const existingPhone = await pool.query(
+                'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
+                [gym_id, normalizedPhone, memberId]
+            );
+            if (existingPhone.rows.length > 0) {
+                return res.status(400).json({ error: 'This phone is already registered in your gym.' });
+            }
+        }
+
+        if (normalizedEmail !== currentEmail) {
+            const existingEmail = await pool.query(
+                'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
+                [gym_id, normalizedEmail, memberId]
+            );
+            if (existingEmail.rows.length > 0) {
+                return res.status(400).json({ error: 'This email is already registered in your gym.' });
+            }
         }
 
         if (req.file) {

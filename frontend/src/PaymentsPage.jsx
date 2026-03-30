@@ -244,14 +244,14 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
   return (
     <div className="min-h-full p-2 font-sans relative" onClick={() => setShowFilterDropdown(false)}>
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-6 flex flex-col gap-6 mb-0"
+      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-5 sm:gap-6 mb-0"
         style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
 
-      <div className="flex justify-between items-end">
-        <div><h1 className="text-3xl font-black text-slate-900 tracking-tight">Financial Overview</h1></div>
-        <div className="flex gap-3">
-          <button onClick={handleExport} className="bg-white border border-slate-200 text-slate-600 px-5 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Download size={18} /> Export</button>
-          <button onClick={() => setShowModal(true)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={20} /> Record Payment</button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">
+        <div><h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Financial Overview</h1></div>
+        <div className="grid grid-cols-2 sm:flex gap-2.5 w-full sm:w-auto">
+          <button onClick={handleExport} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Download size={17} /> Export</button>
+          <button onClick={() => setShowModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Record Payment</button>
         </div>
       </div>
 

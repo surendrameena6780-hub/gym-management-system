@@ -22,6 +22,9 @@ const getAvatarGradient = (name) => AVATAR_GRADIENTS[(name?.charCodeAt(0) || 0) 
 
 const GradientAvatar = ({ name, src, sizePx = 36, onClick, className = '', imageFit = 'object-cover' }) => {
   const [imgError, setImgError] = useState(false);
+  useEffect(() => {
+    setImgError(false);
+  }, [src]);
   const showInitials = !src || imgError;
   return (
     <div onClick={onClick} style={{ width: sizePx, height: sizePx, minWidth: sizePx, minHeight: sizePx }} className={`rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-slate-100 ${onClick ? 'cursor-pointer' : ''} ${className}`}>
@@ -72,12 +75,140 @@ const extractArray = (value, keys = []) => {
 
 const normalizePhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
 const isValidPhoneInput = (value) => /^\d{10}$/.test(normalizePhoneInput(value));
-const apiOrigin = String(import.meta.env.VITE_API_URL || axios.defaults.baseURL || '').trim().replace(/\/+$/, '');
+const MAX_PROFILE_IMAGE_BYTES = 2 * 1024 * 1024;
+const PROFILE_IMAGE_MAX_DIMENSION = 1600;
+const allowedProfileImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
+const getProfileImageTypeError = (file) => {
+  const mimeType = String(file?.type || '').toLowerCase();
+  if (mimeType && !allowedProfileImageMimeTypes.has(mimeType)) {
+    return 'Only JPG, JPEG, PNG, and WEBP images are allowed.';
+  }
+  return null;
+};
+
+const loadImageFromFile = (file) => new Promise((resolve, reject) => {
+  const objectUrl = URL.createObjectURL(file);
+  const image = new Image();
+
+  image.onload = () => {
+    URL.revokeObjectURL(objectUrl);
+    resolve(image);
+  };
+
+  image.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    reject(new Error('Unable to read image.'));
+  };
+
+  image.src = objectUrl;
+});
+
+const canvasToBlob = (canvas, mimeType, quality) => new Promise((resolve, reject) => {
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      reject(new Error('Image compression failed.'));
+      return;
+    }
+    resolve(blob);
+  }, mimeType, quality);
+});
+
+const compressProfileImageFile = async (file, maxBytes = MAX_PROFILE_IMAGE_BYTES) => {
+  const image = await loadImageFromFile(file);
+  const scale = Math.min(1, PROFILE_IMAGE_MAX_DIMENSION / Math.max(image.width, image.height));
+  let width = Math.max(1, Math.round(image.width * scale));
+  let height = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return file;
+  }
+
+  let bestBlob = null;
+
+  for (let pass = 0; pass < 5; pass += 1) {
+    canvas.width = width;
+    canvas.height = height;
+    context.clearRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+
+    for (const mimeType of ['image/webp', 'image/jpeg']) {
+      for (const quality of [0.92, 0.85, 0.78, 0.7, 0.62, 0.55, 0.48]) {
+        try {
+          const blob = await canvasToBlob(canvas, mimeType, quality);
+          if (!bestBlob || blob.size < bestBlob.size) {
+            bestBlob = blob;
+          }
+          if (blob.size <= maxBytes) {
+            const extension = mimeType === 'image/webp' ? 'webp' : 'jpg';
+            const baseName = String(file.name || 'profile').replace(/\.[^/.]+$/, '');
+            return new File([blob], `${baseName}.${extension}`, { type: mimeType, lastModified: Date.now() });
+          }
+        } catch (_err) {
+          // Try next quality/type.
+        }
+      }
+    }
+
+    width = Math.max(1, Math.round(width * 0.85));
+    height = Math.max(1, Math.round(height * 0.85));
+  }
+
+  if (bestBlob) {
+    const bestType = bestBlob.type || 'image/jpeg';
+    const extension = bestType === 'image/webp' ? 'webp' : 'jpg';
+    const baseName = String(file.name || 'profile').replace(/\.[^/.]+$/, '');
+    return new File([bestBlob], `${baseName}.${extension}`, { type: bestType, lastModified: Date.now() });
+  }
+
+  return file;
+};
+
+const normalizeProfileImageFile = async (file) => {
+  if (!file) {
+    return { file: null, error: null, wasCompressed: false };
+  }
+
+  const typeError = getProfileImageTypeError(file);
+  if (typeError) {
+    return { file: null, error: typeError, wasCompressed: false };
+  }
+
+  if (Number(file.size || 0) <= MAX_PROFILE_IMAGE_BYTES) {
+    return { file, error: null, wasCompressed: false };
+  }
+
+  try {
+    const compressedFile = await compressProfileImageFile(file, MAX_PROFILE_IMAGE_BYTES);
+    if (Number(compressedFile?.size || 0) > MAX_PROFILE_IMAGE_BYTES) {
+      return { file: null, error: 'Image is still too large after optimization. Please choose a smaller photo.', wasCompressed: false };
+    }
+    return { file: compressedFile, error: null, wasCompressed: true };
+  } catch (_err) {
+    return { file: null, error: 'Unable to process this image. Please choose another photo.', wasCompressed: false };
+  }
+};
+const getApiOrigin = () => {
+  const envApiUrl = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+  if (envApiUrl) return envApiUrl;
+
+  const axiosBaseUrl = String(axios.defaults.baseURL || '').trim().replace(/\/+$/, '');
+  if (axiosBaseUrl) return axiosBaseUrl;
+
+  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return 'http://localhost:5000';
+  }
+
+  return '';
+};
+
 const toAbsoluteProfileUrl = (value) => {
   const pathValue = String(value || '').trim();
   if (!pathValue) return null;
   if (/^https?:\/\//i.test(pathValue)) return pathValue;
   const normalizedPath = pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
+  const apiOrigin = getApiOrigin();
   return apiOrigin ? `${apiOrigin}${normalizedPath}` : normalizedPath;
 };
 const normalizeMemberRecord = (member) => ({
@@ -98,8 +229,6 @@ const loadRazorpayScript = () => {
 
 const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled }) => {
   const [members, setMembers] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, limit: 30, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
-  const [currentPage, setCurrentPage] = useState(1);
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
   const [searchTerm, setSearchTerm] = useState('');
@@ -126,15 +255,35 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [editFile, setEditFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  const fetchMembers = async ({ page = currentPage, search = searchTerm } = {}) => {
+  const handleProfileImageSelect = async (file, target) => {
+    if (!file) return false;
+
+    const normalized = await normalizeProfileImageFile(file);
+    if (normalized.error || !normalized.file) {
+      toast?.(normalized.error || 'Unable to process this image.', 'error');
+      return false;
+    }
+
+    if (normalized.wasCompressed) {
+      toast?.('Image optimized automatically to fit 2MB limit.', 'warning');
+    }
+
+    if (target === 'add') {
+      setAddFile(normalized.file);
+      setPreviewUrl(URL.createObjectURL(normalized.file));
+      return true;
+    }
+
+    setEditFile(normalized.file);
+    return true;
+  };
+
+  const fetchMembers = async ({ search = searchTerm } = {}) => {
     try {
-      const url = `/api/members?paginate=true&page=${page}&limit=30${search ? `&search=${encodeURIComponent(search)}` : ''}`;
+      const url = `/api/members${search ? `?search=${encodeURIComponent(search)}` : ''}`;
       const res = await axios.get(url, { headers: { 'x-auth-token': token } });
       const normalizedMembers = extractArray(res.data, ['members', 'rows', 'items']).map(normalizeMemberRecord);
       setMembers(normalizedMembers);
-      if (res.data?.pagination) {
-        setPagination(res.data.pagination);
-      }
     } catch (err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
   };
 
@@ -154,10 +303,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     if (!token) return;
     setLoading(true);
     const timer = setTimeout(() => {
-      fetchMembers({ page: currentPage, search: searchTerm });
+      fetchMembers({ search: searchTerm });
     }, 220);
     return () => clearTimeout(timer);
-  }, [token, currentPage, searchTerm]);
+  }, [token, searchTerm]);
 
   useEffect(() => {
     if (!token || !focusMemberId) return;
@@ -383,11 +532,24 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       toast?.('Phone must be exactly 10 digits.', 'error');
       return;
     }
+    let addFileToUpload = addFile;
+    if (addFileToUpload) {
+      const normalized = await normalizeProfileImageFile(addFileToUpload);
+      if (normalized.error || !normalized.file) {
+        toast?.(normalized.error || 'Unable to process this image.', 'error');
+        return;
+      }
+      addFileToUpload = normalized.file;
+      if (normalized.file !== addFile) {
+        setAddFile(normalized.file);
+        setPreviewUrl(URL.createObjectURL(normalized.file));
+      }
+    }
     const formData = new FormData();
     formData.append('full_name', addFormData.full_name);
     formData.append('email', addFormData.email);
     formData.append('phone', normalizedPhone);
-    if (addFile) formData.append('profile_pic', addFile);
+    if (addFileToUpload) formData.append('profile_pic', addFileToUpload);
     try {
       const res = await axios.post('/api/members/add', formData, { headers: { 'x-auth-token': token } });
       setShowAddModal(false);
@@ -412,13 +574,25 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       toast?.('Phone must be exactly 10 digits.', 'error');
       return;
     }
+    let editFileToUpload = editFile;
+    if (editFileToUpload) {
+      const normalized = await normalizeProfileImageFile(editFileToUpload);
+      if (normalized.error || !normalized.file) {
+        toast?.(normalized.error || 'Unable to process this image.', 'error');
+        return;
+      }
+      editFileToUpload = normalized.file;
+      if (normalized.file !== editFile) {
+        setEditFile(normalized.file);
+      }
+    }
     try {
-      if (editFile) {
+      if (editFileToUpload) {
         const formData = new FormData();
         formData.append('full_name', editFormData.full_name);
         formData.append('email', editFormData.email);
         formData.append('phone', normalizedPhone);
-        formData.append('profile_pic', editFile);
+        formData.append('profile_pic', editFileToUpload);
         await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token } });
       } else {
         await axios.put(
@@ -462,7 +636,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-5 p-1 sm:p-2 min-h-full relative">
+    <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative overflow-hidden">
       {showSuccessAnim && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-500 max-w-sm w-full">
@@ -486,7 +660,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         ))}
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-6 flex flex-col gap-5" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 min-h-0 flex-1 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
@@ -501,16 +675,21 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative w-full sm:max-w-xs">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder="Search name, email, phone…" value={searchTerm} onChange={(e) => { setCurrentPage(1); setSearchTerm(e.target.value); }} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-sm font-medium transition-all" />
+            <input type="text" placeholder="Search name, email, phone…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-sm font-medium transition-all" />
           </div>
-          <div className="flex gap-1.5 flex-wrap">
-            {FILTER_TABS.map(({ key, label, active, inactive, badgeActive, badgeInactive }) => (
-              <button key={key} onClick={() => setFilter(key)} className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${filter === key ? active : inactive}`}>{label} <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${filter === key ? badgeActive : badgeInactive}`}>{counts[key] ?? 0}</span></button>
-            ))}
+          <div className="w-full">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-1.5">
+              {FILTER_TABS.map(({ key, label, active, inactive, badgeActive, badgeInactive }) => (
+                <button key={key} onClick={() => setFilter(key)} className={`h-10 sm:h-9 w-full sm:w-auto px-2 sm:px-3.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 sm:gap-1.5 text-center leading-tight whitespace-normal sm:whitespace-nowrap border border-transparent ${filter === key ? active : inactive}`}>
+                  <span>{label}</span>
+                  <span className={`min-w-[18px] text-center text-[9px] px-1.5 py-0.5 rounded-full font-black ${filter === key ? badgeActive : badgeInactive}`}>{counts[key] ?? 0}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {!loading && members.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-50/50 rounded-[32px] border-2 border-dashed border-slate-200 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <div className="w-20 h-20 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-6 text-slate-300"><Users size={40} /></div>
@@ -520,40 +699,45 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </div>
           ) : (
             <>
-              <div className="md:hidden space-y-3 py-1">
-                {loading ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
-                      <div className="h-3 w-24 bg-slate-100 rounded animate-pulse mb-2" />
-                      <div className="h-3 w-40 bg-slate-100 rounded animate-pulse mb-2" />
-                      <div className="h-3 w-20 bg-slate-100 rounded animate-pulse" />
-                    </div>
-                  ))
-                ) : filteredMembers.length === 0 ? (
-                  <div className="text-center text-slate-400 font-bold py-8">No members found</div>
-                ) : (
-                  filteredMembers.map((member) => {
-                    const statusInfo = getStatusInfo(member);
-                    return (
-                      <div key={`member-mobile-${member.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
-                        <div className="flex items-center gap-3">
-                          <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={38} />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-slate-900 truncate">{member.full_name}</p>
-                            <p className="text-xs text-slate-500 truncate">{member.phone} • {member.email}</p>
+              <div className="md:hidden h-full py-1">
+                <div className="h-full overflow-y-auto no-scrollbar pr-1">
+                  <div className="space-y-3 pb-2">
+                    {loading ? (
+                      Array.from({ length: 4 }).map((_, i) => (
+                        <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
+                          <div className="h-3 w-24 bg-slate-100 rounded animate-pulse mb-2" />
+                          <div className="h-3 w-40 bg-slate-100 rounded animate-pulse mb-2" />
+                          <div className="h-3 w-20 bg-slate-100 rounded animate-pulse" />
+                        </div>
+                      ))
+                    ) : filteredMembers.length === 0 ? (
+                      <div className="text-center text-slate-400 font-bold py-8">No members found</div>
+                    ) : (
+                      filteredMembers.map((member) => {
+                        const statusInfo = getStatusInfo(member);
+                        return (
+                          <div key={`member-mobile-${member.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
+                            <div className="flex items-center gap-3">
+                              <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={38} />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-slate-900 truncate">{member.full_name}</p>
+                                <p className="text-xs text-slate-500 truncate">{member.phone} • {member.email}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span>
+                              <span className="text-xs font-bold text-slate-600">{member.plan_name || 'No Plan'}</span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span>
-                          <span className="text-xs font-bold text-slate-600">{member.plan_name || 'No Plan'}</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <table className="hidden md:table w-full text-left border-collapse table-fixed min-w-[1100px]">
+              <div className="hidden md:block h-full overflow-auto">
+              <table className="w-full text-left border-collapse table-fixed min-w-[1100px]">
               <thead>
                 <tr className="text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-100">
                   <th className="py-4 w-[40px] px-2">{isBulkMode && '✓'}</th>
@@ -575,7 +759,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-5 text-slate-300"><Search size={32} /></div>
                         <h2 className="text-xl font-black text-slate-900 mb-2">No members found</h2>
                         <p className="text-slate-500 font-bold text-sm mb-1">No results for <span className="text-slate-900 bg-slate-100 px-2 py-0.5 rounded font-black">"{searchTerm || filter}"</span></p>
-                        <button onClick={() => { setCurrentPage(1); setSearchTerm(''); setFilter('All'); }} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 mt-6"><X size={16} /> Clear Search</button>
+                        <button onClick={() => { setSearchTerm(''); setFilter('All'); }} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 mt-6"><X size={16} /> Clear Search</button>
                       </div>
                     </td>
                   </tr>
@@ -615,36 +799,15 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 )}
               </tbody>
               </table>
+              </div>
             </>
           )}
         </div>
 
-        <div className="flex items-center justify-between pt-1">
-          <p className="text-xs font-semibold text-slate-500">
-            Showing page <span className="font-black text-slate-800">{pagination.page}</span> of <span className="font-black text-slate-800">{pagination.totalPages}</span>
-            {pagination.total ? ` · ${pagination.total} total` : ''}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-              disabled={!pagination.hasPrev}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Prev
-            </button>
-            <button
-              onClick={() => setCurrentPage((prev) => prev + 1)}
-              disabled={!pagination.hasNext}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
-          </div>
-        </div>
       </div>
 
       {selectedIds.length > 0 && (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-6 z-[100] border border-slate-700 backdrop-blur-md bg-opacity-95 animate-in slide-in-from-bottom-10">
+        <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-6 z-[100] border border-slate-700 backdrop-blur-md bg-opacity-95 animate-in slide-in-from-bottom-10">
           <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">Bulk Actions</span><span className="text-sm font-black">{selectedIds.length} Selected</span></div>
           <div className="h-8 w-[1px] bg-slate-700" />
           <button onClick={handleBulkReminder} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all"><Zap size={14} fill="currentColor" /> Send Reminders</button>
@@ -724,7 +887,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               <button onClick={() => setShowEditModal(false)} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
             <form onSubmit={handleUpdateMember} className="p-6 space-y-5">
-              <div className="flex justify-center -mt-1"><div className="relative group"><div className="w-20 h-20 rounded-full overflow-hidden shadow-xl border-4 border-white">{editFile ? <img src={URL.createObjectURL(editFile)} alt="Preview" className="w-full h-full object-cover" /> : <GradientAvatar name={members.find((m) => m.id === editFormData.id)?.full_name || editFormData.full_name} src={members.find((m) => m.id === editFormData.id)?.profile_pic} sizePx={80} />}</div><label className="absolute inset-0 flex items-center justify-center bg-slate-900/50 text-white text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-all rounded-full cursor-pointer">Change<input type="file" accept="image/*" className="hidden" onChange={(e) => setEditFile(e.target.files[0])} /></label></div></div>
+              <div className="flex justify-center -mt-1"><div className="relative group"><div className="w-20 h-20 rounded-full overflow-hidden shadow-xl border-4 border-white">{editFile ? <img src={URL.createObjectURL(editFile)} alt="Preview" className="w-full h-full object-cover" /> : <GradientAvatar name={members.find((m) => m.id === editFormData.id)?.full_name || editFormData.full_name} src={members.find((m) => m.id === editFormData.id)?.profile_pic} sizePx={80} />}</div><label className="absolute inset-0 flex items-center justify-center bg-slate-900/50 text-white text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-all rounded-full cursor-pointer">Change<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const ok = await handleProfileImageSelect(e.target.files?.[0], 'edit'); if (!ok) e.target.value = ''; }} /></label></div></div>
               <div className="space-y-4">
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name</label><input type="text" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.full_name} onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })} /></div>
                 <div className="grid grid-cols-2 gap-3">
@@ -748,7 +911,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               <button onClick={() => { setShowAddModal(false); setAddSelectedPlanId(''); }} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
             <form onSubmit={handleAddMember} className="p-6 space-y-4">
-              <div className="flex flex-col items-center"><label className="cursor-pointer block"><div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">{previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <div className="flex flex-col items-center gap-1 text-slate-300"><UserPlus size={28} /><span className="text-[9px] font-bold uppercase tracking-wider">Upload</span></div>}</div><input type="file" accept="image/*" className="hidden" onChange={(e) => { setAddFile(e.target.files[0]); setPreviewUrl(URL.createObjectURL(e.target.files[0])); }} /></label><p className="text-[10px] text-slate-400 font-medium mt-2">Click to upload photo (optional)</p></div>
+              <div className="flex flex-col items-center"><label className="cursor-pointer block"><div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">{previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <div className="flex flex-col items-center gap-1 text-slate-300"><UserPlus size={28} /><span className="text-[9px] font-bold uppercase tracking-wider">Upload</span></div>}</div><input type="file" accept="image/*" className="hidden" onChange={async (e) => { const ok = await handleProfileImageSelect(e.target.files?.[0], 'add'); if (!ok) e.target.value = ''; }} /></label><p className="text-[10px] text-slate-400 font-medium mt-2">Click to upload photo (optional)</p></div>
               <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name *</label><input type="text" required placeholder="e.g. Rahul Sharma" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.full_name} onChange={(e) => setAddFormData({ ...addFormData, full_name: e.target.value })} /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone *</label><input type="text" required inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" placeholder="9876543210" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.phone} onChange={(e) => setAddFormData({ ...addFormData, phone: normalizePhoneInput(e.target.value) })} /></div>

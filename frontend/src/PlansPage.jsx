@@ -160,22 +160,22 @@ const PlansPage = ({ token, toast, showConfirm }) => {
   return (
     <div className="min-h-full p-2 font-sans relative">
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-8"
+      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-5 sm:p-6 lg:p-8"
         style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
 
       {/* HEADER */}
-      <div className="flex justify-between items-end mb-10">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6 sm:mb-10">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Membership Plans</h1>
-          <p className="text-slate-500 font-medium mt-1">Manage pricing tiers and gym access levels.</p>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Membership Plans</h1>
+          <p className="text-slate-500 font-medium mt-1 text-sm sm:text-base">Manage pricing tiers and gym access levels.</p>
         </div>
-        <button onClick={openAddModal} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg active:scale-95">
+        <button onClick={openAddModal} className="w-full sm:w-auto justify-center bg-slate-900 text-white px-4 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg active:scale-95">
           <Plus size={20} /> Create New Plan
         </button>
       </div>
 
       {/* PLANS GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-8">
         {loading && [1,2,3].map(i => <div key={i} className="h-96 bg-white rounded-[32px] animate-pulse border border-slate-100 shadow-sm"></div>)}
 
         {plans.map((plan) => {
@@ -197,12 +197,12 @@ const PlansPage = ({ token, toast, showConfirm }) => {
             : plan.price;
 
           return (
-            <div key={plan.id} className="group relative bg-white rounded-[32px] p-8 border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 flex flex-col">
+            <div key={plan.id} className="group relative bg-white rounded-[32px] p-5 sm:p-8 border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 flex flex-col">
               
               {/* Analytics Button (Top Right) */}
               <button 
                 onClick={() => openAnalytics(plan.id)}
-                className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors p-2 hover:bg-slate-50 rounded-full"
+                className="absolute top-5 right-5 sm:top-8 sm:right-8 text-slate-300 hover:text-slate-900 transition-colors p-2 hover:bg-slate-50 rounded-full"
                 title="View Analytics"
               >
                 <BarChart3 size={20} />
@@ -229,7 +229,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
               <div className="mb-8">
                 <div className="flex items-baseline gap-2 flex-wrap">
                   {/* Price Display Logic: Show Discounted if active */}
-                  <span className={`text-4xl font-black ${isOfferActive ? 'text-emerald-500' : 'text-slate-900'}`}>₹{discountedPrice}</span>
+                  <span className={`text-3xl sm:text-4xl font-black ${isOfferActive ? 'text-emerald-500' : 'text-slate-900'}`}>₹{discountedPrice}</span>
                   
                   {isOfferActive && (
                       <span className="text-slate-400 font-bold text-sm line-through decoration-rose-500 decoration-2">₹{plan.price}</span>
@@ -281,7 +281,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
         })}
 
         {/* Add New Plan Button */}
-        <button onClick={openAddModal} className="border-3 border-dashed border-slate-200 rounded-[32px] flex flex-col items-center justify-center gap-4 min-h-[400px] text-slate-300 hover:border-slate-400 hover:text-slate-500 hover:bg-slate-50 transition-all group">
+        <button onClick={openAddModal} className="border-3 border-dashed border-slate-200 rounded-[32px] flex flex-col items-center justify-center gap-4 min-h-[280px] sm:min-h-[400px] text-slate-300 hover:border-slate-400 hover:text-slate-500 hover:bg-slate-50 transition-all group">
             <div className="w-16 h-16 rounded-full bg-slate-50 group-hover:bg-white border-2 border-slate-100 flex items-center justify-center transition-all shadow-sm">
                 <Plus size={32} />
             </div>

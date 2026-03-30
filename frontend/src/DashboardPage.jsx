@@ -49,7 +49,7 @@ const ShimmerBar = ({ className = '' }) => (
 );
 
 const DashboardSkeleton = () => (
-  <div className="min-h-full p-0 pb-24">
+  <div className="min-h-full p-0 dashboard-content-safe">
     {animationStyles}
     {/* Hero skeleton */}
     <div className="rounded-[28px] h-40 bg-white/20 backdrop-blur-sm mb-6 overflow-hidden relative">
@@ -134,19 +134,19 @@ const Card = ({ children, className = '', style = {} }) => (
 const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onClick, tag }) => (
   <div
     onClick={onClick}
-    className={`group relative overflow-hidden bg-white/85 backdrop-blur-sm rounded-[24px] border border-white/60 p-5 flex flex-col justify-between shadow-[0_2px_16px_rgba(0,0,0,0.04)] hover:shadow-[0_10px_36px_rgba(0,0,0,0.09)] hover:-translate-y-1 transition-all duration-300 ${onClick ? 'cursor-pointer' : ''}`}
+    className={`group relative overflow-hidden bg-white/85 backdrop-blur-sm rounded-[20px] sm:rounded-[24px] border border-white/60 p-4 sm:p-5 flex flex-col justify-between shadow-[0_2px_16px_rgba(0,0,0,0.04)] hover:shadow-[0_10px_36px_rgba(0,0,0,0.09)] hover:-translate-y-1 transition-all duration-300 ${onClick ? 'cursor-pointer' : ''}`}
     style={{ opacity: 0, animation: `cardCascade 0.6s cubic-bezier(0.16,1,0.3,1) ${index * 75}ms forwards` }}
   >
     <div
-      className="absolute -right-5 -bottom-5 w-28 h-28 rounded-full opacity-[0.045] group-hover:opacity-[0.09] group-hover:scale-125 transition-all duration-700"
+      className="absolute -right-4 -bottom-4 w-20 h-20 sm:w-28 sm:h-28 rounded-full opacity-[0.045] group-hover:opacity-[0.09] group-hover:scale-125 transition-all duration-700"
       style={{ background: iconGradient }}
     />
     <div className="flex items-start justify-between relative z-10">
       <div
-        className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-lg"
+        className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-lg"
         style={{ background: iconGradient, boxShadow: `0 4px 14px rgba(0,0,0,0.15)` }}
       >
-        <Icon size={19} strokeWidth={2} />
+        <Icon size={17} strokeWidth={2} />
       </div>
       {onClick && (
         <div className="w-6 h-6 rounded-full bg-slate-50 group-hover:bg-indigo-50 flex items-center justify-center transition-colors duration-200 mt-0.5">
@@ -154,12 +154,12 @@ const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onClick, t
         </div>
       )}
     </div>
-    <div className="relative z-10 mt-3">
+    <div className="relative z-10 mt-2.5 sm:mt-3">
       {tag && (
         <span className="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-500 mb-1.5">{tag}</span>
       )}
-      <h3 className="text-[26px] font-black text-slate-900 tracking-tight leading-none">{value}</h3>
-      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1.5">{title}</p>
+      <h3 className="text-[23px] sm:text-[26px] font-black text-slate-900 tracking-tight leading-none">{value}</h3>
+      <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-1.5">{title}</p>
     </div>
   </div>
 );
@@ -988,7 +988,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   if (loading) return <DashboardSkeleton />;
 
   return (
-    <div className="min-h-full pb-24 sm:pb-28 font-inter relative">
+    <div className="min-h-full dashboard-content-safe font-inter relative">
       {animationStyles}
 
       {isWarmupRetrying && (
@@ -1088,7 +1088,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       </div>
 
       <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
           <KPICard
             title="Active Members" value={dashboardData.active}
             icon={Users} index={0}
@@ -1320,7 +1320,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
           <KPICard
             title="Check-ins Today" value={todayCheckins}
             icon={CheckCircle} index={8}
@@ -1359,33 +1359,34 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* ════════════════════════════════════════
           FLOATING ACTION BAR
       ════════════════════════════════════════ */}
-      <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[90] animate-in slide-in-from-bottom-8 duration-700 [animation-delay:800ms] [animation-fill-mode:both] w-[calc(100%-1rem)] md:w-auto">
+      <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in slide-in-from-bottom-8 duration-700 [animation-delay:800ms] [animation-fill-mode:both] w-[calc(100%-1rem)] max-w-[560px] md:w-auto">
         <div
-          className="p-2 rounded-full flex items-center gap-0.5 backdrop-blur-xl border border-white/10 overflow-x-auto"
+          className="rounded-[24px] md:rounded-full border border-white/10 backdrop-blur-xl p-1.5 md:p-2"
           style={{
             background: 'rgba(15, 15, 35, 0.92)',
             boxShadow: '0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.05)'
           }}
         >
+          <div className="grid grid-cols-4 gap-1 md:flex md:items-center md:gap-0.5">
           <button id="btn-add-member" onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-white transition-all duration-200 group hover:bg-emerald-500/15 active:scale-95">
+            className="flex flex-col md:flex-row items-center justify-center gap-1.5 md:gap-2 px-2 md:px-5 py-2 md:py-2.5 rounded-xl md:rounded-full text-white transition-all duration-200 group hover:bg-emerald-500/15 active:scale-95">
             <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center group-hover:scale-110 group-hover:rotate-90 transition-all duration-300"
               style={{ boxShadow: '0 0 12px rgba(16,185,129,0.5)' }}>
               <Plus size={14} strokeWidth={3} className="text-white" />
             </div>
-            <span className="text-sm font-bold">Add Member</span>
+            <span className="text-[10px] md:text-sm font-bold leading-tight text-center">Add Member</span>
           </button>
 
-          <div className="w-px h-6 bg-white/10 mx-1" />
-
       <button onClick={() => setShowPaymentModal(true)}
-            className="px-4 py-2.5 text-slate-300 hover:text-white hover:bg-indigo-500/15 rounded-full text-sm font-bold transition-all flex items-center gap-2 active:scale-95 group">
-            <RefreshCw size={16} className="group-hover:scale-110 transition-transform" /> Renew
+            className="px-2 md:px-4 py-2 md:py-2.5 text-slate-300 hover:text-white hover:bg-indigo-500/15 rounded-xl md:rounded-full text-[10px] md:text-sm font-bold transition-all flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 group">
+            <RefreshCw size={15} className="group-hover:scale-110 transition-transform" />
+            <span className="leading-tight">Renew</span>
           </button>
 
           <button onClick={() => setShowBroadcastModal(true)}
-            className="px-4 py-2.5 text-slate-300 hover:text-white hover:bg-emerald-500/15 rounded-full text-sm font-bold transition-all flex items-center gap-2 active:scale-95 group">
-            <MessageSquare size={16} className="group-hover:scale-110 transition-transform" /> Broadcast
+            className="px-2 md:px-4 py-2 md:py-2.5 text-slate-300 hover:text-white hover:bg-emerald-500/15 rounded-xl md:rounded-full text-[10px] md:text-sm font-bold transition-all flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 group">
+            <MessageSquare size={15} className="group-hover:scale-110 transition-transform" />
+            <span className="leading-tight">Broadcast</span>
           </button>
 
           <button
@@ -1393,10 +1394,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               setCheckinQuery('');
               setShowCheckinModal(true);
             }}
-            className="px-4 py-2.5 text-slate-300 hover:text-white hover:bg-sky-500/15 rounded-full text-sm font-bold transition-all flex items-center gap-2 active:scale-95 group"
+            className="px-2 md:px-4 py-2 md:py-2.5 text-slate-300 hover:text-white hover:bg-sky-500/15 rounded-xl md:rounded-full text-[10px] md:text-sm font-bold transition-all flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 group"
           >
-            <CheckCircle size={16} className="group-hover:scale-110 transition-transform" /> Check In
+            <CheckCircle size={15} className="group-hover:scale-110 transition-transform" />
+            <span className="leading-tight">Check In</span>
           </button>
+          </div>
         </div>
       </div>
 
