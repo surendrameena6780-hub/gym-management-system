@@ -700,7 +700,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           ) : (
             <>
               <div className="md:hidden h-full py-1">
-                <div className="h-full overflow-y-auto no-scrollbar pr-1">
+                <div className="h-full overflow-y-auto no-scrollbar pr-1 members-list-scroll-safe">
                   <div className="space-y-3 pb-2">
                     {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
