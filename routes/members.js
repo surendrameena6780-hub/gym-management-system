@@ -6,10 +6,28 @@ const saasMiddleware = require('../middleware/saasMiddleware');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
+
+const getGymIdFromRequest = (req) => {
+    const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
+    const gymId = Number.parseInt(rawGymId, 10);
+    return Number.isInteger(gymId) ? gymId : null;
+};
 
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/profiles/'),
-    filename: (req, file, cb) => cb(null, `member-${req.user.gym_id}-${crypto.randomBytes(12).toString('hex')}${path.extname(file.originalname).toLowerCase()}`)
+    destination: (_req, _file, cb) => {
+        const uploadPath = path.join(__dirname, '..', 'uploads', 'profiles');
+        try {
+            fs.mkdirSync(uploadPath, { recursive: true });
+            cb(null, uploadPath);
+        } catch (err) {
+            cb(err);
+        }
+    },
+    filename: (req, file, cb) => {
+        const gymId = getGymIdFromRequest(req) || 'unknown';
+        cb(null, `member-${gymId}-${crypto.randomBytes(12).toString('hex')}${path.extname(file.originalname).toLowerCase()}`);
+    }
 });
 
 const allowedImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
@@ -219,10 +237,18 @@ router.post('/add', auth, saasMiddleware, upload.single('profile_pic'), async (r
 router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (req, res) => {
     const { full_name, email, phone } = req.body;
     const normalizedPhone = normalizePhone(phone);
+    const normalizedName = String(full_name || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const gym_id = req.user.gym_id;
+    const gym_id = getGymIdFromRequest(req);
+    const memberId = Number.parseInt(req.params.id, 10);
 
-    if (!full_name || !normalizedEmail || !normalizedPhone) {
+    if (!gym_id) {
+        return res.status(401).json({ error: 'Invalid session. Please login again.' });
+    }
+    if (!Number.isInteger(memberId)) {
+        return res.status(400).json({ error: 'Invalid member id.' });
+    }
+    if (!normalizedName || !normalizedEmail || !normalizedPhone) {
         return res.status(400).json({ error: 'full_name, email and phone are required.' });
     }
     if (!isValidPhone(normalizedPhone)) {
@@ -232,7 +258,7 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
     try {
         const existingPhone = await pool.query(
             'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
-            [gym_id, normalizedPhone, req.params.id]
+            [gym_id, normalizedPhone, memberId]
         );
         if (existingPhone.rows.length > 0) {
             return res.status(400).json({ error: 'This phone is already registered in your gym.' });
@@ -240,7 +266,7 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
 
         const existingEmail = await pool.query(
             'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
-            [gym_id, normalizedEmail, req.params.id]
+            [gym_id, normalizedEmail, memberId]
         );
         if (existingEmail.rows.length > 0) {
             return res.status(400).json({ error: 'This email is already registered in your gym.' });
@@ -250,7 +276,7 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
             const profile_pic = buildPicUrl(req.file.filename);
             const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3, profile_pic = $4 WHERE id = $5 AND gym_id = $6 AND deleted_at IS NULL",
-                [full_name, normalizedEmail, normalizedPhone, profile_pic, req.params.id, gym_id]
+                [normalizedName, normalizedEmail, normalizedPhone, profile_pic, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
                 return res.status(404).json({ error: 'Member not found.' });
@@ -258,7 +284,7 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
         } else {
             const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3 WHERE id = $4 AND gym_id = $5 AND deleted_at IS NULL",
-                [full_name, normalizedEmail, normalizedPhone, req.params.id, gym_id]
+                [normalizedName, normalizedEmail, normalizedPhone, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
                 return res.status(404).json({ error: 'Member not found.' });
@@ -272,6 +298,9 @@ router.put('/:id', auth, saasMiddleware, upload.single('profile_pic'), async (re
         }
         if (err.message && err.message.includes('Only JPG')) {
             return res.status(400).json({ error: err.message });
+        }
+        if (['ENOENT', 'EACCES', 'EPERM'].includes(err.code)) {
+            return res.status(500).json({ error: 'Unable to store uploaded image on server.' });
         }
         if (err.code === '23505') {
             const detail = String(err.detail || '').toLowerCase();
