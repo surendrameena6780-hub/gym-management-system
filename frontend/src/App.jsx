@@ -918,7 +918,7 @@ function App() {
             </div>
           </header>
 
-          <main className={`flex-1 p-4 md:p-6 lg:p-8 ${currentPage === 'Dashboard' ? 'app-main-scroll-dashboard' : 'app-main-scroll'} ${currentPage === 'Members' ? 'overflow-hidden md:overflow-y-auto' : 'overflow-y-auto'}`}>
+          <main className={`flex-1 p-4 md:p-6 lg:p-8 ${currentPage === 'Dashboard' ? 'app-main-scroll-dashboard' : currentPage === 'Members' ? 'app-main-scroll-members' : 'app-main-scroll'} ${currentPage === 'Members' ? 'overflow-hidden md:overflow-y-auto' : 'overflow-y-auto'}`}>
             <div className={`max-w-[1400px] mx-auto w-full ${currentPage === 'Members' ? 'h-full min-h-0' : ''}`}>
               {/* 🚨 Passed startTour to Dashboard 🚨 */}
               {currentPage === 'Dashboard'  ? (currentUser?.role === 'OWNER'

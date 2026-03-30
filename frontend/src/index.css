@@ -45,6 +45,10 @@ body {
   padding-bottom: var(--mobile-content-safe-padding);
 }
 
+.app-main-scroll-members {
+  padding-bottom: var(--mobile-content-gap);
+}
+
 .app-main-scroll-dashboard {
   padding-bottom: 0.5rem;
 }
@@ -53,7 +57,7 @@ body {
   bottom: calc(var(--mobile-nav-offset) + 0.5rem);
 }
 
-.members-list-scroll-safe {
+.members-page-shell {
   padding-bottom: var(--mobile-content-safe-padding);
 }
 
@@ -76,11 +80,15 @@ body {
     padding-bottom: 2rem;
   }
 
+  .app-main-scroll-members {
+    padding-bottom: 2rem;
+  }
+
   .mobile-floating-offset {
     bottom: 1.5rem;
   }
 
-  .members-list-scroll-safe {
+  .members-page-shell {
     padding-bottom: 0.5rem;
   }
 
