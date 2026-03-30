@@ -214,9 +214,19 @@ router.get('/:id', auth, saasMiddleware, async (req, res) => {
 // --- 3. ADD MEMBER ---
 router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
     try {
-        const { full_name, email, phone } = req.body;
+        const payload = req.body && typeof req.body === 'object' ? req.body : {};
+        const full_name = payload.full_name;
+        const email = payload.email;
+        const phone = payload.phone;
+        const gym_id = getGymIdFromRequest(req);
         const normalizedPhone = normalizePhone(phone);
-        if (!full_name || !email || !normalizedPhone) {
+        const normalizedName = String(full_name || '').trim();
+        const normalizedEmail = String(email || '').trim().toLowerCase();
+
+        if (!gym_id) {
+            return res.status(401).json({ error: 'Invalid session. Please login again.' });
+        }
+        if (!normalizedName || !normalizedEmail || !normalizedPhone) {
             return res.status(400).json({ error: 'full_name, email and phone are required.' });
         }
         if (!isValidPhone(normalizedPhone)) {
@@ -224,7 +234,6 @@ router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => 
         }
 
         const profile_pic = req.file ? buildPicUrl(req.file.filename) : null;
-        const gym_id = req.user.gym_id;
 
         const existingPhone = await pool.query(
             'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND deleted_at IS NULL LIMIT 1',
@@ -238,7 +247,7 @@ router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => 
             `INSERT INTO members (full_name, email, phone, profile_pic, gym_id, joining_date, last_visit, status)
              VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, NULL, 'UNPAID')
              RETURNING *`,
-            [full_name, email, normalizedPhone, profile_pic, gym_id]
+            [normalizedName, normalizedEmail, normalizedPhone, profile_pic, gym_id]
         );
 
         res.json(newMember.rows[0]);
@@ -259,7 +268,10 @@ router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => 
 
 // --- 4. UPDATE MEMBER ---
 router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
-    const { full_name, email, phone } = req.body;
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const full_name = payload.full_name;
+    const email = payload.email;
+    const phone = payload.phone;
     const normalizedPhone = normalizePhone(phone);
     const normalizedName = String(full_name || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
@@ -323,7 +335,7 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
         if (err.message && err.message.includes('Only JPG')) {
             return res.status(400).json({ error: err.message });
         }
-        if (['ENOENT', 'EACCES', 'EPERM'].includes(err.code)) {
+        if (['ENOENT', 'EACCES', 'EPERM', 'EROFS'].includes(err.code)) {
             return res.status(500).json({ error: 'Unable to store uploaded image on server.' });
         }
         if (err.code === '23505') {
