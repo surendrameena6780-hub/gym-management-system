@@ -337,7 +337,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
     formData.append('phone', normalizedPhone);
     if (addFile) formData.append('profile_pic', addFile);
     try {
-      const res = await axios.post('/api/members/add', formData, { headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' } });
+      const res = await axios.post('/api/members/add', formData, { headers: { 'x-auth-token': token } });
       setShowAddModal(false);
       setAddFormData({ full_name: '', email: '', phone: '' }); setAddFile(null); setPreviewUrl(null);
       await fetchMembers();
@@ -364,7 +364,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
     formData.append('full_name', editFormData.full_name); formData.append('email', editFormData.email); formData.append('phone', normalizedPhone);
     if (editFile) formData.append('profile_pic', editFile);
     try {
-      await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' } });
+      await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token } });
       setShowEditModal(false); setEditFile(null); fetchMembers(); toast?.('Member updated successfully!', 'success');
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Update failed. Please try again.';
