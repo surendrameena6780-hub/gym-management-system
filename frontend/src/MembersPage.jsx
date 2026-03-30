@@ -636,7 +636,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
 
   return (
-    <div className="members-page-shell flex h-full min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative overflow-hidden">
       {showSuccessAnim && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-500 max-w-sm w-full">
