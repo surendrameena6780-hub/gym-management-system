@@ -184,6 +184,7 @@ function App() {
   
   const [currentPage, setCurrentPage] = useState('Dashboard');
   const [memberFilter, setMemberFilter] = useState('All');
+  const [memberFocus, setMemberFocus] = useState({ id: null, action: null });
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [currentUser, setCurrentUser] = useState(() => {
@@ -415,15 +416,27 @@ function App() {
       toast("Access Restricted: Please renew your subscription", "error");
       return; 
     }
-    if (page === 'Members') setMemberFilter('All');
+    if (page === 'Members') {
+      setMemberFilter('All');
+      setMemberFocus({ id: null, action: null });
+    }
     setCurrentPage(page);
   }, [isSuspended, toast, canAccessPage]);
 
-  const navigateTo = useCallback((page, subPath = 'All') => {
+  const navigateTo = useCallback((page, subPath = 'All', options = {}) => {
     if (!canAccessPage(page)) return;
     if (isSuspended && page !== 'Settings') return; 
-    if (page === 'Members') setMemberFilter(subPath);
-    if (page === 'Settings') setSettingsTab(subPath); 
+    if (page === 'Members') {
+      setMemberFilter(subPath);
+      const rawMemberId = Number.parseInt(options?.memberId, 10);
+      setMemberFocus({
+        id: Number.isInteger(rawMemberId) ? rawMemberId : null,
+        action: typeof options?.action === 'string' ? options.action : null,
+      });
+    } else {
+      setMemberFocus({ id: null, action: null });
+    }
+    if (page === 'Settings') setSettingsTab(subPath);
     setCurrentPage(page);
   }, [isSuspended, canAccessPage]);
 
@@ -898,7 +911,7 @@ function App() {
               {currentPage === 'Dashboard'  ? (currentUser?.role === 'OWNER'
                 ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} />
                 : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} />) :
-               currentPage === 'Members'    ? <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} /> :
+               currentPage === 'Members'    ? <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} /> :
                currentPage === 'Plans'      ? <PlansPage token={token} toast={toast} showConfirm={showConfirm} /> :
                currentPage === 'Payments'   ? <PaymentsPage token={token} toast={toast} showConfirm={showConfirm} /> :
                currentPage === 'Attendance' ? <AttendancePage token={token} toast={toast} /> :

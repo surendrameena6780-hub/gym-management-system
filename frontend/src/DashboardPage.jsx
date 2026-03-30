@@ -635,6 +635,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const active   = members.filter(m => m.membership_status === 'ACTIVE');
     const unpaid   = members.filter(m => m.membership_status === 'UNPAID');
     const expired  = members.filter(m => m.membership_status === 'EXPIRED');
+    const unpaidTargetMember = unpaid[0] || null;
     
     const expiringIn3Days = active.filter(m => m.days_left > 0 && m.days_left <= 3);
     const expiringIn7Days = active.filter(m => m.days_left > 0 && m.days_left <= 7);
@@ -815,7 +816,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         priority: 'P1',
         cta: 'Activate Memberships',
         sub: 'Convert pending dues',
-        action: () => setShowPaymentModal(true),
+        action: () => {
+          if (unpaidTargetMember?.id) {
+            navigateTo('Members', 'Unpaid', { memberId: unpaidTargetMember.id, action: 'detail' });
+            return;
+          }
+          navigateTo('Members', 'Unpaid');
+        },
       }),
       buildRecommendation({
         id: 'ESCALATED_CALLS',
@@ -906,6 +913,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     return {
       active: active.length, unpaid: unpaid.length, expired: expired.length,
       expiring7: expiringIn7Days.length, expiring3: expiringIn3Days.length, ghosts: ghosts.length,
+      pendingDuesTargetMemberId: unpaidTargetMember?.id || null,
       escalated: escalatedLeads,
       monthlyRevenue, revenueAtRisk, healthScore,
       topPlan: topPlanEntry ? { name: topPlanEntry[0], count: topPlanEntry[1], pct: topPlanPct } : null,
@@ -1323,7 +1331,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Unpaid Profiles" value={dashboardData.unpaid}
             icon={CreditCard} index={9}
             iconGradient="linear-gradient(135deg, #64748b, #475569)"
-            onClick={() => navigateTo('Members', 'Inactive')}
+            onClick={() => navigateTo('Members', 'Unpaid')}
           />
           <KPICard
             title="Expired Members" value={dashboardData.expired}
@@ -1336,7 +1344,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Pending Dues" value={`₹${Number(payStats.pending_dues).toLocaleString()}`}
             icon={Activity} index={11}
             iconGradient="linear-gradient(135deg, #f97316, #ef4444)"
-            onClick={() => navigateTo('Payments')}
+            onClick={() => {
+              if (dashboardData.pendingDuesTargetMemberId) {
+                navigateTo('Members', 'Unpaid', { memberId: dashboardData.pendingDuesTargetMemberId, action: 'detail' });
+                return;
+              }
+              navigateTo('Members', 'Unpaid');
+            }}
           />
         </div>
 

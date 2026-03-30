@@ -53,6 +53,7 @@ const SkeletonRow = () => (
 const FILTER_TABS = [
   { key: 'All', label: 'All', active: 'bg-slate-800 text-white shadow-md', inactive: 'text-slate-500 hover:bg-slate-50 hover:text-slate-700', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-slate-100 text-slate-500' },
   { key: 'Active', label: 'Active', active: 'bg-emerald-500 text-white shadow-md shadow-emerald-200', inactive: 'text-emerald-600 hover:bg-emerald-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-emerald-50 text-emerald-600' },
+  { key: 'Unpaid', label: 'Unpaid', active: 'bg-slate-700 text-white shadow-md shadow-slate-200', inactive: 'text-slate-600 hover:bg-slate-100', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-slate-100 text-slate-600' },
   { key: 'Inactive', label: 'Inactive', active: 'bg-amber-500 text-white shadow-md shadow-amber-200', inactive: 'text-amber-600 hover:bg-amber-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-amber-50 text-amber-600' },
   { key: 'Expired', label: 'Expired', active: 'bg-rose-500 text-white shadow-md shadow-rose-200', inactive: 'text-rose-600 hover:bg-rose-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-rose-50 text-rose-600' },
   { key: 'Expiring Soon', label: 'Expiring Soon', active: 'bg-orange-500 text-white shadow-md shadow-orange-200', inactive: 'text-orange-600 hover:bg-orange-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-orange-50 text-orange-600' },
@@ -95,7 +96,7 @@ const loadRazorpayScript = () => {
   });
 };
 
-const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
+const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled }) => {
   const [members, setMembers] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 30, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
   const [currentPage, setCurrentPage] = useState(1);
@@ -157,6 +158,57 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
     }, 220);
     return () => clearTimeout(timer);
   }, [token, currentPage, searchTerm]);
+
+  useEffect(() => {
+    if (!token || !focusMemberId) return;
+
+    let isMounted = true;
+
+    const openFocusedMember = async () => {
+      const targetId = Number.parseInt(focusMemberId, 10);
+      if (!Number.isInteger(targetId)) {
+        onFocusHandled?.();
+        return;
+      }
+
+      const memberFromList = members.find((member) => Number(member.id) === targetId);
+      if (memberFromList) {
+        setSelectedMember(memberFromList);
+        setShowDetailsModal(true);
+        if (focusAction === 'activate') {
+          setShowActivateModal(true);
+        }
+        onFocusHandled?.();
+        return;
+      }
+
+      try {
+        const res = await axios.get(`/api/members/${targetId}`, { headers: { 'x-auth-token': token } });
+        if (!isMounted) return;
+
+        const normalizedMember = normalizeMemberRecord(res.data);
+        setSelectedMember(normalizedMember);
+        setShowDetailsModal(true);
+        if (focusAction === 'activate') {
+          setShowActivateModal(true);
+        }
+      } catch (_err) {
+        if (isMounted) {
+          toast?.('Unable to open selected member.', 'warning');
+        }
+      } finally {
+        if (isMounted) {
+          onFocusHandled?.();
+        }
+      }
+    };
+
+    openFocusedMember();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token, focusMemberId, focusAction, members, onFocusHandled, toast]);
 
   const downloadReceipt = () => {
     if (!receiptData) return;
@@ -402,7 +454,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All' }) => {
     const statusInfo = getStatusInfo(m);
     const lastVisitDate = m.last_visit ? new Date(m.last_visit) : null;
     const diffDays = lastVisitDate ? Math.ceil((new Date() - lastVisitDate) / (1000 * 60 * 60 * 24)) : 999;
-    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label !== 'UNPAID' && diffDays > 4);
+    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label !== 'UNPAID' && diffDays > 4);
     const searchLower = searchTerm.toLowerCase();
     return matchesFilter && (m.full_name?.toLowerCase().includes(searchLower) || m.email?.toLowerCase().includes(searchLower) || m.phone?.includes(searchTerm));
   });
