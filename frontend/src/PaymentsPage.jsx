@@ -361,7 +361,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
         </div>
         <div className="overflow-x-auto">
           <div className="md:hidden p-4">
-            <div className="payments-mobile-list-scroll no-scrollbar space-y-3 pr-1">
+            <div className="space-y-3">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <div key={`pay-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
