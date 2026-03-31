@@ -63,7 +63,9 @@ axios.interceptors.response.use((response) => {
   return Promise.reject(error)
 })
 
-if (typeof document !== 'undefined') {
+if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
+  window.__gymvaultTouchGuardsInstalled = true
+
   const blockZoomGesture = (event) => {
     event.preventDefault()
   }
@@ -72,6 +74,64 @@ if (typeof document !== 'undefined') {
   document.addEventListener('gesturechange', blockZoomGesture, { passive: false })
   document.addEventListener('gestureend', blockZoomGesture, { passive: false })
   document.addEventListener('dblclick', blockZoomGesture, { passive: false })
+
+  const nestedScrollableSelector = '.payments-mobile-list-scroll, .members-mobile-list-scroll'
+  const nestedScrollState = {
+    activeElement: null,
+    lastY: 0,
+  }
+
+  const getNestedScrollable = (target) => {
+    if (!target || typeof target.closest !== 'function') return null
+    return target.closest(nestedScrollableSelector)
+  }
+
+  document.addEventListener('touchstart', (event) => {
+    const scrollable = getNestedScrollable(event.target)
+    if (!scrollable) {
+      nestedScrollState.activeElement = null
+      nestedScrollState.lastY = 0
+      return
+    }
+
+    const canScroll = scrollable.scrollHeight > scrollable.clientHeight + 1
+    if (!canScroll) {
+      nestedScrollState.activeElement = null
+      nestedScrollState.lastY = 0
+      return
+    }
+
+    nestedScrollState.activeElement = scrollable
+    nestedScrollState.lastY = event.touches?.[0]?.clientY || 0
+  }, { passive: true, capture: true })
+
+  document.addEventListener('touchmove', (event) => {
+    const scrollable = nestedScrollState.activeElement
+    if (!scrollable) return
+
+    const currentY = event.touches?.[0]?.clientY
+    if (typeof currentY !== 'number') return
+
+    const deltaY = currentY - nestedScrollState.lastY
+    nestedScrollState.lastY = currentY
+
+    const atTop = scrollable.scrollTop <= 0
+    const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1
+
+    if ((atTop && deltaY > 0) || (atBottom && deltaY < 0)) {
+      event.preventDefault()
+    }
+
+    event.stopPropagation()
+  }, { passive: false, capture: true })
+
+  const clearNestedScrollState = () => {
+    nestedScrollState.activeElement = null
+    nestedScrollState.lastY = 0
+  }
+
+  document.addEventListener('touchend', clearNestedScrollState, { passive: true, capture: true })
+  document.addEventListener('touchcancel', clearNestedScrollState, { passive: true, capture: true })
 }
 
 if ('serviceWorker' in navigator) {

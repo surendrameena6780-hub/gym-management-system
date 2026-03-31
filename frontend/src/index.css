@@ -9,6 +9,7 @@ html,
 body,
 #root {
   height: 100%;
+  overscroll-behavior-y: none;
 }
 
 :root {
@@ -50,6 +51,11 @@ body {
 
 .app-main-scroll {
   padding-bottom: var(--mobile-content-safe-padding) !important;
+}
+
+.app-scroll-shell {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-main-scroll-dashboard {
