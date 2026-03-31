@@ -757,21 +757,34 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                     <div className="space-y-3 pb-6">
                       {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
-                        <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
-                          <div className="h-3 w-24 bg-slate-100 rounded animate-pulse mb-2" />
-                          <div className="h-3 w-40 bg-slate-100 rounded animate-pulse mb-2" />
-                          <div className="h-3 w-20 bg-slate-100 rounded animate-pulse" />
+                        <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full gv-skeleton shrink-0" />
+                            <div className="flex-1 space-y-2">
+                              <div className="h-3 w-32 gv-skeleton" />
+                              <div className="h-2.5 w-44 gv-skeleton" />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="h-5 w-16 gv-skeleton rounded-full" />
+                            <div className="h-3 w-20 gv-skeleton" />
+                          </div>
                         </div>
                       ))
                     ) : filteredMembers.length === 0 ? (
                       <div className="text-center text-slate-400 font-bold py-8">No members found</div>
                     ) : (
-                      filteredMembers.map((member) => {
+                      filteredMembers.map((member, idx) => {
                         const statusInfo = getStatusInfo(member);
                         return (
-                          <div key={`member-mobile-${member.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
+                          <div
+                            key={`member-mobile-${member.id}`}
+                            className="gv-fade-up p-4 rounded-2xl border border-slate-100 bg-white space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover"
+                            style={{ animationDelay: `${Math.min(idx * 0.04, 0.3)}s` }}
+                            onClick={() => handleViewDetails(member)}
+                          >
                             <div className="flex items-center gap-3">
-                              <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={38} />
+                              <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={40} />
                               <div className="min-w-0 flex-1">
                                 <p className="font-bold text-slate-900 truncate">{member.full_name}</p>
                                 <p className="text-xs text-slate-500 truncate">{member.phone} • {member.email}</p>
@@ -779,7 +792,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                             </div>
                             <div className="flex items-center justify-between">
                               <span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span>
-                              <span className="text-xs font-bold text-slate-600">{member.plan_name || 'No Plan'}</span>
+                              <span className="text-xs font-bold text-slate-500">{member.plan_name || 'No Plan'}</span>
                             </div>
                           </div>
                         );
@@ -871,68 +884,149 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         </div>
       )}
 
-      {showDetailsModal && selectedMember && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-lg shadow-2xl overflow-visible animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
-            <div className="relative pt-4 pb-5 px-6 shrink-0" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #24243e 100%)' }}>
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-1">Member Profile</p>
-                  <h2 className="text-white text-xl font-black leading-tight">{selectedMember.full_name}</h2>
-                  <p className="text-slate-400 text-xs mt-0.5">Joined {selectedMember.joining_date ? new Date(selectedMember.joining_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}</p>
-                </div>
-                <button onClick={() => setShowDetailsModal(false)} className="text-white/50 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all"><X size={20} /></button>
+      {/* ── Member detail bottom sheet ─────────────────────────── */}
+      <div className={`drawer-backdrop ${showDetailsModal && selectedMember ? 'open' : ''}`} onClick={() => setShowDetailsModal(false)} />
+      <div className={`drawer-sheet ${showDetailsModal && selectedMember ? 'open' : ''}`}>
+        {selectedMember && (<>
+          {/* drag handle */}
+          <div className="flex justify-center pt-3 pb-1 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-slate-200" />
+          </div>
+
+          {/* header */}
+          <div className="relative px-5 pt-3 pb-4 shrink-0" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #24243e 100%)', borderRadius: '20px 20px 0 0' }}>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-0.5">Member Profile</p>
+                <h2 className="text-white text-lg font-black leading-tight">{selectedMember.full_name}</h2>
+                <p className="text-slate-400 text-[11px] mt-0.5">
+                  Joined {selectedMember.joining_date ? new Date(selectedMember.joining_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}
+                </p>
               </div>
+              <button onClick={() => setShowDetailsModal(false)} className="text-white/50 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all mt-0.5"><X size={18} /></button>
             </div>
-
-            <div className="flex flex-col items-center -mt-10 px-6 pb-2 shrink-0 z-10">
-              <div role="button" tabIndex={0} onClick={() => selectedMember.profile_pic && setPreviewImage(selectedMember.profile_pic)} className="w-[96px] h-[96px] rounded-full border-[4px] border-white shadow-2xl bg-[#0b0f1e] flex items-center justify-center overflow-hidden cursor-pointer transition-transform hover:scale-105">
-                <GradientAvatar name={selectedMember.full_name} src={selectedMember.profile_pic} sizePx={88} imageFit="object-contain" className="!bg-transparent p-1" />
+            {/* avatar overlapping */}
+            <div className="absolute -bottom-9 left-5 flex items-end gap-3">
+              <div className="w-[72px] h-[72px] rounded-full border-[3px] border-white shadow-xl bg-[#0b0f1e] flex items-center justify-center overflow-hidden">
+                <GradientAvatar name={selectedMember.full_name} src={selectedMember.profile_pic} sizePx={66} imageFit="object-contain" className="!bg-transparent p-1" />
               </div>
-              <span className={`mt-2.5 px-3 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full shadow-sm ${STATUS_PILLS[getStatusInfo(selectedMember).label] || 'bg-slate-100 text-slate-500'}`}>{getStatusInfo(selectedMember).label}</span>
-            </div>
-
-            <div className="px-6 pb-4 space-y-4 overflow-y-auto overflow-x-hidden flex-1 min-h-0 rounded-b-[24px]">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0"><div className="w-7 h-7 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center shrink-0"><Phone size={13} /></div><div className="min-w-0"><p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-0.5">Phone</p><p className="text-sm font-bold text-slate-900 truncate">{selectedMember.phone}</p></div></div>
-                  <div className="flex gap-1 shrink-0"><button onClick={() => handleCall(selectedMember.phone)} className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm"><Phone size={11} fill="currentColor" /></button><button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"><MessageSquare size={11} fill="currentColor" /></button></div>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center gap-2"><div className="w-7 h-7 bg-indigo-50 text-indigo-500 rounded-lg flex items-center justify-center shrink-0"><Mail size={13} /></div><div className="min-w-0"><p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-0.5">Email</p><p className="text-xs font-bold text-slate-900 truncate">{selectedMember.email}</p></div></div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100 text-center"><p className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter mb-1">Visits</p><p className="text-lg font-black text-blue-900">{selectedMember.total_visits || 0}</p></div>
-                <div className="bg-orange-50/50 p-3 rounded-xl border border-orange-100 text-center"><p className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter mb-1">Streak</p><div className="flex items-center justify-center gap-0.5"><Flame size={11} className="text-orange-500" fill="currentColor" /><p className="text-lg font-black text-orange-900">{selectedMember.streak || 0}</p></div></div>
-                <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 text-center"><p className="text-[9px] font-bold text-emerald-500 uppercase tracking-tighter mb-1">Paid</p><p className="text-sm font-black text-emerald-900">₹{selectedMember.total_paid || 0}</p></div>
-                <div className="bg-purple-50/50 p-3 rounded-xl border border-purple-100 text-center"><p className="text-[9px] font-bold text-purple-500 uppercase tracking-tighter mb-1">Plan</p><p className="text-[10px] font-black text-purple-900 uppercase truncate">{selectedMember.plan_name || '—'}</p></div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100"><div className="flex items-center gap-1.5 text-slate-400 mb-1"><Calendar size={12} /><span className="text-[9px] font-bold uppercase tracking-tight">Valid Till</span></div><p className={`font-bold text-sm ${selectedMember.days_left <= 0 ? 'text-rose-500' : 'text-emerald-600'}`}>{selectedMember.expiry_date ? new Date(selectedMember.expiry_date).toLocaleDateString('en-GB') : 'No Active Plan'}</p></div>
-                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100"><div className="flex items-center gap-1.5 text-slate-400 mb-1"><TrendingUp size={12} /><span className="text-[9px] font-bold uppercase tracking-tight">Last Check-In</span></div><p className="font-bold text-sm text-slate-700">{selectedMember.last_visit ? new Date(selectedMember.last_visit).toLocaleDateString('en-GB') : 'Never'}</p></div>
-              </div>
-
-              {selectedMember.payment_history?.length > 0 && (
-                <div>
-                  <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><CreditCard size={12} /> Payment History</h3>
-                  <div className="border border-slate-100 rounded-xl overflow-hidden shadow-sm">
-                    <div className="max-h-[180px] overflow-y-auto">
-                      <table className="w-full text-xs"><thead className="bg-slate-50 border-b sticky top-0"><tr><th className="px-4 py-2 text-left text-[9px] font-black text-slate-400 uppercase tracking-wider">Date</th><th className="px-4 py-2 text-left text-[9px] font-black text-slate-400 uppercase tracking-wider">Mode</th><th className="px-4 py-2 text-left text-[9px] font-black text-slate-400 uppercase tracking-wider">Status</th><th className="px-4 py-2 text-right text-[9px] font-black text-slate-400 uppercase tracking-wider">Amount</th></tr></thead><tbody className="divide-y text-slate-600">{selectedMember.payment_history.map((pay, idx) => (<tr key={idx} className="hover:bg-slate-50/50 transition-colors"><td className="px-4 py-2.5 font-medium">{new Date(pay.payment_date).toLocaleDateString('en-GB')}</td><td className="px-4 py-2.5 font-medium">{pay.payment_mode || 'Cash'}</td><td className="px-4 py-2.5"><span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase ${!pay.status || pay.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{pay.status || 'Paid'}</span></td><td className="px-4 py-2.5 text-right font-black text-slate-900">₹{pay.amount_paid}</td></tr>))}</tbody></table>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="px-6 py-4 border-t border-slate-100 flex gap-2.5 shrink-0 bg-slate-50/60">
-              {(getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (<button onClick={() => { setShowDetailsModal(false); setShowActivateModal(true); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}><Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew Plan' : 'Activate Plan'}</button>)}
-              <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95"><MessageSquare size={13} fill="currentColor" /> WhatsApp</button>
-              <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95"><Edit2 size={13} /> Edit</button>
+              <span className={`mb-1 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full ${STATUS_PILLS[getStatusInfo(selectedMember).label] || 'bg-slate-100 text-slate-500'}`}>
+                {getStatusInfo(selectedMember).label}
+              </span>
             </div>
           </div>
-        </div>
-      )}
+
+          {/* scrollable body */}
+          <div className="px-5 pt-12 pb-3 space-y-3 overflow-y-auto flex-1 min-h-0 no-scrollbar">
+            {/* contact row */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center shrink-0"><Phone size={12} /></div>
+                  <div className="min-w-0">
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-0.5">Phone</p>
+                    <p className="text-sm font-bold text-slate-900 truncate">{selectedMember.phone}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button onClick={() => handleCall(selectedMember.phone)} className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm"><Phone size={10} fill="currentColor" /></button>
+                  <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"><MessageSquare size={10} fill="currentColor" /></button>
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center gap-2">
+                <div className="w-7 h-7 bg-indigo-50 text-indigo-500 rounded-lg flex items-center justify-center shrink-0"><Mail size={12} /></div>
+                <div className="min-w-0">
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-0.5">Email</p>
+                  <p className="text-xs font-bold text-slate-900 truncate">{selectedMember.email || '—'}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* stats row */}
+            <div className="grid grid-cols-4 gap-2">
+              <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100 text-center">
+                <p className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Visits</p>
+                <p className="text-base font-black text-blue-900">{selectedMember.total_visits || 0}</p>
+              </div>
+              <div className="bg-orange-50/60 p-2.5 rounded-xl border border-orange-100 text-center">
+                <p className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter mb-0.5">Streak</p>
+                <div className="flex items-center justify-center gap-0.5">
+                  <Flame size={10} className="text-orange-500" fill="currentColor" />
+                  <p className="text-base font-black text-orange-900">{selectedMember.streak || 0}</p>
+                </div>
+              </div>
+              <div className="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100 text-center">
+                <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-tighter mb-0.5">Paid</p>
+                <p className="text-xs font-black text-emerald-900">₹{selectedMember.total_paid || 0}</p>
+              </div>
+              <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 text-center">
+                <p className="text-[9px] font-bold text-purple-500 uppercase tracking-tighter mb-0.5">Plan</p>
+                <p className="text-[10px] font-black text-purple-900 uppercase truncate">{selectedMember.plan_name || '—'}</p>
+              </div>
+            </div>
+
+            {/* validity row */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <div className="flex items-center gap-1.5 text-slate-400 mb-1"><Calendar size={11} /><span className="text-[9px] font-bold uppercase tracking-tight">Valid Till</span></div>
+                <p className={`font-bold text-sm ${selectedMember.days_left <= 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
+                  {selectedMember.expiry_date ? new Date(selectedMember.expiry_date).toLocaleDateString('en-GB') : 'No Active Plan'}
+                </p>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <div className="flex items-center gap-1.5 text-slate-400 mb-1"><TrendingUp size={11} /><span className="text-[9px] font-bold uppercase tracking-tight">Last Check-In</span></div>
+                <p className="font-bold text-sm text-slate-700">{selectedMember.last_visit ? new Date(selectedMember.last_visit).toLocaleDateString('en-GB') : 'Never'}</p>
+              </div>
+            </div>
+
+            {/* payment history */}
+            {selectedMember.payment_history?.length > 0 && (
+              <div>
+                <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><CreditCard size={11} /> Payment History</h3>
+                <div className="border border-slate-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="max-h-[150px] overflow-y-auto no-scrollbar">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 border-b sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-[9px] font-black text-slate-400 uppercase tracking-wider">Date</th>
+                          <th className="px-3 py-2 text-left text-[9px] font-black text-slate-400 uppercase tracking-wider">Mode</th>
+                          <th className="px-3 py-2 text-left text-[9px] font-black text-slate-400 uppercase tracking-wider">Status</th>
+                          <th className="px-3 py-2 text-right text-[9px] font-black text-slate-400 uppercase tracking-wider">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y text-slate-600">
+                        {selectedMember.payment_history.map((pay, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-3 py-2 font-medium">{new Date(pay.payment_date).toLocaleDateString('en-GB')}</td>
+                            <td className="px-3 py-2 font-medium">{pay.payment_mode || 'Cash'}</td>
+                            <td className="px-3 py-2"><span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase ${!pay.status || pay.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{pay.status || 'Paid'}</span></td>
+                            <td className="px-3 py-2 text-right font-black text-slate-900">₹{pay.amount_paid}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* action bar */}
+          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
+            {(getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
+              <button onClick={() => { setShowDetailsModal(false); setShowActivateModal(true); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+                <Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
+              </button>
+            )}
+            <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
+              <MessageSquare size={13} fill="currentColor" /> WhatsApp
+            </button>
+            <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
+              <Edit2 size={13} /> Edit
+            </button>
+          </div>
+        </>)}
+      </div>
 
       {showEditModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
