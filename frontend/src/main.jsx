@@ -63,6 +63,17 @@ axios.interceptors.response.use((response) => {
   return Promise.reject(error)
 })
 
+if (typeof document !== 'undefined') {
+  const blockZoomGesture = (event) => {
+    event.preventDefault()
+  }
+
+  document.addEventListener('gesturestart', blockZoomGesture, { passive: false })
+  document.addEventListener('gesturechange', blockZoomGesture, { passive: false })
+  document.addEventListener('gestureend', blockZoomGesture, { passive: false })
+  document.addEventListener('dblclick', blockZoomGesture, { passive: false })
+}
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((error) => {

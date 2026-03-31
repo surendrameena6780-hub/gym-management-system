@@ -39,6 +39,11 @@ body {
   overflow-x: hidden;
 }
 
+html,
+body {
+  touch-action: manipulation;
+}
+
 #root {
   min-height: 100vh;
 }
