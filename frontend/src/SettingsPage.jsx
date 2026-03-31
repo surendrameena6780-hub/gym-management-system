@@ -391,8 +391,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
     }
   };
 
-  const handleCreateLinkedAccount = async (e) => {
-    e.preventDefault();
+  const handleCreateLinkedAccount = async () => {
     const f = linkedAccountForm;
     if (!f.legal_business_name.trim() || !f.business_email.trim() || !f.city.trim() || !f.state.trim() || !f.pincode.trim()) {
       toast('Business name, email, city, state and pincode are required.', 'warning');
@@ -1419,7 +1418,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                             </button>
 
                             {showLinkedAccountForm && (
-                              <form onSubmit={handleCreateLinkedAccount} className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50 space-y-3">
+                              <div className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50 space-y-3">
                                 <p className="text-[11px] font-black uppercase tracking-wider text-indigo-700">Create Razorpay Linked Account</p>
                                 <p className="text-xs text-slate-500 font-medium">We create a Razorpay account under GymVault for this gym. Razorpay will email the owner to add their PAN and bank details. Payments start routing immediately after.</p>
 
@@ -1493,13 +1492,14 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                                 </div>
 
                                 <button
-                                  type="submit"
+                                  type="button"
+                                  onClick={handleCreateLinkedAccount}
                                   disabled={linkedAccountSaving}
                                   className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs hover:bg-indigo-700 disabled:opacity-60"
                                 >
                                   {linkedAccountSaving ? 'Creating account...' : 'Create & Connect'}
                                 </button>
-                              </form>
+                              </div>
                             )}
                           </div>
                         )}

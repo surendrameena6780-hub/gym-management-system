@@ -419,7 +419,7 @@ router.post('/online/linked-account/create', auth, saasMiddleware, async (req, r
                 },
             },
             legal_business_name,
-            business_type: 'route',
+            business_type: 'individual',
             ...(business_phone ? { legal_info: {} } : {}),
         });
 
