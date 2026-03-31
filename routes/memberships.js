@@ -371,6 +371,100 @@ router.post('/online/connect/disconnect', auth, saasMiddleware, async (req, res)
     }
 });
 
+// Create a Razorpay linked account for gym owners who do NOT have a Razorpay account.
+// Razorpay will email them to complete KYC (PAN + bank) on their own platform.
+// We get back acc_XXXXX immediately and can start routing payments to it.
+router.post('/online/linked-account/create', auth, saasMiddleware, async (req, res) => {
+    try {
+        await ensureMemberPaymentsSchema();
+        const gym_id = req.user.gym_id;
+
+        const legal_business_name = String(req.body.legal_business_name || '').trim();
+        const business_email      = String(req.body.business_email || '').trim();
+        const business_phone      = String(req.body.business_phone || '').replace(/\D/g, '');
+        const city                = String(req.body.city || '').trim();
+        const state               = String(req.body.state || '').trim().toUpperCase();
+        const pincode             = String(req.body.pincode || '').trim();
+
+        if (!legal_business_name || !business_email || !city || !state || !pincode) {
+            return res.status(400).json({ error: 'Business name, email, city, state and pincode are required.' });
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(business_email)) {
+            return res.status(400).json({ error: 'Invalid email address.' });
+        }
+
+        const platformKeyId     = String(process.env.RAZORPAY_KEY_ID || '').trim();
+        const platformKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+        if (!platformKeyId || !platformKeySecret) {
+            return res.status(500).json({ error: 'Platform Razorpay gateway not configured. Contact support.' });
+        }
+
+        const platformRazorpay = new Razorpay({ key_id: platformKeyId, key_secret: platformKeySecret });
+
+        // Step 1: Create the linked account under GymVault's Razorpay account.
+        // Razorpay emails the gym owner to complete KYC (PAN + bank details).
+        const account = await platformRazorpay.accounts.create({
+            email: business_email,
+            profile: {
+                category: 'healthcare',
+                subcategory: 'fitness_centres_gyms_sports_clubs',
+                addresses: {
+                    registered: {
+                        street1: city,
+                        city,
+                        state,
+                        postal_code: pincode,
+                        country: 'IN',
+                    },
+                },
+            },
+            legal_business_name,
+            business_type: 'route',
+            ...(business_phone ? { legal_info: {} } : {}),
+        });
+
+        if (!account || !account.id) {
+            return res.status(502).json({ error: 'Razorpay did not return an account ID. Try again.' });
+        }
+
+        // Step 2: If phone provided, add a stakeholder so Razorpay has contact info for KYC.
+        if (business_phone) {
+            try {
+                await platformRazorpay.accounts.addStakeholder(account.id, {
+                    name: legal_business_name,
+                    email: business_email,
+                    relationship: { director: true },
+                    phone: { primary: business_phone, secondary: business_phone },
+                });
+            } catch (_stakeholderErr) {
+                // Non-fatal — KYC can still be completed by the gym owner via Razorpay email
+            }
+        }
+
+        // Step 3: Save the linked account ID and mark as CONNECTED in PARTNER mode.
+        await pool.query(
+            `UPDATE gyms
+             SET member_razorpay_connected_account_id = $1,
+                 member_payments_connect_mode         = 'PARTNER',
+                 member_payments_onboarding_status    = 'CONNECTED',
+                 member_payments_connected_at         = NOW(),
+                 member_payments_updated_at           = NOW()
+             WHERE id = $2`,
+            [account.id, gym_id]
+        );
+
+        return res.json({
+            success: true,
+            account_id: account.id,
+            message: `Linked account created. ${business_email} will receive a Razorpay email to complete KYC (PAN + bank details).`,
+        });
+    } catch (err) {
+        console.error('LINKED ACCOUNT CREATE ERROR:', err.message);
+        const msg = err?.error?.description || err?.message || 'Failed to create linked account.';
+        return res.status(500).json({ error: msg });
+    }
+});
+
 router.post('/online/verify', auth, saasMiddleware, async (req, res) => {
     const gym_id = req.user.gym_id;
     const {

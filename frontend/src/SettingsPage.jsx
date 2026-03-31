@@ -117,6 +117,16 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
   const [testSending, setTestSending] = useState(false);
   const [connectingGateway, setConnectingGateway] = useState(false);
   const [disconnectingGateway, setDisconnectingGateway] = useState(false);
+  const [showLinkedAccountForm, setShowLinkedAccountForm] = useState(false);
+  const [linkedAccountSaving, setLinkedAccountSaving] = useState(false);
+  const [linkedAccountForm, setLinkedAccountForm] = useState({
+    legal_business_name: '',
+    business_email: '',
+    business_phone: '',
+    city: '',
+    state: '',
+    pincode: '',
+  });
   const [integrationData, setIntegrationData] = useState({
     owner_mobile: '',
     gateway_connected: false,
@@ -378,6 +388,27 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
       toast(err?.response?.data?.error || 'Failed to disconnect Razorpay.', 'error');
     } finally {
       setDisconnectingGateway(false);
+    }
+  };
+
+  const handleCreateLinkedAccount = async (e) => {
+    e.preventDefault();
+    const f = linkedAccountForm;
+    if (!f.legal_business_name.trim() || !f.business_email.trim() || !f.city.trim() || !f.state.trim() || !f.pincode.trim()) {
+      toast('Business name, email, city, state and pincode are required.', 'warning');
+      return;
+    }
+    setLinkedAccountSaving(true);
+    try {
+      const res = await axios.post('/api/memberships/online/linked-account/create', f, headers);
+      toast(res.data?.message || 'Razorpay linked account created!', 'success');
+      setShowLinkedAccountForm(false);
+      setLinkedAccountForm({ legal_business_name: '', business_email: '', business_phone: '', city: '', state: '', pincode: '' });
+      await loadIntegrations();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to create linked account.', 'error');
+    } finally {
+      setLinkedAccountSaving(false);
     }
   };
 
@@ -1375,6 +1406,103 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                             )}
                           </div>
                         </div>
+
+                        {/* ── Linked Account setup (for gym owners without a Razorpay account) ── */}
+                        {integrationData.member_payments?.onboarding_status !== 'CONNECTED' && (
+                          <div className="md:col-span-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowLinkedAccountForm((v) => !v)}
+                              className="text-xs font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800"
+                            >
+                              {showLinkedAccountForm ? 'Cancel' : "Don't have a Razorpay account? Set up here →"}
+                            </button>
+
+                            {showLinkedAccountForm && (
+                              <form onSubmit={handleCreateLinkedAccount} className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50 space-y-3">
+                                <p className="text-[11px] font-black uppercase tracking-wider text-indigo-700">Create Razorpay Linked Account</p>
+                                <p className="text-xs text-slate-500 font-medium">We create a Razorpay account under GymVault for this gym. Razorpay will email the owner to add their PAN and bank details. Payments start routing immediately after.</p>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div className="md:col-span-2">
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Legal Business / Gym Name *</label>
+                                    <input
+                                      required
+                                      value={linkedAccountForm.legal_business_name}
+                                      onChange={(e) => setLinkedAccountForm((p) => ({ ...p, legal_business_name: e.target.value }))}
+                                      placeholder="Iron Body Fitness Pvt Ltd"
+                                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Owner Email * (Razorpay will contact here)</label>
+                                    <input
+                                      required
+                                      type="email"
+                                      value={linkedAccountForm.business_email}
+                                      onChange={(e) => setLinkedAccountForm((p) => ({ ...p, business_email: e.target.value }))}
+                                      placeholder="owner@gym.com"
+                                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Owner Mobile (optional)</label>
+                                    <input
+                                      type="tel"
+                                      value={linkedAccountForm.business_phone}
+                                      onChange={(e) => setLinkedAccountForm((p) => ({ ...p, business_phone: e.target.value }))}
+                                      placeholder="9876543210"
+                                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">City *</label>
+                                    <input
+                                      required
+                                      value={linkedAccountForm.city}
+                                      onChange={(e) => setLinkedAccountForm((p) => ({ ...p, city: e.target.value }))}
+                                      placeholder="Mumbai"
+                                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">State * (e.g. MAHARASHTRA)</label>
+                                    <input
+                                      required
+                                      value={linkedAccountForm.state}
+                                      onChange={(e) => setLinkedAccountForm((p) => ({ ...p, state: e.target.value }))}
+                                      placeholder="MAHARASHTRA"
+                                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Pincode *</label>
+                                    <input
+                                      required
+                                      value={linkedAccountForm.pincode}
+                                      onChange={(e) => setLinkedAccountForm((p) => ({ ...p, pincode: e.target.value }))}
+                                      placeholder="400001"
+                                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                                    />
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="submit"
+                                  disabled={linkedAccountSaving}
+                                  className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs hover:bg-indigo-700 disabled:opacity-60"
+                                >
+                                  {linkedAccountSaving ? 'Creating account...' : 'Create & Connect'}
+                                </button>
+                              </form>
+                            )}
+                          </div>
+                        )}
 
                         <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50 md:col-span-2">
                           <span className="text-sm font-bold text-slate-700">Use connected Razorpay account (best way)</span>
