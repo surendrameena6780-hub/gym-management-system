@@ -752,7 +752,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                   key={tab.id}
                   disabled={isTabDisabled}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
                     isTabDisabled ? 'opacity-50 cursor-not-allowed grayscale' : ''
                   } ${
                     isActive 

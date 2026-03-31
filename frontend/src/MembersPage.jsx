@@ -916,6 +916,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               {getStatusInfo(selectedMember).label}
             </span>
           </div>
+          {/* scrollable body */}
+          <div className="flex-1 overflow-y-auto px-5 space-y-3 pt-2 pb-1 no-scrollbar">
             {/* contact row */}
             <div className="grid grid-cols-2 gap-2.5">
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-2">

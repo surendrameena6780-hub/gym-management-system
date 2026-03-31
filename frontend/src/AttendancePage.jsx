@@ -328,19 +328,19 @@ function AttendancePage({ token, toast }) {
   return (
     <div className="space-y-5 p-2">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Today's Check-ins</p>
           <h3 className="text-3xl font-black text-slate-900 mt-1">{overview.today_checkins || 0}</h3>
         </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Yesterday</p>
           <h3 className="text-3xl font-black text-slate-900 mt-1">{overview.yesterday_checkins || 0}</h3>
         </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-2">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Members Today</p>
           <h3 className="text-3xl font-black text-emerald-600 mt-1">{overview.active_members_today || 0}</h3>
         </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-3">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Peak Hour Today</p>
           <h3 className="text-3xl font-black text-indigo-600 mt-1">{peakHourLabel}</h3>
           <p className="text-xs font-bold text-slate-400 mt-1">{overview.peak_hour_count || 0} check-ins</p>
@@ -363,7 +363,7 @@ function AttendancePage({ token, toast }) {
                   setModeSettings((prev) => ({ ...prev, attendance_mode: key }));
                   setCheckinMethod(key);
                 }}
-                className={`text-left p-4 rounded-2xl border transition-all ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
+                className={`text-left p-4 rounded-2xl border transition-all active:scale-95 ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
               >
                 <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${item.color} text-white flex items-center justify-center mb-3`}>
                   <Icon size={17} />
@@ -427,7 +427,7 @@ function AttendancePage({ token, toast }) {
           <button
             onClick={saveModeSettings}
             disabled={busySaveMode}
-            className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 disabled:opacity-60"
+            className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 active:scale-95 transition-all disabled:opacity-60"
           >
             {busySaveMode ? 'Saving...' : 'Save Mode Settings'}
           </button>
@@ -715,7 +715,7 @@ function AttendancePage({ token, toast }) {
               const widthPercent = topVisits > 0 ? Math.max(8, Math.round((itemVisits / topVisits) * 100)) : 8;
 
               return (
-                <div key={item.id} className="p-3 rounded-xl border border-slate-100 bg-white">
+                <div key={item.id} className="p-3 rounded-xl border border-slate-100 bg-white gv-fade-up" style={{ animationDelay: `${Math.min(idx * 0.04, 0.25)}s` }}>
                   <div className="flex items-center justify-between gap-3 mb-2">
                     <div className="min-w-0 flex items-center gap-2.5">
                       <span className="w-7 h-7 rounded-full bg-indigo-50 text-indigo-700 text-xs font-black flex items-center justify-center shrink-0">

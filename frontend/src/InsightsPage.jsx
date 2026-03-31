@@ -28,8 +28,8 @@ const Card = ({ children, className = "" }) => (
   </div>
 );
 
-const KPICard = ({ title, value, change, trend, icon: Icon, color }) => (
-  <Card className="p-5 flex flex-col justify-between hover:shadow-md transition-shadow">
+const KPICard = ({ title, value, change, trend, icon: Icon, color, className = '' }) => (
+  <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col justify-between hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${className}`}>
     <div className="flex justify-between items-start mb-4">
       <div className={`p-3 rounded-xl ${color} bg-opacity-10 text-opacity-100`}>
         <Icon size={20} className={color.replace('bg-', 'text-')} />
@@ -45,7 +45,7 @@ const KPICard = ({ title, value, change, trend, icon: Icon, color }) => (
       <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">{title}</p>
       <h3 className="text-2xl font-black text-slate-900">{value}</h3>
     </div>
-  </Card>
+  </div>
 );
 
 const formatHour = (h) => {
@@ -248,10 +248,10 @@ const InsightsPage = ({ token, toast, currentUser }) => {
 
       {/* 2. KPI STRIP */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Total Revenue" value={`₹${analytics.revenue.total.toLocaleString()}`} change={analytics.revenue.growth} trend="up" icon={DollarSign} color="bg-emerald-500" />
-        <KPICard title="Active Members" value={analytics.health.active} change="+4" trend="up" icon={Users} color="bg-blue-500" />
-        <KPICard title="Retention Rate" value={`${analytics.health.retention}%`} change="-1.2%" trend="down" icon={Activity} color="bg-violet-500" />
-        <KPICard title="Revenue At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} trend="down" icon={AlertTriangle} color="bg-rose-500" />
+        <KPICard title="Total Revenue" value={`₹${analytics.revenue.total.toLocaleString()}`} change={analytics.revenue.growth} trend="up" icon={DollarSign} color="bg-emerald-500" className="gv-fade-up" />
+        <KPICard title="Active Members" value={analytics.health.active} change="+4" trend="up" icon={Users} color="bg-blue-500" className="gv-fade-up gv-fade-up-1" />
+        <KPICard title="Retention Rate" value={`${analytics.health.retention}%`} change="-1.2%" trend="down" icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
+        <KPICard title="Revenue At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} trend="down" icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
       </div>
 
       {/* 3. TABS */}
@@ -265,7 +265,7 @@ const InsightsPage = ({ token, toast, currentUser }) => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`pb-4 flex items-center gap-2 text-sm font-bold transition-all border-b-2 whitespace-nowrap ${activeTab === tab.id ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'}`}
+            className={`pb-4 flex items-center gap-2 text-sm font-bold transition-all border-b-2 whitespace-nowrap active:scale-95 ${activeTab === tab.id ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'}`}
           >
             <tab.icon size={16} />
             {tab.label}

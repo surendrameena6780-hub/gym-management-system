@@ -919,7 +919,7 @@ function App() {
           </header>
 
           <main className={`app-scroll-shell flex-1 p-4 md:p-6 lg:p-8 ${currentPage === 'Dashboard' ? 'app-main-scroll-dashboard' : 'app-main-scroll'} overflow-y-auto`}>
-            <div className="max-w-[1400px] mx-auto w-full">
+            <div key={currentPage} className="max-w-[1400px] mx-auto w-full gv-fade-up">
               {/* 🚨 Passed startTour to Dashboard 🚨 */}
               {currentPage === 'Dashboard'  ? (currentUser?.role === 'OWNER'
                 ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} />
