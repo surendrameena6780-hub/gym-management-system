@@ -96,15 +96,16 @@ body {
 /* ── Bottom sheet drawer ────────────────────────────────────── */
 .drawer-sheet {
   position: fixed;
-  left: 0; right: 0; bottom: 0;
+  left: 0; right: 0;
+  bottom: var(--mobile-nav-offset);
   z-index: 80;
   background: #fff;
   border-radius: 24px 24px 0 0;
   box-shadow: 0 -8px 40px rgba(0,0,0,0.18);
-  max-height: 92dvh;
+  max-height: calc(92dvh - var(--mobile-nav-offset));
   display: flex;
   flex-direction: column;
-  transform: translateY(100%);
+  transform: translateY(calc(100% + var(--mobile-nav-offset)));
   transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
 }
@@ -129,10 +130,10 @@ body {
 @media (min-width: 640px) {
   .drawer-sheet {
     left: 50%; right: auto;
-    transform: translateX(-50%) translateY(100%);
+    bottom: 1.5rem;
+    transform: translateX(-50%) translateY(calc(100% + 2rem));
     width: 480px;
     border-radius: 24px;
-    bottom: 1.5rem;
     max-height: 88dvh;
   }
   .drawer-sheet.open {

@@ -894,7 +894,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           </div>
 
           {/* header */}
-          <div className="relative px-5 pt-3 pb-4 shrink-0" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #24243e 100%)', borderRadius: '20px 20px 0 0' }}>
+          <div className="relative px-5 pt-3 pb-10 shrink-0" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #24243e 100%)', borderRadius: '22px 22px 0 0' }}>
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-0.5">Member Profile</p>
@@ -905,19 +905,17 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
               <button onClick={() => setShowDetailsModal(false)} className="text-white/50 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all mt-0.5"><X size={18} /></button>
             </div>
-            {/* avatar overlapping */}
-            <div className="absolute -bottom-9 left-5 flex items-end gap-3">
-              <div className="w-[72px] h-[72px] rounded-full border-[3px] border-white shadow-xl bg-[#0b0f1e] flex items-center justify-center overflow-hidden">
-                <GradientAvatar name={selectedMember.full_name} src={selectedMember.profile_pic} sizePx={66} imageFit="object-contain" className="!bg-transparent p-1" />
-              </div>
-              <span className={`mb-1 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full ${STATUS_PILLS[getStatusInfo(selectedMember).label] || 'bg-slate-100 text-slate-500'}`}>
-                {getStatusInfo(selectedMember).label}
-              </span>
-            </div>
           </div>
 
-          {/* scrollable body */}
-          <div className="px-5 pt-12 pb-3 space-y-3 overflow-y-auto flex-1 min-h-0 no-scrollbar">
+          {/* avatar — centred, overlapping header */}
+          <div className="flex flex-col items-center -mt-9 pb-1 shrink-0">
+            <div className="w-[68px] h-[68px] rounded-full border-[3px] border-white shadow-xl bg-[#0b0f1e] flex items-center justify-center overflow-hidden">
+              <GradientAvatar name={selectedMember.full_name} src={selectedMember.profile_pic} sizePx={62} imageFit="object-contain" className="!bg-transparent p-1" />
+            </div>
+            <span className={`mt-1.5 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full ${STATUS_PILLS[getStatusInfo(selectedMember).label] || 'bg-slate-100 text-slate-500'}`}>
+              {getStatusInfo(selectedMember).label}
+            </span>
+          </div>
             {/* contact row */}
             <div className="grid grid-cols-2 gap-2.5">
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-2">
@@ -1011,8 +1009,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             )}
           </div>
 
-          {/* action bar */}
-          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
+          {/* action bar — no extra bottom padding needed, drawer sits above nav */}
+          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60">
             {(getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
               <button onClick={() => { setShowDetailsModal(false); setShowActivateModal(true); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
                 <Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
