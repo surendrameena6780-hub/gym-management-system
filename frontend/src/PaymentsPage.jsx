@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { 
   Search, Filter, Download, Plus, DollarSign, 
@@ -74,6 +74,8 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const [formData, setFormData] = useState({
     user_id: '', plan_id: '', amount_paid: '', total_amount: '', payment_mode: 'Online', transaction_id: '', notes: ''
   });
+
+  const paymentsListRef = useRef(null);
 
   const getImageUrl = (path) => {
     if (!path) return null;
@@ -242,6 +244,27 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
     return 'Record your first payment to get started';
   };
 
+  useEffect(() => {
+    const el = paymentsListRef.current;
+    if (!el) return;
+    let startY = 0;
+    const onTouchStart = (e) => { startY = e.touches[0].clientY; };
+    const onTouchMove = (e) => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      if (scrollHeight <= clientHeight) return;
+      const delta = startY - e.touches[0].clientY;
+      const atTop    = scrollTop <= 0 && delta < 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && delta > 0;
+      if (!atTop && !atBottom) e.preventDefault();
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove',  onTouchMove);
+    };
+  }, []);
+
   return (
     <div className="min-h-full p-2 font-sans relative" onClick={() => setShowFilterDropdown(false)}>
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-5 sm:gap-6 mb-0"
@@ -362,7 +385,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
         <div className="overflow-x-auto">
           <div className="md:hidden p-4">
             <div className="relative">
-              <div className="payments-mobile-list-scroll no-scrollbar">
+              <div ref={paymentsListRef} className="payments-mobile-list-scroll no-scrollbar">
                 <div className="space-y-3 pb-6">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import {
   Search, Edit2, Plus, X, Zap, RefreshCw, Trash2, Ban, Calendar,
@@ -251,6 +251,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
   const [editFormData, setEditFormData] = useState({ id: '', full_name: '', email: '', phone: '' });
 
+  const membersListRef = useRef(null);
+
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -366,6 +368,27 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       isMounted = false;
     };
   }, [token, focusMemberId, focusAction, members, onFocusHandled, toast]);
+
+  useEffect(() => {
+    const el = membersListRef.current;
+    if (!el) return;
+    let startY = 0;
+    const onTouchStart = (e) => { startY = e.touches[0].clientY; };
+    const onTouchMove = (e) => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      if (scrollHeight <= clientHeight) return;
+      const delta = startY - e.touches[0].clientY;
+      const atTop    = scrollTop <= 0 && delta < 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && delta > 0;
+      if (!atTop && !atBottom) e.preventDefault();
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove',  onTouchMove);
+    };
+  }, []);
 
   const downloadReceipt = () => {
     if (!receiptData) return;
@@ -709,7 +732,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             <>
               <div className="md:hidden py-2">
                 <div className="relative">
-                  <div className="members-mobile-list-scroll no-scrollbar">
+                  <div ref={membersListRef} className="members-mobile-list-scroll no-scrollbar">
                     <div className="space-y-3 pb-6">
                       {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (

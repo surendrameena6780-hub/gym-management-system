@@ -72,12 +72,10 @@ body {
 
 .payments-mobile-list-scroll,
 .members-mobile-list-scroll {
-  overflow-y: scroll;               /* always creates scroll context — required for overscroll isolation */
-  overscroll-behavior-y: contain;   /* inner scroll never bleeds to outer page */
-  -webkit-overflow-scrolling: touch; /* smooth momentum on iOS */
-  touch-action: pan-y;               /* browser knows this element handles vertical pan */
-  scroll-behavior: smooth;
-  will-change: scroll-position;
+  overflow-y: scroll;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .no-scrollbar {
