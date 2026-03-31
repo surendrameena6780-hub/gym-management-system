@@ -708,8 +708,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           ) : (
             <>
               <div className="md:hidden py-2">
-                <div className="space-y-3 pb-2">
-                  {loading ? (
+                <div className="relative">
+                  <div className="members-mobile-list-scroll no-scrollbar">
+                    <div className="space-y-3 pb-6">
+                      {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
                         <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
                           <div className="h-3 w-24 bg-slate-100 rounded animate-pulse mb-2" />
@@ -739,6 +741,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         );
                       })
                     )}
+                    </div>
+                  </div>
+                  <div className="absolute bottom-0 inset-x-0 h-12 pointer-events-none rounded-b-2xl" style={{ background: 'linear-gradient(to top, rgba(248,250,252,0.96) 0%, transparent 100%)' }} />
                 </div>
               </div>
 

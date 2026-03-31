@@ -361,7 +361,9 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
         </div>
         <div className="overflow-x-auto">
           <div className="md:hidden p-4">
-            <div className="space-y-3">
+            <div className="relative">
+              <div className="payments-mobile-list-scroll no-scrollbar">
+                <div className="space-y-3 pb-6">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <div key={`pay-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
@@ -389,6 +391,9 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                 </div>
               ))
             )}
+                </div>
+              </div>
+              <div className="absolute bottom-0 inset-x-0 h-12 pointer-events-none rounded-b-2xl" style={{ background: 'linear-gradient(to top, rgba(255,255,255,0.96) 0%, transparent 100%)' }} />
             </div>
           </div>
 

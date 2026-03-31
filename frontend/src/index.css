@@ -18,8 +18,8 @@ body,
   --mobile-nav-offset: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
-  --payments-mobile-list-max-height: clamp(17.5rem, 37vh, 22rem);
-  --members-mobile-list-max-height: clamp(19rem, 41vh, 24rem);
+  --payments-mobile-list-max-height: 22rem;
+  --members-mobile-list-max-height: 22rem;
 }
 
 *,
@@ -72,10 +72,20 @@ body {
 
 .payments-mobile-list-scroll,
 .members-mobile-list-scroll {
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  overflow-y: scroll;               /* always creates scroll context — required for overscroll isolation */
+  overscroll-behavior-y: contain;   /* inner scroll never bleeds to outer page */
+  -webkit-overflow-scrolling: touch; /* smooth momentum on iOS */
+  touch-action: pan-y;               /* browser knows this element handles vertical pan */
+  scroll-behavior: smooth;
+  will-change: scroll-position;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .payments-mobile-list-scroll {
