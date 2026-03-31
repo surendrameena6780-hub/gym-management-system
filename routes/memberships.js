@@ -465,6 +465,36 @@ router.post('/online/linked-account/create', auth, saasMiddleware, async (req, r
     }
 });
 
+// Save a Razorpay linked account ID that was created manually in the Razorpay Dashboard.
+// Gym owner copies acc_XXXXX from Razorpay → Route → Accounts and pastes it here.
+router.post('/online/linked-account/save', auth, saasMiddleware, async (req, res) => {
+    try {
+        await ensureMemberPaymentsSchema();
+        const gym_id = req.user.gym_id;
+        const account_id = String(req.body.account_id || '').trim();
+
+        if (!account_id.startsWith('acc_')) {
+            return res.status(400).json({ error: 'Invalid account ID. Must start with acc_' });
+        }
+
+        await pool.query(
+            `UPDATE gyms
+             SET member_razorpay_connected_account_id = $1,
+                 member_payments_connect_mode         = 'PARTNER',
+                 member_payments_onboarding_status    = 'CONNECTED',
+                 member_payments_connected_at         = NOW(),
+                 member_payments_updated_at           = NOW()
+             WHERE id = $2`,
+            [account_id, gym_id]
+        );
+
+        return res.json({ success: true, message: 'Razorpay account connected successfully.' });
+    } catch (err) {
+        console.error('LINKED ACCOUNT SAVE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to save account ID.' });
+    }
+});
+
 router.post('/online/verify', auth, saasMiddleware, async (req, res) => {
     const gym_id = req.user.gym_id;
     const {
