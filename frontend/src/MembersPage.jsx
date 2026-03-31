@@ -636,7 +636,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative overflow-hidden">
+    <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative">
       {showSuccessAnim && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-500 max-w-sm w-full">
@@ -660,7 +660,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         ))}
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 min-h-0 flex-1 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
@@ -689,7 +689,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="overflow-hidden">
           {!loading && members.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-50/50 rounded-[32px] border-2 border-dashed border-slate-200 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <div className="w-20 h-20 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-6 text-slate-300"><Users size={40} /></div>
@@ -704,7 +704,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   <div className="space-y-3 pb-2">
                     {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
-                        <div key={`member-mobile-skeleton-${i}`} className="members-mobile-card p-4 rounded-2xl border border-slate-100 bg-white">
+                        <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
                           <div className="h-3 w-24 bg-slate-100 rounded animate-pulse mb-2" />
                           <div className="h-3 w-40 bg-slate-100 rounded animate-pulse mb-2" />
                           <div className="h-3 w-20 bg-slate-100 rounded animate-pulse" />
@@ -716,7 +716,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                       filteredMembers.map((member) => {
                         const statusInfo = getStatusInfo(member);
                         return (
-                          <div key={`member-mobile-${member.id}`} className="members-mobile-card p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
+                          <div key={`member-mobile-${member.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
                             <div className="flex items-center gap-3">
                               <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={38} />
                               <div className="min-w-0 flex-1">
