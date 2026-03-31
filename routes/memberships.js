@@ -154,19 +154,28 @@ router.post('/online/create-order', auth, saasMiddleware, async (req, res) => {
             [gym_id]
         );
         const gymConfig = gymConfigRes.rows[0] || {};
-        const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
-        const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
         const connectMode = String(gymConfig.member_payments_connect_mode || 'MANUAL').toUpperCase();
         const connectedAccount = String(gymConfig.member_razorpay_connected_account_id || '').trim();
 
         if (!gymConfig.member_payments_enabled) {
             return res.status(400).json({ error: 'Member online payments are disabled in Integrations.' });
         }
-        if (connectMode === 'PARTNER' && !connectedAccount) {
-            return res.status(400).json({ error: 'Razorpay account is not connected yet. Complete Connect Razorpay onboarding first.' });
-        }
-        if (!keyId || !keySecret) {
-            return res.status(400).json({ error: 'Razorpay member payment gateway is not configured. Please update Integrations.' });
+
+        if (connectMode === 'PARTNER') {
+            // Route mode requires a linked account ID from the OAuth callback
+            if (!connectedAccount) {
+                return res.status(400).json({ error: 'Razorpay account is not connected yet. Complete Connect Razorpay onboarding first.' });
+            }
+            if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+                return res.status(500).json({ error: 'Platform payment gateway not configured. Contact support.' });
+            }
+        } else {
+            // Manual mode requires the gym to have saved their own Razorpay keys
+            const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
+            const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
+            if (!keyId || !keySecret) {
+                return res.status(400).json({ error: 'Razorpay member payment gateway is not configured. Please update Integrations.' });
+            }
         }
 
         const planResult = await pool.query(
@@ -188,21 +197,62 @@ router.post('/online/create-order', auth, saasMiddleware, async (req, res) => {
             return res.status(400).json({ error: 'Selected plan has invalid price.' });
         }
 
-        const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-        const order = await razorpay.orders.create({
-            amount: amountPaise,
-            currency: 'INR',
-            receipt: `gym_${gym_id}_m_${member_id}_${Date.now()}`,
-            notes: {
-                purpose: 'MEMBER_PAYMENT',
-                gym_id: String(gym_id),
-                member_id: String(member_id),
-                plan_id: String(plan_id),
-            },
-        });
+        let order, effectiveKeyId;
+
+        if (connectMode === 'PARTNER') {
+            // ── ROUTE MODE ──────────────────────────────────────────────────────────
+            // Payment collected by GymVault's Razorpay account.
+            // Razorpay Route automatically transfers (amount minus platform fee)
+            // to the gym owner's linked account (acc_XXXXX) after capture.
+            const platformKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
+            const platformKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+            const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
+            const feeAmount = Math.round(amountPaise * feePercent / 100);
+            const transferAmount = amountPaise - feeAmount;
+
+            const platformRazorpay = new Razorpay({ key_id: platformKeyId, key_secret: platformKeySecret });
+            order = await platformRazorpay.orders.create({
+                amount: amountPaise,
+                currency: 'INR',
+                receipt: `gym_${gym_id}_m_${member_id}_${Date.now()}`,
+                // Route: transfer funds to gym's linked account at capture
+                transfers: [{
+                    account: connectedAccount,
+                    amount: transferAmount,
+                    currency: 'INR',
+                    on_hold: false,
+                    notes: { gym_id: String(gym_id), member_id: String(member_id), plan_id: String(plan_id) },
+                }],
+                notes: {
+                    purpose: 'MEMBER_PAYMENT',
+                    gym_id: String(gym_id),
+                    member_id: String(member_id),
+                    plan_id: String(plan_id),
+                },
+            });
+            effectiveKeyId = platformKeyId;
+        } else {
+            // ── MANUAL MODE ─────────────────────────────────────────────────────────
+            // Gym owner's own Razorpay keys; money goes directly to their account.
+            const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
+            const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
+            const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+            order = await razorpay.orders.create({
+                amount: amountPaise,
+                currency: 'INR',
+                receipt: `gym_${gym_id}_m_${member_id}_${Date.now()}`,
+                notes: {
+                    purpose: 'MEMBER_PAYMENT',
+                    gym_id: String(gym_id),
+                    member_id: String(member_id),
+                    plan_id: String(plan_id),
+                },
+            });
+            effectiveKeyId = keyId;
+        }
 
         return res.json({
-            key_id: keyId,
+            key_id: effectiveKeyId,
             order,
             member: {
                 id: member.id,
@@ -338,11 +388,17 @@ router.post('/online/verify', auth, saasMiddleware, async (req, res) => {
     try {
         await ensureMemberPaymentsSchema();
         const gymConfigRes = await pool.query(
-            `SELECT member_razorpay_key_secret_enc
+            `SELECT member_razorpay_key_secret_enc, member_payments_connect_mode
              FROM gyms WHERE id = $1 LIMIT 1`,
             [gym_id]
         );
-        const keySecret = decryptSecret(gymConfigRes.rows[0]?.member_razorpay_key_secret_enc || '');
+        const row = gymConfigRes.rows[0] || {};
+        const verifyMode = String(row.member_payments_connect_mode || 'MANUAL').toUpperCase();
+        // PARTNER: order was created with GymVault's key, so verify with GymVault's secret.
+        // MANUAL: order was created with the gym's own key, so verify with their secret.
+        const keySecret = verifyMode === 'PARTNER'
+            ? String(process.env.RAZORPAY_KEY_SECRET || '').trim()
+            : decryptSecret(row.member_razorpay_key_secret_enc || '');
         if (!keySecret) {
             return res.status(400).json({ error: 'Razorpay gateway secret missing. Update Integrations first.' });
         }
