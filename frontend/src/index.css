@@ -17,6 +17,9 @@ body,
   --mobile-nav-offset: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
+  --mobile-list-gap: 0.75rem;
+  --payments-mobile-card-height: 5.9rem;
+  --members-mobile-card-height: 6.4rem;
 }
 
 *,
@@ -57,6 +60,28 @@ body {
   padding-bottom: calc(var(--mobile-nav-offset) + 3.85rem);
 }
 
+.payments-mobile-list-scroll,
+.members-mobile-list-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.payments-mobile-list-scroll {
+  max-height: calc((var(--payments-mobile-card-height) * 3) + (var(--mobile-list-gap) * 2));
+}
+
+.members-mobile-list-scroll {
+  max-height: calc((var(--members-mobile-card-height) * 3) + (var(--mobile-list-gap) * 2));
+}
+
+.payments-mobile-card {
+  min-height: var(--payments-mobile-card-height);
+}
+
+.members-mobile-card {
+  min-height: var(--members-mobile-card-height);
+}
+
 @media (min-width: 1280px) {
   html {
     font-size: 15px;
@@ -78,6 +103,17 @@ body {
 
   .dashboard-content-safe {
     padding-bottom: 7rem;
+  }
+
+  .payments-mobile-list-scroll,
+  .members-mobile-list-scroll {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .payments-mobile-card,
+  .members-mobile-card {
+    min-height: 0;
   }
 }
 

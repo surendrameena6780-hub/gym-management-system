@@ -360,10 +360,11 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <div className="md:hidden p-4 space-y-3">
+          <div className="md:hidden p-4">
+            <div className="payments-mobile-list-scroll no-scrollbar space-y-3 pr-1">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <div key={`pay-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
+                <div key={`pay-mobile-skeleton-${i}`} className="payments-mobile-card p-4 rounded-2xl border border-slate-100 bg-white">
                   <div className="h-3 w-28 bg-slate-100 rounded animate-pulse mb-2" />
                   <div className="h-3 w-20 bg-slate-100 rounded animate-pulse mb-2" />
                   <div className="h-3 w-16 bg-slate-100 rounded animate-pulse" />
@@ -373,7 +374,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
               <div className="text-center text-slate-400 font-bold py-8">No transactions found</div>
             ) : (
               filteredPayments.map((payment) => (
-                <div key={`pay-mobile-${payment.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-2">
+                <div key={`pay-mobile-${payment.id}`} className="payments-mobile-card p-4 rounded-2xl border border-slate-100 bg-white space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="font-bold text-slate-900 truncate pr-2">{payment.member_name}</p>
                     <p className="font-black text-emerald-600">₹{parseFloat(payment.amount_paid).toLocaleString()}</p>
@@ -388,6 +389,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                 </div>
               ))
             )}
+            </div>
           </div>
 
           <table className="hidden md:table w-full text-left border-collapse">

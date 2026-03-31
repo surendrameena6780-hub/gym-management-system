@@ -700,11 +700,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           ) : (
             <>
               <div className="md:hidden h-full py-1">
-                <div className="h-full overflow-y-auto no-scrollbar pr-1">
+                <div className="members-mobile-list-scroll no-scrollbar pr-1">
                   <div className="space-y-3 pb-2">
                     {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
-                        <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white">
+                        <div key={`member-mobile-skeleton-${i}`} className="members-mobile-card p-4 rounded-2xl border border-slate-100 bg-white">
                           <div className="h-3 w-24 bg-slate-100 rounded animate-pulse mb-2" />
                           <div className="h-3 w-40 bg-slate-100 rounded animate-pulse mb-2" />
                           <div className="h-3 w-20 bg-slate-100 rounded animate-pulse" />
@@ -716,7 +716,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                       filteredMembers.map((member) => {
                         const statusInfo = getStatusInfo(member);
                         return (
-                          <div key={`member-mobile-${member.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
+                          <div key={`member-mobile-${member.id}`} className="members-mobile-card p-4 rounded-2xl border border-slate-100 bg-white space-y-3" onClick={() => handleViewDetails(member)}>
                             <div className="flex items-center gap-3">
                               <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={38} />
                               <div className="min-w-0 flex-1">
