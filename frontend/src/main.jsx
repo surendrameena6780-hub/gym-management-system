@@ -133,9 +133,10 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
       return
     }
 
+    lockOuterScroll(scrollable)
     nestedScrollState.activeElement = scrollable
     nestedScrollState.lastY = event.touches?.[0]?.clientY || 0
-    nestedScrollState.outerLocked = false
+    nestedScrollState.outerLocked = true
   }, { passive: true, capture: true })
 
   document.addEventListener('touchmove', (event) => {
@@ -155,11 +156,6 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
     if (isOverscrolling) {
       resetNestedScrollState()
       return
-    }
-
-    if (!nestedScrollState.outerLocked) {
-      lockOuterScroll(scrollable)
-      nestedScrollState.outerLocked = true
     }
 
     event.stopPropagation()
