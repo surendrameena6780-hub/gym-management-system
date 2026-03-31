@@ -79,6 +79,38 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
   const nestedScrollState = {
     activeElement: null,
     lastY: 0,
+    outerElement: null,
+    outerPreviousOverflowY: '',
+  }
+
+  const unlockOuterScroll = () => {
+    const outer = nestedScrollState.outerElement
+    if (!outer) return
+
+    outer.style.overflowY = nestedScrollState.outerPreviousOverflowY || ''
+    nestedScrollState.outerElement = null
+    nestedScrollState.outerPreviousOverflowY = ''
+  }
+
+  const lockOuterScroll = (scrollable) => {
+    const outer = scrollable.closest('main.app-scroll-shell') || document.querySelector('main.app-scroll-shell')
+    if (!outer) return
+
+    if (nestedScrollState.outerElement && nestedScrollState.outerElement !== outer) {
+      unlockOuterScroll()
+    }
+
+    if (!nestedScrollState.outerElement) {
+      nestedScrollState.outerElement = outer
+      nestedScrollState.outerPreviousOverflowY = outer.style.overflowY || ''
+      outer.style.overflowY = 'hidden'
+    }
+  }
+
+  const resetNestedScrollState = () => {
+    nestedScrollState.activeElement = null
+    nestedScrollState.lastY = 0
+    unlockOuterScroll()
   }
 
   const getNestedScrollable = (target) => {
@@ -89,18 +121,17 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
   document.addEventListener('touchstart', (event) => {
     const scrollable = getNestedScrollable(event.target)
     if (!scrollable) {
-      nestedScrollState.activeElement = null
-      nestedScrollState.lastY = 0
+      resetNestedScrollState()
       return
     }
 
     const canScroll = scrollable.scrollHeight > scrollable.clientHeight + 1
     if (!canScroll) {
-      nestedScrollState.activeElement = null
-      nestedScrollState.lastY = 0
+      resetNestedScrollState()
       return
     }
 
+    lockOuterScroll(scrollable)
     nestedScrollState.activeElement = scrollable
     nestedScrollState.lastY = event.touches?.[0]?.clientY || 0
   }, { passive: true, capture: true })
@@ -126,8 +157,7 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
   }, { passive: false, capture: true })
 
   const clearNestedScrollState = () => {
-    nestedScrollState.activeElement = null
-    nestedScrollState.lastY = 0
+    resetNestedScrollState()
   }
 
   document.addEventListener('touchend', clearNestedScrollState, { passive: true, capture: true })
