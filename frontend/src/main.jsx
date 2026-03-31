@@ -158,7 +158,6 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
       return
     }
 
-    event.stopPropagation()
   }, { passive: false, capture: true })
 
   const clearNestedScrollState = () => {
