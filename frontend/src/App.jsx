@@ -216,6 +216,10 @@ function App() {
   const { confirmState, showConfirm, hideConfirm } = useConfirm();
   const toastRef = useRef(toast);
   const dashboardFallbackNotifiedRef = useRef(false);
+  const mainRef = useRef(null);
+  // Tracks every page ever visited so we keep its component alive in the DOM.
+  // Using a ref (not state) so it mutates without triggering re-renders.
+  const visitedPagesRef = useRef(new Set(['Dashboard']));
 
   useEffect(() => {
     toastRef.current = toast;
@@ -343,6 +347,11 @@ function App() {
 
   useEffect(() => {
     setShowMobileMoreNav(false);
+  }, [currentPage]);
+
+  // Scroll main panel back to top on every page switch
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
   }, [currentPage]);
 
   // --- NOTIFICATION STATE & LOGIC ---
@@ -635,6 +644,9 @@ function App() {
     </>
   );
 
+  // Stamp current page into visitedPagesRef every render (ref mutation is safe during render)
+  visitedPagesRef.current.add(currentPage);
+
   return (
     <>
       {isSuspended && <SuspensionOverlay onLogout={handleLogout} onRenew={() => setIsSuspended(false)} />}
@@ -918,20 +930,67 @@ function App() {
             </div>
           </header>
 
-          <main className={`app-scroll-shell flex-1 p-4 md:p-6 lg:p-8 ${currentPage === 'Dashboard' ? 'app-main-scroll-dashboard' : 'app-main-scroll'} overflow-y-auto`}>
-            <div key={currentPage} className="max-w-[1400px] mx-auto w-full gv-page-fade">
-              {/* 🚨 Passed startTour to Dashboard 🚨 */}
-              {currentPage === 'Dashboard'  ? (currentUser?.role === 'OWNER'
-                ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} />
-                : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} />) :
-               currentPage === 'Members'    ? <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} /> :
-               currentPage === 'Plans'      ? <PlansPage token={token} toast={toast} showConfirm={showConfirm} /> :
-               currentPage === 'Payments'   ? <PaymentsPage token={token} toast={toast} showConfirm={showConfirm} /> :
-               currentPage === 'Attendance' ? <AttendancePage token={token} toast={toast} /> :
-               currentPage === 'Insights'   ? <InsightsPage token={token} toast={toast} currentUser={currentUser} /> :
-               currentPage === 'Settings' ? <SettingsPage toast={toast} token={token} defaultTab={settingsTab} /> :
-               currentPage === 'Help & Support' ? <HelpSupportPage token={token} toast={toast} /> : null}
+          {/* ── Keep-alive page mounting: each page stays in DOM after first visit ── */}
+          <main ref={mainRef} className="app-scroll-shell flex-1 overflow-y-auto">
+
+            {/* Dashboard */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Dashboard') && (
+                currentUser?.role === 'OWNER'
+                  ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} />
+                  : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} />
+              )}
             </div>
+
+            {/* Members */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Members') && (
+                <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} />
+              )}
+            </div>
+
+            {/* Plans */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Plans') && (
+                <PlansPage token={token} toast={toast} showConfirm={showConfirm} />
+              )}
+            </div>
+
+            {/* Payments */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Payments') && (
+                <PaymentsPage token={token} toast={toast} showConfirm={showConfirm} />
+              )}
+            </div>
+
+            {/* Attendance */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Attendance') && (
+                <AttendancePage token={token} toast={toast} />
+              )}
+            </div>
+
+            {/* Insights */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Insights') && (
+                <InsightsPage token={token} toast={toast} currentUser={currentUser} />
+              )}
+            </div>
+
+            {/* Settings */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Settings') && (
+                <SettingsPage toast={toast} token={token} defaultTab={settingsTab} />
+              )}
+            </div>
+
+            {/* Help & Support */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('Help & Support') && (
+                <HelpSupportPage token={token} toast={toast} />
+              )}
+            </div>
+
           </main>
         </div>
 

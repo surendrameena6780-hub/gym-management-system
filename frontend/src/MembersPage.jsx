@@ -908,9 +908,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           </div>
 
           {/* avatar — centred, overlapping header */}
-          <div className="flex flex-col items-center -mt-9 pb-1 shrink-0">
-            <div className="w-[68px] h-[68px] rounded-full border-[3px] border-white shadow-xl bg-[#0b0f1e] flex items-center justify-center overflow-hidden">
-              <GradientAvatar name={selectedMember.full_name} src={selectedMember.profile_pic} sizePx={62} imageFit="object-contain" className="!bg-transparent p-1" />
+          <div className="flex flex-col items-center -mt-9 pb-1 shrink-0 relative z-10">
+            <div className="w-[72px] h-[72px] rounded-full border-[3px] border-white shadow-xl overflow-hidden">
+              <GradientAvatar name={selectedMember.full_name} src={selectedMember.profile_pic} sizePx={72} imageFit="object-cover" className="" />
             </div>
             <span className={`mt-1.5 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest rounded-full ${STATUS_PILLS[getStatusInfo(selectedMember).label] || 'bg-slate-100 text-slate-500'}`}>
               {getStatusInfo(selectedMember).label}

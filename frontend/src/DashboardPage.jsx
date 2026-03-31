@@ -1359,7 +1359,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* ════════════════════════════════════════
           FLOATING ACTION BAR
       ════════════════════════════════════════ */}
-      <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in slide-in-from-bottom-8 duration-700 [animation-delay:800ms] [animation-fill-mode:both] w-[calc(100%-1rem)] max-w-[560px] md:w-auto">
+      <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1rem)] max-w-[560px] md:w-auto">
         <div
           className="rounded-[24px] md:rounded-full border border-white/10 backdrop-blur-xl p-1.5 md:p-2"
           style={{
@@ -1409,8 +1409,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Add Member */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-[200] p-0 sm:p-4">
-          <div className="bg-white rounded-t-[28px] sm:rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150 max-h-[92dvh] sm:max-h-[90dvh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92dvh] flex flex-col">
             <div
               className="relative p-6 text-white flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' }}
@@ -1432,7 +1432,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </div>
 
-            <form onSubmit={handleAddMember} className="p-6 space-y-4 overflow-y-auto max-h-[calc(92dvh-96px)] sm:max-h-none">
+            <form onSubmit={handleAddMember} className="p-6 space-y-4 overflow-y-auto flex-1">
               <div className="flex flex-col items-center">
                 <label className="cursor-pointer block">
                   <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">
@@ -1536,8 +1536,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Record Payment */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-end sm:items-center justify-center z-[200] p-0 sm:p-4">
-          <div className="bg-white rounded-t-[24px] sm:rounded-[24px] w-full max-w-md shadow-2xl animate-in zoom-in-95 fade-in duration-200 overflow-hidden max-h-[92dvh] sm:max-h-[90dvh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[92dvh] flex flex-col">
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -1551,7 +1551,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-slate-500" />
               </button>
             </div>
-            <form onSubmit={handlePayment} className="p-6 space-y-4 overflow-y-auto max-h-[calc(92dvh-84px)] sm:max-h-none">
+            <form onSubmit={handlePayment} className="p-6 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Member</label>
                 <select required
@@ -1594,8 +1594,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Broadcast */}
       {showBroadcastModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-end sm:items-center justify-center z-[200] p-0 sm:p-4">
-          <div className="bg-white rounded-t-[24px] sm:rounded-[24px] w-full max-w-md shadow-2xl animate-in zoom-in-95 fade-in duration-200 overflow-hidden max-h-[92dvh] sm:max-h-[90dvh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[92dvh] flex flex-col">
             <div className="px-6 py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
               <div className="flex items-center gap-3">
@@ -1607,7 +1607,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-white" />
               </button>
             </div>
-            <form onSubmit={handleBroadcast} className="p-6 space-y-4 overflow-y-auto max-h-[calc(92dvh-84px)] sm:max-h-none">
+            <form onSubmit={handleBroadcast} className="p-6 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Target Audience</label>
                <select
@@ -1669,8 +1669,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       )}
 
       {showCheckinModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-end sm:items-center justify-center z-[200] p-0 sm:p-4">
-          <div className="bg-white rounded-t-[24px] sm:rounded-[24px] w-full max-w-2xl shadow-2xl animate-in zoom-in-95 fade-in duration-200 overflow-hidden max-h-[92dvh] sm:max-h-[90dvh]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-[24px] w-full max-w-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[92dvh] flex flex-col">
             <div
               className="px-6 py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)' }}
@@ -1690,7 +1690,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </div>
 
-            <div className="p-6 space-y-4 overflow-y-auto max-h-[calc(92dvh-88px)] sm:max-h-[75vh]">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
               <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
                 <input
                   type="text"
