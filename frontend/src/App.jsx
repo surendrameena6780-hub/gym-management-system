@@ -928,7 +928,7 @@ function App() {
                currentPage === 'Plans'      ? <PlansPage token={token} toast={toast} showConfirm={showConfirm} /> :
                currentPage === 'Payments'   ? <PaymentsPage token={token} toast={toast} showConfirm={showConfirm} /> :
                currentPage === 'Attendance' ? <AttendancePage token={token} toast={toast} /> :
-               currentPage === 'Insights'   ? <InsightsPage token={token} toast={toast} /> :
+               currentPage === 'Insights'   ? <InsightsPage token={token} toast={toast} currentUser={currentUser} /> :
                currentPage === 'Settings' ? <SettingsPage toast={toast} token={token} defaultTab={settingsTab} /> :
                currentPage === 'Help & Support' ? <HelpSupportPage token={token} toast={toast} /> : null}
             </div>

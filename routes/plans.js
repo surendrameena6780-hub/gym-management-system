@@ -8,7 +8,7 @@ const { requireOwner } = require('../middleware/rbac');
 router.use(auth, saasMiddleware, requireOwner);
 
 // GET ALL PLANS
-router.get('/', auth, saasMiddleware, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const plans = await pool.query('SELECT * FROM plans WHERE gym_id = $1 AND deleted_at IS NULL ORDER BY price ASC', [req.user.gym_id]);
         res.json(plans.rows);
@@ -19,7 +19,7 @@ router.get('/', auth, saasMiddleware, async (req, res) => {
 });
 
 // CREATE A NEW PLAN
-router.post('/add', auth, saasMiddleware, async (req, res) => {
+router.post('/add', async (req, res) => {
     const { name, price, duration_days, features, color_theme, is_popular, description, discount_percent, discount_valid_until } = req.body;
     try {
         const gym_id = req.user.gym_id; 
@@ -52,7 +52,7 @@ router.post('/add', auth, saasMiddleware, async (req, res) => {
 });
 
 // DELETE PLAN
-router.delete('/:id', auth, saasMiddleware, async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
         await pool.query("UPDATE plans SET deleted_at = NOW() WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL", [id, req.user.gym_id]);
@@ -64,7 +64,7 @@ router.delete('/:id', auth, saasMiddleware, async (req, res) => {
 });
 
 // UPDATE PLAN
-router.put('/:id', auth, saasMiddleware, async (req, res) => {
+router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const { name, price, duration_days, features, color_theme, is_popular, description, discount_percent, discount_valid_until } = req.body;
 
@@ -102,7 +102,7 @@ router.put('/:id', auth, saasMiddleware, async (req, res) => {
 });
 
 // GET PLAN ANALYTICS
-router.get('/:id/analytics', auth, saasMiddleware, async (req, res) => {
+router.get('/:id/analytics', async (req, res) => {
     const { id } = req.params;
     const gym_id = req.user.gym_id;
 

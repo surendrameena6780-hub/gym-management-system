@@ -26,7 +26,9 @@ module.exports = (req, res, next) => {
         req.user = decoded.user || decoded; 
         next();
     } catch (err) {
-        console.log("JWT Error Details:", err.message);
+        if (process.env.NODE_ENV !== 'production') {
+            console.error("JWT Error Details:", err.message);
+        }
         res.status(401).json({
             success: false,
             code: 'AUTH_INVALID',

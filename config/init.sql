@@ -376,3 +376,26 @@ CREATE INDEX IF NOT EXISTS idx_broadcast_logs_created   ON broadcast_logs(create
 CREATE INDEX IF NOT EXISTS idx_attendance_method       ON attendance(checkin_method);
 CREATE INDEX IF NOT EXISTS idx_attendance_staff_user   ON attendance(staff_user_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_member_time  ON attendance(member_id, check_in_time DESC);
+
+-- =============================================================
+-- MESSAGING: Gym-level WhatsApp / SMS message templates
+-- =============================================================
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_owner_mobile VARCHAR(30);
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_monthly_limit INTEGER DEFAULT 500;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_per_campaign_limit INTEGER DEFAULT 50;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_channels JSONB DEFAULT '{"whatsapp": true, "sms": false}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS gym_message_templates (
+    id            SERIAL PRIMARY KEY,
+    gym_id        INT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE,
+    template_key  VARCHAR(60) NOT NULL,
+    title         VARCHAR(120) NOT NULL,
+    whatsapp_text TEXT NOT NULL,
+    sms_text      TEXT NOT NULL,
+    is_active     BOOLEAN DEFAULT TRUE,
+    updated_at    TIMESTAMP DEFAULT NOW(),
+    UNIQUE(gym_id, template_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gym_message_templates_gym_id ON gym_message_templates(gym_id);

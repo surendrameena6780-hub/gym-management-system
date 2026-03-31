@@ -141,12 +141,33 @@ router.get('/', auth, saasMiddleware, async (req, res) => {
         const pagedParams = [...queryParams, limit, offset];
         const pagedResult = await pool.query(`${baseQuery} LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}`, pagedParams);
 
+        // Count query must mirror the exact same WHERE clause (including status filter)
+        // so pagination totals are accurate when filtering by membership status.
+        const countParams = [gym_id];
+        let countWhere = 'WHERE m.gym_id = $1 AND m.deleted_at IS NULL';
+
+        if (search) {
+            countParams.push(`%${search}%`);
+            countWhere += ` AND (m.full_name ILIKE $${countParams.length} OR m.email ILIKE $${countParams.length} OR m.phone ILIKE $${countParams.length})`;
+        }
+
+        if (status) {
+            countParams.push(status);
+            countWhere += ` AND COALESCE(ms_count.status, 'UNPAID') = $${countParams.length}`;
+        }
+
         const countResult = await pool.query(
             `SELECT COUNT(*)::INTEGER AS total
              FROM members m
-             WHERE m.gym_id = $1 AND m.deleted_at IS NULL
-               ${search ? `AND (m.full_name ILIKE $2 OR m.email ILIKE $2 OR m.phone ILIKE $2)` : ''}`,
-            search ? [gym_id, `%${search}%`] : [gym_id]
+             LEFT JOIN LATERAL (
+                 SELECT ms.status
+                 FROM memberships ms
+                 WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
+                 ORDER BY ms.end_date DESC
+                 LIMIT 1
+             ) ms_count ON true
+             ${countWhere}`,
+            countParams
         );
 
         const total = countResult.rows[0]?.total || 0;

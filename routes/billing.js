@@ -8,10 +8,20 @@ const { requireOwner } = require('../middleware/rbac');
 
 router.use(auth, requireOwner);
 
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET
-});
+// Lazy Razorpay initializer — prevents crash when keys are not configured
+let _razorpay = null;
+const getRazorpay = () => {
+    if (!_razorpay) {
+        if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+            throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables are required for billing.');
+        }
+        _razorpay = new Razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID,
+            key_secret: process.env.RAZORPAY_KEY_SECRET,
+        });
+    }
+    return _razorpay;
+};
 
 const SAAS_PRICING = {
     monthly: { basic: 999, pro: 1999, elite: 3999 },
@@ -32,13 +42,13 @@ const resolveSaasPrice = (planTier, cycle) => {
 };
 
 // --- 1. CREATE DYNAMIC SAAS ORDER ---
-router.post('/create-order', auth, async (req, res) => {
+router.post('/create-order', async (req, res) => {
     try {
         const resolved = resolveSaasPrice(req.body.plan_tier, req.body.cycle);
         if (!resolved) {
             return res.status(400).json({ error: 'Invalid plan_tier or cycle.' });
         }
-        
+
         const options = {
             amount: resolved.amountInr * 100,
             currency: "INR",
@@ -50,7 +60,7 @@ router.post('/create-order', auth, async (req, res) => {
             },
         };
 
-        const order = await razorpay.orders.create(options);
+        const order = await getRazorpay().orders.create(options);
         res.json(order);
     } catch (error) {
         console.error("RAZORPAY ORDER ERROR:", error);
@@ -59,7 +69,7 @@ router.post('/create-order', auth, async (req, res) => {
 });
 
 // --- 2. VERIFY & SAVE PLAN ---
-router.post('/verify', auth, async (req, res) => {
+router.post('/verify', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan_tier, cycle } = req.body;
     const resolved = resolveSaasPrice(plan_tier, cycle);
     if (!resolved) {
@@ -75,7 +85,7 @@ router.post('/verify', auth, async (req, res) => {
 
     if (razorpay_signature === expectedSign) {
         try {
-            const order = await razorpay.orders.fetch(razorpay_order_id);
+            const order = await getRazorpay().orders.fetch(razorpay_order_id);
             if (!order || Number(order.amount) !== resolved.amountInr * 100 || String(order.currency || '').toUpperCase() !== 'INR') {
                 return res.status(400).json({ error: 'Order amount/currency mismatch.' });
             }

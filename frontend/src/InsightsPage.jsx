@@ -57,7 +57,8 @@ const formatHour = (h) => {
 
 // --- MAIN PAGE COMPONENT ---
 
-const InsightsPage = ({ token }) => {
+const InsightsPage = ({ token, toast, currentUser }) => {
+  const gymName = currentUser?.gym_name || 'GymVault';
   const [activeTab, setActiveTab] = useState('revenue');
   const [members, setMembers] = useState([]);
   const [attendanceSummary, setAttendanceSummary] = useState([]);
@@ -66,7 +67,6 @@ const InsightsPage = ({ token }) => {
 
   // --- ACTION FUNCTIONS ---
   const sendWhatsApp = (member, type) => {
-    const gymName = "GymVault"; 
     let message = "";
     
     if (type === 'expiring') {

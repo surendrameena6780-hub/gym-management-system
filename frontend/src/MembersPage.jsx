@@ -309,6 +309,14 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   }, [token, searchTerm]);
 
   useEffect(() => {
+    if (!focusAction || focusMemberId) return;
+    if (focusAction === 'add') {
+      setShowAddModal(true);
+      onFocusHandled?.();
+    }
+  }, [focusAction, focusMemberId, onFocusHandled]);
+
+  useEffect(() => {
     if (!token || !focusMemberId) return;
 
     let isMounted = true;

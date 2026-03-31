@@ -8,7 +8,7 @@ const { requireOwner } = require('../middleware/rbac');
 router.use(auth, saasMiddleware, requireOwner);
 
 // --- 1. GET ALL PAYMENTS ---
-router.get('/', auth, saasMiddleware, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const { search } = req.query;
         const gym_id = req.user.gym_id;
@@ -56,12 +56,25 @@ router.get('/', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 2. RECORD PAYMENT ---
-router.post('/record', auth, saasMiddleware, async (req, res) => {
+router.post('/record', async (req, res) => {
     const { user_id, plan_id, amount_paid, total_amount, payment_mode, notes, transaction_id } = req.body;
     const gym_id = req.user.gym_id;
 
+    // Input validation
+    if (!user_id || !plan_id) {
+        return res.status(400).json({ error: 'user_id and plan_id are required.' });
+    }
+    const parsedAmountPaid   = parseFloat(amount_paid);
+    const parsedTotalAmount  = parseFloat(total_amount ?? amount_paid);
+    if (isNaN(parsedAmountPaid) || parsedAmountPaid < 0) {
+        return res.status(400).json({ error: 'amount_paid must be a valid non-negative number.' });
+    }
+    if (isNaN(parsedTotalAmount) || parsedTotalAmount < 0) {
+        return res.status(400).json({ error: 'total_amount must be a valid non-negative number.' });
+    }
+
     try {
-        const amount_due   = parseFloat(total_amount || 0) - parseFloat(amount_paid || 0);
+        const amount_due   = parsedTotalAmount - parsedAmountPaid;
         const status       = amount_due > 0 ? 'Pending' : 'Completed';
         const auto_inv_id  = `INV-${Date.now().toString().slice(-6)}`;
 
@@ -79,7 +92,7 @@ router.post('/record', auth, saasMiddleware, async (req, res) => {
              RETURNING *`,
             [
                 gym_id, user_id, plan_id,
-                parseFloat(amount_paid), amount_due, parseFloat(total_amount || amount_paid),
+                parsedAmountPaid, amount_due, parsedTotalAmount,
                 final_mode, status, final_invoice_id, final_txn_id, notes || ''
             ]
         );
@@ -112,7 +125,7 @@ router.post('/record', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 3. STATS ---
-router.get('/stats', auth, saasMiddleware, async (req, res) => {
+router.get('/stats', async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const [revenue, today, pending] = await Promise.all([
@@ -133,7 +146,7 @@ router.get('/stats', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 4. REVENUE CHART ---
-router.get('/chart', auth, saasMiddleware, async (req, res) => {
+router.get('/chart', async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const days = req.query.days === '7' ? 7 : 30;
@@ -158,7 +171,7 @@ router.get('/chart', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 5. PAYMENT HISTORY FOR A MEMBER ---
-router.get('/history/:member_id', auth, saasMiddleware, async (req, res) => {
+router.get('/history/:member_id', async (req, res) => {
     try {
         const { member_id } = req.params;
         const gym_id = req.user.gym_id;
@@ -191,7 +204,7 @@ router.get('/history/:member_id', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 6. DELETE PAYMENT ---
-router.delete('/:id', auth, saasMiddleware, async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const gym_id = req.user.gym_id;

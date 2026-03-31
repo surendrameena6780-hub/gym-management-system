@@ -8,7 +8,7 @@ const { requireOwner } = require('../middleware/rbac');
 router.use(auth, saasMiddleware, requireOwner);
 
 // GET /api/dashboard/stats
-router.get('/stats', auth, saasMiddleware, async (req, res) => {
+router.get('/stats', async (req, res) => {
     const gym_id = req.user.gym_id; 
 
     try {
@@ -111,7 +111,7 @@ router.get('/stats', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- GET ONBOARDING SETUP STATUS ---
-router.get('/setup-status', auth, async (req, res) => {
+router.get('/setup-status', async (req, res) => {
     const gym_id = req.user.gym_id;
 
     try {

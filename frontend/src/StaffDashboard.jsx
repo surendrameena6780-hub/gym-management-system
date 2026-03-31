@@ -42,7 +42,7 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage }) {
 
         <button
           disabled={!canMembers}
-          onClick={() => navigateTo('Members', 'All')}
+          onClick={() => navigateTo('Members', 'All', { action: 'add' })}
           className={cardClass(canMembers)}
         >
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
