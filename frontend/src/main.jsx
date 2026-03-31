@@ -81,6 +81,7 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
     lastY: 0,
     outerElement: null,
     outerPreviousOverflowY: '',
+    outerLocked: false,
   }
 
   const unlockOuterScroll = () => {
@@ -110,6 +111,7 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
   const resetNestedScrollState = () => {
     nestedScrollState.activeElement = null
     nestedScrollState.lastY = 0
+    nestedScrollState.outerLocked = false
     unlockOuterScroll()
   }
 
@@ -131,9 +133,9 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
       return
     }
 
-    lockOuterScroll(scrollable)
     nestedScrollState.activeElement = scrollable
     nestedScrollState.lastY = event.touches?.[0]?.clientY || 0
+    nestedScrollState.outerLocked = false
   }, { passive: true, capture: true })
 
   document.addEventListener('touchmove', (event) => {
@@ -148,9 +150,16 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
 
     const atTop = scrollable.scrollTop <= 0
     const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1
+    const isOverscrolling = (atTop && deltaY > 0) || (atBottom && deltaY < 0)
 
-    if ((atTop && deltaY > 0) || (atBottom && deltaY < 0)) {
-      event.preventDefault()
+    if (isOverscrolling) {
+      resetNestedScrollState()
+      return
+    }
+
+    if (!nestedScrollState.outerLocked) {
+      lockOuterScroll(scrollable)
+      nestedScrollState.outerLocked = true
     }
 
     event.stopPropagation()
