@@ -252,6 +252,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [editFormData, setEditFormData] = useState({ id: '', full_name: '', email: '', phone: '' });
 
   const membersListRef = useRef(null);
+  const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
 
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
@@ -372,21 +373,41 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   useEffect(() => {
     const el = membersListRef.current;
     if (!el) return;
-    let startY = 0;
-    const onTouchStart = (e) => { startY = e.touches[0].clientY; };
+    const s = membersScrollState.current;
+    const onTouchStart = (e) => {
+      s.lastY = e.touches[0].clientY;
+      s.velocity = 0;
+      if (s.rafId) { cancelAnimationFrame(s.rafId); s.rafId = null; }
+    };
     const onTouchMove = (e) => {
+      if (!e.touches[0]) return;
+      const y = e.touches[0].clientY;
+      const dy = s.lastY - y;
+      s.lastY = y;
+      s.velocity = dy;
       const { scrollTop, scrollHeight, clientHeight } = el;
       if (scrollHeight <= clientHeight) return;
-      const delta = startY - e.touches[0].clientY;
-      const atTop    = scrollTop <= 0 && delta < 0;
-      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && delta > 0;
-      if (!atTop && !atBottom) e.preventDefault();
+      const atTop    = scrollTop <= 0 && dy < 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && dy > 0;
+      if (!atTop && !atBottom) { el.scrollTop += dy; e.preventDefault(); }
+    };
+    const onTouchEnd = () => {
+      const tick = () => {
+        s.velocity *= 0.88;
+        if (Math.abs(s.velocity) < 0.5) { s.velocity = 0; return; }
+        el.scrollTop += s.velocity;
+        s.rafId = requestAnimationFrame(tick);
+      };
+      s.rafId = requestAnimationFrame(tick);
     };
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    el.addEventListener('touchend',   onTouchEnd,   { passive: true });
     return () => {
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove',  onTouchMove);
+      el.removeEventListener('touchend',   onTouchEnd);
+      if (s.rafId) cancelAnimationFrame(s.rafId);
     };
   }, []);
 
