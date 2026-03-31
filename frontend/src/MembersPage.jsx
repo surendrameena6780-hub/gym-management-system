@@ -889,12 +889,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       <div className={`drawer-sheet ${showDetailsModal && selectedMember ? 'open' : ''}`}>
         {selectedMember && (<>
           {/* drag handle */}
-          <div className="flex justify-center pt-3 pb-1 shrink-0">
-            <div className="w-10 h-1 rounded-full bg-slate-200" />
+          <div className="flex justify-center pt-2.5 pb-1.5 shrink-0 bg-white">
+            <div className="w-9 h-[3px] rounded-full bg-slate-200" />
           </div>
 
           {/* header */}
-          <div className="relative px-5 pt-3 pb-10 shrink-0" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #24243e 100%)', borderRadius: '22px 22px 0 0' }}>
+          <div className="relative px-5 pt-3 pb-10 shrink-0" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #24243e 100%)' }}>
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-0.5">Member Profile</p>
