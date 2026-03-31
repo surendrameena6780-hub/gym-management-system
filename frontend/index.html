@@ -13,6 +13,30 @@
     <link rel="apple-touch-icon" href="/vite.svg" />
     <title>GymVault | Premium</title>
 
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              slate: {
+                900: '#0f172a',
+                50: '#f8fafc',
+              },
+              emerald: {
+                500: '#10b981',
+              }
+            }
+          }
+        }
+      }
+    </script>
+
     <style type="text/css">
       body {
         font-family: 'Inter', sans-serif !important;
