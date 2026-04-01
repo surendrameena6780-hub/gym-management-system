@@ -135,6 +135,9 @@ function SplashScreen({ exiting }) {
       }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Strong top-centre glow so status-bar area matches the rest of the splash */}
+        <div className="absolute left-0 right-0 w-full"
+          style={{ top: '-30px', height: '340px', background: 'radial-gradient(ellipse 80% 55% at 50% 0%, rgba(99,102,241,0.55) 0%, rgba(99,102,241,0.18) 45%, transparent 72%)' }} />
         <div className="absolute top-1/3 left-1/3 w-[500px] h-[500px] rounded-full"
           style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
         <div className="absolute bottom-1/3 right-1/3 w-[400px] h-[400px] rounded-full"
