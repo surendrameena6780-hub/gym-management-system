@@ -363,10 +363,10 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                   <div className="grid h-full items-end gap-2 sm:gap-3" style={{ gridTemplateColumns: `repeat(${Math.max((analyticsData?.graphData || []).length, 1)}, minmax(0, 1fr))` }}>
                     {(analyticsData?.graphData || []).map((item, idx) => (
                       <div key={idx} className="flex h-full min-w-0 flex-col items-center justify-end gap-2 group">
-                        <div className="relative w-full bg-slate-100 rounded-[22px] overflow-hidden h-[160px] sm:h-[190px] flex items-end justify-center px-1.5 py-1.5">
+                        <div className="relative w-full bg-slate-100 rounded-[22px] overflow-hidden h-[160px] sm:h-[190px] flex items-end justify-center px-1.5 pb-0 pt-2">
                           <div
-                            style={{ height: `${Math.max(10, Math.round((Number(item.revenue || 0) / analyticsGraphMax) * 100))}%` }}
-                            className="w-full bg-slate-900 rounded-[16px] transition-all duration-500 group-hover:bg-purple-600 relative"
+                            style={{ height: `${Math.max(8, Math.round((Number(item.revenue || 0) / analyticsGraphMax) * 100))}%` }}
+                            className="w-full bg-slate-900 rounded-t-xl transition-all duration-500 group-hover:bg-purple-600 relative"
                           >
                             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">₹{item.revenue}</div>
                           </div>

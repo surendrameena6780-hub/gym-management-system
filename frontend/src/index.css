@@ -93,7 +93,8 @@ textarea {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: calc(var(--safe-area-top) + 0.75rem) 0.75rem calc(var(--mobile-nav-offset) + 0.75rem);
+  /* push content below the sticky app header (safe-area-top + 4rem header row) */
+  padding: calc(var(--safe-area-top) + 4rem + 0.5rem) 0.75rem calc(var(--mobile-nav-offset) + 0.75rem);
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -101,7 +102,7 @@ textarea {
 
 .app-modal-panel {
   width: min(100%, 32rem);
-  max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - var(--mobile-nav-offset) - 1.5rem);
+  max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - 4rem - var(--mobile-nav-offset) - 1.25rem);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
