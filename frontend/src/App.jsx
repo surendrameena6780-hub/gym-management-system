@@ -1126,7 +1126,7 @@ function App() {
           </>
         )}
 
-        <nav className="fixed inset-x-0 bottom-0 md:hidden z-[120] px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)]">
+        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 md:hidden z-[120] px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)]">
           <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
             {/* iOS-style sliding indicator nav */}
             <MobileNav

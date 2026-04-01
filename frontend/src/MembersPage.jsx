@@ -253,6 +253,15 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const canWritePayments = hasPermission(currentUser, 'payments:write');
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
 
+  const notifyDashboardDataChanged = () => {
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+      detail: {
+        source: 'members',
+        at: Date.now(),
+      },
+    }));
+  };
+
   const openAddMemberModal = () => {
     if (!canWriteMembers) {
       toast?.('You do not have permission to add members.', 'warning');
@@ -557,6 +566,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       if (canWriteAttendance) {
         await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
       }
+      await fetchMembers();
+      notifyDashboardDataChanged();
       setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
       setShowActivateModal(false);
       setShowSuccessAnim(true);
@@ -583,7 +594,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
     try {
       await axios.post('/api/memberships/extend', { member_id: editFormData.id, days }, { headers: { 'x-auth-token': token } });
-      fetchMembers();
+      await fetchMembers();
+      notifyDashboardDataChanged();
       toast?.(`Extended by ${days} days!`, 'success');
     } catch (err) { toast?.('Extension failed.', 'error'); }
   };
@@ -607,7 +619,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
     try {
       await axios.put(`/api/members/${memberId}/check-in`, {}, { headers: { 'x-auth-token': token } });
-      fetchMembers();
+      await fetchMembers();
+      notifyDashboardDataChanged();
     } catch (err) { toast?.('Check-in failed', 'error'); }
   };
 
@@ -645,6 +658,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setShowAddModal(false);
       setAddFormData({ full_name: '', email: '', phone: '' }); setAddFile(null); setPreviewUrl(null);
       await fetchMembers();
+      notifyDashboardDataChanged();
       toast?.('Member added successfully!', 'success');
       if (canWritePayments && addSelectedPlanId && res.data) { setSelectedMember(normalizeMemberRecord(res.data)); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
       setAddSelectedPlanId('');
@@ -702,7 +716,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           { headers: { 'x-auth-token': token } }
         );
       }
-      setShowEditModal(false); setEditFile(null); fetchMembers(); toast?.('Member updated successfully!', 'success');
+      setShowEditModal(false); setEditFile(null); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Member updated successfully!', 'success');
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Update failed. Please try again.';
       toast?.(message, 'error');
@@ -715,7 +729,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       return;
     }
     showConfirm?.({ title: 'Delete Member', message: 'This action cannot be undone.', confirmLabel: 'Yes, Delete', variant: 'danger', onConfirm: async () => {
-        try { await axios.delete(`/api/members/${editFormData.id}`, { headers: { 'x-auth-token': token } }); setShowEditModal(false); fetchMembers(); toast?.('Member deleted.', 'success'); } catch (err) { toast?.('Delete failed.', 'error'); }
+        try { await axios.delete(`/api/members/${editFormData.id}`, { headers: { 'x-auth-token': token } }); setShowEditModal(false); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Member deleted.', 'success'); } catch (err) { toast?.('Delete failed.', 'error'); }
       }
     });
   };
@@ -726,7 +740,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       return;
     }
     showConfirm?.({ title: 'Cancel Active Plan', message: 'This will remove the active membership plan.', confirmLabel: 'Cancel Plan', variant: 'danger', onConfirm: async () => {
-        try { await axios.post('/api/memberships/remove-plan', { member_id: editFormData.id }, { headers: { 'x-auth-token': token } }); setShowEditModal(false); fetchMembers(); toast?.('Plan removed.', 'success'); } catch (err) { toast?.('Failed to remove plan.', 'error'); }
+        try { await axios.post('/api/memberships/remove-plan', { member_id: editFormData.id }, { headers: { 'x-auth-token': token } }); setShowEditModal(false); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Plan removed.', 'success'); } catch (err) { toast?.('Failed to remove plan.', 'error'); }
       }
     });
   };

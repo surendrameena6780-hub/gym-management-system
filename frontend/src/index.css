@@ -16,12 +16,19 @@ body,
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --app-viewport-height: 100vh;
+  --app-keyboard-inset: 0px;
   --mobile-nav-height: 84px;
   --mobile-nav-offset: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
+  --app-bottom-ui-offset: var(--mobile-nav-offset);
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
   --payments-mobile-list-max-height: 22rem;
   --members-mobile-list-max-height: 22rem;
+}
+
+.app-keyboard-open,
+.app-modal-open {
+  --app-bottom-ui-offset: calc(var(--safe-area-bottom) + 0.5rem);
 }
 
 @supports (height: 100dvh) {
@@ -96,7 +103,7 @@ textarea {
   align-items: flex-start;
   justify-content: center;
   /* push content below the sticky app header (safe-area-top + 4rem header row) */
-  padding: calc(var(--safe-area-top) + 4rem + 0.5rem) 0.75rem calc(var(--mobile-nav-offset) + 0.75rem);
+  padding: calc(var(--safe-area-top) + 4rem + 0.5rem) 0.75rem calc(var(--app-bottom-ui-offset) + var(--app-keyboard-inset) + 0.75rem);
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -104,7 +111,7 @@ textarea {
 
 .app-modal-panel {
   width: min(100%, 32rem);
-  max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - 4rem - var(--mobile-nav-offset) - 1.25rem);
+  max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - 4rem - var(--app-bottom-ui-offset) - var(--app-keyboard-inset) - 1rem);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -125,6 +132,7 @@ textarea {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: calc(var(--safe-area-bottom) + 1rem);
 }
 
 .app-main-scroll {
@@ -142,6 +150,37 @@ textarea {
 
 .mobile-floating-offset {
   bottom: calc(var(--mobile-nav-offset) + 0.5rem);
+}
+
+.app-mobile-nav,
+.app-floating-action-bar {
+  transition: transform 0.24s ease, opacity 0.24s ease;
+}
+
+.app-keyboard-open .app-mobile-nav,
+.app-modal-open .app-mobile-nav {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(140%);
+}
+
+.app-keyboard-open .app-floating-action-bar,
+.app-modal-open .app-floating-action-bar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(-50%, 140%, 0);
+}
+
+.app-bottom-sheet {
+  position: fixed;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(var(--app-keyboard-inset) + 0.5rem);
+  max-height: calc(var(--app-viewport-height) - var(--app-keyboard-inset) - 1rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1.75rem;
 }
 
 .dashboard-content-safe {
@@ -228,6 +267,15 @@ textarea {
   }
   .drawer-sheet.open {
     transform: translateX(-50%) translateY(0);
+  }
+
+  .app-bottom-sheet {
+    left: 50%;
+    right: auto;
+    width: min(100%, 32rem);
+    transform: translateX(-50%);
+    bottom: 1rem;
+    max-height: min(88vh, calc(var(--app-viewport-height) - 2rem));
   }
 }
 

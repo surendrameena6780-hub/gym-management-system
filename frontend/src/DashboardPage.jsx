@@ -292,6 +292,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [checkinQuery, setCheckinQuery] = useState('');
   const [checkinBusyMemberId, setCheckinBusyMemberId] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState([]);
+  const isAnyDashboardModalOpen = showAddModal || showPaymentModal || showBroadcastModal || showCheckinModal;
 
   // Form states
   const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
@@ -431,7 +432,40 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     };
   }, [previewUrl]);
 
-  useEffect(() => { if (token) fetchData(); }, [token]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('app-modal-open', Boolean(isActive && isAnyDashboardModalOpen));
+
+    return () => {
+      root.classList.remove('app-modal-open');
+    };
+  }, [isActive, isAnyDashboardModalOpen]);
+
+  useEffect(() => {
+    if (!token || !isActive) return;
+
+    fetchData();
+
+    const handleExternalRefresh = () => {
+      fetchData();
+    };
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    };
+
+    window.addEventListener('focus', handleExternalRefresh);
+    window.addEventListener('gymvault:data-changed', handleExternalRefresh);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+
+    return () => {
+      window.removeEventListener('focus', handleExternalRefresh);
+      window.removeEventListener('gymvault:data-changed', handleExternalRefresh);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
+  }, [token, isActive]);
 
   const handleStartTour = () => {
       localStorage.setItem('gymvault_tour_completed', 'true');
@@ -1562,7 +1596,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* ════════════════════════════════════════
           FLOATING ACTION BAR
       ════════════════════════════════════════ */}
-      <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1.5rem)] max-w-[520px]">
+      <div className="app-floating-action-bar fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1.5rem)] max-w-[520px]">
         <div
           className="rounded-[22px] border border-white/8 backdrop-blur-2xl p-1.5"
           style={{
@@ -1891,13 +1925,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             onClick={() => setShowBroadcastModal(false)}
           />
           {/* Sheet panel — anchored to bottom, not affected by visualViewport keyboard changes */}
-          <div
-            className="fixed left-0 right-0 bottom-0 z-[200] bg-white rounded-t-[28px] shadow-2xl flex flex-col"
-            style={{
-              maxHeight: '88vh',
-              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-            }}
-          >
+          <div className="app-bottom-sheet z-[200] bg-white shadow-2xl">
             {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-1 shrink-0">
               <div className="w-10 h-1 rounded-full bg-slate-200" />
@@ -1914,7 +1942,11 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-white" />
               </button>
             </div>
-            <form onSubmit={handleBroadcast} className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-3.5">
+            <form
+              onSubmit={handleBroadcast}
+              className="app-modal-scroll min-h-0 p-5 space-y-3.5"
+              style={{ paddingBottom: 'calc(var(--safe-area-bottom) + 1rem)' }}
+            >
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
                 <input

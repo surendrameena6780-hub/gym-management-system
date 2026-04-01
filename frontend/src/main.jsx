@@ -66,13 +66,36 @@ axios.interceptors.response.use((response) => {
 if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   window.__gymvaultViewportSyncInstalled = true
 
+  let stableViewportHeight = Math.max(
+    Math.round(window.innerHeight || 0),
+    Math.round(document.documentElement.clientHeight || 0),
+  )
+  const KEYBOARD_OPEN_THRESHOLD_PX = 120
+
   const syncViewportVariables = () => {
     const viewport = window.visualViewport
-    const nextHeight = Math.round(viewport?.height || window.innerHeight || 0)
+    const layoutViewportHeight = Math.max(
+      Math.round(window.innerHeight || 0),
+      Math.round(document.documentElement.clientHeight || 0),
+      stableViewportHeight || 0,
+    )
+    const visibleViewportHeight = Math.round(viewport?.height || layoutViewportHeight || 0)
+    const viewportOffsetTop = Math.round(viewport?.offsetTop || 0)
+    const inferredKeyboardInset = Math.max(0, layoutViewportHeight - visibleViewportHeight - viewportOffsetTop)
+    const isKeyboardOpen = inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
 
-    if (nextHeight > 0) {
-      document.documentElement.style.setProperty('--app-viewport-height', `${nextHeight}px`)
+    if (!isKeyboardOpen && layoutViewportHeight > 0) {
+      stableViewportHeight = layoutViewportHeight
+    } else if (layoutViewportHeight > stableViewportHeight) {
+      stableViewportHeight = layoutViewportHeight
     }
+
+    if (stableViewportHeight > 0) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${stableViewportHeight}px`)
+    }
+
+    document.documentElement.style.setProperty('--app-keyboard-inset', `${isKeyboardOpen ? inferredKeyboardInset : 0}px`)
+    document.documentElement.classList.toggle('app-keyboard-open', isKeyboardOpen)
   }
 
   let rafId = 0
