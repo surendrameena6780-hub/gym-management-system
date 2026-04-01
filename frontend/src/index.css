@@ -176,7 +176,7 @@ textarea {
   left: 0.75rem;
   right: 0.75rem;
   bottom: calc(var(--app-keyboard-inset) + 0.5rem);
-  max-height: calc(var(--app-viewport-height) - var(--app-keyboard-inset) - 1rem);
+  max-height: min(76vh, calc(var(--app-viewport-height) - var(--app-keyboard-inset) - 0.75rem));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -275,7 +275,7 @@ textarea {
     width: min(100%, 32rem);
     transform: translateX(-50%);
     bottom: 1rem;
-    max-height: min(88vh, calc(var(--app-viewport-height) - 2rem));
+    max-height: min(78vh, calc(var(--app-viewport-height) - 2rem));
   }
 }
 

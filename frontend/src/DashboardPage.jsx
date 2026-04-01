@@ -315,6 +315,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [campaignPreviewLoading, setCampaignPreviewLoading] = useState(false);
   const [broadcastTemplates, setBroadcastTemplates] = useState([]);
   const [gymName, setGymName] = useState('');
+  const [gymBilling, setGymBilling] = useState({
+    saas_status: 'FREE_TRIAL',
+    saas_valid_until: '',
+    current_plan: 'pro',
+    saas_billing_cycle: 'monthly',
+  });
   const [churnInsights, setChurnInsights] = useState({ summary: { high: 0, medium: 0, low: 0 }, members: [] });
   const [campaignLogs, setCampaignLogs] = useState([]);
 
@@ -342,7 +348,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       const [
         membersRes, plansRes, statsRes,
         chart30Res, chart7Res, attendanceRes,
-        todayRes, setupRes, churnRes, logsRes
+        todayRes, setupRes, churnRes, logsRes,
+        settingsRes
       ] = await Promise.allSettled([
         axios.get('/api/members', requestConfig),
         axios.get('/api/memberships/plans', requestConfig),
@@ -353,7 +360,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         axios.get('/api/attendance/today', requestConfig),
         axios.get('/api/dashboard/setup-status', requestConfig),
         axios.get('/api/notifications/campaign/churn-scores?limit=30', requestConfig),
-        axios.get('/api/notifications/campaign/logs?limit=50', requestConfig)
+        axios.get('/api/notifications/campaign/logs?limit=50', requestConfig),
+        axios.get('/api/settings', requestConfig)
       ]);
 
       const pickData = (result, fallback) => {
@@ -376,6 +384,14 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       setTodayAttendance(normalizedTodayData);
       setTodayCheckins(normalizedTodayData.length);
       setSetup(asObject(pickData(setupRes, { progress: 0, is_complete: false, steps: {} }), { progress: 0, is_complete: false, steps: {} }));
+      const settingsData = asObject(pickData(settingsRes, {}), {});
+      const billingData = asObject(settingsData.gym, {});
+      setGymBilling({
+        saas_status: String(billingData.saas_status || 'FREE_TRIAL').toUpperCase(),
+        saas_valid_until: String(billingData.saas_valid_until || ''),
+        current_plan: String(billingData.current_plan || 'pro'),
+        saas_billing_cycle: String(billingData.saas_billing_cycle || 'monthly'),
+      });
       const churnData = asObject(pickData(churnRes, { summary: { high: 0, medium: 0, low: 0 }, members: [] }), { summary: { high: 0, medium: 0, low: 0 }, members: [] });
       setChurnInsights({
         summary: asObject(churnData.summary, { high: 0, medium: 0, low: 0 }),
@@ -383,16 +399,16 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       });
       setCampaignLogs(asArray(pickData(logsRes, [])));
 
-      const failedCalls = [membersRes, plansRes, statsRes, chart30Res, chart7Res, attendanceRes, todayRes, setupRes, churnRes, logsRes]
+      const failedCalls = [membersRes, plansRes, statsRes, chart30Res, chart7Res, attendanceRes, todayRes, setupRes, churnRes, logsRes, settingsRes]
         .filter((result) => result.status === 'rejected')
         .length;
-      const successfulCalls = 10 - failedCalls;
+      const successfulCalls = 11 - failedCalls;
 
       if (failedCalls > 0 && successfulCalls > 0) {
         toast?.(`${failedCalls} dashboard section(s) failed to load.`, 'warning');
       }
 
-      if (failedCalls === 10 && warmupRetryCountRef.current === 0) {
+      if (failedCalls === 11 && warmupRetryCountRef.current === 0) {
         toast?.('Server is waking up. Dashboard will retry automatically.', 'warning');
       }
 
@@ -755,7 +771,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const active   = members.filter(m => m.membership_status === 'ACTIVE');
     const unpaid   = members.filter(m => m.membership_status === 'UNPAID');
     const expired  = members.filter(m => m.membership_status === 'EXPIRED');
-    const unpaidTargetMember = unpaid[0] || null;
     
     const expiringIn3Days = active.filter(m => m.days_left > 0 && m.days_left <= 3);
     const expiringIn7Days = active.filter(m => m.days_left > 0 && m.days_left <= 7);
@@ -792,6 +807,25 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       ? Math.round(plans.reduce((sum, p) => sum + Number(p.price || 0), 0) / plans.length)
       : 1500;
     const planPriceByName = new Map(plans.map((p) => [String(p.name || ''), Number(p.price || 0)]));
+    const todayStartDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const accessValidUntil = gymBilling.saas_valid_until ? new Date(gymBilling.saas_valid_until) : null;
+    const hasValidAccessDate = Boolean(accessValidUntil && !Number.isNaN(accessValidUntil.getTime()));
+    const accessExpiryDay = hasValidAccessDate
+      ? new Date(accessValidUntil.getFullYear(), accessValidUntil.getMonth(), accessValidUntil.getDate())
+      : null;
+    const accessDaysRemaining = accessExpiryDay
+      ? Math.ceil((accessExpiryDay.getTime() - todayStartDate.getTime()) / 86400000)
+      : null;
+    const accessDerivedStatus = (() => {
+      if (!hasValidAccessDate || gymBilling.saas_status === 'FREE_TRIAL') return 'FREE_TRIAL';
+      const diffDays = (accessValidUntil.getTime() - today.getTime()) / 86400000;
+      if (gymBilling.saas_status === 'EXPIRED' || diffDays <= -3) return 'EXPIRED';
+      if (gymBilling.saas_status === 'GRACE_PERIOD' || (diffDays < 0 && diffDays > -3)) return 'GRACE_PERIOD';
+      return 'ACTIVE';
+    })();
+    const accessExpiryLabel = hasValidAccessDate
+      ? accessValidUntil.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+      : '';
     const estimateMemberValue = (member) => {
       const byPlan = planPriceByName.get(String(member?.plan_name || ''));
       if (Number.isFinite(byPlan) && byPlan > 0) return byPlan;
@@ -936,13 +970,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         priority: 'P1',
         cta: 'Activate Memberships',
         sub: 'Convert pending dues',
-        action: () => {
-          if (unpaidTargetMember?.id) {
-            navigateTo('Members', 'Unpaid', { memberId: unpaidTargetMember.id, action: 'detail' });
-            return;
-          }
-          navigateTo('Members', 'Unpaid');
-        },
+        action: () => navigateTo('Members', 'Unpaid'),
       }),
       buildRecommendation({
         id: 'ESCALATED_CALLS',
@@ -1079,28 +1107,69 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     };
 
     const gymHealthLabel = healthScore >= 80 ? 'strong' : healthScore >= 60 ? 'moderate' : 'needs attention';
-    const aiSummary = recommendations.length > 0
-      ? `Gym health: ${healthScore}% (${gymHealthLabel}). Top opportunity — ${primary.title}: ${primary.reason}. Est. growth value ₹${primary.impact.toLocaleString()} at ${primary.confidence}% confidence.`
-      : `Gym health is ${gymHealthLabel} at ${healthScore}%. ${active.length} active members, ₹${monthlyRevenue.toLocaleString()} monthly revenue. Focus on consistent check-ins and renewal follow-ups to sustain momentum.`;
+    const aiSummaryLines = recommendations.length > 0
+      ? [
+          { label: 'Gym health', value: `${healthScore}% · ${gymHealthLabel}` },
+          { label: 'Top opportunity', value: primary.title },
+          { label: 'Why now', value: primary.reason },
+        ]
+      : [
+          { label: 'Gym health', value: `${healthScore}% · ${gymHealthLabel}` },
+          { label: 'Active members', value: `${active.length} members currently active` },
+          { label: 'Monthly revenue', value: `₹${monthlyRevenue.toLocaleString()} current run rate` },
+        ];
+
+    const subscriptionWarning = (() => {
+      if (accessDaysRemaining === null) return null;
+      if ((accessDerivedStatus === 'ACTIVE' || accessDerivedStatus === 'FREE_TRIAL') && accessDaysRemaining > 7) return null;
+
+      const isCritical = accessDerivedStatus === 'EXPIRED' || accessDerivedStatus === 'GRACE_PERIOD' || accessDaysRemaining <= 1;
+      const title = accessDerivedStatus === 'EXPIRED'
+        ? 'GymVault access expired'
+        : accessDerivedStatus === 'GRACE_PERIOD'
+          ? 'GymVault access in grace period'
+          : accessDaysRemaining <= 0
+            ? 'GymVault access expires today'
+            : accessDaysRemaining === 1
+              ? 'GymVault access expires tomorrow'
+              : `GymVault access expires in ${accessDaysRemaining} days`;
+      const reason = accessExpiryLabel
+        ? `Renew before ${accessExpiryLabel} to keep members, attendance, and analytics unlocked`
+        : 'Renew your GymVault subscription to keep access uninterrupted';
+
+      return buildRecommendation({
+        id: 'GYMVAULT_ACCESS',
+        title,
+        reason,
+        count: 1,
+        impact: Math.max(monthlyRevenue, avgPlanPrice * 3),
+        confidence: 98,
+        urgency: isCritical ? 'Critical' : 'This week',
+        priority: isCritical ? 'P0' : 'P1',
+        cta: 'Open Billing',
+        sub: accessDerivedStatus === 'FREE_TRIAL' ? 'Trial ending soon' : 'Software subscription warning',
+        action: () => navigateTo('Settings', 'billing'),
+      });
+    })();
 
     // ── Action Required: urgent member-specific tasks ONLY (expired, unpaid, ghosts, escalated) ──
-    const actionRequiredRows = aiCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
+    const actionCandidates = [subscriptionWarning, ...aiCandidates].filter(Boolean);
+    const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
     const mergedActionRows = actionRequiredRows.length > 0
       ? actionRequiredRows.slice(0, 3)
-      : aiCandidates.slice(0, 3); // show best P2 member tasks when nothing critical
+      : actionCandidates.slice(0, 3); // show best P2 tasks when nothing critical
     const urgentCount = actionRequiredRows.length;
 
     return {
       active: active.length, unpaid: unpaid.length, expired: expired.length,
       expiring7: expiringIn7Days.length, expiring3: expiringIn3Days.length, ghosts: ghosts.length,
-      pendingDuesTargetMemberId: unpaidTargetMember?.id || null,
       escalated: escalatedLeads,
       monthlyRevenue, revenueAtRisk, healthScore,
       topPlan: topPlanEntry ? { name: topPlanEntry[0], count: topPlanEntry[1], pct: topPlanPct } : null,
       heatmap,
       churnHigh: churnInsights.summary?.high || 0,
       ai: {
-        summary: aiSummary,
+        summaryLines: aiSummaryLines,
         primary,
         recommendations,
         urgentCount,
@@ -1116,7 +1185,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         lastAutomationLabel,
       },
     };
-  }, [members, plans, chart30, attendanceHeatmap, churnInsights, campaignLogs, payStats.pending_dues, setup, todayCheckins]);
+  }, [members, plans, chart30, attendanceHeatmap, churnInsights, campaignLogs, payStats.pending_dues, setup, todayCheckins, gymBilling]);
 
   const [isAutomating, setIsAutomating] = useState(false);
 
@@ -1392,9 +1461,14 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   </div>
                 </div>
                 
-                <p className="text-slate-700 font-semibold text-sm leading-relaxed flex-1">
-                  {dashboardData.ai.summary}
-                </p>
+                <div className="space-y-2 flex-1">
+                  {dashboardData.ai.summaryLines.map((line) => (
+                    <div key={line.label} className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{line.label}</p>
+                      <p className="text-[13px] font-bold text-slate-800 leading-snug mt-1">{line.value}</p>
+                    </div>
+                  ))}
+                </div>
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-lg border border-slate-100 bg-slate-50/70 px-2 py-2">
@@ -1581,13 +1655,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Pending Dues" value={`₹${Number(payStats.pending_dues).toLocaleString()}`}
             icon={Activity} index={11}
             iconGradient="linear-gradient(135deg, #f97316, #ef4444)"
-            onClick={() => {
-              if (dashboardData.pendingDuesTargetMemberId) {
-                navigateTo('Members', 'Unpaid', { memberId: dashboardData.pendingDuesTargetMemberId, action: 'detail' });
-                return;
-              }
-              navigateTo('Members', 'Unpaid');
-            }}
+            onClick={() => navigateTo('Members', 'Unpaid')}
           />
         </div>
 
@@ -1942,11 +2010,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-white" />
               </button>
             </div>
-            <form
-              onSubmit={handleBroadcast}
-              className="app-modal-scroll min-h-0 p-5 space-y-3.5"
-              style={{ paddingBottom: 'calc(var(--safe-area-bottom) + 1rem)' }}
-            >
+            <form onSubmit={handleBroadcast} className="flex min-h-0 flex-1 flex-col">
+              <div className="app-modal-scroll min-h-0 px-4 pb-3 pt-4 space-y-3">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
                 <input
@@ -2053,17 +2118,20 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Campaign Message</label>
-                <textarea required rows={4}
+                <textarea required rows={3}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-none"
                   placeholder="Type your message here..."
                   value={broadcastMessage} onChange={e => setBroadcastMessage(e.target.value)} />
                 <p className="text-[10px] text-slate-400 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name &middot; {'{{gym_name}}'} fills your gym name.</p>
               </div>
-              <button type="submit"
-                className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 transition-all hover:opacity-90 active:scale-98"
-                style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>
-                Launch Broadcast
-              </button>
+              </div>
+              <div className="shrink-0 border-t border-slate-100 bg-white px-4 pb-[calc(var(--safe-area-bottom)+0.75rem)] pt-3">
+                <button type="submit"
+                  className="w-full py-3 rounded-xl font-black text-sm text-white transition-all hover:opacity-90 active:scale-98"
+                  style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>
+                  Launch Broadcast
+                </button>
+              </div>
             </form>
           </div>
         </>
