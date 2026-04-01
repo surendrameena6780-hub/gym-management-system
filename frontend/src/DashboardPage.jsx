@@ -2025,7 +2025,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-none"
                   placeholder="Type your message here..."
                   value={broadcastMessage} onChange={e => setBroadcastMessage(e.target.value)} />
-                <p className="text-[10px] text-slate-400 mt-1 font-semibold">{{name}} auto-fills each member's name · {{gym_name}} fills your gym name · Opens WhatsApp Web tabs for each member individually.</p>
+                <p className="text-[10px] text-slate-400 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name &middot; {'{{gym_name}}'} fills your gym name.</p>
               </div>
               <button type="submit"
                 className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 transition-all hover:opacity-90 active:scale-98"

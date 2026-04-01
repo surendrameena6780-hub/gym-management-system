@@ -121,8 +121,15 @@ function ConfirmModal({ confirmState, hideConfirm }) {
 function SplashScreen({ exiting }) {
   return (
     <div
-      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-all duration-700 ease-in-out ${exiting ? 'opacity-0 scale-105' : 'opacity-100 scale-100'}`}
-      style={{ background: 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%)' }}
+      className={`fixed z-[9999] flex flex-col items-center justify-center transition-all duration-700 ease-in-out ${exiting ? 'opacity-0 scale-105' : 'opacity-100 scale-100'}`}
+      style={{
+        background: 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%)',
+        inset: 0,
+        top: '-100px',
+        paddingTop: '100px',
+        bottom: '-40px',
+        paddingBottom: '40px',
+      }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/3 left-1/3 w-[500px] h-[500px] rounded-full"
