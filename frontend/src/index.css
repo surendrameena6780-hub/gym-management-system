@@ -80,6 +80,16 @@ textarea {
     #eef0ff;
 }
 
+html.gv-splash-active {
+  background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%) !important;
+  color-scheme: dark;
+}
+
+html.gv-splash-active body,
+html.gv-splash-active #root {
+  background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%) !important;
+}
+
 .app-shell-height {
   min-height: var(--app-viewport-height);
   height: var(--app-viewport-height);

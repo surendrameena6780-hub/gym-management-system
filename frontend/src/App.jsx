@@ -118,17 +118,16 @@ function ConfirmModal({ confirmState, hideConfirm }) {
 
 // ─── Splash Screen ────────────────────────────────────────────────────────────
 
+const SPLASH_GRADIENT = 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%)';
+
 function SplashScreen({ exiting }) {
   return (
     <div
-      className={`fixed z-[9999] flex flex-col items-center justify-center transition-all duration-500 ease-out ${exiting ? 'opacity-0 scale-105' : 'opacity-100 scale-100'}`}
+      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-all duration-300 ease-out ${exiting ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'}`}
       style={{
-        background: 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%)',
-        inset: 0,
-        top: '-100px',
-        paddingTop: '100px',
-        bottom: '-140px',
-        paddingBottom: '140px',
+        background: SPLASH_GRADIENT,
+        paddingTop: 'calc(var(--safe-area-top) + 1.5rem)',
+        paddingBottom: 'calc(var(--safe-area-bottom) + 1.5rem)',
       }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -347,6 +346,19 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isHQ) {
+      document.documentElement.classList.remove('gv-splash-active');
+      return;
+    }
+
+    document.documentElement.classList.toggle('gv-splash-active', showSplash);
+
+    return () => {
+      document.documentElement.classList.remove('gv-splash-active');
+    };
+  }, [showSplash, isHQ]);
+
   const handleInstallApp = useCallback(async () => {
     if (isStandaloneMode) return;
 
@@ -561,8 +573,8 @@ function App() {
       setShowSplash(false);
       return;
     }
-    const t1 = setTimeout(() => setSplashExiting(true), 240);
-    const t2 = setTimeout(() => setShowSplash(false), 640);
+    const t1 = setTimeout(() => setSplashExiting(true), 420);
+    const t2 = setTimeout(() => setShowSplash(false), 760);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [isHQ]);
 
@@ -778,7 +790,7 @@ function App() {
 
 
       <div
-        className="flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900"
+        className={`flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900 transition-opacity duration-200 ${showSplash ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
         style={{
           background: `
             radial-gradient(ellipse at 18% 18%, rgba(99,102,241,0.09) 0%, transparent 55%),
