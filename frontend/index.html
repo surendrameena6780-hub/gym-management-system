@@ -56,13 +56,9 @@
         margin: 0;
       }
 
-      /* Light app gradient is applied once React paints */
+      /* Starts dark to match splash — app shell div provides the light gradient once React renders */
       #root {
-        background:
-          radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.12) 0%, transparent 48%),
-          radial-gradient(circle at 82% 20%, rgba(168, 85, 247, 0.09) 0%, transparent 42%),
-          radial-gradient(circle at 78% 82%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
-          #eef0ff;
+        background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%) !important;
       }
       .premium-card {
         background: white;

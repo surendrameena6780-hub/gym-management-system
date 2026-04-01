@@ -123,11 +123,15 @@ const SPLASH_GRADIENT = 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e152
 function SplashScreen({ exiting }) {
   return (
     <div
-      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-all duration-300 ease-out ${exiting ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'}`}
+      className={`fixed z-[9999] flex flex-col items-center justify-center transition-all duration-300 ease-out ${exiting ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'}`}
       style={{
         background: SPLASH_GRADIENT,
-        paddingTop: 'calc(var(--safe-area-top) + 1.5rem)',
-        paddingBottom: 'calc(var(--safe-area-bottom) + 1.5rem)',
+        top: '-200px',
+        left: '-20px',
+        right: '-20px',
+        bottom: '-200px',
+        paddingTop: 'calc(200px + env(safe-area-inset-top, 0px))',
+        paddingBottom: '215px',
       }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
