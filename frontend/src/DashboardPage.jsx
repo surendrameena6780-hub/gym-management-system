@@ -947,7 +947,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             setShowAddModal(true);
             return;
           }
-          navigateTo('Settings');
+          navigateTo('Settings', 'account');
         },
       }),
       active.length >= 10 && trafficGap > 0 && buildRecommendation({
@@ -1431,28 +1431,43 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </div>
               
               <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
-                {dashboardData.actionRows.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-6 gap-3 text-center">
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
-                      <CheckCircle size={20} className="text-emerald-500" />
+                {dashboardData.actionRows.length === 0 && (() => {
+                  const emptyItems = [
+                    !setup.steps?.profile && { label: 'Complete gym profile', sub: 'Add your gym name, logo & address', onClick: () => navigateTo('Settings', 'account') },
+                    !setup.steps?.plans   && { label: 'Create a pricing plan', sub: 'Set up your first membership plan', onClick: () => navigateTo('Plans') },
+                    !setup.steps?.members && { label: 'Add your first member', sub: 'Register a member to get started', onClick: () => setShowAddModal(true) },
+                    setup.steps?.profile && setup.steps?.plans && { label: 'Set up WhatsApp / SMS messaging', sub: 'Enable automated member alerts', onClick: () => navigateTo('Settings', 'automation') },
+                    setup.steps?.profile && { label: 'Connect payment gateway', sub: 'Integrate Razorpay for online payments', onClick: () => navigateTo('Settings', 'integrations') },
+                  ].filter(Boolean).slice(0, 3);
+                  return (
+                    <div className="flex flex-col items-center justify-center py-4 gap-3 text-center">
+                      <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
+                        <CheckCircle size={20} className="text-emerald-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-slate-800">
+                          {emptyItems.length === 0 ? 'All clear — gym is running smoothly!' : 'No urgent issues right now.'}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                          {emptyItems.length > 0 ? 'Complete these to fully unlock GymVault:' : 'Keep an eye on renewals and check-ins.'}
+                        </p>
+                      </div>
+                      {emptyItems.length > 0 && (
+                        <div className="w-full space-y-1.5 text-left mt-1">
+                          {emptyItems.map((item) => (
+                            <button key={item.label} onClick={item.onClick} className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 text-left transition-colors">
+                              <div>
+                                <p className="text-[11px] font-bold text-slate-700">{item.label}</p>
+                                <p className="text-[9px] text-slate-400 font-semibold mt-0.5">{item.sub}</p>
+                              </div>
+                              <ChevronRight size={13} className="text-slate-300 shrink-0" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-sm font-black text-slate-800">All clear right now!</p>
-                      <p className="text-[10px] text-slate-400 font-semibold mt-0.5">No urgent actions needed today.</p>
-                    </div>
-                    <div className="w-full space-y-1.5 text-left mt-1">
-                      {[{label:'Complete gym profile', sub:'Add logo, address & contact info', nav:'Settings'},{label:'Set up SMS messaging', sub:'Enable WhatsApp or SMS alerts for members', nav:'Settings'},{label:'Add integration links', sub:'Connect Razorpay or payment gateway', nav:'Settings'}].map((item) => (
-                        <button key={item.label} onClick={() => navigateTo(item.nav)} className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 text-left transition-colors">
-                          <div>
-                            <p className="text-[11px] font-bold text-slate-700">{item.label}</p>
-                            <p className="text-[9px] text-slate-400 font-semibold mt-0.5">{item.sub}</p>
-                          </div>
-                          <ChevronRight size={13} className="text-slate-300 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
                 {dashboardData.actionRows.map((row) => {
                   const meta = getPriorityMeta(row.priority);
                   return (
@@ -1867,22 +1882,39 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         </div>
       )}
 
-      {/* Broadcast */}
+      {/* Broadcast — bottom sheet, keyboard-resilient */}
       {showBroadcastModal && (
-        <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="app-modal-panel bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
-            <div className="px-5 py-4 sm:px-6 sm:py-5 flex justify-between items-center"
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-[190] bg-slate-900/60 backdrop-blur-sm"
+            onClick={() => setShowBroadcastModal(false)}
+          />
+          {/* Sheet panel — anchored to bottom, not affected by visualViewport keyboard changes */}
+          <div
+            className="fixed left-0 right-0 bottom-0 z-[200] bg-white rounded-t-[28px] shadow-2xl flex flex-col"
+            style={{
+              maxHeight: '88vh',
+              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            }}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-slate-200" />
+            </div>
+            {/* Header */}
+            <div className="px-5 py-3 flex justify-between items-center shrink-0"
               style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
               <div className="flex items-center gap-3">
-                <MessageSquare size={20} className="text-white" />
-                <h2 className="text-lg font-black text-white">Bulk Broadcast</h2>
+                <MessageSquare size={18} className="text-white" />
+                <h2 className="text-base font-black text-white">Bulk Broadcast</h2>
               </div>
-              <button onClick={() => setShowBroadcastModal(false)}
+              <button type="button" onClick={() => setShowBroadcastModal(false)}
                 className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors">
                 <X size={16} className="text-white" />
               </button>
             </div>
-            <form onSubmit={handleBroadcast} className="app-modal-scroll p-5 sm:p-6 space-y-3.5">
+            <form onSubmit={handleBroadcast} className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-3.5">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
                 <input
@@ -2002,7 +2034,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </form>
           </div>
-        </div>
+        </>
       )}
 
       {showCheckinModal && (

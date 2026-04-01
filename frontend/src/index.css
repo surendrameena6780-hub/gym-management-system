@@ -46,7 +46,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   min-height: var(--app-viewport-height);
   /* Body stays dark to avoid white flash on load — app gradient lives on #root */
-  background: #0b0c1e;
+  background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%);
   overflow-x: hidden;
   color: #0f172a;
 }
