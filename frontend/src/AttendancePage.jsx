@@ -1,4 +1,27 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+
+function useCountUp(target, duration = 800) {
+  const [display, setDisplay] = useState(0);
+  const rafRef = useRef(null);
+  const prevTarget = useRef(null);
+  useEffect(() => {
+    const end = Number(target) || 0;
+    if (prevTarget.current === end) return;
+    prevTarget.current = end;
+    const begin = display;
+    const startTime = performance.now();
+    const tick = (now) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(begin + (end - begin) * eased));
+      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+  return display;
+}
 import axios from 'axios';
 import {
   Activity,
@@ -321,6 +344,12 @@ function AttendancePage({ token, toast }) {
     return (total / weeks).toFixed(1);
   }, [heatmap]);
 
+  // Count-up animated values for stat cards (must be before any conditional return)
+  const animatedTodayCheckins      = useCountUp(overview.today_checkins || 0);
+  const animatedYesterdayCheckins  = useCountUp(overview.yesterday_checkins || 0);
+  const animatedActiveMembersToday = useCountUp(overview.active_members_today || 0);
+  const animatedPeakHourCount      = useCountUp(overview.peak_hour_count || 0);
+
   if (loading) {
     return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Loading attendance intelligence...</div>;
   }
@@ -330,20 +359,20 @@ function AttendancePage({ token, toast }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Today's Check-ins</p>
-          <h3 className="text-3xl font-black text-slate-900 mt-1">{overview.today_checkins || 0}</h3>
+          <h3 className="text-3xl font-black text-slate-900 mt-1">{animatedTodayCheckins}</h3>
         </div>
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Yesterday</p>
-          <h3 className="text-3xl font-black text-slate-900 mt-1">{overview.yesterday_checkins || 0}</h3>
+          <h3 className="text-3xl font-black text-slate-900 mt-1">{animatedYesterdayCheckins}</h3>
         </div>
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-2">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Members Today</p>
-          <h3 className="text-3xl font-black text-emerald-600 mt-1">{overview.active_members_today || 0}</h3>
+          <h3 className="text-3xl font-black text-emerald-600 mt-1">{animatedActiveMembersToday}</h3>
         </div>
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-3">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Peak Hour Today</p>
           <h3 className="text-3xl font-black text-indigo-600 mt-1">{peakHourLabel}</h3>
-          <p className="text-xs font-bold text-slate-400 mt-1">{overview.peak_hour_count || 0} check-ins</p>
+          <p className="text-xs font-bold text-slate-400 mt-1">{animatedPeakHourCount} check-ins</p>
         </div>
       </div>
 

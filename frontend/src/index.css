@@ -46,10 +46,11 @@ body {
 }
 
 /* ── Prevent iOS auto-zoom on focused inputs (requires font-size ≥ 16px) ──── */
+/* !important overrides Tailwind text-sm (14px) which would trigger Safari zoom */
 input,
 select,
 textarea {
-  font-size: 16px;
+  font-size: 16px !important;
 }
 
 #root {
