@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0b0c1e" />
+    <meta name="theme-color" content="#161d4f" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -44,21 +44,16 @@
         min-height: 100%;
       }
 
-      /* Dark base so the splash screen has no white flash on load */
-      html {
-        background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%);
-      }
-
-      body {
+      /* Pre-React background — must exactly match SPLASH_BG in App.jsx (#161d4f) */
+      html, body {
+        background: #161d4f;
+        margin: 0;
         font-family: 'Inter', sans-serif !important;
         -webkit-font-smoothing: antialiased;
-        background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%);
-        margin: 0;
       }
 
-      /* Starts dark to match splash — app shell div provides the light gradient once React renders */
       #root {
-        background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%) !important;
+        background: #161d4f !important;
       }
       .premium-card {
         background: white;

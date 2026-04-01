@@ -118,26 +118,19 @@ function ConfirmModal({ confirmState, hideConfirm }) {
 
 // ─── Splash Screen ────────────────────────────────────────────────────────────
 
-const SPLASH_GRADIENT = 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%)';
+// Single flat colour used everywhere for the splash — must match index.html/body/root pre-React
+const SPLASH_BG = '#161d4f';
 
 function SplashScreen({ exiting }) {
   return (
     <div
-      className={`fixed z-[9999] flex flex-col items-center justify-center transition-all duration-300 ease-out ${exiting ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'}`}
-      style={{
-        background: SPLASH_GRADIENT,
-        top: '-200px',
-        left: '-20px',
-        right: '-20px',
-        bottom: '-200px',
-        paddingTop: 'calc(200px + env(safe-area-inset-top, 0px))',
-        paddingBottom: '215px',
-      }}
+      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
+      style={{ background: SPLASH_BG }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {/* Strong top-centre glow so status-bar area matches the rest of the splash */}
-        <div className="absolute left-0 right-0 w-full"
-          style={{ top: '-30px', height: '340px', background: 'radial-gradient(ellipse 80% 55% at 50% 0%, rgba(99,102,241,0.55) 0%, rgba(99,102,241,0.18) 45%, transparent 72%)' }} />
+        {/* Ambient glows on top of the flat base colour */}
+        <div className="absolute inset-x-0 top-0 h-[45%]"
+          style={{ background: 'radial-gradient(ellipse 90% 65% at 50% 0%, rgba(99,102,241,0.38) 0%, rgba(99,102,241,0.10) 55%, transparent 78%)' }} />
         <div className="absolute top-1/3 left-1/3 w-[500px] h-[500px] rounded-full"
           style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
         <div className="absolute bottom-1/3 right-1/3 w-[400px] h-[400px] rounded-full"
@@ -797,8 +790,8 @@ function App() {
 
 
       <div
-        className={`flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900 transition-opacity duration-200 ${showSplash ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-        style={{
+        className="flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900"
+        style={{  /* Splash is opaque z-9999, no need to hide the shell behind it */
           background: `
             radial-gradient(ellipse at 18% 18%, rgba(99,102,241,0.09) 0%, transparent 55%),
             radial-gradient(ellipse at 82% 82%, rgba(168,85,247,0.07) 0%, transparent 55%),

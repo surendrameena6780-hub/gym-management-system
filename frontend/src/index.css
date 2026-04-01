@@ -52,8 +52,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: var(--app-viewport-height);
-  /* Body stays dark to avoid white flash on load — app gradient lives on #root */
-  background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%);
+  /* Body stays dark to avoid white flash on load — must match SPLASH_BG #161d4f */
+  background: #161d4f;
   overflow-x: hidden;
   color: #0f172a;
 }
@@ -80,14 +80,11 @@ textarea {
     #eef0ff;
 }
 
-html.gv-splash-active {
-  background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%) !important;
-  color-scheme: dark;
-}
-
+html.gv-splash-active,
 html.gv-splash-active body,
 html.gv-splash-active #root {
-  background: linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%) !important;
+  background: #161d4f !important;
+  color-scheme: dark;
 }
 
 .app-shell-height {
