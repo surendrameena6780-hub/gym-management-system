@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { 
   Search, Filter, Download, Plus, DollarSign, 
@@ -20,6 +20,34 @@ const extractObject = (value, fallback = {}) => {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value;
   return fallback;
 };
+
+// ─── Count-Up Hook ────────────────────────────────────────────────────────────
+
+function useCountUp(target, duration = 900) {
+  const [display, setDisplay] = useState(0);
+  const rafRef = useRef(null);
+  const prevTarget = useRef(null);
+  useEffect(() => {
+    if (prevTarget.current === target) return;
+    prevTarget.current = target;
+    const start = display;
+    const end = Number(target) || 0;
+    if (start === end) return;
+    const startTime = performance.now();
+    const tick = (now) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(start + (end - start) * eased));
+      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+  return display;
+}
 
 // ─── Skeleton Rows ────────────────────────────────────────────────────────────
 
@@ -56,6 +84,11 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Count-up animated values for stat cards
+  const animatedTotalRevenue = useCountUp(parseFloat(stats.total_revenue || 0));
+  const animatedTodayRevenue = useCountUp(parseFloat(stats.today_revenue || 0));
+  const animatedPendingDues  = useCountUp(parseFloat(stats.pending_dues  || 0));
 
   const [searchTerm, setSearchTerm] = useState('');
   const [chartDays, setChartDays] = useState('30');
@@ -288,8 +321,14 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
   return (
     <div className="min-h-full p-2 font-sans relative" onClick={() => setShowFilterDropdown(false)}>
+      <style>{`
+        @keyframes payCardIn {
+          from { opacity: 0; transform: translateY(18px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-5 sm:gap-6 mb-0"
-        style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+        style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)', opacity: 0, animation: 'payCardIn 0.6s cubic-bezier(0.16,1,0.3,1) 0ms forwards' }}>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">
         <div><h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Financial Overview</h1></div>
@@ -302,30 +341,30 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       {/* STATS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="relative overflow-hidden rounded-[20px] p-6 border"
-            style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)' }}>
+            style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
               <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.12)' }}>
                 <DollarSign size={20} className="text-emerald-600" />
               </div>
               <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Total Revenue</p>
-              <h3 className="text-3xl font-black text-slate-900">₹{parseFloat(stats.total_revenue || 0).toLocaleString()}</h3>
+              <h3 className="text-3xl font-black text-slate-900">₹{animatedTotalRevenue.toLocaleString()}</h3>
               <p className="text-emerald-600 text-xs font-bold mt-1.5">All time earnings</p>
           </div>
           <div className="relative overflow-hidden rounded-[20px] p-6 border"
-            style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: 'rgba(59,130,246,0.15)', boxShadow: '0 4px 20px rgba(59,130,246,0.08)' }}>
+            style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: 'rgba(59,130,246,0.15)', boxShadow: '0 4px 20px rgba(59,130,246,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 210ms forwards' }}>
               <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(59,130,246,0.12)' }}>
                 <Clock size={20} className="text-blue-600" />
               </div>
               <p className="text-blue-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Collected Today</p>
-              <h3 className="text-3xl font-black text-slate-900">₹{parseFloat(stats.today_revenue || 0).toLocaleString()}</h3>
+              <h3 className="text-3xl font-black text-slate-900">₹{animatedTodayRevenue.toLocaleString()}</h3>
               <p className="text-blue-600 text-xs font-bold mt-1.5">Today's collection</p>
           </div>
           <div className="relative overflow-hidden rounded-[20px] p-6 border"
-            style={{ background: 'linear-gradient(135deg, #fff7ed 0%, #fef9f0 100%)', borderColor: 'rgba(249,115,22,0.15)', boxShadow: '0 4px 20px rgba(249,115,22,0.08)' }}>
+            style={{ background: 'linear-gradient(135deg, #fff7ed 0%, #fef9f0 100%)', borderColor: 'rgba(249,115,22,0.15)', boxShadow: '0 4px 20px rgba(249,115,22,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 300ms forwards' }}>
               <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(249,115,22,0.12)' }}>
                 <AlertCircle size={20} className="text-orange-600" />
               </div>
               <p className="text-orange-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Pending Dues</p>
-              <h3 className="text-3xl font-black text-orange-500">₹{parseFloat(stats.pending_dues || 0).toLocaleString()}</h3>
+              <h3 className="text-3xl font-black text-orange-500">₹{animatedPendingDues.toLocaleString()}</h3>
               <p className="text-orange-500 text-xs font-bold mt-1.5">Awaiting payment</p>
           </div>
       </div>

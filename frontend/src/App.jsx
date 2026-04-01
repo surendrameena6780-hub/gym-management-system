@@ -176,6 +176,90 @@ function SplashScreen({ exiting }) {
   );
 }
 
+// ─── iOS-style sliding mobile nav ─────────────────────────────────────────────
+
+function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMoreNav, isSuspended, onNav, onMoreToggle }) {
+  const colCount = items.length + (moreItems.length > 0 ? 1 : 0);
+  const containerRef = useRef(null);
+  const pillRef = useRef(null);
+  const buttonRefs = useRef([]);
+
+  // Find active index in primary items
+  const activeIdx = items.findIndex(({ name }) => name === currentPage);
+
+  // Slide pill to active button
+  useEffect(() => {
+    const container = containerRef.current;
+    const pill = pillRef.current;
+    if (!container || !pill) return;
+    const targetBtn = buttonRefs.current[activeIdx >= 0 ? activeIdx : -1];
+    if (!targetBtn) {
+      pill.style.opacity = '0';
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const btnRect = targetBtn.getBoundingClientRect();
+    pill.style.opacity = '1';
+    pill.style.width = `${btnRect.width}px`;
+    pill.style.height = `${btnRect.height}px`;
+    pill.style.transform = `translateX(${btnRect.left - containerRect.left}px)`;
+  }, [currentPage, activeIdx]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative flex gap-1"
+      style={{ display: 'grid', gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}
+    >
+      {/* Sliding pill */}
+      <div
+        ref={pillRef}
+        className="absolute top-0 left-0 rounded-2xl pointer-events-none"
+        style={{
+          background: '#0f172a',
+          boxShadow: '0 8px 20px -8px rgba(15,23,42,0.8)',
+          opacity: 0,
+          transition: 'transform 0.36s cubic-bezier(0.34,1.56,0.64,1), width 0.2s, height 0.2s, opacity 0.2s',
+          zIndex: 0,
+        }}
+      />
+
+      {/* Nav buttons */}
+      {items.map(({ name, icon: Icon }, idx) => {
+        const isActive = currentPage === name;
+        const isBlocked = isSuspended && name !== 'Settings';
+        return (
+          <button
+            key={`mobile-${name}`}
+            ref={el => { buttonRefs.current[idx] = el; }}
+            onClick={() => onNav(name)}
+            disabled={isBlocked}
+            className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-colors duration-200 ${
+              isActive ? 'text-white' : 'text-slate-500 hover:text-slate-700'
+            } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
+          >
+            <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
+            <span className={`text-[10px] font-bold leading-none tracking-[0.01em] transition-all duration-200 ${isActive ? 'scale-105' : ''}`}>{name}</span>
+          </button>
+        );
+      })}
+
+      {/* More button */}
+      {moreItems.length > 0 && (
+        <button
+          onClick={onMoreToggle}
+          className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-colors duration-200 ${
+            isMoreActive || showMobileMoreNav ? 'text-indigo-700 bg-indigo-50' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <MoreHorizontal size={17} strokeWidth={2} />
+          <span className="text-[10px] font-bold leading-none tracking-[0.01em]">More</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -1032,44 +1116,17 @@ function App() {
 
         <nav className="fixed inset-x-0 bottom-0 md:hidden z-[120] px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)]">
           <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
-            <div
-              className="grid gap-1"
-              style={{ gridTemplateColumns: `repeat(${mobilePrimaryNavItems.length + (mobileMoreNavItems.length > 0 ? 1 : 0)}, minmax(0, 1fr))` }}
-            >
-              {mobilePrimaryNavItems.map(({ name, icon: Icon }) => {
-                const isActive = currentPage === name;
-                const isBlocked = isSuspended && name !== 'Settings';
-                return (
-                  <button
-                    key={`mobile-${name}`}
-                    onClick={() => handleSidebarNav(name)}
-                    disabled={isBlocked}
-                    className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-all ${
-                      isActive
-                        ? 'bg-slate-900 text-white shadow-[0_8px_18px_-10px_rgba(15,23,42,0.85)]'
-                        : 'text-slate-500 hover:bg-slate-100/75'
-                    } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  >
-                    <Icon size={16} />
-                    <span className="text-[10px] font-bold leading-none tracking-[0.01em]">{name}</span>
-                  </button>
-                );
-              })}
-
-              {mobileMoreNavItems.length > 0 && (
-                <button
-                  onClick={() => setShowMobileMoreNav((prev) => !prev)}
-                  className={`flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-all ${
-                    isMoreActive || showMobileMoreNav
-                      ? 'bg-indigo-50 text-indigo-700'
-                      : 'text-slate-500 hover:bg-slate-100/75'
-                  }`}
-                >
-                  <MoreHorizontal size={17} />
-                  <span className="text-[10px] font-bold leading-none tracking-[0.01em]">More</span>
-                </button>
-              )}
-            </div>
+            {/* iOS-style sliding indicator nav */}
+            <MobileNav
+              items={mobilePrimaryNavItems}
+              moreItems={mobileMoreNavItems}
+              currentPage={currentPage}
+              isMoreActive={isMoreActive}
+              showMobileMoreNav={showMobileMoreNav}
+              isSuspended={isSuspended}
+              onNav={handleSidebarNav}
+              onMoreToggle={() => setShowMobileMoreNav((prev) => !prev)}
+            />
           </div>
         </nav>
       </div>

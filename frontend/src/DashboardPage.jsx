@@ -10,6 +10,30 @@ import {
   Bot, Play // <-- 🚨 ADDED ICONS
 } from 'lucide-react';
 
+// ─── Count-Up Hook ─────────────────────────────────────────────────────────────
+function useCountUp(target, duration = 900) {
+  const [display, setDisplay] = useState(0);
+  const rafRef = useRef(null);
+  const prevTarget = useRef(null);
+  useEffect(() => {
+    const end = Number(target) || 0;
+    if (prevTarget.current === end) return;
+    prevTarget.current = end;
+    const begin = display;
+    const startTime = performance.now();
+    const tick = (now) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(begin + (end - begin) * eased));
+      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+  return display;
+}
+
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {
     if (window.Razorpay) return resolve(true);
@@ -131,7 +155,19 @@ const Card = ({ children, className = '', style = {} }) => (
   </div>
 );
 
-const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onClick, tag }) => (
+const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onClick, tag }) => {
+  // Detect prefix/suffix and animate the numeric part
+  const strVal = String(value ?? '');
+  const prefix = strVal.startsWith('₹') ? '₹' : '';
+  const suffix = strVal.endsWith('%') ? '%' : '';
+  const rawNum = parseFloat(strVal.replace(/[₹%,]/g, ''));
+  const isNumeric = !Number.isNaN(rawNum);
+  const animated = useCountUp(isNumeric ? rawNum : 0);
+  const displayVal = isNumeric
+    ? `${prefix}${animated.toLocaleString()}${suffix}`
+    : strVal;
+
+  return (
   <div
     onClick={onClick}
     className={`group relative overflow-hidden bg-white/85 backdrop-blur-sm rounded-[20px] sm:rounded-[24px] border border-white/60 p-4 sm:p-5 flex flex-col justify-between shadow-[0_2px_16px_rgba(0,0,0,0.04)] hover:shadow-[0_10px_36px_rgba(0,0,0,0.09)] hover:-translate-y-1 transition-all duration-300 ${onClick ? 'cursor-pointer' : ''}`}
@@ -158,11 +194,12 @@ const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onClick, t
       {tag && (
         <span className="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-500 mb-1.5">{tag}</span>
       )}
-      <h3 className="text-[23px] sm:text-[26px] font-black text-slate-900 tracking-tight leading-none">{value}</h3>
+      <h3 className="text-[23px] sm:text-[26px] font-black text-slate-900 tracking-tight leading-none">{displayVal}</h3>
       <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-1.5">{title}</p>
     </div>
   </div>
-);
+  );
+};
 
 const getGreeting = () => {
   const h = new Date().getHours();
@@ -259,6 +296,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [previewUrl, setPreviewUrl] = useState(null);
   const [addSelectedPlanId, setAddSelectedPlanId] = useState('');
   const [selectedMemberForPay, setSelectedMemberForPay] = useState('');
+  const [payMemberSearch, setPayMemberSearch] = useState('');
+  const [payMemberDropdownOpen, setPayMemberDropdownOpen] = useState(false);
   const [selectedPlanForPay, setSelectedPlanForPay] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
@@ -1359,46 +1398,49 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* ════════════════════════════════════════
           FLOATING ACTION BAR
       ════════════════════════════════════════ */}
-      <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1rem)] max-w-[560px] md:w-auto">
+      <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1.5rem)] max-w-[520px]">
         <div
-          className="rounded-[24px] md:rounded-full border border-white/10 backdrop-blur-xl p-1.5 md:p-2"
+          className="rounded-[22px] border border-white/8 backdrop-blur-2xl p-1.5"
           style={{
-            background: 'rgba(15, 15, 35, 0.92)',
-            boxShadow: '0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.05)'
+            background: 'rgba(10, 12, 30, 0.94)',
+            boxShadow: '0 8px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.07)'
           }}
         >
-          <div className="grid grid-cols-4 gap-1 md:flex md:items-center md:gap-0.5">
-          <button id="btn-add-member" onClick={() => setShowAddModal(true)}
-            className="flex flex-col md:flex-row items-center justify-center gap-1.5 md:gap-2 px-2 md:px-5 py-2 md:py-2.5 rounded-xl md:rounded-full text-white transition-all duration-200 group hover:bg-emerald-500/15 active:scale-95">
-            <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center group-hover:scale-110 group-hover:rotate-90 transition-all duration-300"
-              style={{ boxShadow: '0 0 12px rgba(16,185,129,0.5)' }}>
-              <Plus size={14} strokeWidth={3} className="text-white" />
-            </div>
-            <span className="text-[10px] md:text-sm font-bold leading-tight text-center">Add Member</span>
-          </button>
-
-      <button onClick={() => setShowPaymentModal(true)}
-            className="px-2 md:px-4 py-2 md:py-2.5 text-slate-300 hover:text-white hover:bg-indigo-500/15 rounded-xl md:rounded-full text-[10px] md:text-sm font-bold transition-all flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 group">
-            <RefreshCw size={15} className="group-hover:scale-110 transition-transform" />
-            <span className="leading-tight">Renew</span>
-          </button>
-
-          <button onClick={() => setShowBroadcastModal(true)}
-            className="px-2 md:px-4 py-2 md:py-2.5 text-slate-300 hover:text-white hover:bg-emerald-500/15 rounded-xl md:rounded-full text-[10px] md:text-sm font-bold transition-all flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 group">
-            <MessageSquare size={15} className="group-hover:scale-110 transition-transform" />
-            <span className="leading-tight">Broadcast</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setCheckinQuery('');
-              setShowCheckinModal(true);
-            }}
-            className="px-2 md:px-4 py-2 md:py-2.5 text-slate-300 hover:text-white hover:bg-sky-500/15 rounded-xl md:rounded-full text-[10px] md:text-sm font-bold transition-all flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 active:scale-95 group"
-          >
-            <CheckCircle size={15} className="group-hover:scale-110 transition-transform" />
-            <span className="leading-tight">Check In</span>
-          </button>
+          <div className="grid grid-cols-4 gap-1">
+          {[
+            { id: 'btn-add-member', label: 'Add Member', icon: <UserPlus size={16} strokeWidth={2.5} />, color: 'emerald', onClick: () => setShowAddModal(true) },
+            { label: 'Renew', icon: <RefreshCw size={15} strokeWidth={2.5} />, color: 'indigo', onClick: () => setShowPaymentModal(true) },
+            { label: 'Broadcast', icon: <MessageSquare size={15} strokeWidth={2.5} />, color: 'violet', onClick: () => setShowBroadcastModal(true) },
+            { label: 'Check In', icon: <CheckCircle size={15} strokeWidth={2.5} />, color: 'sky', onClick: () => { setCheckinQuery(''); setShowCheckinModal(true); } },
+          ].map(({ id, label, icon, color, onClick: onBtnClick }) => {
+            const colors = {
+              emerald: 'hover:bg-emerald-500/18 active:bg-emerald-500/28 text-emerald-400',
+              indigo:  'hover:bg-indigo-500/18 active:bg-indigo-500/28 text-indigo-400',
+              violet:  'hover:bg-violet-500/18 active:bg-violet-500/28 text-violet-400',
+              sky:     'hover:bg-sky-500/18 active:bg-sky-500/28 text-sky-400',
+            }[color];
+            const glows = {
+              emerald: '0 0 14px rgba(16,185,129,0.6)',
+              indigo:  '0 0 14px rgba(99,102,241,0.6)',
+              violet:  '0 0 14px rgba(139,92,246,0.6)',
+              sky:     '0 0 14px rgba(14,165,233,0.6)',
+            }[color];
+            return (
+              <button
+                key={label}
+                id={id}
+                onClick={onBtnClick}
+                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] text-white/70 transition-all duration-150 active:scale-[0.93] ${colors}`}
+              >
+                <div className="transition-all duration-200 group-active:scale-90" style={{ filter: 'drop-shadow(0 0 0px transparent)', transition: 'filter 0.2s' }}
+                  onMouseEnter={e => { e.currentTarget.style.filter = `drop-shadow(${glows})`; }}
+                  onMouseLeave={e => { e.currentTarget.style.filter = ''; }}>
+                  {icon}
+                </div>
+                <span className="text-[10px] font-bold leading-none tracking-wide text-slate-400">{label}</span>
+              </button>
+            );
+          })}
           </div>
         </div>
       </div>
@@ -1546,20 +1588,115 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 </div>
                 <h2 className="text-lg font-black text-slate-900">Record Payment</h2>
               </div>
-              <button onClick={() => setShowPaymentModal(false)}
+              <button onClick={() => { setShowPaymentModal(false); setPayMemberSearch(''); setPayMemberDropdownOpen(false); }}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
                 <X size={16} className="text-slate-500" />
               </button>
             </div>
             <form onSubmit={handlePayment} className="p-6 space-y-4 overflow-y-auto flex-1">
+              {/* Searchable member picker */}
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Member</label>
-                <select required
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                  value={selectedMemberForPay} onChange={e => setSelectedMemberForPay(e.target.value)}>
-                  <option value="">Choose a member...</option>
-                  {members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.phone})</option>)}
-                </select>
+                <div className="relative">
+                  {/* Show selected member chip or search input */}
+                  {selectedMemberForPay ? (
+                    <div className="flex items-center gap-2 px-3 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
+                      {(() => {
+                        const m = members.find(x => String(x.id) === String(selectedMemberForPay));
+                        const status = String(m?.membership_status || '').toUpperCase();
+                        const badge = status === 'EXPIRED' ? 'text-rose-600 bg-rose-50' : status === 'ACTIVE' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50';
+                        return (
+                          <>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-black text-slate-900 truncate">{m?.full_name}</p>
+                              <p className="text-[10px] text-slate-500 font-semibold truncate">{m?.phone}</p>
+                            </div>
+                            <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0 ${badge}`}>{status || 'UNPAID'}</span>
+                            <button type="button" onClick={() => { setSelectedMemberForPay(''); setPayMemberSearch(''); setPayMemberDropdownOpen(false); }}
+                              className="w-6 h-6 rounded-full bg-slate-200 hover:bg-rose-100 flex items-center justify-center shrink-0 transition-colors">
+                              <X size={12} />
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search by name or phone..."
+                        value={payMemberSearch}
+                        onChange={e => { setPayMemberSearch(e.target.value); setPayMemberDropdownOpen(true); }}
+                        onFocus={() => setPayMemberDropdownOpen(true)}
+                        className="w-full px-4 py-2.5 pl-9 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      />
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dropdown */}
+                  {payMemberDropdownOpen && !selectedMemberForPay && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200 shadow-2xl z-[300] overflow-hidden">
+                      {/* Filter tabs */}
+                      <div className="flex gap-0 border-b border-slate-100">
+                        {['All', 'Expired', 'Unpaid'].map(tab => (
+                          <button key={tab} type="button"
+                            onClick={() => setPayMemberSearch(tab === 'All' ? '' : tab.toLowerCase())}
+                            className="flex-1 py-2 text-[10px] font-black uppercase tracking-wider text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                            {tab}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="max-h-[200px] overflow-y-auto">
+                        {(() => {
+                          const q = payMemberSearch.toLowerCase();
+                          const filtered = members
+                            .filter(m => {
+                              const name = (m.full_name || '').toLowerCase();
+                              const phone = (m.phone || '').toLowerCase();
+                              const status = (m.membership_status || '').toLowerCase();
+                              if (!q) return true;
+                              if (q === 'expired') return status === 'expired';
+                              if (q === 'unpaid') return status !== 'active';
+                              return name.includes(q) || phone.includes(q);
+                            })
+                            .sort((a, b) => {
+                              // Expired/unpaid first
+                              const priority = s => s === 'expired' ? 0 : s === 'active' ? 2 : 1;
+                              const pa = priority((a.membership_status || '').toLowerCase());
+                              const pb = priority((b.membership_status || '').toLowerCase());
+                              return pa - pb || (a.full_name || '').localeCompare(b.full_name || '');
+                            });
+                          if (!filtered.length) return <div className="py-6 text-center text-sm text-slate-400 font-semibold">No members found</div>;
+                          return filtered.map(m => {
+                            const status = String(m.membership_status || '').toUpperCase();
+                            const badge = status === 'EXPIRED' ? 'text-rose-600 bg-rose-50' : status === 'ACTIVE' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50';
+                            return (
+                              <button key={m.id} type="button"
+                                onClick={() => { setSelectedMemberForPay(String(m.id)); setPayMemberSearch(''); setPayMemberDropdownOpen(false); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors text-left border-b border-slate-50 last:border-0">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-black shrink-0">
+                                  {(m.full_name || '?').charAt(0).toUpperCase()}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-black text-slate-900 truncate">{m.full_name}</p>
+                                  <p className="text-[10px] text-slate-500 font-semibold">{m.phone}</p>
+                                </div>
+                                <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0 ${badge}`}>{status || 'UNPAID'}</span>
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                  {/* Click-outside to close */}
+                  {payMemberDropdownOpen && !selectedMemberForPay && (
+                    <div className="fixed inset-0 z-[299]" onClick={() => setPayMemberDropdownOpen(false)} />
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Plan</label>

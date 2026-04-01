@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -20,6 +20,30 @@ const extractArray = (value, keys = []) => {
   return [];
 };
 
+// ─── Count-Up Hook ─────────────────────────────────────────────────────────────
+function useCountUp(target, duration = 900) {
+  const [display, setDisplay] = useState(0);
+  const rafRef = useRef(null);
+  const prevTarget = useRef(null);
+  useEffect(() => {
+    const end = Number(target) || 0;
+    if (prevTarget.current === end) return;
+    prevTarget.current = end;
+    const begin = display;
+    const startTime = performance.now();
+    const tick = (now) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(begin + (end - begin) * eased));
+      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+  return display;
+}
+
 // --- UTILITY COMPONENTS ---
 
 const Card = ({ children, className = "" }) => (
@@ -28,7 +52,15 @@ const Card = ({ children, className = "" }) => (
   </div>
 );
 
-const KPICard = ({ title, value, change, trend, icon: Icon, color, className = '' }) => (
+const KPICard = ({ title, value, change, trend, icon: Icon, color, className = '' }) => {
+  const strVal = String(value ?? '');
+  const prefix = strVal.startsWith('₹') ? '₹' : '';
+  const suffix = strVal.endsWith('%') ? '%' : '';
+  const rawNum = parseFloat(strVal.replace(/[₹%,]/g, ''));
+  const isNumeric = !Number.isNaN(rawNum);
+  const animated = useCountUp(isNumeric ? rawNum : 0);
+  const displayVal = isNumeric ? `${prefix}${animated.toLocaleString()}${suffix}` : strVal;
+  return (
   <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col justify-between hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${className}`}>
     <div className="flex justify-between items-start mb-4">
       <div className={`p-3 rounded-xl ${color} bg-opacity-10 text-opacity-100`}>
@@ -43,10 +75,11 @@ const KPICard = ({ title, value, change, trend, icon: Icon, color, className = '
     </div>
     <div>
       <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">{title}</p>
-      <h3 className="text-2xl font-black text-slate-900">{value}</h3>
+      <h3 className="text-2xl font-black text-slate-900">{displayVal}</h3>
     </div>
   </div>
-);
+  );
+};
 
 const formatHour = (h) => {
   if (h === 0) return '12AM';

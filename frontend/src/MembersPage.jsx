@@ -287,6 +287,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       const res = await axios.get(url, { headers: { 'x-auth-token': token } });
       const normalizedMembers = extractArray(res.data, ['members', 'rows', 'items']).map(normalizeMemberRecord);
       setMembers(normalizedMembers);
+      // Sync selectedMember so photo & data stay fresh after any upload/edit
+      setSelectedMember(prev => {
+        if (!prev) return prev;
+        const fresh = normalizedMembers.find(m => m.id === prev.id);
+        return fresh || prev;
+      });
     } catch (err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
   };
 

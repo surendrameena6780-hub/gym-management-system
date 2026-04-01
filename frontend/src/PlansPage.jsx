@@ -159,7 +159,12 @@ const PlansPage = ({ token, toast, showConfirm }) => {
 
   return (
     <div className="min-h-full p-2 font-sans relative">
-
+      <style>{`
+        @keyframes planCardIn {
+          from { opacity: 0; transform: translateY(20px) scale(0.96); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-5 sm:p-6 lg:p-8"
         style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
 
@@ -197,7 +202,8 @@ const PlansPage = ({ token, toast, showConfirm }) => {
             : plan.price;
 
           return (
-            <div key={plan.id} className="group relative bg-white rounded-[32px] p-5 sm:p-8 border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 flex flex-col">
+            <div key={plan.id} className="group relative bg-white rounded-[32px] p-5 sm:p-8 border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 flex flex-col"
+              style={{ opacity: 0, animation: `planCardIn 0.5s cubic-bezier(0.16,1,0.3,1) ${plans.indexOf(plan) * 80}ms forwards` }}>
               
               {/* Analytics Button (Top Right) */}
               <button 
