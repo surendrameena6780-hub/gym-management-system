@@ -63,6 +63,34 @@ axios.interceptors.response.use((response) => {
   return Promise.reject(error)
 })
 
+if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
+  window.__gymvaultViewportSyncInstalled = true
+
+  const syncViewportVariables = () => {
+    const viewport = window.visualViewport
+    const nextHeight = Math.round(viewport?.height || window.innerHeight || 0)
+
+    if (nextHeight > 0) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${nextHeight}px`)
+    }
+  }
+
+  let rafId = 0
+  const queueViewportSync = () => {
+    if (rafId) return
+    rafId = window.requestAnimationFrame(() => {
+      rafId = 0
+      syncViewportVariables()
+    })
+  }
+
+  syncViewportVariables()
+  window.addEventListener('resize', queueViewportSync, { passive: true })
+  window.addEventListener('orientationchange', queueViewportSync, { passive: true })
+  window.visualViewport?.addEventListener('resize', queueViewportSync, { passive: true })
+  window.visualViewport?.addEventListener('scroll', queueViewportSync, { passive: true })
+}
+
 if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
   window.__gymvaultTouchGuardsInstalled = true
 

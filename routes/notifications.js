@@ -281,7 +281,7 @@ router.put('/read-all', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 4. SEGMENT PREVIEW (automation pipeline) ---
-router.get('/campaign/segments', auth, saasMiddleware, async (req, res) => {
+router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
         const segment = String(req.query.segment || 'ALL').toUpperCase();
@@ -510,7 +510,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
 });
 
 // --- 6. CAMPAIGN HISTORY LOG ---
-router.get('/campaign/logs', auth, saasMiddleware, async (req, res) => {
+router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20', 10)));
@@ -531,7 +531,7 @@ router.get('/campaign/logs', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 7. DEEPER CHURN SCORES ---
-router.get('/campaign/churn-scores', auth, saasMiddleware, async (req, res) => {
+router.get('/campaign/churn-scores', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
         const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)));

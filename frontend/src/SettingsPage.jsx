@@ -7,8 +7,9 @@ import {
   CheckCircle, Plus, Download, Smartphone, Monitor, Globe,
   Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
   RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
-  MessageSquare, Send, ChevronDown
+  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft
 } from 'lucide-react';
+import { normalizeProfileImageUrl } from './utils/profileImage';
 
 const TABS = [
   { id: 'account', label: 'Account & Business', icon: User, group: 'Personal & Business' },
@@ -23,6 +24,13 @@ const TABS = [
   { id: 'reports', label: 'Report Settings', icon: FileText, group: 'Advanced' },
   { id: 'danger', label: 'Danger Zone', icon: AlertOctagon, group: 'Danger' },
 ];
+
+const SETTINGS_GROUPS = ['Personal & Business', 'System', 'Customization', 'Advanced', 'Danger'];
+
+const normalizeSettingsTab = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return TABS.some((tab) => tab.id === normalized) ? normalized : 'account';
+};
 
 const SAAS_PLANS = {
   monthly: [
@@ -68,20 +76,26 @@ const loadRazorpayScript = () => {
     });
 };
 
-const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim();
-
 // ðŸš¨ FIX: Added defaultTab to the props here!
   const SettingsPage = ({ toast, token, defaultTab }) => { 
     const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
   
-  // ðŸš¨ FIX: Made it fallback to lowercase 'account' to match your TABS array
-  const [activeTab, setActiveTab] = useState(defaultTab ? defaultTab.toLowerCase() : 'account');
+  const [activeTab, setActiveTab] = useState(() => normalizeSettingsTab(defaultTab));
+  const [mobileMenuVisible, setMobileMenuVisible] = useState(() => {
+    const normalized = String(defaultTab || '').trim().toLowerCase();
+    return !normalized || normalized === 'menu';
+  });
+  const activeTabMeta = TABS.find((tab) => tab.id === activeTab) || TABS[0];
 
   useEffect(() => {
-      if (defaultTab) {
-          // ðŸš¨ FIX: Force lowercase so 'Billing' successfully matches 'billing'
-          setActiveTab(defaultTab.toLowerCase());
+      const normalized = String(defaultTab || '').trim().toLowerCase();
+      if (!normalized || normalized === 'menu') {
+          setMobileMenuVisible(true);
+          return;
       }
+
+      setActiveTab(normalizeSettingsTab(defaultTab));
+      setMobileMenuVisible(false);
   }, [defaultTab]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -185,7 +199,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
             phone: res.data.account.phone || prev.phone
           }));
           if (res.data.account.profile_pic) {
-              setPreviewUrl(`${apiOrigin}${res.data.account.profile_pic}`);
+              setPreviewUrl(normalizeProfileImageUrl(res.data.account.profile_pic));
           }
       }
 
@@ -510,8 +524,19 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
   useEffect(() => {
       if (isLockedOut && activeTab !== 'billing') {
           setActiveTab('billing');
+          setMobileMenuVisible(false);
       }
   }, [isLockedOut, activeTab]);
+
+  const groupedTabs = SETTINGS_GROUPS.map((group) => ({
+    group,
+    items: TABS.filter((tab) => tab.group === group),
+  }));
+
+  const openTab = (tabId) => {
+    setActiveTab(tabId);
+    setMobileMenuVisible(false);
+  };
 
   const generateSaaSInvoice = (invoice) => {
     if (!invoice) return;
@@ -737,14 +762,14 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
   if (isLoading) return <div className="p-10 text-center font-bold text-slate-400 animate-pulse">Loading Configurations...</div>;
 
   return (
-    <div className="flex flex-col md:flex-row gap-6 md:h-[calc(100vh-100px)]">
+    <div className="flex flex-col md:flex-row gap-4 md:gap-6 md:min-h-[calc(var(--app-viewport-height)-7rem)]">
       
       {/* SIDEBAR NAVIGATION */}
-      <div className="w-full md:w-64 flex-shrink-0 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar pb-10">
-        {['Personal & Business', 'System', 'Customization', 'Advanced', 'Danger'].map(group => (
+      <div className={`w-full md:w-64 flex-shrink-0 ${mobileMenuVisible ? 'flex' : 'hidden'} md:flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar pb-10`}>
+        {groupedTabs.map(({ group, items }) => (
           <div key={group} className="flex flex-col gap-1">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3 mb-1">{group}</p>
-            {TABS.filter(t => t.group === group).map(tab => {
+            {items.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               const isDanger = tab.id === 'danger';
@@ -754,7 +779,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                 <button
                   key={tab.id}
                   disabled={isTabDisabled}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => openTab(tab.id)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
                     isTabDisabled ? 'opacity-50 cursor-not-allowed grayscale' : ''
                   } ${
@@ -766,6 +791,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                   <Icon size={16} />
                   {tab.label}
                   {isTabDisabled && <Lock size={12} className="ml-auto opacity-50" />}
+                  {!isTabDisabled && <ChevronRight size={14} className="ml-auto opacity-45 md:hidden" />}
                 </button>
               );
             })}
@@ -773,8 +799,21 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
         ))}
       </div>
 
-      <div className="flex-1 bg-white/80 backdrop-blur-xl border border-white/60 rounded-[28px] shadow-sm overflow-y-auto relative custom-scrollbar">
-        <div className="max-w-4xl p-8 mb-10 mx-auto">
+      <div className={`${mobileMenuVisible ? 'hidden' : 'block'} md:block flex-1 bg-white/80 backdrop-blur-xl border border-white/60 rounded-[28px] shadow-sm overflow-y-auto relative custom-scrollbar`}>
+        <div className="sticky top-0 z-20 md:hidden flex items-center gap-3 px-4 py-4 border-b border-slate-100 bg-white/95 backdrop-blur-xl">
+          <button
+            type="button"
+            onClick={() => setMobileMenuVisible(true)}
+            className="w-10 h-10 rounded-2xl border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-all"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Settings</p>
+            <h2 className="text-base font-black text-slate-900 truncate">{activeTabMeta.label}</h2>
+          </div>
+        </div>
+        <div className="max-w-4xl p-5 sm:p-8 mb-10 mx-auto">
           
           {activeTab === 'account' && (
             <div className="animate-in fade-in duration-300">
@@ -896,7 +935,8 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
               </div>
               
               <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white max-w-5xl">
-                <table className="w-full text-left text-sm">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] text-left text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                     <tr><th className="px-6 py-4">Name</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Reset Password</th><th className="px-6 py-4 text-right">Actions</th></tr>
                   </thead>
@@ -970,6 +1010,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                     )}
                   </tbody>
                 </table>
+                  </div>
               </div>
             </div>
           )}
@@ -1563,11 +1604,11 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
               <p className="text-sm font-medium text-slate-500 mb-8">Export your data anytime. You own your data.</p>
               
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Members List</h3><p className="text-xs text-slate-500 mt-1">Download a full CSV of all active, expired, and unpaid members.</p></div>
                   <button className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
-                <div className="flex items-center justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Payment History</h3><p className="text-xs text-slate-500 mt-1">Download all financial transactions for accounting purposes.</p></div>
                   <button className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
@@ -1603,7 +1644,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
               <p className="text-sm font-medium text-slate-500 mb-8">Configure how GymVault behaves for your region.</p>
               
               <form onSubmit={handlePreferencesSave} className="space-y-6 max-w-3xl">
-                <div className="grid grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Currency Symbol</label>
                     <select value={gymData.currency} onChange={e => setGymData({...gymData, currency: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">

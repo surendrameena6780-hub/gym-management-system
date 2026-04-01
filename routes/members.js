@@ -3,10 +3,12 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
-const multer = require('multer');
-const path = require('path');
-const crypto = require('crypto');
-const fs = require('fs');
+const { requirePermission } = require('../middleware/rbac');
+const {
+    createProfileUploadMiddleware,
+    cleanupUploadedFile,
+    resolveStoredProfileImagePath,
+} = require('../utils/profileUploads');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -14,68 +16,33 @@ const getGymIdFromRequest = (req) => {
     return Number.isInteger(gymId) ? gymId : null;
 };
 
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-        const uploadPath = path.join(__dirname, '..', 'uploads', 'profiles');
-        try {
-            fs.mkdirSync(uploadPath, { recursive: true });
-            cb(null, uploadPath);
-        } catch (err) {
-            cb(err);
-        }
-    },
-    filename: (req, file, cb) => {
-        const gymId = getGymIdFromRequest(req) || 'unknown';
-        cb(null, `member-${gymId}-${crypto.randomBytes(12).toString('hex')}${path.extname(file.originalname).toLowerCase()}`);
-    }
+const uploadProfilePic = createProfileUploadMiddleware({
+    prefix: 'member',
+    getActorId: (req) => req.params.id || req.user?.id || 'member',
+    storageMode: 'inline',
 });
 
-const allowedImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
-
-const upload = multer({
-    storage,
-    limits: { fileSize: 2 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        if (!allowedImageMimeTypes.has(file.mimetype)) {
-            return cb(new Error('Only JPG, JPEG, PNG, and WEBP files are allowed'));
-        }
-        cb(null, true);
-    }
-});
-
-const uploadProfilePic = (req, res, next) => {
-    upload.single('profile_pic')(req, res, (err) => {
-        if (!err) return next();
-
-        if (err instanceof multer.MulterError) {
-            if (err.code === 'LIMIT_FILE_SIZE') {
-                return res.status(400).json({ error: 'Image too large. Max size is 2MB.' });
-            }
-            return res.status(400).json({ error: err.message || 'Invalid image upload.' });
-        }
-
-        const msg = String(err.message || '');
-        if (msg.includes('Only JPG') || msg.includes('Unexpected end of form') || msg.includes('Multipart')) {
-            return res.status(400).json({ error: 'Invalid image upload payload. Please reselect image and try again.' });
-        }
-
-        if (['ENOENT', 'EACCES', 'EPERM'].includes(err.code)) {
-            return res.status(500).json({ error: 'Unable to store uploaded image on server.' });
-        }
-
-        return res.status(500).json({ error: 'Image upload failed.' });
-    });
+const discardUploadedProfile = async (req) => {
+    await cleanupUploadedFile(req?.file);
 };
 
 const buildPicUrl = (filename) => {
     return `/uploads/profiles/${filename}`;
 };
 
+const getStoredProfileValue = (file) => {
+    if (!file) return null;
+    if (typeof file.inlineDataUrl === 'string' && file.inlineDataUrl) {
+        return file.inlineDataUrl;
+    }
+    return buildPicUrl(file.filename);
+};
+
 const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
 const isValidPhone = (value) => /^\d{10}$/.test(value);
 
 // --- 1. GET ALL MEMBERS ---
-router.get('/', auth, saasMiddleware, async (req, res) => {
+router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const page = Math.max(parseInt(req.query.page || '1', 10), 1);
@@ -191,7 +158,7 @@ router.get('/', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 2. GET SINGLE MEMBER ---
-router.get('/:id', auth, saasMiddleware, async (req, res) => {
+router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const result = await pool.query(`
@@ -233,7 +200,7 @@ router.get('/:id', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 3. ADD MEMBER ---
-router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
+router.post('/add', auth, saasMiddleware, requirePermission('members:write'), uploadProfilePic, async (req, res) => {
     try {
         const payload = req.body && typeof req.body === 'object' ? req.body : {};
         const full_name = payload.full_name;
@@ -245,22 +212,26 @@ router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => 
         const normalizedEmail = String(email || '').trim().toLowerCase();
 
         if (!gym_id) {
+            await discardUploadedProfile(req);
             return res.status(401).json({ error: 'Invalid session. Please login again.' });
         }
         if (!normalizedName || !normalizedEmail || !normalizedPhone) {
+            await discardUploadedProfile(req);
             return res.status(400).json({ error: 'full_name, email and phone are required.' });
         }
         if (!isValidPhone(normalizedPhone)) {
+            await discardUploadedProfile(req);
             return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
         }
 
-        const profile_pic = req.file ? buildPicUrl(req.file.filename) : null;
+        const profile_pic = getStoredProfileValue(req.file);
 
         const existingPhone = await pool.query(
             'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND deleted_at IS NULL LIMIT 1',
             [gym_id, normalizedPhone]
         );
         if (existingPhone.rows.length > 0) {
+            await discardUploadedProfile(req);
             return res.status(400).json({ error: 'This phone is already registered in your gym.' });
         }
 
@@ -274,12 +245,7 @@ router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => 
         res.json(newMember.rows[0]);
     } catch (err) {
         console.error("ADD MEMBER ERROR:", err.message);
-        if (err instanceof multer.MulterError) {
-            return res.status(400).json({ error: 'Image too large. Max size is 2MB.' });
-        }
-        if (err.message && err.message.includes('Only JPG')) {
-            return res.status(400).json({ error: err.message });
-        }
+        await discardUploadedProfile(req);
         if (err.code === '23505') {
             return res.status(400).json({ error: "This email or phone is already registered to another member." });
         }
@@ -288,7 +254,7 @@ router.post('/add', auth, saasMiddleware, uploadProfilePic, async (req, res) => 
 });
 
 // --- 4. UPDATE MEMBER ---
-router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
+router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), uploadProfilePic, async (req, res) => {
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
     const full_name = payload.full_name;
     const email = payload.email;
@@ -300,24 +266,29 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
     const memberId = Number.parseInt(req.params.id, 10);
 
     if (!gym_id) {
+        await discardUploadedProfile(req);
         return res.status(401).json({ error: 'Invalid session. Please login again.' });
     }
     if (!Number.isInteger(memberId)) {
+        await discardUploadedProfile(req);
         return res.status(400).json({ error: 'Invalid member id.' });
     }
     if (!normalizedName || !normalizedEmail || !normalizedPhone) {
+        await discardUploadedProfile(req);
         return res.status(400).json({ error: 'full_name, email and phone are required.' });
     }
     if (!isValidPhone(normalizedPhone)) {
+        await discardUploadedProfile(req);
         return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
     }
 
     try {
         const currentMemberResult = await pool.query(
-            'SELECT id, email, phone FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+            'SELECT id, email, phone, profile_pic FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
             [memberId, gym_id]
         );
         if (currentMemberResult.rows.length === 0) {
+            await discardUploadedProfile(req);
             return res.status(404).json({ error: 'Member not found.' });
         }
 
@@ -331,6 +302,7 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
                 [gym_id, normalizedPhone, memberId]
             );
             if (existingPhone.rows.length > 0) {
+                await discardUploadedProfile(req);
                 return res.status(400).json({ error: 'This phone is already registered in your gym.' });
             }
         }
@@ -341,18 +313,25 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
                 [gym_id, normalizedEmail, memberId]
             );
             if (existingEmail.rows.length > 0) {
+                await discardUploadedProfile(req);
                 return res.status(400).json({ error: 'This email is already registered in your gym.' });
             }
         }
 
         if (req.file) {
-            const profile_pic = buildPicUrl(req.file.filename);
+            const profile_pic = getStoredProfileValue(req.file);
             const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3, profile_pic = $4 WHERE id = $5 AND gym_id = $6 AND deleted_at IS NULL",
                 [normalizedName, normalizedEmail, normalizedPhone, profile_pic, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
+                await discardUploadedProfile(req);
                 return res.status(404).json({ error: 'Member not found.' });
+            }
+
+            const previousProfilePath = resolveStoredProfileImagePath(currentMember.profile_pic);
+            if (previousProfilePath && previousProfilePath !== req.file.path) {
+                await cleanupUploadedFile(previousProfilePath);
             }
         } else {
             const updateResult = await pool.query(
@@ -360,21 +339,14 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
                 [normalizedName, normalizedEmail, normalizedPhone, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
+                await discardUploadedProfile(req);
                 return res.status(404).json({ error: 'Member not found.' });
             }
         }
         res.json({ message: "Member updated" });
     } catch (err) {
         console.error("UPDATE MEMBER ERROR:", err.message);
-        if (err instanceof multer.MulterError) {
-            return res.status(400).json({ error: 'Image too large. Max size is 2MB.' });
-        }
-        if (err.message && err.message.includes('Only JPG')) {
-            return res.status(400).json({ error: err.message });
-        }
-        if (['ENOENT', 'EACCES', 'EPERM', 'EROFS'].includes(err.code)) {
-            return res.status(500).json({ error: 'Unable to store uploaded image on server.' });
-        }
+        await discardUploadedProfile(req);
         if (err.code === '23505') {
             const detail = String(err.detail || '').toLowerCase();
             if (detail.includes('(email)')) {
@@ -390,7 +362,7 @@ router.put('/:id', auth, saasMiddleware, uploadProfilePic, async (req, res) => {
 });
 
 // --- 5. MANUAL CHECK-IN ---
-router.put('/:id/check-in', auth, saasMiddleware, async (req, res) => {
+router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     const gym_id = req.user.gym_id;
     try {
         const member = await pool.query("SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL", [req.params.id, gym_id]);
@@ -412,7 +384,7 @@ router.put('/:id/check-in', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 6. DELETE MEMBER ---
-router.delete('/:id', auth, saasMiddleware, async (req, res) => {
+router.delete('/:id', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     const memberId = req.params.id;
     const gym_id = req.user.gym_id;
     try {

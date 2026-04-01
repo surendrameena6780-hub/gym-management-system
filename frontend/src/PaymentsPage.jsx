@@ -436,39 +436,51 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       </div>
 
       {/* STATS */}
-      <div className="grid grid-cols-2 gap-5">
-          <div className="relative overflow-hidden rounded-[20px] p-6 border col-span-2"
-            style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
-              <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.12)' }}>
-                <DollarSign size={20} className="text-emerald-600" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+          <div className="relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
+            style={{ gridColumn: '1 / -1', background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Total Revenue</p>
+                  <h3 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">₹{animatedTotalRevenue.toLocaleString()}</h3>
+                  <p className="text-emerald-600 text-xs font-bold mt-1.5">All time earnings</p>
+                </div>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: 'rgba(16,185,129,0.12)' }}>
+                  <DollarSign size={22} className="text-emerald-600" />
+                </div>
               </div>
-              <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Total Revenue</p>
-              <h3 className="text-3xl font-black text-slate-900">₹{animatedTotalRevenue.toLocaleString()}</h3>
-              <p className="text-emerald-600 text-xs font-bold mt-1.5">All time earnings</p>
           </div>
-          <div className="relative overflow-hidden rounded-[20px] p-6 border"
+          <div className="relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
             style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: 'rgba(59,130,246,0.15)', boxShadow: '0 4px 20px rgba(59,130,246,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 210ms forwards' }}>
-              <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(59,130,246,0.12)' }}>
-                <Clock size={20} className="text-blue-600" />
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-blue-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Collected Today</p>
+                  <h3 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">₹{animatedTodayRevenue.toLocaleString()}</h3>
+                  <p className="text-blue-600 text-xs font-bold mt-1.5">Today's collection</p>
+                </div>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: 'rgba(59,130,246,0.12)' }}>
+                  <Clock size={22} className="text-blue-600" />
+                </div>
               </div>
-              <p className="text-blue-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Collected Today</p>
-              <h3 className="text-2xl sm:text-3xl font-black text-slate-900">₹{animatedTodayRevenue.toLocaleString()}</h3>
-              <p className="text-blue-600 text-xs font-bold mt-1.5">Today's collection</p>
           </div>
-          <div className="relative overflow-hidden rounded-[20px] p-6 border"
+          <div className="relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
             style={{ background: 'linear-gradient(135deg, #fff7ed 0%, #fef9f0 100%)', borderColor: 'rgba(249,115,22,0.15)', boxShadow: '0 4px 20px rgba(249,115,22,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 300ms forwards' }}>
-              <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(249,115,22,0.12)' }}>
-                <AlertCircle size={20} className="text-orange-600" />
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 pr-2">
+                  <p className="text-orange-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Pending Dues</p>
+                  <h3 className="text-2xl sm:text-3xl font-black text-orange-500 tracking-tight">₹{animatedPendingDues.toLocaleString()}</h3>
+                  <p className="text-orange-500 text-xs font-bold mt-1.5">Awaiting payment</p>
+                </div>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: 'rgba(249,115,22,0.12)' }}>
+                  <AlertCircle size={22} className="text-orange-600" />
+                </div>
               </div>
-              <p className="text-orange-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Pending Dues</p>
-              <h3 className="text-2xl sm:text-3xl font-black text-orange-500">₹{animatedPendingDues.toLocaleString()}</h3>
-              <p className="text-orange-500 text-xs font-bold mt-1.5">Awaiting payment</p>
           </div>
       </div>
 
       {/* CHARTS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white/90 p-6 sm:p-8 rounded-[24px] border border-slate-100/60" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
+          <div className="lg:col-span-2 bg-white/90 p-5 sm:p-8 rounded-[24px] border border-slate-100/60" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
             <div>
               <h3 className="text-lg font-black text-slate-900">Collection Intelligence</h3>
@@ -479,18 +491,18 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
               <p className="text-sm font-black text-slate-900">{collectionIntelligence.dominantMode} · {collectionIntelligence.onlineShare}% digital</p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3 mb-5">
-            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 sm:p-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
+            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 sm:p-4 min-w-0">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Completed</p>
-              <p className="text-xl sm:text-2xl font-black text-slate-900">{collectionIntelligence.completedCount}</p>
+              <p className="text-[clamp(1.375rem,5vw,2rem)] font-black leading-none text-slate-900">{collectionIntelligence.completedCount}</p>
             </div>
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 sm:p-4">
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 sm:p-4 min-w-0">
               <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600/70 mb-1">Avg Ticket</p>
-              <p className="text-xl sm:text-2xl font-black text-emerald-600">₹{collectionIntelligence.averageTicket.toLocaleString()}</p>
+              <p className="text-[clamp(1.375rem,5vw,2rem)] font-black leading-none tracking-tight text-emerald-600">₹{collectionIntelligence.averageTicket.toLocaleString()}</p>
             </div>
-            <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-3 sm:p-4">
+            <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-3 sm:p-4 min-w-0 col-span-2 lg:col-span-1">
               <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600/70 mb-1">Digital Mix</p>
-              <p className="text-xl sm:text-2xl font-black text-indigo-600">{collectionIntelligence.onlineShare}%</p>
+              <p className="text-[clamp(1.375rem,5vw,2rem)] font-black leading-none tracking-tight text-indigo-600">{collectionIntelligence.onlineShare}%</p>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -514,7 +526,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
           </div>
         </div>
 
-          <div className="bg-white/90 p-8 rounded-[24px] border border-slate-100/60 flex flex-col" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
+          <div className="bg-white/90 p-5 sm:p-8 rounded-[24px] border border-slate-100/60 flex flex-col" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
           <h3 className="text-lg font-black text-slate-900 mb-2">Revenue Split</h3>
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Cash vs Online Values</p>
           <div className="space-y-6 mt-4">
@@ -635,13 +647,13 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
       {/* RECORD PAYMENT MODAL */}
       {showModal && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div><h2 className="text-xl font-black text-slate-900">Record Transaction</h2><p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Log a manual payment</p></div>
               <button onClick={() => setShowModal(false)} className="bg-white p-2 rounded-full text-slate-400 hover:text-slate-900 shadow-sm transition-all"><X size={20} /></button>
             </div>
-            <form onSubmit={handleRecordPayment} className="p-6 space-y-5 overflow-y-auto">
+            <form onSubmit={handleRecordPayment} className="app-modal-scroll p-6 space-y-5">
               <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Select Member</label><div className="relative"><select required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none appearance-none" value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})}><option value="">-- Choose Member --</option>{members.map(m => (<option key={m.id} value={m.id}>{m.full_name} ({m.email})</option>))}</select><ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} /></div></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Select Plan</label><div className="relative"><select required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none appearance-none" value={formData.plan_id} onChange={handlePlanSelect}><option value="">-- Choose Plan --</option>{plans.map(p => (<option key={p.id} value={p.id}>{p.name} - ₹{p.price}</option>))}</select><ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} /></div></div>
               <div className="grid grid-cols-2 gap-4">
@@ -658,14 +670,14 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
       {/* RECEIPT MODAL */}
       {showReceipt && selectedPayment && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-sm shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[24px] w-full max-w-sm shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-emerald-500 p-6 text-center text-white relative">
               <button onClick={() => setShowReceipt(false)} className="absolute right-4 top-4 text-white/80 hover:text-white"><X size={20}/></button>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 backdrop-blur-md"><CheckCircle2 size={24} className="text-white"/></div>
               <h3 className="text-xl font-black">Payment Successful</h3>
             </div>
-            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+            <div className="app-modal-scroll p-6 space-y-4">
               <div className="text-center mb-6"><p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Total Amount Paid</p><h2 className="text-3xl font-black text-slate-900 mt-1">₹{parseFloat(selectedPayment.amount_paid).toLocaleString()}</h2></div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm"><span className="text-slate-500 font-bold">Member</span><span className="text-slate-900 font-bold">{selectedPayment.member_name}</span></div>

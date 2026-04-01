@@ -190,6 +190,19 @@ const normalizeProfileImageFile = async (file) => {
     return { file: null, error: 'Unable to process this image. Please choose another photo.', wasCompressed: false };
   }
 };
+
+const hasPermission = (user, permission) => {
+  if (!permission) return true;
+  if (!user) return false;
+  if (String(user.role || '').toUpperCase() === 'OWNER') return true;
+
+  const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+  if (permissions.includes('*') || permissions.includes(permission)) return true;
+
+  const [scope] = String(permission).split(':');
+  return Boolean(scope && permissions.includes(`${scope}:*`));
+};
+
 const normalizeMemberRecord = (member) => ({
   ...member,
   profile_pic: normalizeProfileImageUrl(member?.profile_pic),
@@ -206,7 +219,7 @@ const loadRazorpayScript = () => {
   });
 };
 
-const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled }) => {
+const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, currentUser = null }) => {
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
@@ -236,6 +249,26 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const canWriteMembers = hasPermission(currentUser, 'members:write');
+  const canWritePayments = hasPermission(currentUser, 'payments:write');
+  const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
+
+  const openAddMemberModal = () => {
+    if (!canWriteMembers) {
+      toast?.('You do not have permission to add members.', 'warning');
+      return;
+    }
+    setShowAddModal(true);
+  };
+
+  const openActivateModalForMember = (member) => {
+    if (!canWritePayments) {
+      toast?.('You do not have permission to manage memberships or payments.', 'warning');
+      return;
+    }
+    setSelectedMember(member);
+    setShowActivateModal(true);
+  };
 
   const handleProfileImageSelect = async (file, target) => {
     if (!file) return false;
@@ -299,10 +332,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   useEffect(() => {
     if (!focusAction || focusMemberId) return;
     if (focusAction === 'add') {
-      setShowAddModal(true);
+      openAddMemberModal();
       onFocusHandled?.();
     }
-  }, [focusAction, focusMemberId, onFocusHandled]);
+  }, [focusAction, focusMemberId, onFocusHandled, canWriteMembers]);
 
   useEffect(() => {
     if (!token || !focusMemberId) return;
@@ -321,7 +354,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         setSelectedMember(memberFromList);
         setShowDetailsModal(true);
         if (focusAction === 'activate') {
-          setShowActivateModal(true);
+          openActivateModalForMember(memberFromList);
         }
         onFocusHandled?.();
         return;
@@ -335,7 +368,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         setSelectedMember(normalizedMember);
         setShowDetailsModal(true);
         if (focusAction === 'activate') {
-          setShowActivateModal(true);
+          openActivateModalForMember(normalizedMember);
         }
       } catch (_err) {
         if (isMounted) {
@@ -353,7 +386,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     return () => {
       isMounted = false;
     };
-  }, [token, focusMemberId, focusAction, members, onFocusHandled, toast]);
+  }, [token, focusMemberId, focusAction, members, onFocusHandled, toast, canWritePayments]);
 
   useEffect(() => {
     const el = membersListRef.current;
@@ -440,6 +473,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const handleActivateSubscription = async (e, type = 'online') => {
     if (e) e.preventDefault();
+    if (!canWritePayments) {
+      toast?.('You do not have permission to manage memberships or payments.', 'warning');
+      return;
+    }
     if (!selectedPlanId) { toast?.('Please select a plan first.', 'warning'); return; }
     const selectedPlan = plans.find((p) => p.id === parseInt(selectedPlanId));
 
@@ -492,7 +529,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               },
               { headers: { 'x-auth-token': token } }
             );
-            await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
+            if (canWriteAttendance) {
+              await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
+            }
             setReceiptData({ memberName: selectedMember.full_name, planName: selectedPlan.name, amount: selectedPlan.price, payId: res.razorpay_payment_id });
             setShowActivateModal(false);
             setShowSuccessAnim(true);
@@ -515,7 +554,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       const isOnline = paymentId && String(paymentId).startsWith('pay_');
       const mode = isOnline ? 'Online' : 'Cash';
       await axios.post('/api/memberships/activate', { member_id: selectedMember.id, plan_id: plan.id, payment_id: paymentId, payment_mode: mode }, { headers: { 'x-auth-token': token } });
-      await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
+      if (canWriteAttendance) {
+        await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
+      }
       setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
       setShowActivateModal(false);
       setShowSuccessAnim(true);
@@ -536,6 +577,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   };
 
   const handleQuickExtend = async (days) => {
+    if (!canWritePayments) {
+      toast?.('You do not have permission to extend memberships.', 'warning');
+      return;
+    }
     try {
       await axios.post('/api/memberships/extend', { member_id: editFormData.id, days }, { headers: { 'x-auth-token': token } });
       fetchMembers();
@@ -556,6 +601,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const handleManualCheckIn = async (e, memberId) => {
     e.stopPropagation();
+    if (!canWriteAttendance) {
+      toast?.('You do not have permission to check members in.', 'warning');
+      return;
+    }
     try {
       await axios.put(`/api/members/${memberId}/check-in`, {}, { headers: { 'x-auth-token': token } });
       fetchMembers();
@@ -564,6 +613,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const handleAddMember = async (e) => {
     e.preventDefault();
+    if (!canWriteMembers) {
+      toast?.('You do not have permission to add members.', 'warning');
+      return;
+    }
     const normalizedPhone = normalizePhoneInput(addFormData.phone);
     if (!isValidPhoneInput(normalizedPhone)) {
       toast?.('Phone must be exactly 10 digits.', 'error');
@@ -593,7 +646,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setAddFormData({ full_name: '', email: '', phone: '' }); setAddFile(null); setPreviewUrl(null);
       await fetchMembers();
       toast?.('Member added successfully!', 'success');
-      if (addSelectedPlanId && res.data) { setSelectedMember(normalizeMemberRecord(res.data)); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
+      if (canWritePayments && addSelectedPlanId && res.data) { setSelectedMember(normalizeMemberRecord(res.data)); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
       setAddSelectedPlanId('');
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Error adding member.';
@@ -601,11 +654,22 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
   };
 
-  const handleEditClick = (member) => { setEditFormData({ id: member.id, full_name: member.full_name, email: member.email, phone: member.phone }); setShowEditModal(true); };
+  const handleEditClick = (member) => {
+    if (!canWriteMembers) {
+      toast?.('You do not have permission to edit members.', 'warning');
+      return;
+    }
+    setEditFormData({ id: member.id, full_name: member.full_name, email: member.email, phone: member.phone });
+    setShowEditModal(true);
+  };
   const handleViewDetails = (member) => { setSelectedMember(member); setShowDetailsModal(true); };
 
   const handleUpdateMember = async (e) => {
     e.preventDefault();
+    if (!canWriteMembers) {
+      toast?.('You do not have permission to edit members.', 'warning');
+      return;
+    }
     const normalizedPhone = normalizePhoneInput(editFormData.phone);
     if (!isValidPhoneInput(normalizedPhone)) {
       toast?.('Phone must be exactly 10 digits.', 'error');
@@ -646,6 +710,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   };
 
   const handleDeleteMember = () => {
+    if (!canWriteMembers) {
+      toast?.('You do not have permission to delete members.', 'warning');
+      return;
+    }
     showConfirm?.({ title: 'Delete Member', message: 'This action cannot be undone.', confirmLabel: 'Yes, Delete', variant: 'danger', onConfirm: async () => {
         try { await axios.delete(`/api/members/${editFormData.id}`, { headers: { 'x-auth-token': token } }); setShowEditModal(false); fetchMembers(); toast?.('Member deleted.', 'success'); } catch (err) { toast?.('Delete failed.', 'error'); }
       }
@@ -653,6 +721,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   };
 
   const handleRemovePlan = () => {
+    if (!canWritePayments) {
+      toast?.('You do not have permission to change memberships.', 'warning');
+      return;
+    }
     showConfirm?.({ title: 'Cancel Active Plan', message: 'This will remove the active membership plan.', confirmLabel: 'Cancel Plan', variant: 'danger', onConfirm: async () => {
         try { await axios.post('/api/memberships/remove-plan', { member_id: editFormData.id }, { headers: { 'x-auth-token': token } }); setShowEditModal(false); fetchMembers(); toast?.('Plan removed.', 'success'); } catch (err) { toast?.('Failed to remove plan.', 'error'); }
       }
@@ -675,8 +747,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   return (
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative">
       {showSuccessAnim && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-500 max-w-sm w-full">
+        <div className="app-modal-shell z-[200] bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="app-modal-panel bg-white p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-500 max-w-sm w-full">
             <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4 animate-bounce"><CheckCircle size={48} /></div>
             <h2 className="text-2xl font-black text-slate-900">Success!</h2>
             <p className="text-slate-500 font-bold mb-8">Membership Activated for {selectedMember?.full_name}</p>
@@ -705,7 +777,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">
             <button onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>
-            <button onClick={() => setShowAddModal(true)} className="flex-1 md:flex-none text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-95 text-sm" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}><Plus size={16} /> Add Member</button>
+            {canWriteMembers && <button onClick={openAddMemberModal} className="flex-1 md:flex-none text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-95 text-sm" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}><Plus size={16} /> Add Member</button>}
           </div>
         </div>
 
@@ -732,7 +804,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               <div className="w-20 h-20 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-6 text-slate-300"><Users size={40} /></div>
               <h2 className="text-2xl font-black text-slate-900 mb-2">Build Your Community!</h2>
               <p className="text-slate-500 font-bold mb-8 text-center max-w-xs">Your gym looks quiet. Start by adding your very first member.</p>
-              <button onClick={() => setShowAddModal(true)} className="text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 transition-all active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 32px rgba(99,102,241,0.4)' }}><UserPlus size={20} /> Add First Member</button>
+              {canWriteMembers && <button onClick={openAddMemberModal} className="text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 transition-all active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 32px rgba(99,102,241,0.4)' }}><UserPlus size={20} /> Add First Member</button>}
             </div>
           ) : (
             <>
@@ -846,11 +918,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600">{member.last_visit ? new Date(member.last_visit).toLocaleDateString('en-GB') : '—'}</span></td>
                         <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end items-center gap-1.5">
-                            {statusInfo.label === 'UNPAID' && <button onClick={() => { setSelectedMember(member); setShowActivateModal(true); }} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm"><Zap size={10} fill="currentColor" /> Initiate</button>}
-                            {statusInfo.label === 'EXPIRED' && <button onClick={() => { setSelectedMember(member); setShowActivateModal(true); }} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm"><RefreshCw size={10} /> Renew</button>}
+                            {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm"><Zap size={10} fill="currentColor" /> Initiate</button>}
+                            {canWritePayments && statusInfo.label === 'EXPIRED' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm"><RefreshCw size={10} /> Renew</button>}
                             {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => sendWhatsApp(member, statusInfo.label === 'INACTIVE' ? 'followup' : 'reminder')} className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm"><MessageSquare size={10} fill="currentColor" /> Remind</button>}
-                            <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>
+                            {canWriteAttendance && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
+                            {canWriteMembers && <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
                           </div>
                         </td>
                       </tr>
@@ -1006,29 +1078,29 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
           {/* action bar — no extra bottom padding needed, drawer sits above nav */}
           <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60">
-            {(getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
-              <button onClick={() => { setShowDetailsModal(false); setShowActivateModal(true); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+            {canWritePayments && (getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
+              <button onClick={() => { setShowDetailsModal(false); openActivateModalForMember(selectedMember); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
                 <Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
               </button>
             )}
             <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
               <MessageSquare size={13} fill="currentColor" /> WhatsApp
             </button>
-            <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
+            {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
               <Edit2 size={13} /> Edit
-            </button>
+            </button>}
           </div>
         </>)}
       </div>
 
       {showEditModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+        <div className="app-modal-shell z-[60] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 100%)' }}>
               <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center"><Edit2 size={18} /></div><div><h2 className="text-lg font-black">Edit Member</h2><p className="text-white/50 text-[10px] font-bold uppercase tracking-wider">Update Profile</p></div></div>
               <button onClick={() => setShowEditModal(false)} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
-            <form onSubmit={handleUpdateMember} className="p-6 space-y-5">
+            <form onSubmit={handleUpdateMember} className="app-modal-scroll p-6 space-y-5">
               <div className="flex justify-center -mt-1"><div className="relative group"><div className="w-20 h-20 rounded-full overflow-hidden shadow-xl border-4 border-white">{editFile ? <img src={URL.createObjectURL(editFile)} alt="Preview" className="w-full h-full object-cover" /> : <GradientAvatar name={members.find((m) => m.id === editFormData.id)?.full_name || editFormData.full_name} src={members.find((m) => m.id === editFormData.id)?.profile_pic} sizePx={80} />}</div><label className="absolute inset-0 flex items-center justify-center bg-slate-900/50 text-white text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-all rounded-full cursor-pointer">Change<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const ok = await handleProfileImageSelect(e.target.files?.[0], 'edit'); if (!ok) e.target.value = ''; }} /></label></div></div>
               <div className="space-y-4">
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name</label><input type="text" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.full_name} onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })} /></div>
@@ -1037,48 +1109,48 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email</label><input type="email" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.email} onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })} /></div>
                 </div>
               </div>
-              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-2xl border border-indigo-100"><label className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-3"><Clock size={12} /> Quick Extend Membership</label><div className="grid grid-cols-3 gap-2">{[2, 5, 15].map((days) => (<button key={days} type="button" onClick={() => handleQuickExtend(days)} className="py-2.5 bg-white border border-indigo-200 text-indigo-700 text-xs font-black rounded-xl hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all shadow-sm active:scale-95">+{days} Days</button>))}</div></div>
+              {canWritePayments && <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-2xl border border-indigo-100"><label className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-3"><Clock size={12} /> Quick Extend Membership</label><div className="grid grid-cols-3 gap-2">{[2, 5, 15].map((days) => (<button key={days} type="button" onClick={() => handleQuickExtend(days)} className="py-2.5 bg-white border border-indigo-200 text-indigo-700 text-xs font-black rounded-xl hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all shadow-sm active:scale-95">+{days} Days</button>))}</div></div>}
               <button type="submit" className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>Save Changes</button>
-              <div className="border-t border-dashed border-rose-100 pt-4"><p className="text-[9px] font-black text-rose-300 uppercase tracking-widest mb-3 text-center">Danger Zone</p><div className="flex gap-2"><button type="button" onClick={handleRemovePlan} className="flex-1 py-2.5 text-[10px] font-bold text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 flex items-center justify-center gap-1.5 transition-all"><Ban size={11} /> Remove Plan</button><button type="button" onClick={handleDeleteMember} className="flex-1 py-2.5 text-[10px] font-bold text-rose-500 border border-rose-200 bg-rose-50 rounded-xl hover:bg-rose-500 hover:text-white flex items-center justify-center gap-1.5 transition-all"><Trash2 size={11} /> Delete Member</button></div></div>
+              {(canWritePayments || canWriteMembers) && <div className="border-t border-dashed border-rose-100 pt-4"><p className="text-[9px] font-black text-rose-300 uppercase tracking-widest mb-3 text-center">Danger Zone</p><div className="flex gap-2">{canWritePayments && <button type="button" onClick={handleRemovePlan} className="flex-1 py-2.5 text-[10px] font-bold text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 flex items-center justify-center gap-1.5 transition-all"><Ban size={11} /> Remove Plan</button>}{canWriteMembers && <button type="button" onClick={handleDeleteMember} className="flex-1 py-2.5 text-[10px] font-bold text-rose-500 border border-rose-200 bg-rose-50 rounded-xl hover:bg-rose-500 hover:text-white flex items-center justify-center gap-1.5 transition-all"><Trash2 size={11} /> Delete Member</button>}</div></div>}
             </form>
           </div>
         </div>
       )}
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150">
+        <div className="app-modal-shell z-50 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' }}>
               <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><UserPlus size={18} /></div><div><h2 className="text-lg font-black">New Member</h2><p className="text-white/60 text-[10px] font-bold uppercase tracking-wider">Add to GymVault</p></div></div>
               <button onClick={() => { setShowAddModal(false); setAddSelectedPlanId(''); }} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
-            <form onSubmit={handleAddMember} className="p-6 space-y-4">
+            <form onSubmit={handleAddMember} className="app-modal-scroll p-6 space-y-4">
               <div className="flex flex-col items-center"><label className="cursor-pointer block"><div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">{previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <div className="flex flex-col items-center gap-1 text-slate-300"><UserPlus size={28} /><span className="text-[9px] font-bold uppercase tracking-wider">Upload</span></div>}</div><input type="file" accept="image/*" className="hidden" onChange={async (e) => { const ok = await handleProfileImageSelect(e.target.files?.[0], 'add'); if (!ok) e.target.value = ''; }} /></label><p className="text-[10px] text-slate-400 font-medium mt-2">Click to upload photo (optional)</p></div>
               <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name *</label><input type="text" required placeholder="e.g. Rahul Sharma" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.full_name} onChange={(e) => setAddFormData({ ...addFormData, full_name: e.target.value })} /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone *</label><input type="text" required inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" placeholder="9876543210" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.phone} onChange={(e) => setAddFormData({ ...addFormData, phone: normalizePhoneInput(e.target.value) })} /></div>
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email *</label><input type="email" required placeholder="rahul@email.com" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.email} onChange={(e) => setAddFormData({ ...addFormData, email: e.target.value })} /></div>
               </div>
-              <div>
+              {canWritePayments && <div>
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5"><Zap size={10} className="text-emerald-500" /> Assign Plan Now (optional)</label>
                 <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 text-sm font-semibold text-slate-700 appearance-none cursor-pointer transition-all" value={addSelectedPlanId} onChange={(e) => setAddSelectedPlanId(e.target.value)}><option value="">Skip — assign plan later</option>{plans.map((p) => (<option key={p.id} value={p.id}>{p.name} — ₹{p.price} / {p.duration_days}d</option>))}</select>
                 {addSelectedPlanId && <p className="text-[10px] text-emerald-600 font-bold mt-1.5 ml-0.5">Payment will be collected in the next step →</p>}
-              </div>
-              <button type="submit" className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}>{addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member'}</button>
+              </div>}
+              <button type="submit" className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}>{canWritePayments && addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member'}</button>
             </form>
           </div>
         </div>
       )}
 
       {showActivateModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
-          <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 border">
+        <div className="app-modal-shell z-[110] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 border">
             <div className="p-8 text-center bg-gradient-to-b from-slate-50 to-white">
               <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3 shadow-inner"><Zap size={32} fill="currentColor" /></div>
               <h2 className="text-2xl font-black text-slate-900 tracking-tight">Activate Plan</h2>
               <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">For {selectedMember?.full_name}</p>
             </div>
-            <div className="px-8 pb-8 space-y-4">
+            <div className="app-modal-scroll px-8 pb-8 space-y-4">
               <div className="relative">
                 <select required className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-purple-500 focus:outline-none text-sm font-black appearance-none cursor-pointer" value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)}>
                   <option value="">Select Membership Plan...</option>

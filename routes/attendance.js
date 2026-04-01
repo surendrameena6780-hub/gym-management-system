@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
+const { requireOwner, requirePermission } = require('../middleware/rbac');
 
 const CHECKIN_METHODS = new Set(['STAFF', 'QR', 'SELF', 'RFID']);
 
@@ -56,7 +57,7 @@ const getMemberSnapshot = async (gym_id, member_id) => {
 };
 
 // --- 0. ATTENDANCE MODE SETTINGS ---
-router.get('/mode', auth, async (req, res) => {
+router.get('/mode', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym = await pool.query(
             `SELECT attendance_mode, attendance_geo_enabled, gym_latitude, gym_longitude, gym_radius_meters, allow_expired_checkin
@@ -72,7 +73,7 @@ router.get('/mode', auth, async (req, res) => {
     }
 });
 
-router.put('/mode', auth, async (req, res) => {
+router.put('/mode', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const attendance_mode = normalizeMethod(req.body.attendance_mode || 'STAFF');
         const attendance_geo_enabled = asBool(req.body.attendance_geo_enabled);
@@ -101,7 +102,7 @@ router.put('/mode', auth, async (req, res) => {
 });
 
 // --- 1. CHECK-IN A MEMBER ---
-router.post('/checkin', auth, saasMiddleware, async (req, res) => {
+router.post('/checkin', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     const { member_id, method, notes, latitude, longitude } = req.body;
     const allow_override = asBool(req.body.allow_override);
     const gym_id = req.user.gym_id;
@@ -211,7 +212,7 @@ router.post('/checkin', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 1B. QUICK MEMBER SEARCH FOR CHECK-IN PANEL ---
-router.get('/search', auth, saasMiddleware, async (req, res) => {
+router.get('/search', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const q = String(req.query.q || '').trim();
@@ -252,7 +253,7 @@ router.get('/search', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 2. TODAY'S ATTENDANCE LIST ---
-router.get('/today', auth, saasMiddleware, async (req, res) => {
+router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const list = await pool.query(
             `SELECT
@@ -284,7 +285,7 @@ router.get('/today', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 3. ATTENDANCE HISTORY FOR A SPECIFIC MEMBER ---
-router.get('/history/:member_id', auth, saasMiddleware, async (req, res) => {
+router.get('/history/:member_id', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     const { member_id } = req.params;
     if (!member_id || member_id === 'undefined') return res.json([]);
 
@@ -311,7 +312,7 @@ router.get('/history/:member_id', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 4. ATTENDANCE SUMMARY (last 7 days by hour — for dashboard heatmap) ---
-router.get('/summary', auth, saasMiddleware, async (req, res) => {
+router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     const gym_id = req.user.gym_id;
     try {
         const result = await pool.query(
@@ -334,7 +335,7 @@ router.get('/summary', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 5. OVERVIEW KPIS FOR ATTENDANCE PAGE ---
-router.get('/overview', auth, saasMiddleware, async (req, res) => {
+router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
 
@@ -388,7 +389,7 @@ router.get('/overview', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 6. LIVE FEED ---
-router.get('/feed', auth, saasMiddleware, async (req, res) => {
+router.get('/feed', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
@@ -423,7 +424,7 @@ router.get('/feed', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 7. FILTERABLE ATTENDANCE TABLE ---
-router.get('/records', auth, saasMiddleware, async (req, res) => {
+router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const range = String(req.query.range || 'today').toLowerCase();
@@ -478,7 +479,7 @@ router.get('/records', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 8. HEATMAP DATA (calendar-style intensity) ---
-router.get('/heatmap', auth, saasMiddleware, async (req, res) => {
+router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const days = Math.min(Math.max(parseInt(req.query.days || '90', 10), 7), 365);
@@ -513,7 +514,7 @@ router.get('/heatmap', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 9. PEAK HOUR ANALYSIS ---
-router.get('/peak-hours', auth, saasMiddleware, async (req, res) => {
+router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 1), 90);
@@ -539,7 +540,7 @@ router.get('/peak-hours', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 10. INACTIVE MEMBERS / RETENTION RISK ---
-router.get('/inactive', auth, saasMiddleware, async (req, res) => {
+router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const days = Math.min(Math.max(parseInt(req.query.days || '7', 10), 1), 120);
@@ -586,7 +587,7 @@ router.get('/inactive', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 11. ENGAGEMENT LEADERBOARD ---
-router.get('/leaderboard', auth, saasMiddleware, async (req, res) => {
+router.get('/leaderboard', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 7), 180);

@@ -102,8 +102,22 @@ const asObject = (value, fallback = {}) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
 );
 
-function AttendancePage({ token, toast, isActive = true }) {
+const hasPermission = (user, permission) => {
+  if (!permission) return true;
+  if (!user) return false;
+  if (String(user.role || '').toUpperCase() === 'OWNER') return true;
+
+  const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+  if (permissions.includes('*') || permissions.includes(permission)) return true;
+
+  const [scope] = String(permission).split(':');
+  return Boolean(scope && permissions.includes(`${scope}:*`));
+};
+
+function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+  const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
+  const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
 
   const [overview, setOverview] = useState({
     today_checkins: 0,
@@ -250,6 +264,11 @@ function AttendancePage({ token, toast, isActive = true }) {
   }, [searchText, token]);
 
   const saveModeSettings = async () => {
+    if (!isOwner) {
+      toast?.('Only the gym owner can change attendance mode settings.', 'warning');
+      return;
+    }
+
     setBusySaveMode(true);
     try {
       await axios.put('/api/attendance/mode', modeSettings, headers);
@@ -263,6 +282,11 @@ function AttendancePage({ token, toast, isActive = true }) {
   };
 
   const submitCheckin = async (allowOverride = false) => {
+    if (!canWriteAttendance) {
+      toast?.('You do not have permission to check members in.', 'warning');
+      return;
+    }
+
     if (!selectedMember?.id) {
       toast?.('Select a member first.', 'warning');
       return;
@@ -396,11 +420,12 @@ function AttendancePage({ token, toast, isActive = true }) {
             return (
               <button
                 key={key}
+                disabled={!isOwner}
                 onClick={() => {
                   setModeSettings((prev) => ({ ...prev, attendance_mode: key }));
                   setCheckinMethod(key);
                 }}
-                className={`text-left p-4 rounded-2xl border transition-all active:scale-95 ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
+                className={`text-left p-4 rounded-2xl border transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
               >
                 <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${item.color} text-white flex items-center justify-center mb-3`}>
                   <Icon size={17} />
@@ -418,6 +443,7 @@ function AttendancePage({ token, toast, isActive = true }) {
             <input
               type="checkbox"
               checked={modeSettings.allow_expired_checkin}
+              disabled={!isOwner}
               onChange={(e) => setModeSettings((prev) => ({ ...prev, allow_expired_checkin: e.target.checked }))}
             />
           </label>
@@ -426,6 +452,7 @@ function AttendancePage({ token, toast, isActive = true }) {
             <input
               type="checkbox"
               checked={modeSettings.attendance_geo_enabled}
+              disabled={!isOwner}
               onChange={(e) => setModeSettings((prev) => ({ ...prev, attendance_geo_enabled: e.target.checked }))}
             />
           </label>
@@ -438,6 +465,7 @@ function AttendancePage({ token, toast, isActive = true }) {
               step="0.000001"
               placeholder="Gym latitude"
               value={modeSettings.gym_latitude}
+              disabled={!isOwner}
               onChange={(e) => setModeSettings((prev) => ({ ...prev, gym_latitude: e.target.value }))}
               className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
             />
@@ -446,6 +474,7 @@ function AttendancePage({ token, toast, isActive = true }) {
               step="0.000001"
               placeholder="Gym longitude"
               value={modeSettings.gym_longitude}
+              disabled={!isOwner}
               onChange={(e) => setModeSettings((prev) => ({ ...prev, gym_longitude: e.target.value }))}
               className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
             />
@@ -454,6 +483,7 @@ function AttendancePage({ token, toast, isActive = true }) {
               min="50"
               placeholder="Radius meters"
               value={modeSettings.gym_radius_meters}
+              disabled={!isOwner}
               onChange={(e) => setModeSettings((prev) => ({ ...prev, gym_radius_meters: e.target.value }))}
               className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
             />
@@ -461,9 +491,10 @@ function AttendancePage({ token, toast, isActive = true }) {
         )}
 
         <div className="mt-4">
+          {!isOwner && <p className="mb-2 text-xs font-semibold text-slate-500">Attendance mode settings are view-only for staff accounts.</p>}
           <button
             onClick={saveModeSettings}
-            disabled={busySaveMode}
+            disabled={busySaveMode || !isOwner}
             className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 active:scale-95 transition-all disabled:opacity-60"
           >
             {busySaveMode ? 'Saving...' : 'Save Mode Settings'}
@@ -529,7 +560,7 @@ function AttendancePage({ token, toast, isActive = true }) {
           <div className="mt-4">
             <button
               onClick={() => submitCheckin(false)}
-              disabled={!selectedMember || busyCheckin}
+              disabled={!selectedMember || busyCheckin || !canWriteAttendance}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-sm font-black disabled:opacity-60"
             >
               {busyCheckin ? 'Checking in...' : 'Check In Member'}
@@ -658,12 +689,12 @@ function AttendancePage({ token, toast, isActive = true }) {
             <Activity size={16} className="text-indigo-500 shrink-0" />
             <div className="min-w-0">
               <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Peak Hour Analysis (30D)</h3>
-              <p className="text-[11px] text-slate-500 font-semibold mt-0.5">Top attendance days are folded into this view.</p>
+              <p className="text-[11px] text-slate-500 font-semibold mt-0.5">Hourly traffic and full weekday rankings stay accessible on every screen.</p>
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_116px] sm:grid-cols-[minmax(0,1fr)_180px] gap-3 h-[260px]">
-          <div className="min-w-0 h-full">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px] gap-4">
+          <div className="min-w-0 h-[240px] sm:h-[280px] xl:h-[260px]">
             {isActive ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={peakHours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -676,8 +707,26 @@ function AttendancePage({ token, toast, isActive = true }) {
             </ResponsiveContainer>
             ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
           </div>
-          <div className="space-y-2 overflow-hidden">
-            {weekdayPerformance.slice(0, 3).map((item, index) => (
+          <div className="xl:hidden -mx-1 overflow-x-auto pb-1">
+            <div className="flex min-w-max gap-3 px-1">
+              {weekdayPerformance.map((item, index) => (
+                <div key={item.label} className="w-[148px] rounded-2xl border border-slate-100 bg-white p-3 shrink-0">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{index + 1} day</p>
+                      <p className="text-sm font-black text-slate-900 truncate">{item.label}</p>
+                    </div>
+                    <p className="text-base font-black text-indigo-600 shrink-0">{item.total}</p>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="hidden xl:flex xl:flex-col xl:gap-2.5 xl:max-h-[260px] xl:overflow-y-auto xl:pr-1">
+            {weekdayPerformance.map((item, index) => (
               <div key={item.label} className="rounded-2xl border border-slate-100 bg-white p-3">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <div className="min-w-0">
@@ -686,7 +735,6 @@ function AttendancePage({ token, toast, isActive = true }) {
                   </div>
                   <p className="text-sm font-black text-indigo-600 shrink-0">{item.total}</p>
                 </div>
-                <p className="text-[11px] text-slate-500 font-semibold mb-2">Avg {item.avg} visits</p>
                 <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                   <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
                 </div>
@@ -777,8 +825,8 @@ function AttendancePage({ token, toast, isActive = true }) {
       </div>
 
       {warningState && (
-        <div className="fixed inset-0 z-[220] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-[24px] max-w-md w-full p-6 border border-slate-200 shadow-2xl">
+        <div className="app-modal-shell z-[220] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[24px] max-w-md w-full p-6 border border-slate-200 shadow-2xl">
             <div className="flex items-center gap-2 text-rose-600 mb-2">
               <AlertTriangle size={18} />
               <p className="font-black">Membership Warning</p>
@@ -801,6 +849,7 @@ function AttendancePage({ token, toast, isActive = true }) {
               </button>
               <button
                 onClick={() => submitCheckin(true)}
+                disabled={!canWriteAttendance}
                 className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-black hover:bg-amber-600"
               >
                 Override Check-In

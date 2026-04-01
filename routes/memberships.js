@@ -1,13 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const Razorpay = require('razorpay');
+const OAuthTokenClient = require('razorpay/dist/oAuthTokenClient');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
+const { requireOwner, requirePermission } = require('../middleware/rbac');
 const { decryptSecret } = require('../utils/secretCrypto');
 
 let ensureMemberPaymentsSchemaPromise;
+const MEMBER_CONNECT_STATE_TTL_MS = Math.max(60, parseInt(process.env.RAZORPAY_PARTNER_STATE_TTL_SECONDS || '600', 10)) * 1000;
 
 const ensureMemberPaymentsSchema = async () => {
     if (!ensureMemberPaymentsSchemaPromise) {
@@ -22,10 +25,85 @@ const ensureMemberPaymentsSchema = async () => {
             ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED',
             ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120),
             ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb,
+            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_hash TEXT,
+            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_expires_at TIMESTAMP,
             ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
         `);
     }
     await ensureMemberPaymentsSchemaPromise;
+};
+
+const safeCompare = (left, right) => {
+    const a = Buffer.from(String(left || ''), 'utf8');
+    const b = Buffer.from(String(right || ''), 'utf8');
+    if (a.length === 0 || a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+};
+
+const hashConnectNonce = (nonce) => crypto.createHash('sha256').update(String(nonce || ''), 'utf8').digest('hex');
+
+const normalizeOrigin = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const parsed = new URL(raw);
+        return parsed.origin;
+    } catch (_err) {
+        return '';
+    }
+};
+
+const extractConnectedAccountId = (tokenResponse = {}) => {
+    const candidates = [
+        tokenResponse.account_id,
+        tokenResponse.connected_account_id,
+        tokenResponse.razorpay_account_id,
+        tokenResponse.merchant_id,
+        tokenResponse.merchant?.id,
+        tokenResponse.entity?.id,
+    ];
+
+    const accountId = candidates
+        .map((value) => String(value || '').trim())
+        .find((value) => value.startsWith('acc_'));
+
+    return accountId || '';
+};
+
+const buildConnectMeta = ({ query = {}, tokenResponse = {} } = {}) => {
+    return {
+        callback: {
+            error: String(query.error || '').trim() || null,
+            error_description: String(query.error_description || '').trim() || null,
+        },
+        oauth: {
+            scope: tokenResponse.scope || null,
+            token_type: tokenResponse.token_type || null,
+            expires_in: Number.isFinite(Number(tokenResponse.expires_in)) ? Number(tokenResponse.expires_in) : null,
+            connected_account_id: extractConnectedAccountId(tokenResponse) || null,
+        },
+        updated_at: new Date().toISOString(),
+    };
+};
+
+const renderConnectResultPage = ({ status, targetOrigin }) => {
+    const message = status === 'CONNECTED'
+        ? 'Razorpay connected successfully.'
+        : status === 'FAILED'
+            ? 'Razorpay onboarding failed.'
+            : 'Razorpay onboarding updated.';
+    const postMessageTarget = JSON.stringify(targetOrigin || '*');
+
+    return `<!doctype html><html><body style="font-family:Arial,sans-serif;padding:24px;">
+        <h3>${message}</h3>
+        <p>You can close this window and return to GymVault Integrations.</p>
+        <script>
+            if (window.opener) {
+                window.opener.postMessage({ type: 'GYMVAULT_RAZORPAY_CONNECT', status: '${status}' }, ${postMessageTarget});
+            }
+            setTimeout(function(){ window.close(); }, 1200);
+        </script>
+    </body></html>`;
 };
 
 const createSignedState = (payload) => {
@@ -39,7 +117,7 @@ const verifySignedState = (stateValue) => {
     const [encoded, signature] = raw.split('.');
     if (!encoded || !signature) return null;
     const expected = crypto.createHmac('sha256', process.env.JWT_SECRET).update(encoded).digest('hex');
-    if (signature !== expected) return null;
+    if (!safeCompare(signature, expected)) return null;
     try {
         return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
     } catch (_err) {
@@ -111,7 +189,7 @@ const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentM
 };
 
 // --- 1. ACTIVATE / RENEW ---
-router.post('/activate', auth, saasMiddleware, async (req, res) => {
+router.post('/activate', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const { member_id, plan_id, payment_id, payment_mode } = req.body;
     const gym_id = req.user.gym_id;
 
@@ -134,7 +212,7 @@ router.post('/activate', auth, saasMiddleware, async (req, res) => {
     }
 });
 
-router.post('/online/create-order', auth, saasMiddleware, async (req, res) => {
+router.post('/online/create-order', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const gym_id = req.user.gym_id;
     const { member_id, plan_id } = req.body || {};
     if (!member_id || !plan_id) return res.status(400).json({ error: 'member_id and plan_id are required.' });
@@ -272,35 +350,67 @@ router.post('/online/create-order', auth, saasMiddleware, async (req, res) => {
     }
 });
 
-router.get('/online/connect-url', auth, saasMiddleware, async (req, res) => {
+router.get('/online/connect-url', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMemberPaymentsSchema();
 
         const gymId = req.user.gym_id;
-        const connectBaseUrl = String(process.env.RAZORPAY_PARTNER_CONNECT_BASE_URL || '').trim();
         const clientId = String(process.env.RAZORPAY_PARTNER_CLIENT_ID || '').trim();
+        const clientSecret = String(process.env.RAZORPAY_PARTNER_CLIENT_SECRET || '').trim();
         const redirectUri = String(process.env.RAZORPAY_PARTNER_REDIRECT_URI || '').trim();
+        const connectBaseUrl = String(process.env.RAZORPAY_PARTNER_CONNECT_BASE_URL || '').trim();
+        const requestOrigin = normalizeOrigin(req.headers.origin);
 
-        if (!connectBaseUrl || !clientId || !redirectUri) {
+        if (!clientId || !clientSecret || !redirectUri) {
             return res.status(400).json({
-                error: 'Partner connect is not configured on server. Set RAZORPAY_PARTNER_CONNECT_BASE_URL, RAZORPAY_PARTNER_CLIENT_ID, and RAZORPAY_PARTNER_REDIRECT_URI.',
+                error: 'Partner connect is not configured on server. Set RAZORPAY_PARTNER_CLIENT_ID, RAZORPAY_PARTNER_CLIENT_SECRET, and RAZORPAY_PARTNER_REDIRECT_URI.',
             });
         }
+
+        const nonce = crypto.randomBytes(24).toString('hex');
+        const issuedAt = Date.now();
+        const nonceExpiresAt = issuedAt + MEMBER_CONNECT_STATE_TTL_MS;
 
         const state = createSignedState({
             gym_id: gymId,
             user_id: req.user.id,
-            issued_at: Date.now(),
+            origin: requestOrigin,
+            nonce,
+            issued_at: issuedAt,
         });
 
-        const url = new URL(connectBaseUrl);
-        url.searchParams.set('client_id', clientId);
-        url.searchParams.set('redirect_uri', redirectUri);
-        url.searchParams.set('response_type', 'code');
-        url.searchParams.set('scope', 'read_write');
-        url.searchParams.set('state', state);
+        await pool.query(
+            `UPDATE gyms
+             SET member_payments_connect_mode = 'PARTNER',
+                 member_payments_onboarding_status = 'PENDING',
+                 member_payments_connect_nonce_hash = $1,
+                 member_payments_connect_nonce_expires_at = TO_TIMESTAMP($2 / 1000.0),
+                 member_payments_updated_at = NOW()
+             WHERE id = $3`,
+            [hashConnectNonce(nonce), nonceExpiresAt, gymId]
+        );
 
-        return res.json({ connect_url: url.toString() });
+        let connectUrl;
+        if (connectBaseUrl) {
+            const url = new URL(connectBaseUrl);
+            url.searchParams.set('client_id', clientId);
+            url.searchParams.set('redirect_uri', redirectUri);
+            url.searchParams.set('response_type', 'code');
+            url.searchParams.set('scope', 'read_write');
+            url.searchParams.set('state', state);
+            connectUrl = url.toString();
+        } else {
+            const oauthClient = new OAuthTokenClient();
+            connectUrl = oauthClient.generateAuthUrl({
+                client_id: clientId,
+                redirect_uri: redirectUri,
+                response_type: 'code',
+                scope: 'read_write',
+                state,
+            });
+        }
+
+        return res.json({ connect_url: connectUrl });
     } catch (err) {
         console.error('MEMBER PAY CONNECT URL ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to prepare Razorpay connect URL.' });
@@ -312,44 +422,138 @@ router.get('/online/connect/callback', async (req, res) => {
         await ensureMemberPaymentsSchema();
 
         const payload = verifySignedState(req.query.state);
-        if (!payload?.gym_id) {
+        const gymId = Number(payload?.gym_id);
+        const issuedAt = Number(payload?.issued_at || 0);
+        const stateNonce = String(payload?.nonce || '').trim();
+        const targetOrigin = normalizeOrigin(payload?.origin);
+
+        if (!Number.isInteger(gymId) || !stateNonce || !issuedAt) {
             return res.status(400).send('<h3>Invalid onboarding state.</h3>');
         }
 
-        const gymId = Number(payload.gym_id);
-        const code = String(req.query.code || '').trim();
-        const accountId = String(req.query.account_id || req.query.merchant_id || '').trim();
-        const error = String(req.query.error || '').trim();
+        if (Date.now() - issuedAt > MEMBER_CONNECT_STATE_TTL_MS) {
+            return res.status(400).send('<h3>Onboarding state expired. Start the connection again.</h3>');
+        }
 
-        let onboardingStatus = 'PENDING';
-        if (error) onboardingStatus = 'FAILED';
-        else if (accountId) onboardingStatus = 'CONNECTED';
-        else if (code) onboardingStatus = 'AUTHORIZED';
-
-        await pool.query(
-            `UPDATE gyms
-             SET member_payments_connect_mode = 'PARTNER',
-                 member_payments_onboarding_status = $1,
-                 member_razorpay_connected_account_id = COALESCE(NULLIF($2, ''), member_razorpay_connected_account_id),
-                 member_payments_connect_meta = $3::jsonb,
-                 member_payments_connected_at = CASE WHEN $1 = 'CONNECTED' THEN NOW() ELSE member_payments_connected_at END,
-                 member_payments_updated_at = NOW()
-             WHERE id = $4`,
-            [onboardingStatus, accountId, JSON.stringify(req.query || {}), gymId]
+        const nonceHash = hashConnectNonce(stateNonce);
+        const stateCheck = await pool.query(
+            `SELECT id
+             FROM gyms
+             WHERE id = $1
+               AND member_payments_connect_nonce_hash = $2
+               AND member_payments_connect_nonce_expires_at IS NOT NULL
+               AND member_payments_connect_nonce_expires_at >= NOW()
+             LIMIT 1`,
+            [gymId, nonceHash]
         );
 
-        return res.send(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:24px;">
-            <h3>${onboardingStatus === 'CONNECTED' ? 'Razorpay connected successfully.' : 'Razorpay onboarding updated.'}</h3>
-            <p>You can close this window and return to GymVault Integrations.</p>
-            <script>if(window.opener){window.opener.postMessage({type:'GYMVAULT_RAZORPAY_CONNECT',status:'${onboardingStatus}'},'*');}setTimeout(function(){window.close();},1200);</script>
-        </body></html>`);
+        if (stateCheck.rows.length === 0) {
+            return res.status(400).send('<h3>Onboarding state is invalid or already used.</h3>');
+        }
+
+        const code = String(req.query.code || '').trim();
+        const error = String(req.query.error || '').trim();
+
+        if (error) {
+            await pool.query(
+                `UPDATE gyms
+                 SET member_payments_connect_mode = 'PARTNER',
+                     member_payments_onboarding_status = 'FAILED',
+                     member_payments_connect_meta = $1::jsonb,
+                     member_payments_connect_nonce_hash = NULL,
+                     member_payments_connect_nonce_expires_at = NULL,
+                     member_payments_updated_at = NOW()
+                 WHERE id = $2 AND member_payments_connect_nonce_hash = $3`,
+                [JSON.stringify(buildConnectMeta({ query: req.query })), gymId, nonceHash]
+            );
+
+            return res.send(renderConnectResultPage({ status: 'FAILED', targetOrigin }));
+        }
+
+        if (!code) {
+            await pool.query(
+                `UPDATE gyms
+                 SET member_payments_connect_mode = 'PARTNER',
+                     member_payments_onboarding_status = 'FAILED',
+                     member_payments_connect_meta = $1::jsonb,
+                     member_payments_connect_nonce_hash = NULL,
+                     member_payments_connect_nonce_expires_at = NULL,
+                     member_payments_updated_at = NOW()
+                 WHERE id = $2 AND member_payments_connect_nonce_hash = $3`,
+                [JSON.stringify(buildConnectMeta({ query: req.query })), gymId, nonceHash]
+            );
+
+            return res.status(400).send('<h3>Missing Razorpay authorization code.</h3>');
+        }
+
+        const clientId = String(process.env.RAZORPAY_PARTNER_CLIENT_ID || '').trim();
+        const clientSecret = String(process.env.RAZORPAY_PARTNER_CLIENT_SECRET || '').trim();
+        const redirectUri = String(process.env.RAZORPAY_PARTNER_REDIRECT_URI || '').trim();
+
+        if (!clientId || !clientSecret || !redirectUri) {
+            await pool.query(
+                `UPDATE gyms
+                 SET member_payments_onboarding_status = 'FAILED',
+                     member_payments_connect_meta = $1::jsonb,
+                     member_payments_connect_nonce_hash = NULL,
+                     member_payments_connect_nonce_expires_at = NULL,
+                     member_payments_updated_at = NOW()
+                 WHERE id = $2 AND member_payments_connect_nonce_hash = $3`,
+                [JSON.stringify(buildConnectMeta({ query: req.query })), gymId, nonceHash]
+            );
+            return res.status(500).send('<h3>Partner onboarding is not configured on server.</h3>');
+        }
+
+        const oauthClient = new OAuthTokenClient();
+
+        try {
+            const tokenResponse = await oauthClient.getAccessToken({
+                client_id: clientId,
+                client_secret: clientSecret,
+                grant_type: 'authorization_code',
+                redirect_uri: redirectUri,
+                code,
+            });
+            const accountId = extractConnectedAccountId(tokenResponse);
+            const onboardingStatus = accountId ? 'CONNECTED' : 'AUTHORIZED';
+
+            await pool.query(
+                `UPDATE gyms
+                 SET member_payments_connect_mode = 'PARTNER',
+                     member_payments_onboarding_status = $1,
+                     member_razorpay_connected_account_id = CASE WHEN $2 <> '' THEN $2 ELSE member_razorpay_connected_account_id END,
+                     member_payments_connect_meta = $3::jsonb,
+                     member_payments_connected_at = CASE WHEN $1 = 'CONNECTED' THEN NOW() ELSE member_payments_connected_at END,
+                     member_payments_connect_nonce_hash = NULL,
+                     member_payments_connect_nonce_expires_at = NULL,
+                     member_payments_updated_at = NOW()
+                 WHERE id = $4 AND member_payments_connect_nonce_hash = $5`,
+                [onboardingStatus, accountId, JSON.stringify(buildConnectMeta({ query: req.query, tokenResponse })), gymId, nonceHash]
+            );
+
+            return res.send(renderConnectResultPage({ status: onboardingStatus, targetOrigin }));
+        } catch (exchangeErr) {
+            console.error('MEMBER PAY CONNECT TOKEN EXCHANGE ERROR:', exchangeErr.message);
+            await pool.query(
+                `UPDATE gyms
+                 SET member_payments_onboarding_status = 'FAILED',
+                     member_payments_connect_meta = $1::jsonb,
+                     member_payments_connect_nonce_hash = NULL,
+                     member_payments_connect_nonce_expires_at = NULL,
+                     member_payments_updated_at = NOW()
+                 WHERE id = $2 AND member_payments_connect_nonce_hash = $3`,
+                [JSON.stringify(buildConnectMeta({ query: req.query })), gymId, nonceHash]
+            );
+
+            return res.status(500).send(renderConnectResultPage({ status: 'FAILED', targetOrigin }));
+        }
     } catch (err) {
         console.error('MEMBER PAY CONNECT CALLBACK ERROR:', err.message);
         return res.status(500).send('<h3>Failed to process onboarding callback.</h3>');
     }
 });
 
-router.post('/online/connect/disconnect', auth, saasMiddleware, async (req, res) => {
+router.post('/online/connect/disconnect', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMemberPaymentsSchema();
         await pool.query(
@@ -359,6 +563,8 @@ router.post('/online/connect/disconnect', auth, saasMiddleware, async (req, res)
                  member_payments_onboarding_status = 'NOT_CONNECTED',
                  member_razorpay_connected_account_id = NULL,
                  member_payments_connect_meta = '{}'::jsonb,
+                 member_payments_connect_nonce_hash = NULL,
+                 member_payments_connect_nonce_expires_at = NULL,
                  member_payments_connected_at = NULL,
                  member_payments_updated_at = NOW()
              WHERE id = $1`,
@@ -374,7 +580,7 @@ router.post('/online/connect/disconnect', auth, saasMiddleware, async (req, res)
 // Create a Razorpay linked account for gym owners who do NOT have a Razorpay account.
 // Razorpay will email them to complete KYC (PAN + bank) on their own platform.
 // We get back acc_XXXXX immediately and can start routing payments to it.
-router.post('/online/linked-account/create', auth, saasMiddleware, async (req, res) => {
+router.post('/online/linked-account/create', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMemberPaymentsSchema();
         const gym_id = req.user.gym_id;
@@ -467,13 +673,13 @@ router.post('/online/linked-account/create', auth, saasMiddleware, async (req, r
 
 // Save a Razorpay linked account ID that was created manually in the Razorpay Dashboard.
 // Gym owner copies acc_XXXXX from Razorpay → Route → Accounts and pastes it here.
-router.post('/online/linked-account/save', auth, saasMiddleware, async (req, res) => {
+router.post('/online/linked-account/save', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMemberPaymentsSchema();
         const gym_id = req.user.gym_id;
         const account_id = String(req.body.account_id || '').trim();
 
-        if (!account_id.startsWith('acc_')) {
+        if (!/^acc_[A-Za-z0-9]+$/.test(account_id)) {
             return res.status(400).json({ error: 'Invalid account ID. Must start with acc_' });
         }
 
@@ -495,7 +701,7 @@ router.post('/online/linked-account/save', auth, saasMiddleware, async (req, res
     }
 });
 
-router.post('/online/verify', auth, saasMiddleware, async (req, res) => {
+router.post('/online/verify', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const gym_id = req.user.gym_id;
     const {
         member_id,
@@ -562,7 +768,7 @@ router.post('/online/verify', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 2. GET ALL PLANS ---
-router.get('/plans', auth, saasMiddleware, async (req, res) => {
+router.get('/plans', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const plans = await pool.query(
             `SELECT id, name, duration_days, duration_months, price
@@ -577,7 +783,7 @@ router.get('/plans', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 3. CREATE PLAN ---
-router.post('/plans', auth, saasMiddleware, async (req, res) => {
+router.post('/plans', auth, saasMiddleware, requireOwner, async (req, res) => {
     const { plan_name, duration_days, price } = req.body;
     const gym_id = req.user.gym_id;
     const duration_months = Math.max(1, Math.floor(parseInt(duration_days) / 30));
@@ -596,7 +802,7 @@ router.post('/plans', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 4. REMOVE PLAN ---
-router.post('/remove-plan', auth, saasMiddleware, async (req, res) => {
+router.post('/remove-plan', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const { member_id } = req.body;
     const gym_id = req.user.gym_id;
     try {
@@ -613,7 +819,7 @@ router.post('/remove-plan', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 5. MEMBERSHIP STATUS LIST ---
-router.get('/status', auth, saasMiddleware, async (req, res) => {
+router.get('/status', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const list = await pool.query(`
             SELECT
@@ -646,7 +852,7 @@ router.get('/status', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 6. RENEW ---
-router.post('/renew', auth, saasMiddleware, async (req, res) => {
+router.post('/renew', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const { membership_id } = req.body;
     try {
         const current = await pool.query(
@@ -675,7 +881,7 @@ router.post('/renew', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 7. QUICK EXTEND ---
-router.post('/extend', auth, saasMiddleware, async (req, res) => {
+router.post('/extend', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const { member_id, days } = req.body;
     if (!member_id || !days) return res.status(400).json({ error: "member_id and days required." });
 

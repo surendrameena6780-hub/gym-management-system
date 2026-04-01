@@ -1553,8 +1553,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Add Member */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92dvh] flex flex-col">
+        <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div
               className="relative p-6 text-white flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' }}
@@ -1576,7 +1576,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </div>
 
-            <form onSubmit={handleAddMember} className="p-6 space-y-4 overflow-y-auto flex-1">
+            <form onSubmit={handleAddMember} className="app-modal-scroll p-6 space-y-4">
               <div className="flex flex-col items-center">
                 <label className="cursor-pointer block">
                   <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">
@@ -1680,8 +1680,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Record Payment */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 1rem)' }}>
+        <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -1695,7 +1695,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-slate-500" />
               </button>
             </div>
-            <form onSubmit={handlePayment} className="p-6 space-y-4 overflow-y-auto flex-1">
+            <form onSubmit={handlePayment} className="app-modal-scroll p-6 space-y-4">
               {/* Searchable member picker */}
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Member</label>
@@ -1833,8 +1833,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Broadcast */}
       {showBroadcastModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start sm:items-center justify-center z-[200] p-3 sm:p-4 pt-4 sm:pt-6 pb-[calc(var(--mobile-nav-offset)+0.75rem)] overflow-y-auto">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 0.75rem)' }}>
+        <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
             <div className="px-5 py-4 sm:px-6 sm:py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
               <div className="flex items-center gap-3">
@@ -1846,7 +1846,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-white" />
               </button>
             </div>
-            <form onSubmit={handleBroadcast} className="p-5 sm:p-6 space-y-3.5 overflow-y-auto flex-1">
+            <form onSubmit={handleBroadcast} className="app-modal-scroll p-5 sm:p-6 space-y-3.5">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
                 <input
@@ -1970,8 +1970,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       )}
 
       {showCheckinModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 1.25rem)' }}>
+        <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
             <div
               className="px-6 py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)' }}
@@ -1991,7 +1991,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </div>
 
-            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+            <div className="app-modal-scroll p-6 space-y-4">
               <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
                 <input
                   type="text"

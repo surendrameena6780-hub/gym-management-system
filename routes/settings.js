@@ -4,11 +4,13 @@ const bcrypt = require('bcryptjs');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const { requireOwner } = require('../middleware/rbac');
-const multer = require('multer');
-const path = require('path');
-const crypto = require('crypto');
 const twilio = require('twilio');
 const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
+const {
+    createProfileUploadMiddleware,
+    cleanupUploadedFile,
+    resolveStoredProfileImagePath,
+} = require('../utils/profileUploads');
 
 router.use(auth, requireOwner);
 
@@ -182,33 +184,22 @@ const ensureMemberPaymentsSchema = async () => {
             ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED',
             ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120),
             ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb,
+            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_hash TEXT,
+            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_expires_at TIMESTAMP,
             ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
         `);
     }
     await ensureMemberPaymentsSchemaPromise;
 };
 
-// --- 1. CONFIGURE MULTER STORAGE ---
-const storage = multer.diskStorage({
-    destination: './uploads/profiles/',
-    filename: (req, file, cb) => {
-        cb(null, `profile-${req.user.gym_id}-${req.user.id}-${crypto.randomBytes(12).toString('hex')}${path.extname(file.originalname).toLowerCase()}`);
-    }
+const uploadProfilePic = createProfileUploadMiddleware({
+    prefix: 'profile',
+    getActorId: (req) => req.user?.id || 'owner',
 });
 
-const allowedImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
-
-const upload = multer({
-    storage,
-    limits: { fileSize: 2 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        if (!allowedImageMimeTypes.has(file.mimetype)) {
-            return cb(new Error('Only JPG, JPEG, PNG, and WEBP files are allowed'));
-        }
-        cb(null, true);
-    }
-});
-// Replace the router.get('/', ...) block in routes/settings.js with this:
+const discardUploadedProfile = async (req) => {
+    await cleanupUploadedFile(req?.file);
+};
 
 router.get('/', auth, async (req, res) => {
     try {
@@ -526,23 +517,28 @@ router.post('/integrations/test-message', auth, async (req, res) => {
 });
 
 // --- 3. MASTER ACCOUNT UPDATE ---
-router.put('/account', auth, upload.single('profile_pic'), async (req, res) => {
+router.put('/account', auth, uploadProfilePic, async (req, res) => {
     const { full_name, email, phone, current_password, new_password } = req.body;
     let profile_pic_path = req.file ? `/uploads/profiles/${req.file.filename}` : null;
 
     try {
         const normalizedCurrentPassword = String(current_password || '').trim();
         const normalizedNewPassword = String(new_password || '');
+        const currentUserRes = await pool.query('SELECT profile_pic, password_hash FROM users WHERE id = $1', [req.user.id]);
+        const currentUser = currentUserRes.rows[0] || {};
 
         if ((normalizedCurrentPassword && !normalizedNewPassword) || (!normalizedCurrentPassword && normalizedNewPassword)) {
+            await discardUploadedProfile(req);
             return res.status(400).json({ error: 'To change password, provide both current_password and new_password.' });
         }
 
         if (normalizedNewPassword && normalizedNewPassword.length < 8) {
+            await discardUploadedProfile(req);
             return res.status(400).json({ error: 'New password must be at least 8 characters.' });
         }
 
         if (normalizedCurrentPassword && normalizedNewPassword && normalizedCurrentPassword === normalizedNewPassword) {
+            await discardUploadedProfile(req);
             return res.status(400).json({ error: 'New password must be different from current password.' });
         }
 
@@ -561,11 +557,11 @@ router.put('/account', auth, upload.single('profile_pic'), async (req, res) => {
         }
 
         if (normalizedCurrentPassword && normalizedNewPassword) {
-            const userRes = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
-            const isMatch = await bcrypt.compare(normalizedCurrentPassword, userRes.rows[0].password_hash);
+            const isMatch = await bcrypt.compare(normalizedCurrentPassword, currentUser.password_hash || '');
             
             if (!isMatch) {
                 await pool.query('ROLLBACK');
+                await discardUploadedProfile(req);
                 return res.status(400).json({ error: "Current password is incorrect." });
             }
 
@@ -579,6 +575,14 @@ router.put('/account', auth, upload.single('profile_pic'), async (req, res) => {
         }
 
         await pool.query('COMMIT');
+
+        if (profile_pic_path) {
+            const previousProfilePath = resolveStoredProfileImagePath(currentUser.profile_pic);
+            if (previousProfilePath && previousProfilePath !== req.file.path) {
+                await cleanupUploadedFile(previousProfilePath);
+            }
+        }
+
         res.json({ 
             message: "Account updated successfully", 
             profile_pic: profile_pic_path
@@ -587,8 +591,7 @@ router.put('/account', auth, upload.single('profile_pic'), async (req, res) => {
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("ACCOUNT UPDATE ERROR:", err.message);
-        if (err instanceof multer.MulterError) return res.status(400).json({ error: 'Image too large. Max size is 2MB.' });
-        if (err.message && err.message.includes('Only JPG')) return res.status(400).json({ error: err.message });
+        await discardUploadedProfile(req);
         if (err.code === '23505') return res.status(400).json({ error: "Email already in use." });
         res.status(500).json({ error: "Server Error" });
     }

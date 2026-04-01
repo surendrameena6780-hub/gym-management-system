@@ -32,8 +32,8 @@ router.get('/', async (req, res) => {
                 pl.name      AS plan_name,
                 pl.duration_days
             FROM payments p
-            JOIN    members m  ON p.user_id  = m.id
-            LEFT JOIN plans pl ON p.plan_id  = pl.id
+            JOIN    members m  ON p.user_id  = m.id AND m.gym_id = p.gym_id
+            LEFT JOIN plans pl ON p.plan_id  = pl.id AND pl.gym_id = p.gym_id
             WHERE p.gym_id = $1
                             AND p.deleted_at IS NULL
                             AND m.deleted_at IS NULL
@@ -82,6 +82,25 @@ router.post('/record', async (req, res) => {
         const final_invoice_id = (transaction_id && transaction_id.startsWith('pay_')) ? transaction_id : auto_inv_id;
         const final_mode       = (transaction_id && transaction_id.startsWith('pay_')) ? 'Online' : (payment_mode || 'Cash');
 
+        const [memberResult, planResult] = await Promise.all([
+            pool.query(
+                'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                [user_id, gym_id]
+            ),
+            pool.query(
+                'SELECT id, duration_days FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                [plan_id, gym_id]
+            ),
+        ]);
+
+        if (memberResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Member not found.' });
+        }
+
+        if (planResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Plan not found.' });
+        }
+
         await pool.query('BEGIN');
 
         const newPayment = await pool.query(
@@ -99,15 +118,12 @@ router.post('/record', async (req, res) => {
 
         await pool.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [user_id, gym_id]);
 
-        const planResult = await pool.query('SELECT duration_days FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [plan_id, gym_id]);
-        if (planResult.rows.length > 0) {
-            const days = planResult.rows[0].duration_days;
-            await pool.query(
-                `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
-                 VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
-                [gym_id, user_id, plan_id, days]
-            );
-        }
+        const days = planResult.rows[0].duration_days || 30;
+        await pool.query(
+            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
+             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
+            [gym_id, user_id, plan_id, days]
+        );
 
         await pool.query(
             `UPDATE members SET status = 'ACTIVE', joining_date = COALESCE(joining_date, CURRENT_DATE) WHERE id = $1 AND gym_id = $2`,
@@ -189,7 +205,7 @@ router.get('/history/:member_id', async (req, res) => {
                 p.payment_mode,
                 pl.name AS plan_name
             FROM payments p
-            LEFT JOIN plans pl ON p.plan_id = pl.id
+            LEFT JOIN plans pl ON p.plan_id = pl.id AND pl.gym_id = p.gym_id
             WHERE p.user_id = $1 AND p.gym_id = $2
                             AND p.deleted_at IS NULL
             ORDER BY p.payment_date DESC

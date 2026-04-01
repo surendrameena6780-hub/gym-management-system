@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const { connectDB, pool } = require('./config/db');
 const fs = require('fs'); 
 const path = require('path');
+const { PROFILE_UPLOAD_DIR, allowedProfileImageExtensions } = require('./utils/profileUploads');
 
 // Import Jobs and Middleware
 const checkExpirations = require('./jobs/expiryCheck');
@@ -28,6 +29,16 @@ const supportRoutes = require('./routes/support');
 dotenv.config();
 const app = express();
 
+const parseTrustProxySetting = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+    if (raw.toLowerCase() === 'true') return true;
+    if (raw.toLowerCase() === 'false') return false;
+    const asNumber = Number.parseInt(raw, 10);
+    if (Number.isInteger(asNumber) && `${asNumber}` === raw) return asNumber;
+    return raw;
+};
+
 const requiredEnv = ['DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'JWT_SECRET'];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
 if (missingEnv.length > 0) {
@@ -44,9 +55,14 @@ const corsOrigins = (process.env.CORS_ORIGIN || '')
 const isProduction = process.env.NODE_ENV === 'production';
 
 const defaultDevOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const trustProxySetting = parseTrustProxySetting(process.env.TRUST_PROXY);
 
 if (isProduction && corsOrigins.length === 0) {
     throw new Error('FATAL: CORS_ORIGIN is required in production.');
+}
+
+if (trustProxySetting) {
+    app.set('trust proxy', trustProxySetting);
 }
 
 const corsOptions = {
@@ -115,9 +131,27 @@ app.use('/api/', (req, res, next) => {
 app.use('/api/auth/login', authLimiter);
 app.use('/api/superadmin/login', authLimiter);
 
-// Serve static files from the 'uploads' directory
-// This makes http://localhost:5000/uploads/profiles/image.jpg accessible
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(
+    '/uploads/profiles',
+    (req, res, next) => {
+        const requestedExtension = path.extname(req.path).toLowerCase();
+        if (!allowedProfileImageExtensions.has(requestedExtension)) {
+            return res.status(404).json({ error: 'Not found' });
+        }
+        return next();
+    },
+    express.static(PROFILE_UPLOAD_DIR, {
+        index: false,
+        fallthrough: false,
+        dotfiles: 'deny',
+        maxAge: isProduction ? '7d' : 0,
+        immutable: isProduction,
+        setHeaders: (res) => {
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.setHeader('Content-Disposition', 'inline');
+        },
+    })
+);
 
 app.use('/api/users', require('./routes/users'));
 
@@ -125,8 +159,8 @@ app.use('/api/users', require('./routes/users'));
 connectDB();
 
 // Create uploads folder structure if missing
-const uploadDir = './uploads';
-const profileDir = './uploads/profiles';
+const uploadDir = path.join(__dirname, 'uploads');
+const profileDir = PROFILE_UPLOAD_DIR;
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir);
 

@@ -13,13 +13,21 @@ body,
 }
 
 :root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --app-viewport-height: 100vh;
   --mobile-nav-height: 84px;
   --mobile-nav-offset: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
   --payments-mobile-list-max-height: 22rem;
   --members-mobile-list-max-height: 22rem;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-viewport-height: 100dvh;
+  }
 }
 
 *,
@@ -36,8 +44,14 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8fafc;
+  min-height: var(--app-viewport-height);
+  background:
+    radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.12) 0%, transparent 48%),
+    radial-gradient(circle at 82% 20%, rgba(168, 85, 247, 0.09) 0%, transparent 42%),
+    radial-gradient(circle at 78% 82%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
+    #eef0ff;
   overflow-x: hidden;
+  color: #0f172a;
 }
 
 html,
@@ -54,7 +68,60 @@ textarea {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: var(--app-viewport-height);
+}
+
+.app-shell-height {
+  min-height: var(--app-viewport-height);
+  height: var(--app-viewport-height);
+}
+
+.app-header-safe {
+  padding-top: var(--safe-area-top);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+
+.app-header-row {
+  min-height: 4rem;
+}
+
+.app-modal-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: calc(var(--safe-area-top) + 0.75rem) 0.75rem calc(var(--mobile-nav-offset) + 0.75rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-modal-panel {
+  width: min(100%, 32rem);
+  max-height: calc(var(--app-viewport-height) - var(--safe-area-top) - var(--mobile-nav-offset) - 1.5rem);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app-modal-panel--wide {
+  width: min(100%, 64rem);
+}
+
+.app-modal-panel--xl {
+  width: min(100%, 72rem);
+}
+
+.app-modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-main-scroll {
@@ -110,7 +177,7 @@ textarea {
   background: #fff;
   border-radius: 24px;
   box-shadow: 0 8px 60px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.05);
-  max-height: calc(88dvh - var(--mobile-nav-offset));
+  max-height: calc(var(--app-viewport-height) - var(--mobile-nav-offset) - var(--safe-area-top) - 1rem);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -137,13 +204,24 @@ textarea {
   pointer-events: auto;
 }
 @media (min-width: 640px) {
+  .app-modal-shell {
+    align-items: center;
+    padding: 1rem;
+  }
+
+  .app-modal-panel,
+  .app-modal-panel--wide,
+  .app-modal-panel--xl {
+    max-height: min(88vh, calc(var(--app-viewport-height) - 2rem));
+  }
+
   .drawer-sheet {
     left: 50%; right: auto;
     bottom: 1.5rem;
     transform: translateX(-50%) translateY(calc(100% + 3rem));
     width: 460px;
     border-radius: 24px;
-    max-height: 88dvh;
+    max-height: min(88vh, calc(var(--app-viewport-height) - 3rem));
   }
   .drawer-sheet.open {
     transform: translateX(-50%) translateY(0);

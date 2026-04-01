@@ -526,6 +526,9 @@ function App() {
       setMemberFilter('All');
       setMemberFocus({ id: null, action: null });
     }
+    if (page === 'Settings') {
+      setSettingsTab('menu');
+    }
     setCurrentPage(page);
   }, [isSuspended, toast, canAccessPage]);
 
@@ -542,7 +545,7 @@ function App() {
     } else {
       setMemberFocus({ id: null, action: null });
     }
-    if (page === 'Settings') setSettingsTab(subPath);
+    if (page === 'Settings') setSettingsTab(subPath || 'menu');
     setCurrentPage(page);
   }, [isSuspended, canAccessPage]);
 
@@ -712,7 +715,7 @@ function App() {
   if (!stats && currentPage === 'Dashboard' && !isSuspended && currentUser?.role === 'OWNER') return (
     <>
       {showSplash && <SplashScreen exiting={splashExiting} />}
-      <div className="h-screen flex items-center justify-center flex-col gap-4"
+      <div className="app-shell-height flex items-center justify-center flex-col gap-4"
         style={{ background: 'radial-gradient(ellipse at 30% 30%, rgba(99,102,241,0.12) 0%, transparent 60%), #0b0f1e' }}>
         <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-900/60"
           style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
@@ -787,7 +790,7 @@ function App() {
 
 
       <div
-        className="flex h-[100dvh] overflow-hidden font-['Inter'] antialiased text-slate-900"
+        className="flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900"
         style={{
           background: `
             radial-gradient(ellipse at 18% 18%, rgba(99,102,241,0.09) 0%, transparent 55%),
@@ -798,7 +801,7 @@ function App() {
           `
         }}
       >
-        <div className="fixed top-5 right-5 z-[9999] flex flex-col gap-3 pointer-events-none">
+        <div className="fixed right-4 sm:right-5 z-[9999] flex flex-col gap-3 pointer-events-none" style={{ top: 'max(calc(var(--safe-area-top) + 1rem), 1rem)' }}>
           {toasts.map(t => (
             <div key={t.id} className="pointer-events-auto">
               <ToastItem {...t} onRemove={() => removeToast(t.id)} />
@@ -870,18 +873,19 @@ function App() {
           </div>
         </aside>
 
-        <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden">
-          <header className="relative z-50 h-16 flex items-center justify-between px-4 md:px-8 shrink-0 border-b bg-white/70 backdrop-blur-3xl">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-400">Home</span>
-              {currentPage !== 'Dashboard' && (
-                <>
-                  <span className="text-slate-300 text-xs mx-0.5">/</span>
-                  <span className="text-sm font-bold text-slate-800">{currentPage}</span>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-2 sm:gap-5">
+        <div className="flex-1 flex flex-col app-shell-height overflow-hidden">
+          <header className="relative z-50 shrink-0 border-b border-white/60 app-header-safe">
+            <div className="app-header-row flex items-center justify-between px-4 md:px-8">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-400">Home</span>
+                {currentPage !== 'Dashboard' && (
+                  <>
+                    <span className="text-slate-300 text-xs mx-0.5">/</span>
+                    <span className="text-sm font-bold text-slate-800">{currentPage}</span>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-2 sm:gap-5">
               {token && !isStandaloneMode && canInstallApp && (
                 <button
                   onClick={handleInstallApp}
@@ -892,8 +896,8 @@ function App() {
                 </button>
               )}
   
-              {/* NOTIFICATION BELL */}
-              <div className="relative">
+                {/* NOTIFICATION BELL */}
+                <div className="relative">
                 <button 
                   onClick={() => setShowNotifications(!showNotifications)}
                   className="relative p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
@@ -952,10 +956,10 @@ function App() {
                     </div>
                   </>
                 )}
-              </div>
+                </div>
 
-             {/* PROFILE MENU */}
-              <div className="relative">
+               {/* PROFILE MENU */}
+                <div className="relative">
                 <button 
                   onClick={() => setShowProfileMenu(!showProfileMenu)}
                   className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-black shadow-md bg-gradient-to-tr from-indigo-500 to-purple-500 hover:scale-105 transition-transform ring-2 ring-white"
@@ -1010,6 +1014,7 @@ function App() {
                     </div>
                   </>
                 )}
+                </div>
               </div>
             </div>
           </header>
@@ -1029,7 +1034,7 @@ function App() {
             {/* Members */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Members') && (
-                <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} />
+                <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} />
               )}
             </div>
 
@@ -1050,7 +1055,7 @@ function App() {
             {/* Attendance */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Attendance') && (
-                <AttendancePage token={token} toast={toast} isActive={currentPage === 'Attendance'} />
+                <AttendancePage token={token} toast={toast} isActive={currentPage === 'Attendance'} currentUser={currentUser} />
               )}
             </div>
 

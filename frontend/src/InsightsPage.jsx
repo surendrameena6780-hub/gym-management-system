@@ -285,10 +285,10 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
       {/* 2. KPI STRIP */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Total Revenue" value={`₹${analytics.revenue.total.toLocaleString()}`} change={analytics.revenue.growth} trend="up" icon={DollarSign} color="bg-emerald-500" className="gv-fade-up" />
-        <KPICard title="Active Members" value={analytics.health.active} change="+4" trend="up" icon={Users} color="bg-blue-500" className="gv-fade-up gv-fade-up-1" />
-        <KPICard title="Retention Rate" value={`${analytics.health.retention}%`} change="-1.2%" trend="down" icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
-        <KPICard title="Revenue At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} trend="down" icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
+        <KPICard title="ARPU" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
+        <KPICard title="Renewals Due Soon" value={analytics.risk.expiringCount} change={analytics.risk.expiringCount > 0 ? 'priority' : 'stable'} trend={analytics.risk.expiringCount > 0 ? 'down' : 'up'} icon={Clock} color="bg-amber-500" className="gv-fade-up gv-fade-up-1" />
+        <KPICard title="Retention Rate" value={`${analytics.health.retention}%`} change={`${analytics.health.expired} expired`} trend={Number(analytics.health.churn || 0) > 0 ? 'down' : 'up'} icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
+        <KPICard title="Revenue At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={`${analytics.risk.ghostCount} ghosts`} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
       </div>
 
       {/* 3. TABS */}

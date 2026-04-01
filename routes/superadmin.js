@@ -9,6 +9,14 @@ const masterPassword = String(process.env.MASTER_PASSWORD || process.env.SUPERAD
 const superadminEnabled = masterPassword.length >= 8;
 const disabledMessage = 'Superadmin is disabled. Set MASTER_PASSWORD (or SUPERADMIN_PASSWORD) with at least 8 characters.';
 
+const normalizeIp = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (raw === '::1') return '127.0.0.1';
+    if (raw.startsWith('::ffff:')) return raw.slice(7);
+    return raw;
+};
+
 const securePasswordCompare = (input, expected) => {
     const a = Buffer.from(String(input || ''), 'utf8');
     const b = Buffer.from(String(expected || ''), 'utf8');
@@ -19,14 +27,13 @@ const securePasswordCompare = (input, expected) => {
 const toBool = (value) => String(value || '').toLowerCase() === 'true';
 
 const getClientIp = (req) => {
-    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    return forwarded || req.ip || req.connection?.remoteAddress || '';
+    return normalizeIp(req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '');
 };
 
 const isIpAllowed = (req) => {
     const allowList = String(process.env.SUPERADMIN_ALLOWED_IPS || '')
         .split(',')
-        .map((v) => v.trim())
+        .map((v) => normalizeIp(v))
         .filter(Boolean);
 
     if (allowList.length === 0) return true;
