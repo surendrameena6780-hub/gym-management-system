@@ -34,6 +34,13 @@ function useCountUp(target, duration = 900) {
   return display;
 }
 
+const getApiOrigin = () => (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const buildProfileUrl = (pic) => {
+  if (!pic) return null;
+  if (pic.startsWith('http') || pic.startsWith('blob:') || pic.startsWith('data:')) return pic;
+  return `${getApiOrigin()}/uploads/profiles/${pic}`;
+};
+
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {
     if (window.Razorpay) return resolve(true);
@@ -1408,36 +1415,25 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         >
           <div className="grid grid-cols-4 gap-1">
           {[
-            { id: 'btn-add-member', label: 'Add Member', icon: <UserPlus size={16} strokeWidth={2.5} />, color: 'emerald', onClick: () => setShowAddModal(true) },
-            { label: 'Renew', icon: <RefreshCw size={15} strokeWidth={2.5} />, color: 'indigo', onClick: () => setShowPaymentModal(true) },
-            { label: 'Broadcast', icon: <MessageSquare size={15} strokeWidth={2.5} />, color: 'violet', onClick: () => setShowBroadcastModal(true) },
-            { label: 'Check In', icon: <CheckCircle size={15} strokeWidth={2.5} />, color: 'sky', onClick: () => { setCheckinQuery(''); setShowCheckinModal(true); } },
-          ].map(({ id, label, icon, color, onClick: onBtnClick }) => {
-            const colors = {
-              emerald: 'hover:bg-emerald-500/18 active:bg-emerald-500/28 text-emerald-400',
-              indigo:  'hover:bg-indigo-500/18 active:bg-indigo-500/28 text-indigo-400',
-              violet:  'hover:bg-violet-500/18 active:bg-violet-500/28 text-violet-400',
-              sky:     'hover:bg-sky-500/18 active:bg-sky-500/28 text-sky-400',
-            }[color];
-            const glows = {
-              emerald: '0 0 14px rgba(16,185,129,0.6)',
-              indigo:  '0 0 14px rgba(99,102,241,0.6)',
-              violet:  '0 0 14px rgba(139,92,246,0.6)',
-              sky:     '0 0 14px rgba(14,165,233,0.6)',
+            { label: 'Add Member', icon: <UserPlus size={16} strokeWidth={2.5} />, color: 'emerald', onClick: () => setShowAddModal(true) },
+            { label: 'Renew',      icon: <RefreshCw size={15} strokeWidth={2.5} />, color: 'indigo',  onClick: () => setShowPaymentModal(true) },
+            { label: 'Broadcast',  icon: <MessageSquare size={15} strokeWidth={2.5} />, color: 'violet', onClick: () => setShowBroadcastModal(true) },
+            { label: 'Check In',   icon: <CheckCircle size={15} strokeWidth={2.5} />, color: 'sky',    onClick: () => { setCheckinQuery(''); setShowCheckinModal(true); } },
+          ].map(({ label, icon, color, onClick: onBtnClick }) => {
+            const btnCls = {
+              emerald: 'bg-emerald-500/10 active:bg-emerald-500/25 text-emerald-400',
+              indigo:  'bg-indigo-500/10 active:bg-indigo-500/25 text-indigo-400',
+              violet:  'bg-violet-500/10 active:bg-violet-500/25 text-violet-400',
+              sky:     'bg-sky-500/10 active:bg-sky-500/25 text-sky-400',
             }[color];
             return (
               <button
                 key={label}
-                id={id}
                 onClick={onBtnClick}
-                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] text-white/70 transition-all duration-150 active:scale-[0.93] ${colors}`}
+                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] ${btnCls}`}
               >
-                <div className="transition-all duration-200 group-active:scale-90" style={{ filter: 'drop-shadow(0 0 0px transparent)', transition: 'filter 0.2s' }}
-                  onMouseEnter={e => { e.currentTarget.style.filter = `drop-shadow(${glows})`; }}
-                  onMouseLeave={e => { e.currentTarget.style.filter = ''; }}>
-                  {icon}
-                </div>
-                <span className="text-[10px] font-bold leading-none tracking-wide text-slate-400">{label}</span>
+                {icon}
+                <span className="text-[10px] font-bold leading-none tracking-wide opacity-75">{label}</span>
               </button>
             );
           })}
@@ -1746,19 +1742,32 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             </div>
             <form onSubmit={handleBroadcast} className="p-6 space-y-4 overflow-y-auto flex-1">
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Target Audience</label>
-               <select
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                  value={broadcastAudience} onChange={e => setBroadcastAudience(e.target.value)}>
-                  <option value="All">All Members ({members.length})</option>
-                  <option value="Active">Active Members ({dashboardData.active})</option>
-                  <option value="Expiring">Expiring Soon ({dashboardData.expiring7})</option>
-                  <option value="Expired">Expired Members ({dashboardData.expired})</option>
-                  <option value="Ghosts">Ghost Members ({dashboardData.ghosts})</option>
-                  <option value="HighChurn">High Churn Risk ({dashboardData.churnHigh})</option>
-                </select>
-                <p className="text-[10px] text-slate-400 mt-1 font-semibold">
-                  {campaignPreviewLoading ? 'Loading segment preview...' : `Estimated audience: ${campaignPreviewCount}`}
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Target Audience</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { value: 'All',       label: 'All Members',   count: members.length },
+                    { value: 'Active',    label: 'Active',        count: dashboardData.active },
+                    { value: 'Expiring',  label: 'Expiring Soon', count: dashboardData.expiring7 },
+                    { value: 'Expired',   label: 'Expired',       count: dashboardData.expired },
+                    { value: 'Ghosts',    label: 'Ghosts',        count: dashboardData.ghosts },
+                    { value: 'HighChurn', label: 'High Churn',    count: dashboardData.churnHigh },
+                  ].map(({ value, label, count }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setBroadcastAudience(value)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-150 ${
+                        broadcastAudience === value
+                          ? 'bg-emerald-500 text-white shadow shadow-emerald-200'
+                          : 'bg-slate-100 text-slate-600 active:bg-slate-200'
+                      }`}
+                    >
+                      {label}{count > 0 ? ` · ${count}` : ''}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">
+                  {campaignPreviewLoading ? 'Loading preview...' : `Estimated reach: ${campaignPreviewCount} member${campaignPreviewCount !== 1 ? 's' : ''}`}
                 </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1807,7 +1816,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {showCheckinModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[92dvh] flex flex-col">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[80dvh] flex flex-col">
             <div
               className="px-6 py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)' }}
@@ -1846,7 +1855,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   <p className="text-sm font-bold text-slate-500">No members found for this search.</p>
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
                   {checkinMembers.map((member) => {
                     const isCheckedIn = checkedInMemberIds.has(Number(member.id));
                     const membershipStatus = String(member.membership_status || 'UNPAID').toUpperCase();
@@ -1866,9 +1875,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     return (
                       <div key={member.id} className="p-3 rounded-2xl border border-slate-100 bg-white flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-12 h-12 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
+                          <div className="w-11 h-11 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
                             {member.profile_pic ? (
-                              <img src={member.profile_pic} alt={member.full_name} className="w-full h-full object-cover" />
+                              <img src={buildProfileUrl(member.profile_pic)} alt={member.full_name} className="w-full h-full object-cover" onError={e => { e.target.onerror = null; e.target.style.display = 'none'; }} />
                             ) : (
                               <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-xs font-black">
                                 {initials}
