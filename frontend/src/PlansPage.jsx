@@ -303,7 +303,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
       {showAnalyticsModal && (
         <div className="app-modal-shell z-[100] bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="app-modal-panel app-modal-panel--wide bg-white rounded-[28px] sm:rounded-[32px] w-full max-w-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col md:flex-row">
-            <div className="bg-slate-900 text-white p-5 sm:p-6 md:p-8 md:w-[320px] flex flex-col gap-5 relative overflow-hidden">
+            <div className="bg-slate-900 text-white p-5 sm:p-6 md:p-8 md:w-[320px] shrink-0 flex flex-col gap-5 relative">
               <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500 rounded-full blur-[100px] opacity-20 -mr-20 -mt-20 pointer-events-none"></div>
               <div className="relative flex items-start justify-between gap-3">
                 <div>

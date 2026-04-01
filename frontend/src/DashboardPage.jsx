@@ -313,6 +313,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [campaignPreviewCount, setCampaignPreviewCount] = useState(0);
   const [campaignPreviewLoading, setCampaignPreviewLoading] = useState(false);
   const [broadcastTemplates, setBroadcastTemplates] = useState([]);
+  const [gymName, setGymName] = useState('');
   const [churnInsights, setChurnInsights] = useState({ summary: { high: 0, medium: 0, low: 0 }, members: [] });
   const [campaignLogs, setCampaignLogs] = useState([]);
 
@@ -603,22 +604,33 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   }, [broadcastAudience, showBroadcastModal, broadcastCustomIds.length]);
 
   useEffect(() => {
-    const loadTemplates = async () => {
+    const loadTemplatesAndGymName = async () => {
       if (!showBroadcastModal) return;
       try {
-        const res = await axios.get('/api/settings/integrations', headers);
-        const templates = Array.isArray(res.data?.templates) ? res.data.templates.filter((item) => item.is_active !== false) : [];
-        setBroadcastTemplates(templates);
-        const isSandbox = String(res.data?.whatsapp_mode || '') === 'SANDBOX';
-        const smsReady = Boolean(res.data?.sms_ready);
-        if (isSandbox && smsReady) {
-          setBroadcastChannel('SMS');
+        const [intRes, settRes] = await Promise.allSettled([
+          axios.get('/api/settings/integrations', headers),
+          axios.get('/api/settings', headers),
+        ]);
+        if (intRes.status === 'fulfilled') {
+          const data = intRes.value.data || {};
+          const templates = Array.isArray(data.templates) ? data.templates.filter((item) => item.is_active !== false) : [];
+          setBroadcastTemplates(templates);
+          const isSandbox = String(data.whatsapp_mode || '') === 'SANDBOX';
+          const smsReady = Boolean(data.sms_ready);
+          if (isSandbox && smsReady) setBroadcastChannel('SMS');
+        } else {
+          setBroadcastTemplates([]);
+        }
+        if (settRes.status === 'fulfilled') {
+          const acc = settRes.value.data?.account || settRes.value.data?.data?.account || {};
+          const name = String(acc.gym_name || '').trim();
+          if (name) setGymName(name);
         }
       } catch (_err) {
         setBroadcastTemplates([]);
       }
     };
-    loadTemplates();
+    loadTemplatesAndGymName();
   }, [showBroadcastModal]);
 
   useEffect(() => {
@@ -626,8 +638,18 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const selected = broadcastTemplates.find((item) => item.template_key === broadcastTemplateKey);
     if (!selected) return;
     const content = broadcastChannel === 'SMS' ? selected.sms_text : selected.whatsapp_text;
-    setBroadcastMessage(String(content || ''));
+    let resolved = String(content || '');
+    if (gymName) resolved = resolved.replace(/\{\{gym_name\}\}/gi, gymName);
+    setBroadcastMessage(resolved);
   }, [broadcastTemplateKey, broadcastChannel, broadcastTemplates]);
+
+  // If gym name loads after template was already selected, resolve {{gym_name}} in-place
+  useEffect(() => {
+    if (!gymName) return;
+    setBroadcastMessage((prev) =>
+      prev.includes('{{gym_name}}') ? prev.replace(/\{\{gym_name\}\}/gi, gymName) : prev
+    );
+  }, [gymName]);
 
   const handleBroadcast = async (e) => {
     e.preventDefault();
@@ -999,10 +1021,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     ].filter(Boolean)
       .sort((a, b) => b.score - a.score);
 
-    const recommendations = [...aiCandidates, ...opportunityCandidates]
-      .filter((item, index, arr) => arr.findIndex((candidate) => candidate.id === item.id) === index)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+    // ── AI Engine: strategic growth / opportunity insights (NOT member crisis tasks) ──
+    const recommendations = opportunityCandidates.slice(0, 3);
 
     const primary = recommendations[0] || {
       id: 'BASELINE',
@@ -1024,23 +1044,17 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       },
     };
 
+    const gymHealthLabel = healthScore >= 80 ? 'strong' : healthScore >= 60 ? 'moderate' : 'needs attention';
     const aiSummary = recommendations.length > 0
-      ? `Focus now: ${primary.title}. ${primary.reason}. Potential value ₹${primary.impact.toLocaleString()} at ${primary.confidence}% confidence.`
-      : `Gym health is ${healthScore}%. Operations are stable. Focus on growth and daily follow-ups this week.`;
+      ? `Gym health: ${healthScore}% (${gymHealthLabel}). Top opportunity — ${primary.title}: ${primary.reason}. Est. growth value ₹${primary.impact.toLocaleString()} at ${primary.confidence}% confidence.`
+      : `Gym health is ${gymHealthLabel} at ${healthScore}%. ${active.length} active members, ₹${monthlyRevenue.toLocaleString()} monthly revenue. Focus on consistent check-ins and renewal follow-ups to sustain momentum.`;
 
-    const ACTION_SLOT_COUNT = 3;
-    const priorityRank = { P0: 0, P1: 1, P2: 2 };
+    // ── Action Required: urgent member-specific tasks ONLY (expired, unpaid, ghosts, escalated) ──
     const actionRequiredRows = aiCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
-
-    const mergedActionRows = [...actionRequiredRows, ...opportunityCandidates]
-      .filter((item, index, arr) => arr.findIndex((x) => x.id === item.id) === index)
-      .sort((a, b) => {
-        const priorityDelta = (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
-        if (priorityDelta !== 0) return priorityDelta;
-        return b.score - a.score;
-      })
-      .slice(0, ACTION_SLOT_COUNT);
-    const urgentCount = aiCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1').length;
+    const mergedActionRows = actionRequiredRows.length > 0
+      ? actionRequiredRows.slice(0, 3)
+      : aiCandidates.slice(0, 3); // show best P2 member tasks when nothing critical
+    const urgentCount = actionRequiredRows.length;
 
     return {
       active: active.length, unpaid: unpaid.length, expired: expired.length,
@@ -1865,7 +1879,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                         onClick={() => setBroadcastCustomIds((prev) => prev.filter((id) => Number(id) !== Number(member.id)))}
                         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black border border-emerald-100"
                       >
-                        <span className="truncate max-w-[120px]">{member.full_name}</span>
+                        <span className="truncate max-w-[200px]">{member.full_name}</span>
                         <X size={12} />
                       </button>
                     ))}
@@ -1957,7 +1971,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-none"
                   placeholder="Type your message here..."
                   value={broadcastMessage} onChange={e => setBroadcastMessage(e.target.value)} />
-                <p className="text-[10px] text-slate-400 mt-1 font-semibold">Opens WhatsApp Web tabs for each member individually.</p>
+                <p className="text-[10px] text-slate-400 mt-1 font-semibold">{{name}} auto-fills each member's name · {{gym_name}} fills your gym name · Opens WhatsApp Web tabs for each member individually.</p>
               </div>
               <button type="submit"
                 className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 transition-all hover:opacity-90 active:scale-98"
