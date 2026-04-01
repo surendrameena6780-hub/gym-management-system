@@ -11,6 +11,7 @@ import {
   MessageSquare, Phone, Award
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import PageLoader from './PageLoader';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -250,7 +251,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
     };
   }, [members, attendanceSummary, dateRange]);
 
-  if (loading) return <div className="flex min-h-full items-center justify-center text-slate-400 font-bold animate-pulse">Loading Business Intelligence...</div>;
+  if (loading) return <PageLoader className="min-h-[56vh]" />;
   if (!analytics) return <div className="p-10 text-center text-slate-500 font-bold">No Data Available. Add members to see insights.</div>;
 
   return (

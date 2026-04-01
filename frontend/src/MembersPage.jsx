@@ -6,6 +6,7 @@ import {
   MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
   'from-violet-500 to-purple-600',
@@ -757,6 +758,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   });
 
   const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
+
+  if (loading && members.length === 0) {
+    return <PageLoader className="min-h-[56vh]" />;
+  }
 
   return (
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative">

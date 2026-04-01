@@ -4,8 +4,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0f102d",
-  "theme_color": "#0f102d",
+  "background_color": "#0b0c1e",
+  "theme_color": "#0b0c1e",
   "description": "GymVault management software",
   "icons": [
     {

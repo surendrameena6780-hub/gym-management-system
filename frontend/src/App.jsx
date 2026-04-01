@@ -121,14 +121,14 @@ function ConfirmModal({ confirmState, hideConfirm }) {
 function SplashScreen({ exiting }) {
   return (
     <div
-      className={`fixed z-[9999] flex flex-col items-center justify-center transition-all duration-700 ease-in-out ${exiting ? 'opacity-0 scale-105' : 'opacity-100 scale-100'}`}
+      className={`fixed z-[9999] flex flex-col items-center justify-center transition-all duration-500 ease-out ${exiting ? 'opacity-0 scale-105' : 'opacity-100 scale-100'}`}
       style={{
         background: 'linear-gradient(135deg, #0b0c1e 0%, #151040 40%, #0e1525 100%)',
         inset: 0,
         top: '-100px',
         paddingTop: '100px',
-        bottom: '-40px',
-        paddingBottom: '40px',
+        bottom: '-140px',
+        paddingBottom: '140px',
       }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -158,17 +158,17 @@ function SplashScreen({ exiting }) {
         Pro Dashboard
       </p>
 
-      <div className="w-44 h-[3px] bg-white/[0.07] rounded-full overflow-hidden animate-in fade-in duration-500 [animation-delay:400ms] [animation-fill-mode:both]">
+      <div className="w-44 h-[3px] bg-white/[0.07] rounded-full overflow-hidden animate-in fade-in duration-300 [animation-delay:240ms] [animation-fill-mode:both]">
         <div
           className="h-full rounded-full"
           style={{
             background: 'linear-gradient(90deg, #6366f1, #a855f7, #6366f1)',
             backgroundSize: '200% 100%',
-            animation: 'splashBar 1.8s ease-out forwards, shimmerBar 1.5s linear infinite 0.3s'
+            animation: 'splashBar 0.9s ease-out forwards, shimmerBar 0.9s linear infinite 0.12s'
           }}
         />
       </div>
-      <p className="text-white/20 text-[10px] uppercase tracking-[0.2em] font-bold mt-4 animate-in fade-in duration-500 [animation-delay:500ms] [animation-fill-mode:both]">
+      <p className="text-white/20 text-[10px] uppercase tracking-[0.2em] font-bold mt-4 animate-in fade-in duration-300 [animation-delay:300ms] [animation-fill-mode:both]">
         Loading your dashboard...
       </p>
 
@@ -561,8 +561,8 @@ function App() {
       setShowSplash(false);
       return;
     }
-    const t1 = setTimeout(() => setSplashExiting(true), 1600);
-    const t2 = setTimeout(() => setShowSplash(false), 2300);
+    const t1 = setTimeout(() => setSplashExiting(true), 240);
+    const t2 = setTimeout(() => setShowSplash(false), 640);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [isHQ]);
 
@@ -718,25 +718,6 @@ function App() {
   if (!token) {
     return <LoginPage setToken={(t, user) => { localStorage.setItem('token', t); setToken(t); if (user) { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); } }} />;
   }
-
-  if (!stats && currentPage === 'Dashboard' && !isSuspended && currentUser?.role === 'OWNER') return (
-    <>
-      {showSplash && <SplashScreen exiting={splashExiting} />}
-      <div className="app-shell-height flex items-center justify-center flex-col gap-4"
-        style={{ background: 'radial-gradient(ellipse at 30% 30%, rgba(99,102,241,0.12) 0%, transparent 60%), #0b0f1e' }}>
-        <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-900/60"
-          style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
-          <Dumbbell size={22} className="text-white" />
-        </div>
-        <div className="flex gap-1.5">
-          {[0,1,2].map(i => (
-            <div key={i} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-          ))}
-        </div>
-        <p className="font-bold tracking-[0.25em] uppercase text-xs text-slate-500">Initializing GymVault</p>
-      </div>
-    </>
-  );
 
   // Stamp current page into visitedPagesRef every render (ref mutation is safe during render)
   visitedPagesRef.current.add(currentPage);

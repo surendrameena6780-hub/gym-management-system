@@ -10,6 +10,7 @@ import {
   MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import PageLoader from './PageLoader';
 
 const TABS = [
   { id: 'account', label: 'Account & Business', icon: User, group: 'Personal & Business' },
@@ -759,7 +760,7 @@ const loadRazorpayScript = () => {
       )
   };
 
-  if (isLoading) return <div className="p-10 text-center font-bold text-slate-400 animate-pulse">Loading Configurations...</div>;
+  if (isLoading) return <PageLoader className="min-h-[56vh]" />;
 
   return (
     <div className="flex flex-col md:flex-row gap-4 md:gap-6 md:min-h-[calc(var(--app-viewport-height)-7rem)]">

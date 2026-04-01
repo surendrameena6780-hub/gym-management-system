@@ -10,6 +10,7 @@ import {
   Bot, Play // <-- 🚨 ADDED ICONS
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import PageLoader from './PageLoader';
 
 // ─── Count-Up Hook ─────────────────────────────────────────────────────────────
 function useCountUp(target, duration = 900) {
@@ -1106,17 +1107,24 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       },
     };
 
-    const gymHealthLabel = healthScore >= 80 ? 'strong' : healthScore >= 60 ? 'moderate' : 'needs attention';
+    const activeCoveragePct = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
+    const nextWatchline = expiringIn7Days.length > 0
+      ? `${expiringIn7Days.length} renewals are due within the next 7 days`
+      : unpaid.length > 0
+        ? `${unpaid.length} unpaid profiles are still waiting for activation`
+        : ghosts.length > 0
+          ? `${ghosts.length} active members have gone quiet recently`
+          : 'No immediate retention or revenue risks are peaking right now';
     const aiSummaryLines = recommendations.length > 0
       ? [
-          { label: 'Gym health', value: `${healthScore}% · ${gymHealthLabel}` },
-          { label: 'Top opportunity', value: primary.title },
-          { label: 'Why now', value: primary.reason },
+          { label: 'Active coverage', value: `${active.length} of ${members.length || 0} members currently hold active plans (${activeCoveragePct}%)` },
+          { label: 'Revenue signal', value: `₹${monthlyRevenue.toLocaleString()} collected across the last 30 days` },
+          { label: 'What to watch', value: nextWatchline },
         ]
       : [
-          { label: 'Gym health', value: `${healthScore}% · ${gymHealthLabel}` },
-          { label: 'Active members', value: `${active.length} members currently active` },
-          { label: 'Monthly revenue', value: `₹${monthlyRevenue.toLocaleString()} current run rate` },
+          { label: 'Active coverage', value: `${active.length} of ${members.length || 0} members currently hold active plans (${activeCoveragePct}%)` },
+          { label: 'Revenue signal', value: `₹${monthlyRevenue.toLocaleString()} collected across the last 30 days` },
+          { label: 'What to watch', value: nextWatchline },
         ];
 
     const subscriptionWarning = (() => {
@@ -1254,7 +1262,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   }, [broadcastSearch, broadcastCustomIds, members]);
 
 
-  if (loading) return <DashboardSkeleton />;
+  if (loading) return <PageLoader className="min-h-[56vh]" />;
 
   return (
     <div className="min-h-full dashboard-content-safe font-inter relative">
@@ -1489,39 +1497,30 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   Last automation: {dashboardData.automations.lastAutomationLabel}
                 </p>
 
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {dashboardData.ai.recommendations.map((rec, index) => {
-                    const meta = getPriorityMeta(rec.priority);
                     return (
-                      <button
+                      <div
                         key={rec.id}
-                        onClick={rec.action}
-                        className={`w-full text-left p-2 rounded-lg border transition-colors hover:bg-slate-50 ${meta.rowClass}`}
+                        className="w-full rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-left"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-[10px] font-black text-slate-800 truncate">{index + 1}. {rec.title}</p>
-                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${meta.badgeClass}`}>{meta.label}</span>
+                          <p className="text-[10px] font-black text-slate-800">Insight {index + 1}</p>
+                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200">{rec.urgency}</span>
                         </div>
-                        <p className="text-[9px] text-slate-500 font-semibold mt-0.5">
-                          ₹{Number(rec.impact || 0).toLocaleString()} impact · {rec.confidence}% confidence · {rec.urgency}
+                        <p className="text-[12px] font-bold text-slate-800 leading-snug mt-2">
+                          {rec.title}
                         </p>
-                      </button>
+                        <p className="text-[10px] text-slate-500 font-semibold mt-1 leading-relaxed">
+                          {rec.reason}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-bold mt-2">
+                          Est. upside ₹{Number(rec.impact || 0).toLocaleString()} · {rec.confidence}% confidence
+                        </p>
+                      </div>
                     );
                   })}
                 </div>
-                
-                <button
-                  onClick={dashboardData.ai.primary.action}
-                  disabled={isAutomating}
-                  className="w-full py-2.5 rounded-xl font-bold text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-600 hover:text-white transition-all duration-200 flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:cursor-wait"
-                >
-                  {isAutomating ? (
-                    <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Zap size={13} fill="currentColor" /> 
-                  )}
-                  {isAutomating ? 'Running Automations...' : dashboardData.ai.primary.cta}
-                </button>
               </div>
             </div>
 

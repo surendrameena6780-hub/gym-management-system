@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import PageLoader from './PageLoader';
 
 function useCountUp(target, duration = 800) {
   const [display, setDisplay] = useState(0);
@@ -383,7 +384,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
   const animatedPeakHourCount      = useCountUp(overview.peak_hour_count || 0);
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Loading attendance intelligence...</div>;
+    return <PageLoader className="min-h-[56vh]" />;
   }
 
   return (

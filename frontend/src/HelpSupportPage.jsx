@@ -12,6 +12,7 @@ import {
   Send,
   Ticket,
 } from 'lucide-react';
+import PageLoader from './PageLoader';
 
 const statusBadge = (status) => {
   const key = String(status || '').toUpperCase();
@@ -272,7 +273,7 @@ function HelpSupportPage({ token, toast }) {
   };
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Loading support center...</div>;
+    return <PageLoader className="min-h-[56vh]" />;
   }
 
   if (accessDenied) {
