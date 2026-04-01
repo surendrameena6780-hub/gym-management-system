@@ -6,7 +6,8 @@ import {
   FileText, AlertOctagon, Save, Lock, Trash2,
   CheckCircle, Plus, Download, Smartphone, Monitor, Globe,
   Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
-  RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown
+  RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
+  MessageSquare, Send, ChevronDown
 } from 'lucide-react';
 
 const TABS = [
@@ -69,16 +70,16 @@ const loadRazorpayScript = () => {
 
 const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim();
 
-// 🚨 FIX: Added defaultTab to the props here!
+// ðŸš¨ FIX: Added defaultTab to the props here!
   const SettingsPage = ({ toast, token, defaultTab }) => { 
     const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
   
-  // 🚨 FIX: Made it fallback to lowercase 'account' to match your TABS array
+  // ðŸš¨ FIX: Made it fallback to lowercase 'account' to match your TABS array
   const [activeTab, setActiveTab] = useState(defaultTab ? defaultTab.toLowerCase() : 'account');
 
   useEffect(() => {
       if (defaultTab) {
-          // 🚨 FIX: Force lowercase so 'Billing' successfully matches 'billing'
+          // ðŸš¨ FIX: Force lowercase so 'Billing' successfully matches 'billing'
           setActiveTab(defaultTab.toLowerCase());
       }
   }, [defaultTab]);
@@ -102,7 +103,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
   
   const [gymData, setGymData] = useState({ 
     name: '', phone: '', email: '', address: '', 
-    currency: '₹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
+    currency: 'â‚¹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
     saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: 'pro', saas_billing_cycle: 'monthly'
   });
 
@@ -112,6 +113,8 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
       storage: 0.1
   });
 
+  const [integSubTab, setIntegSubTab] = useState('payments');
+  const [expandedTemplate, setExpandedTemplate] = useState(null);
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [testSending, setTestSending] = useState(false);
@@ -902,7 +905,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                       <td className="px-6 py-4 font-bold text-slate-800">{accountData.full_name} <span className="block text-xs font-medium text-slate-400">{accountData.email}</span></td>
                       <td className="px-6 py-4"><span className="px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold uppercase tracking-wider">Owner</span></td>
                       <td className="px-6 py-4"><span className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold"><CheckCircle size={14}/> Active</span></td>
-                      <td className="px-6 py-4 text-slate-300 text-xs font-bold">—</td>
+                      <td className="px-6 py-4 text-slate-300 text-xs font-bold">â€”</td>
                       <td className="px-6 py-4 text-right text-slate-300 font-bold text-xs">Cannot edit owner</td>
                     </tr>
 
@@ -1066,7 +1069,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                               </div>
                               <h3 className="text-xl font-black mb-1 text-slate-900">{plan.name}</h3>
                               <div className="flex items-baseline gap-1 mb-6 text-slate-900">
-                                  <span className="text-3xl font-black">₹{plan.price}</span>
+                                  <span className="text-3xl font-black">â‚¹{plan.price}</span>
                                   <span className="text-sm font-medium text-slate-500">/mo</span>
                               </div>
 
@@ -1144,7 +1147,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                               <div>
                                   <p className="font-black text-slate-800 text-sm mb-1">{localInvoice.plan}</p>
                                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                      {formatExpiry(localInvoice.date)} • #{localInvoice.id.slice(0,10)}...
+                                      {formatExpiry(localInvoice.date)} â€¢ #{localInvoice.id.slice(0,10)}...
                                   </p>
                               </div>
                               <button onClick={() => generateSaaSInvoice(localInvoice)} className="text-indigo-600 font-black text-xs uppercase tracking-wider hover:bg-indigo-100 bg-indigo-50 px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm">
@@ -1184,387 +1187,371 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
           {activeTab === 'integrations' && (
             <div className="animate-in fade-in duration-300">
               <h2 className="text-2xl font-black text-slate-900 mb-1">Integrations</h2>
-              <p className="text-sm font-medium text-slate-500 mb-8">Owner-friendly messaging setup: only one mobile number + ready templates and limits.</p>
+              <p className="text-sm font-medium text-slate-500 mb-6">Connect payment gateways, messaging services &amp; manage campaign templates.</p>
+
+              {/* Sub-tab switcher */}
+              <div className="flex bg-slate-100 rounded-2xl p-1 mb-8 gap-1 max-w-md">
+                <button onClick={() => setIntegSubTab('payments')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all duration-200 ${integSubTab === 'payments' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <CreditCard size={14} /> Payments
+                </button>
+                <button onClick={() => setIntegSubTab('messaging')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all duration-200 ${integSubTab === 'messaging' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <MessageSquare size={14} /> Messaging
+                </button>
+                <button onClick={() => setIntegSubTab('campaigns')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all duration-200 ${integSubTab === 'campaigns' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <Zap size={14} /> Campaigns
+                </button>
+              </div>
 
               {integrationLoading ? (
-                <div className="p-10 bg-white border border-slate-200 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading messaging integrations...</div>
+                <div className="p-10 bg-white border border-slate-100 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading integrations...</div>
               ) : (
-                <div className="space-y-6 max-w-5xl">
-                  <form onSubmit={handleIntegrationSave} className="space-y-6">
-                    <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-black text-slate-900 text-lg">Messaging Gateway</h3>
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${integrationData.gateway_connected ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                          {integrationData.gateway_connected ? 'Gateway Connected' : 'Gateway Not Connected'}
-                        </span>
-                      </div>
+                <div className="max-w-2xl">
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                        <div>
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Owner Mobile Number</label>
-                          <input
-                            value={integrationData.owner_mobile}
-                            onChange={(e) => setIntegrationData((prev) => ({ ...prev, owner_mobile: e.target.value }))}
-                            placeholder="+91XXXXXXXXXX"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                          />
-                          <p className="text-[11px] mt-1 text-slate-500 font-medium">Only this number is required from owner side.</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-500 font-medium p-3 rounded-xl bg-slate-50 border border-slate-200">
-                            Twilio SID/Auth/From numbers are managed by platform admin and hidden from gym owners.
-                          </p>
-                        </div>
-                      </div>
+                  {/* â•â• PAYMENTS TAB â•â• */}
+                  {integSubTab === 'payments' && (
+                    <div className="space-y-4 animate-in fade-in duration-200">
 
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className={`p-3 rounded-xl border ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-50 border-emerald-200' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
-                          <p className="text-[11px] uppercase tracking-wider font-black text-slate-500">WhatsApp Mode</p>
-                          <p className="text-sm font-black mt-1 text-slate-800">
-                            {integrationData.whatsapp_mode === 'PRODUCTION' ? 'Production (real WhatsApp)' : integrationData.whatsapp_mode === 'SANDBOX' ? 'Sandbox (join required)' : 'Not Configured'}
-                          </p>
-                          {integrationData.whatsapp_mode === 'SANDBOX' && (
-                            <p className="text-xs font-semibold mt-1 text-amber-700">Members must join sandbox for WhatsApp. SMS fallback is used when enabled.</p>
-                          )}
-                        </div>
-                        <div className="p-3 rounded-xl border border-slate-200 bg-slate-50">
-                          <p className="text-[11px] uppercase tracking-wider font-black text-slate-500">SMS Fallback</p>
-                          <p className="text-sm font-black mt-1 text-slate-800">{integrationData.sms_ready ? 'Ready' : 'Not Configured'}</p>
-                          <p className="text-xs font-semibold mt-1 text-slate-500">Configure SMS to send directly without sandbox joining.</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                      <h3 className="font-black text-slate-900 text-lg mb-4">Bulk Messaging Safety Controls</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
-                          <span className="text-sm font-bold text-slate-700">Enable bulk messaging</span>
-                          <input
-                            type="checkbox"
-                            checked={integrationData.bulk_enabled}
-                            onChange={(e) => setIntegrationData((prev) => ({ ...prev, bulk_enabled: e.target.checked }))}
-                          />
-                        </label>
-
-                        <div className="p-3 rounded-xl border border-slate-200 bg-slate-50">
-                          <p className="text-[11px] uppercase tracking-wider font-black text-slate-500">Monthly Usage</p>
-                          <p className="text-lg font-black text-slate-900 mt-1">{integrationData.monthly_usage} / {integrationData.bulk_monthly_limit}</p>
-                          <p className="text-xs text-slate-500 font-semibold">Remaining: {integrationData.monthly_remaining}</p>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Monthly Member Limit</label>
-                          <input
-                            type="number"
-                            min="10"
-                            value={integrationData.bulk_monthly_limit}
-                            onChange={(e) => setIntegrationData((prev) => ({ ...prev, bulk_monthly_limit: e.target.value }))}
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Per Campaign Limit</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={integrationData.bulk_per_campaign_limit}
-                            onChange={(e) => setIntegrationData((prev) => ({ ...prev, bulk_per_campaign_limit: e.target.value }))}
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                          />
-                        </div>
-
-                        <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
-                          <span className="text-sm font-bold text-slate-700">Allow WhatsApp campaigns</span>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(integrationData.bulk_channels?.whatsapp)}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              bulk_channels: { ...(prev.bulk_channels || {}), whatsapp: e.target.checked },
-                            }))}
-                          />
-                        </label>
-
-                        <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
-                          <span className="text-sm font-bold text-slate-700">Allow SMS campaigns</span>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(integrationData.bulk_channels?.sms)}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              bulk_channels: { ...(prev.bulk_channels || {}), sms: e.target.checked },
-                            }))}
-                          />
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                      <h3 className="font-black text-slate-900 text-lg mb-4">Campaign Templates</h3>
-                      <p className="text-xs text-slate-500 font-medium mb-4">{'Use placeholders: {{name}}, {{plan}}, {{days_left}}, {{gym_name}}'}</p>
-                      <div className="space-y-4">
-                        {(integrationData.templates || []).map((template, index) => (
-                          <div key={template.template_key} className="p-4 rounded-xl border border-slate-200 bg-slate-50/70">
-                            <div className="flex items-center justify-between mb-2">
-                              <input
-                                value={template.title}
-                                onChange={(e) => {
-                                  const next = [...integrationData.templates];
-                                  next[index] = { ...next[index], title: e.target.value };
-                                  setIntegrationData((prev) => ({ ...prev, templates: next }));
-                                }}
-                                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-800 w-full max-w-md"
-                              />
-                              <label className="flex items-center gap-2 ml-3 text-xs font-bold text-slate-600 shrink-0">
-                                Active
-                                <input
-                                  type="checkbox"
-                                  checked={template.is_active !== false}
-                                  onChange={(e) => {
-                                    const next = [...integrationData.templates];
-                                    next[index] = { ...next[index], is_active: e.target.checked };
-                                    setIntegrationData((prev) => ({ ...prev, templates: next }));
-                                  }}
-                                />
-                              </label>
+                      {/* Razorpay Connect Hero Card */}
+                      <div className={`rounded-2xl p-6 border ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-50 border-emerald-200' : 'bg-gradient-to-br from-indigo-50 to-white border-indigo-200'}`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className={`w-2.5 h-2.5 rounded-full ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-500' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'bg-amber-400' : 'bg-slate-300'}`} />
+                              <span className={`text-xs font-black uppercase tracking-wider ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'text-emerald-700' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'text-amber-700' : 'text-slate-500'}`}>
+                                {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connected via Razorpay Route' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'Authorized â€“ Setup Pending' : integrationData.member_payments?.onboarding_status === 'FAILED' ? 'Connection Failed' : 'Not Connected'}
+                              </span>
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div>
-                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">WhatsApp Text</label>
-                                <textarea
-                                  rows={3}
-                                  value={template.whatsapp_text}
-                                  onChange={(e) => {
-                                    const next = [...integrationData.templates];
-                                    next[index] = { ...next[index], whatsapp_text: e.target.value };
-                                    setIntegrationData((prev) => ({ ...prev, templates: next }));
-                                  }}
-                                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">SMS Text</label>
-                                <textarea
-                                  rows={3}
-                                  value={template.sms_text}
-                                  onChange={(e) => {
-                                    const next = [...integrationData.templates];
-                                    next[index] = { ...next[index], sms_text: e.target.value };
-                                    setIntegrationData((prev) => ({ ...prev, templates: next }));
-                                  }}
-                                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none"
-                                />
-                              </div>
+                            <h3 className="text-lg font-black text-slate-900 mb-1">
+                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Razorpay Connected âœ“' : 'Connect with Razorpay'}
+                            </h3>
+                            <p className="text-xs font-medium text-slate-500 mb-4">
+                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? `Account: ${integrationData.member_payments.connected_account_id}` : 'Members pay membership fees directly to your account. GymVault auto-collects its platform fee via Route.'}
+                            </p>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <button type="button" onClick={handleConnectRazorpay} disabled={connectingGateway}
+                                className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : 'âš¡ Connect Razorpay'}
+                              </button>
+                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
+                                <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}
+                                  className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 active:scale-95 transition-all disabled:opacity-60">
+                                  {disconnectingGateway ? 'Disconnecting...' : 'Disconnect'}
+                                </button>
+                              )}
                             </div>
                           </div>
-                        ))}
+                          <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center shrink-0">
+                            <CreditCard size={22} className="text-indigo-500" />
+                          </div>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                      <h3 className="font-black text-slate-900 text-lg mb-4">Member Online Payments (Gym Collection)</h3>
-                      <p className="text-xs text-slate-500 font-medium mb-4">Configure each gym owner's Razorpay account to collect member fees directly for plans.</p>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2 p-3 rounded-xl border border-slate-200 bg-slate-50 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      {/* Paste acc_ manually */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+                        <button type="button" onClick={() => setShowLinkedAccountForm(v => !v)}
+                          className="w-full flex items-center justify-between p-5 text-left hover:bg-slate-50 transition-colors">
                           <div>
-                            <p className="text-[11px] uppercase tracking-wider font-black text-slate-500">Connect Status</p>
-                            <p className="text-sm font-black mt-1 text-slate-800">
-                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connected' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'Authorized (final setup pending)' : integrationData.member_payments?.onboarding_status === 'FAILED' ? 'Failed' : 'Not Connected'}
-                            </p>
-                            {integrationData.member_payments?.connected_account_id && (
-                              <p className="text-xs font-semibold mt-1 text-slate-500">Account: {integrationData.member_payments.connected_account_id}</p>
-                            )}
+                            <p className="font-bold text-slate-800 text-sm">Already have a Razorpay Account ID?</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Paste acc_... to connect directly without OAuth</p>
+                          </div>
+                          <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${showLinkedAccountForm ? 'rotate-180' : ''}`} />
+                        </button>
+                        {showLinkedAccountForm && (
+                          <div className="px-5 pb-5 space-y-3 animate-in fade-in duration-200">
+                            <div className="h-px bg-slate-100" />
+                            <p className="text-xs text-slate-500 font-medium">Go to <strong>Razorpay â†’ Route â†’ Accounts</strong> and copy your Account ID (starts with <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">acc_</code>)</p>
+                            <input
+                              value={linkedAccountForm.account_id || ''}
+                              onChange={(e) => setLinkedAccountForm(p => ({ ...p, account_id: e.target.value }))}
+                              placeholder="acc_XXXXXXXXXXXXXXXXX"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-mono font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
+                            />
+                            <button type="button" onClick={handleCreateLinkedAccount} disabled={linkedAccountSaving}
+                              className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60">
+                              {linkedAccountSaving ? 'Saving...' : 'Connect Account'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Manual API Keys */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm">Manual API Keys</h4>
+                            <p className="text-xs text-slate-500 mt-0.5">For gyms using their own Razorpay account directly</p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={handleConnectRazorpay}
-                              disabled={connectingGateway}
-                              className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs hover:bg-indigo-700 disabled:opacity-60"
-                            >
-                              {connectingGateway ? 'Connecting...' : 'Connect Razorpay'}
+                            <span className="text-xs font-bold text-slate-500">Use Route</span>
+                            <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, connect_mode: prev.member_payments?.connect_mode === 'PARTNER' ? 'MANUAL' : 'PARTNER' } }))}
+                              className={`relative w-10 h-6 rounded-full transition-colors ${integrationData.member_payments?.connect_mode === 'PARTNER' ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                              <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.member_payments?.connect_mode === 'PARTNER' ? 'translate-x-4' : ''}`} />
                             </button>
-                            {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
-                              <button
-                                type="button"
-                                onClick={handleDisconnectRazorpay}
-                                disabled={disconnectingGateway}
-                                className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black text-xs hover:bg-slate-50 disabled:opacity-60"
-                              >
-                                {disconnectingGateway ? 'Disconnecting...' : 'Disconnect'}
-                              </button>
-                            )}
+                          </div>
+                        </div>
+                        <div className={`space-y-3 ${integrationData.member_payments?.connect_mode === 'PARTNER' ? 'opacity-40 pointer-events-none' : ''}`}>
+                          <div>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Razorpay Key ID</label>
+                            <input value={integrationData.member_payments?.razorpay_key_id || ''}
+                              onChange={(e) => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, razorpay_key_id: e.target.value } }))}
+                              placeholder="rzp_live_xxxxx"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Razorpay Key Secret</label>
+                            <input type="password" value={integrationData.member_payments?.razorpay_key_secret || ''}
+                              onChange={(e) => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, razorpay_key_secret: e.target.value } }))}
+                              placeholder={integrationData.member_payments?.has_razorpay_secret ? 'Saved securely (enter to replace)' : 'rzp_live_secret_xxxxx'}
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* UPI + Enable toggle */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
+                        <div>
+                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">UPI ID <span className="font-medium normal-case text-slate-400">(optional)</span></label>
+                          <input value={integrationData.member_payments?.upi_id || ''}
+                            onChange={(e) => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, upi_id: e.target.value } }))}
+                            placeholder="yourgym@upi"
+                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
+                          <p className="text-xs text-slate-400 mt-1 font-medium">Displayed to members as a payment option</p>
+                        </div>
+                        <div className="flex items-center justify-between py-1">
+                          <div>
+                            <p className="font-bold text-slate-800 text-sm">Enable Member Online Payments</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Members can pay membership fees through the app</p>
+                          </div>
+                          <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, enabled: !prev.member_payments?.enabled } }))}
+                            className={`relative w-11 h-6 rounded-full transition-colors ${integrationData.member_payments?.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                            <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.member_payments?.enabled ? 'translate-x-5' : ''}`} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
+                          className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                          <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Payment Settings'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* â•â• MESSAGING TAB â•â• */}
+                  {integSubTab === 'messaging' && (
+                    <div className="space-y-4 animate-in fade-in duration-200">
+
+                      {/* Owner mobile */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
+                        <h4 className="font-black text-slate-900 text-sm mb-1">Owner Mobile Number</h4>
+                        <p className="text-xs text-slate-500 mb-3 font-medium">All alerts and WhatsApp messages are sent from/to this number</p>
+                        <input value={integrationData.owner_mobile}
+                          onChange={(e) => setIntegrationData(prev => ({ ...prev, owner_mobile: e.target.value }))}
+                          placeholder="+91XXXXXXXXXX"
+                          className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                        <p className="text-[11px] mt-2 text-slate-400 font-medium">Twilio credentials are managed by GymVault â€” you only need to set this number.</p>
+                      </div>
+
+                      {/* Gateway status cards */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className={`rounded-2xl p-4 border ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-50 border-emerald-200' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`w-2 h-2 rounded-full ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-500' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-400' : 'bg-slate-300'}`} />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">WhatsApp</span>
+                          </div>
+                          <p className="text-sm font-black text-slate-800">
+                            {integrationData.whatsapp_mode === 'PRODUCTION' ? 'Production' : integrationData.whatsapp_mode === 'SANDBOX' ? 'Sandbox' : 'Not Set Up'}
+                          </p>
+                          {integrationData.whatsapp_mode === 'SANDBOX' && <p className="text-[11px] text-amber-700 font-semibold mt-1">Members must join sandbox</p>}
+                        </div>
+                        <div className={`rounded-2xl p-4 border ${integrationData.sms_ready ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`w-2 h-2 rounded-full ${integrationData.sms_ready ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">SMS</span>
+                          </div>
+                          <p className="text-sm font-black text-slate-800">{integrationData.sms_ready ? 'Ready' : 'Not Configured'}</p>
+                          <p className="text-[11px] text-slate-500 font-semibold mt-1">Managed by GymVault</p>
+                        </div>
+                      </div>
+
+                      {/* Test message */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
+                        <h4 className="font-black text-slate-900 text-sm mb-1">Send Test Message</h4>
+                        <p className="text-xs text-slate-500 mb-4 font-medium">Verify your messaging setup is working correctly</p>
+                        <form onSubmit={handleTestMessage} className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Channel</label>
+                              <select value={integrationTest.channel}
+                                onChange={(e) => setIntegrationTest(prev => ({ ...prev, channel: e.target.value }))}
+                                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none">
+                                <option value="WHATSAPP">WhatsApp</option>
+                                <option value="SMS">SMS</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Recipient</label>
+                              <input value={integrationTest.to}
+                                onChange={(e) => setIntegrationTest(prev => ({ ...prev, to: e.target.value }))}
+                                placeholder="+91XXXXXXXXXX"
+                                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                            </div>
+                          </div>
+                          <textarea rows={3} value={integrationTest.message}
+                            onChange={(e) => setIntegrationTest(prev => ({ ...prev, message: e.target.value }))}
+                            placeholder="Type your test message here..."
+                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold resize-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                          <button type="submit" disabled={testSending}
+                            className="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                            <Send size={14} /> {testSending ? 'Sending...' : 'Send Test Message'}
+                          </button>
+                        </form>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
+                          className="px-6 py-3 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                          <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Messaging Settings'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* â•â• CAMPAIGNS TAB â•â• */}
+                  {integSubTab === 'campaigns' && (
+                    <div className="space-y-4 animate-in fade-in duration-200">
+
+                      {/* Usage + Controls */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm">Bulk Messaging</h4>
+                            <p className="text-xs text-slate-500 mt-0.5 font-medium">Send campaigns to multiple members at once</p>
+                          </div>
+                          <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_enabled: !prev.bulk_enabled }))}
+                            className={`relative w-11 h-6 rounded-full transition-colors ${integrationData.bulk_enabled ? 'bg-purple-500' : 'bg-slate-300'}`}>
+                            <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_enabled ? 'translate-x-5' : ''}`} />
+                          </button>
+                        </div>
+
+                        {/* Usage bar */}
+                        <div className="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                          <div className="flex items-end justify-between mb-2">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Monthly Usage</p>
+                              <p className="text-2xl font-black text-slate-900">{integrationData.monthly_usage}<span className="text-sm text-slate-400 font-bold"> / {integrationData.bulk_monthly_limit}</span></p>
+                            </div>
+                            <span className={`text-xs font-black px-2.5 py-1 rounded-full ${integrationData.monthly_remaining > 50 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {integrationData.monthly_remaining} left
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                            <div className="bg-purple-500 h-2 rounded-full transition-all duration-700"
+                              style={{ width: `${Math.min(100, (integrationData.monthly_usage / Math.max(1, integrationData.bulk_monthly_limit)) * 100)}%` }} />
                           </div>
                         </div>
 
-                        {/* ── Paste Razorpay Account ID directly ── */}
-                        <div className="md:col-span-2">
-                          <button
-                            type="button"
-                            onClick={() => setShowLinkedAccountForm((v) => !v)}
-                            className="text-xs font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800"
-                          >
-                            {showLinkedAccountForm ? 'Cancel' : 'Already have a Razorpay account ID (acc_...)? Connect it here →'}
-                          </button>
-
-                          {showLinkedAccountForm && (
-                            <div className="mt-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50 space-y-3">
-                              <p className="text-[11px] font-black uppercase tracking-wider text-indigo-700">Connect Razorpay Account</p>
-                              <p className="text-xs text-slate-500 font-medium">
-                                Go to your <strong>Razorpay Dashboard → Route → Accounts → Add Account</strong>. Copy the Account ID (starts with <code>acc_</code>) and paste it below.
-                              </p>
-                              <div>
-                                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Razorpay Account ID *</label>
-                                <input
-                                  value={linkedAccountForm.account_id || ''}
-                                  onChange={(e) => setLinkedAccountForm((p) => ({ ...p, account_id: e.target.value }))}
-                                  placeholder="acc_XXXXXXXXXXXXXXXXX"
-                                  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 font-mono"
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={handleCreateLinkedAccount}
-                                disabled={linkedAccountSaving}
-                                className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs hover:bg-indigo-700 disabled:opacity-60"
-                              >
-                                {linkedAccountSaving ? 'Connecting...' : 'Connect Account'}
-                              </button>
-                            </div>
-                          )}
+                        {/* Limits */}
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Monthly Limit</label>
+                            <input type="number" min="10" value={integrationData.bulk_monthly_limit}
+                              onChange={(e) => setIntegrationData(prev => ({ ...prev, bulk_monthly_limit: e.target.value }))}
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Per Campaign</label>
+                            <input type="number" min="1" value={integrationData.bulk_per_campaign_limit}
+                              onChange={(e) => setIntegrationData(prev => ({ ...prev, bulk_per_campaign_limit: e.target.value }))}
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                          </div>
                         </div>
 
-                        <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50 md:col-span-2">
-                          <span className="text-sm font-bold text-slate-700">Use connected Razorpay account (best way)</span>
-                          <input
-                            type="checkbox"
-                            checked={String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase() === 'PARTNER'}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              member_payments: {
-                                ...(prev.member_payments || {}),
-                                connect_mode: e.target.checked ? 'PARTNER' : 'MANUAL',
-                              },
-                            }))}
-                          />
-                        </label>
-
-                        <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50 md:col-span-2">
-                          <span className="text-sm font-bold text-slate-700">Enable member online payments</span>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(integrationData.member_payments?.enabled)}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              member_payments: {
-                                ...(prev.member_payments || {}),
-                                enabled: e.target.checked,
-                              },
-                            }))}
-                          />
-                        </label>
-
-                        <div>
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Razorpay Key ID</label>
-                          <input
-                            value={integrationData.member_payments?.razorpay_key_id || ''}
-                            disabled={String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase() === 'PARTNER'}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              member_payments: {
-                                ...(prev.member_payments || {}),
-                                razorpay_key_id: e.target.value,
-                              },
-                            }))}
-                            placeholder="rzp_live_xxxxx"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Razorpay Key Secret</label>
-                          <input
-                            type="password"
-                            value={integrationData.member_payments?.razorpay_key_secret || ''}
-                            disabled={String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase() === 'PARTNER'}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              member_payments: {
-                                ...(prev.member_payments || {}),
-                                razorpay_key_secret: e.target.value,
-                              },
-                            }))}
-                            placeholder={integrationData.member_payments?.has_razorpay_secret ? 'Saved securely (enter to replace)' : 'rzp_live_secret_xxxxx'}
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                          />
-                        </div>
-
-                        <div className="md:col-span-2">
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">UPI ID (optional for display)</label>
-                          <input
-                            value={integrationData.member_payments?.upi_id || ''}
-                            onChange={(e) => setIntegrationData((prev) => ({
-                              ...prev,
-                              member_payments: {
-                                ...(prev.member_payments || {}),
-                                upi_id: e.target.value,
-                              },
-                            }))}
-                            placeholder="yourgym@upi"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                          />
+                        {/* Channel toggles */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                            <span className="text-sm font-bold text-slate-700">WhatsApp</span>
+                            <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { ...prev.bulk_channels, whatsapp: !prev.bulk_channels?.whatsapp } }))}
+                              className={`relative w-9 h-5 rounded-full transition-colors ${integrationData.bulk_channels?.whatsapp ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_channels?.whatsapp ? 'translate-x-4' : ''}`} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                            <span className="text-sm font-bold text-slate-700">SMS</span>
+                            <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { ...prev.bulk_channels, sms: !prev.bulk_channels?.sms } }))}
+                              className={`relative w-9 h-5 rounded-full transition-colors ${integrationData.bulk_channels?.sms ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_channels?.sms ? 'translate-x-4' : ''}`} />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={integrationSaving}
-                        className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-2"
-                      >
-                        <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Integrations'}
-                      </button>
-                    </div>
-                  </form>
+                      {/* Templates accordion */}
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-5 pt-5 pb-3">
+                          <h4 className="font-black text-slate-900 text-sm mb-0.5">Message Templates</h4>
+                          <p className="text-xs text-slate-500 font-medium">{'Placeholders: {{name}}, {{plan}}, {{days_left}}, {{gym_name}}'}</p>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {(integrationData.templates || []).map((template, index) => (
+                            <div key={template.template_key}>
+                              <button type="button"
+                                onClick={() => setExpandedTemplate(expandedTemplate === template.template_key ? null : template.template_key)}
+                                className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors text-left">
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-2 h-2 rounded-full shrink-0 ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                  <span className="text-sm font-bold text-slate-800">{template.title}</span>
+                                </div>
+                                <ChevronDown size={15} className={`text-slate-400 transition-transform duration-200 shrink-0 ${expandedTemplate === template.template_key ? 'rotate-180' : ''}`} />
+                              </button>
+                              {expandedTemplate === template.template_key && (
+                                <div className="px-5 pb-5 space-y-3 animate-in fade-in duration-150 bg-slate-50/50">
+                                  <div className="flex items-center gap-3">
+                                    <input value={template.title}
+                                      onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], title: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
+                                      className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-800 focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className="text-xs font-bold text-slate-500">Active</span>
+                                      <button type="button" onClick={() => { const next = [...integrationData.templates]; next[index] = { ...next[index], is_active: next[index].is_active === false ? true : false }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
+                                        className={`relative w-9 h-5 rounded-full transition-colors ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${template.is_active !== false ? 'translate-x-4' : ''}`} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">WhatsApp</label>
+                                      <textarea rows={3} value={template.whatsapp_text}
+                                        onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], whatsapp_text: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
+                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">SMS</label>
+                                      <textarea rows={3} value={template.sms_text}
+                                        onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], sms_text: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
+                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
 
-                  <form onSubmit={handleTestMessage} className="border border-slate-200 rounded-2xl p-5 bg-white">
-                    <h3 className="font-black text-slate-900 text-lg mb-3">Send Test Message</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <select
-                        value={integrationTest.channel}
-                        onChange={(e) => setIntegrationTest((prev) => ({ ...prev, channel: e.target.value }))}
-                        className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                      >
-                        <option value="WHATSAPP">WhatsApp</option>
-                        <option value="SMS">SMS</option>
-                      </select>
-                      <input
-                        value={integrationTest.to}
-                        onChange={(e) => setIntegrationTest((prev) => ({ ...prev, to: e.target.value }))}
-                        placeholder="Recipient phone (+91...)"
-                        className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold"
-                      />
-                      <button
-                        type="submit"
-                        disabled={testSending}
-                        className="px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        {testSending ? 'Sending...' : 'Send Test'}
-                      </button>
+                      <div className="flex justify-end">
+                        <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
+                          className="px-6 py-3 rounded-xl bg-purple-600 text-white font-black text-sm hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                          <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Campaign Settings'}
+                        </button>
+                      </div>
                     </div>
-                    <textarea
-                      rows={3}
-                      value={integrationTest.message}
-                      onChange={(e) => setIntegrationTest((prev) => ({ ...prev, message: e.target.value }))}
-                      className="w-full mt-3 px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold resize-none"
-                      placeholder="Test message"
-                    />
-                  </form>
+                  )}
+
                 </div>
               )}
             </div>
@@ -1604,7 +1591,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
               <div className="border border-slate-200 rounded-2xl p-6 bg-white">
                 <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><Monitor size={18}/> Active Sessions</h3>
                 <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                  <div><p className="font-bold text-sm text-slate-800">Windows • Chrome Browser</p><p className="text-xs text-emerald-500 font-bold">Current Session</p></div><Globe size={20} className="text-slate-300" />
+                  <div><p className="font-bold text-sm text-slate-800">Windows â€¢ Chrome Browser</p><p className="text-xs text-emerald-500 font-bold">Current Session</p></div><Globe size={20} className="text-slate-300" />
                 </div>
               </div>
             </div>
@@ -1620,7 +1607,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Currency Symbol</label>
                     <select value={gymData.currency} onChange={e => setGymData({...gymData, currency: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
-                      <option value="₹">₹ (INR)</option><option value="$">$ (USD)</option><option value="€">€ (EUR)</option><option value="£">£ (GBP)</option>
+                      <option value="â‚¹">â‚¹ (INR)</option><option value="$">$ (USD)</option><option value="â‚¬">â‚¬ (EUR)</option><option value="Â£">Â£ (GBP)</option>
                     </select>
                   </div>
                   <div>
