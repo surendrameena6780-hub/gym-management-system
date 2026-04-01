@@ -44,8 +44,11 @@
         min-height: 100%;
       }
 
-      /* Pre-React background — must exactly match SPLASH_BG in App.jsx (#161d4f) */
-      html, body {
+      /* Pre-React background — html uses same pre-compensation gradient as the splash */
+      html {
+        background: linear-gradient(to bottom, #1f2971 0px, #1f2971 calc(env(safe-area-inset-top, 44px) - 1px), #161d4f calc(env(safe-area-inset-top, 44px) + 12px));
+      }
+      body {
         background: #161d4f;
         margin: 0;
         font-family: 'Inter', sans-serif !important;

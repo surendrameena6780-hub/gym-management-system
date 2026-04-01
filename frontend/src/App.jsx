@@ -120,12 +120,18 @@ function ConfirmModal({ confirmState, hideConfirm }) {
 
 // Single flat colour used everywhere for the splash — must match index.html/body/root pre-React
 const SPLASH_BG = '#161d4f';
+// iOS black-translucent darkens the status-bar zone by ~30% (result = content × 0.70).
+// So the content behind the status bar must be SPLASH_BG ÷ 0.70 ≈ #1f2971
+// to appear as SPLASH_BG after iOS applies its overlay — making top and bottom match.
+const SPLASH_STATUS_BAR_BG = '#1f2971';
 
 function SplashScreen({ exiting }) {
   return (
     <div
       className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
-      style={{ background: SPLASH_BG }}
+      style={{
+        background: `linear-gradient(to bottom, ${SPLASH_STATUS_BAR_BG} 0px, ${SPLASH_STATUS_BAR_BG} calc(env(safe-area-inset-top, 44px) - 1px), ${SPLASH_BG} calc(env(safe-area-inset-top, 44px) + 12px), ${SPLASH_BG} 100%)`,
+      }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {/* Ambient glows on top of the flat base colour */}
