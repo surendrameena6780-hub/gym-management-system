@@ -10,6 +10,7 @@ import {
   UserMinus, UserCheck, Clock, Target, ShieldCheck,
   MessageSquare, Phone, Award
 } from 'lucide-react';
+import { normalizeProfileImageUrl } from './utils/profileImage';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -90,7 +91,7 @@ const formatHour = (h) => {
 
 // --- MAIN PAGE COMPONENT ---
 
-const InsightsPage = ({ token, toast, currentUser }) => {
+const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
   const gymName = currentUser?.gym_name || 'GymVault';
   const [activeTab, setActiveTab] = useState('revenue');
   const [members, setMembers] = useState([]);
@@ -124,7 +125,10 @@ const InsightsPage = ({ token, toast, currentUser }) => {
           axios.get('/api/members', { headers: { 'x-auth-token': token } }),
           axios.get('/api/attendance/summary', { headers: { 'x-auth-token': token } })
         ]);
-        setMembers(extractArray(membersRes.data, ['members', 'rows', 'items']));
+        setMembers(extractArray(membersRes.data, ['members', 'rows', 'items']).map((member) => ({
+          ...member,
+          profile_pic: normalizeProfileImageUrl(member?.profile_pic),
+        })));
         setAttendanceSummary(extractArray(attendanceRes.data, ['summary', 'attendance', 'rows', 'items']));
       } catch (err) {
         console.error("Failed to load insights data", err);
@@ -348,6 +352,7 @@ const InsightsPage = ({ token, toast, currentUser }) => {
                   </div>
                 </div>
                 <div className="h-[250px] w-full">
+                  {isActive ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={analytics.revenue.graphData}>
                       <defs>
@@ -363,6 +368,7 @@ const InsightsPage = ({ token, toast, currentUser }) => {
                       <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={4} fillOpacity={1} fill="url(#colorRev)" />
                     </AreaChart>
                   </ResponsiveContainer>
+                  ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
                 </div>
               </Card>
 
@@ -407,14 +413,16 @@ const InsightsPage = ({ token, toast, currentUser }) => {
                     <h3 className="font-bold text-lg text-slate-900 mb-6">Peak Visiting Hours</h3>
                     <div className="h-[300px] w-full">
                       {analytics.attendance.heatmap.length > 0 ? (
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={analytics.attendance.heatmap}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none'}} />
-                                <Bar dataKey="count" fill="#6366f1" radius={[6, 6, 0, 0]} barSize={40} name="Check-ins" />
-                            </BarChart>
-                        </ResponsiveContainer>
+                        isActive ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={analytics.attendance.heatmap}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                  <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
+                                  <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none'}} />
+                                  <Bar dataKey="count" fill="#6366f1" radius={[6, 6, 0, 0]} barSize={40} name="Check-ins" />
+                              </BarChart>
+                          </ResponsiveContainer>
+                        ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />
                       ) : (
                         <div className="flex items-center justify-center h-full text-slate-400 font-bold">No attendance data yet.</div>
                       )}

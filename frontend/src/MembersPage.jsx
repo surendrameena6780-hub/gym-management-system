@@ -5,6 +5,7 @@ import {
   CreditCard, Clock, AlertTriangle, CheckCircle, Flame, TrendingUp,
   MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail,
 } from 'lucide-react';
+import { normalizeProfileImageUrl } from './utils/profileImage';
 
 const AVATAR_GRADIENTS = [
   'from-violet-500 to-purple-600',
@@ -189,31 +190,9 @@ const normalizeProfileImageFile = async (file) => {
     return { file: null, error: 'Unable to process this image. Please choose another photo.', wasCompressed: false };
   }
 };
-const getApiOrigin = () => {
-  const envApiUrl = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
-  if (envApiUrl) return envApiUrl;
-
-  const axiosBaseUrl = String(axios.defaults.baseURL || '').trim().replace(/\/+$/, '');
-  if (axiosBaseUrl) return axiosBaseUrl;
-
-  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-    return 'http://localhost:5000';
-  }
-
-  return '';
-};
-
-const toAbsoluteProfileUrl = (value) => {
-  const pathValue = String(value || '').trim();
-  if (!pathValue) return null;
-  if (/^https?:\/\//i.test(pathValue)) return pathValue;
-  const normalizedPath = pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
-  const apiOrigin = getApiOrigin();
-  return apiOrigin ? `${apiOrigin}${normalizedPath}` : normalizedPath;
-};
 const normalizeMemberRecord = (member) => ({
   ...member,
-  profile_pic: toAbsoluteProfileUrl(member?.profile_pic),
+  profile_pic: normalizeProfileImageUrl(member?.profile_pic),
 });
 
 const loadRazorpayScript = () => {
@@ -614,7 +593,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setAddFormData({ full_name: '', email: '', phone: '' }); setAddFile(null); setPreviewUrl(null);
       await fetchMembers();
       toast?.('Member added successfully!', 'success');
-      if (addSelectedPlanId && res.data) { setSelectedMember(res.data); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
+      if (addSelectedPlanId && res.data) { setSelectedMember(normalizeMemberRecord(res.data)); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
       setAddSelectedPlanId('');
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Error adding member.';
@@ -785,10 +764,17 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         return (
                           <div
                             key={`member-mobile-${member.id}`}
-                            className="gv-fade-up p-4 rounded-2xl border border-slate-100 bg-white space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover"
+                            className={`gv-fade-up relative p-4 rounded-2xl border space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover ${selectedIds.includes(member.id) ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-100 bg-white'}`}
                             style={{ animationDelay: `${Math.min(idx * 0.04, 0.3)}s` }}
-                            onClick={() => handleViewDetails(member)}
+                            onClick={() => (isBulkMode ? toggleSelection(member.id) : handleViewDetails(member))}
                           >
+                            {isBulkMode && (
+                              <div className="absolute right-3 top-3">
+                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedIds.includes(member.id) ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>
+                                  <CheckCircle size={12} fill="currentColor" />
+                                </div>
+                              </div>
+                            )}
                             <div className="flex items-center gap-3">
                               <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={40} />
                               <div className="min-w-0 flex-1">
@@ -881,12 +867,13 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       </div>
 
       {selectedIds.length > 0 && (
-        <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-6 z-[100] border border-slate-700 backdrop-blur-md bg-opacity-95 animate-in slide-in-from-bottom-10">
+        <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 w-[calc(100%-1rem)] max-w-[560px] bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-3 z-[100] border border-slate-700 backdrop-blur-md bg-opacity-95 animate-in slide-in-from-bottom-10">
           <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">Bulk Actions</span><span className="text-sm font-black">{selectedIds.length} Selected</span></div>
-          <div className="h-8 w-[1px] bg-slate-700" />
-          <button onClick={handleBulkReminder} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all"><Zap size={14} fill="currentColor" /> Send Reminders</button>
-          <button className="flex items-center gap-2 text-xs font-bold bg-rose-500/10 text-rose-400 px-4 py-2 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all"><Trash2 size={14} /> Delete</button>
-          <button onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white ml-1"><X size={18} /></button>
+          <div className="flex items-center gap-2 ml-auto">
+            <button onClick={handleBulkReminder} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all"><Zap size={14} fill="currentColor" /> Send Reminders</button>
+            <button className="flex items-center gap-2 text-xs font-bold bg-rose-500/10 text-rose-400 px-4 py-2 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all"><Trash2 size={14} /> Delete</button>
+            <button onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white ml-1"><X size={18} /></button>
+          </div>
         </div>
       )}
 

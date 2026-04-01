@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import axios from 'axios';
 import { 
   Search, Filter, Download, Plus, DollarSign, 
-  TrendingUp, AlertCircle, FileText, CheckCircle2, 
+  AlertCircle, FileText, CheckCircle2, 
   Clock, X, ChevronDown, User, ArrowDownToLine, History, Wallet, CreditCard, Trash2
 } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { normalizeProfileImageUrl } from './utils/profileImage';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -78,11 +78,9 @@ const PaymentSkeletonRow = () => (
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 const PaymentsPage = ({ token, toast, showConfirm }) => {
-  const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim();
   const [payments, setPayments] = useState([]);
   const [filteredPayments, setFilteredPayments] = useState([]);
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
-  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Count-up animated values for stat cards
@@ -91,7 +89,6 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const animatedPendingDues  = useCountUp(parseFloat(stats.pending_dues  || 0));
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [chartDays, setChartDays] = useState('30');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
 
@@ -111,11 +108,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const paymentsListRef = useRef(null);
   const paymentsScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
 
-  const getImageUrl = (path) => {
-    if (!path) return null;
-    const filename = path.split(/[/\\]/).pop();
-    return `${apiOrigin}/uploads/${filename}`;
-  };
+  const getImageUrl = (path) => normalizeProfileImageUrl(path);
 
   const fetchData = async () => {
     try {
@@ -124,20 +117,19 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       const paymentUrl = searchTerm
         ? `/api/payments?search=${searchTerm}`
         : '/api/payments';
-      const chartUrl = `/api/payments/chart?days=${chartDays}`;
-
-      const [paymentsRes, statsRes, chartRes, membersRes, plansRes] = await Promise.all([
+      const [paymentsRes, statsRes, membersRes, plansRes] = await Promise.all([
         axios.get(paymentUrl, { headers }),
         axios.get('/api/payments/stats', { headers }),
-        axios.get(chartUrl, { headers }),
         axios.get('/api/members', { headers }),
         axios.get('/api/plans', { headers })
       ]);
 
-      const paymentsData = extractArray(paymentsRes.data, ['payments', 'rows', 'items']);
+      const paymentsData = extractArray(paymentsRes.data, ['payments', 'rows', 'items']).map((payment) => ({
+        ...payment,
+        profile_pic: normalizeProfileImageUrl(payment?.profile_pic),
+      }));
       const membersData = extractArray(membersRes.data, ['members', 'rows', 'items']);
       const plansData = extractArray(plansRes.data, ['plans', 'rows', 'items']);
-      const chartDataSafe = extractArray(chartRes.data, ['chart', 'data', 'rows', 'items']);
 
       setPayments(paymentsData);
       let newData = paymentsData;
@@ -147,7 +139,6 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       setFilteredPayments(newData);
 
       setStats(extractObject(statsRes.data, { total_revenue: 0, today_revenue: 0, pending_dues: 0 }));
-      setChartData(chartDataSafe);
       setMembers(membersData);
       setPlans(plansData);
       setLoading(false);
@@ -162,7 +153,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       const delayDebounceFn = setTimeout(() => { fetchData(); }, 300);
       return () => clearTimeout(delayDebounceFn);
     }
-  }, [token, searchTerm, chartDays]);
+  }, [token, searchTerm]);
 
   useEffect(() => {
     let data = payments;
@@ -272,6 +263,22 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
     return { cash: cashTotal, online: onlineTotal, onlineCount, cashPer: total > 0 ? (cashTotal / total) * 100 : 0, onlinePer: total > 0 ? (onlineTotal / total) * 100 : 0 };
   }, [payments]);
 
+  const collectionsSnapshot = useMemo(() => {
+    const completed = payments.filter((payment) => payment.status === 'Completed');
+    const pending = payments.filter((payment) => payment.status !== 'Completed');
+    const totalCollected = completed.reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
+    const averageTicket = completed.length > 0 ? Math.round(totalCollected / completed.length) : 0;
+    const latest = completed.slice(0, 5);
+
+    return {
+      completedCount: completed.length,
+      pendingCount: pending.length,
+      averageTicket,
+      onlineShare: Math.round(revenueSplit.onlinePer || 0),
+      latest,
+    };
+  }, [payments, revenueSplit.onlinePer]);
+
   const getEmptySubtitle = () => {
     if (searchTerm) return `No results matching "${searchTerm}"`;
     if (activeFilter !== 'All') return `No ${activeFilter} payments recorded yet`;
@@ -339,8 +346,8 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       </div>
 
       {/* STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="relative overflow-hidden rounded-[20px] p-6 border"
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="relative overflow-hidden rounded-[20px] p-6 border md:col-span-2"
             style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
               <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.12)' }}>
                 <DollarSign size={20} className="text-emerald-600" />
@@ -373,35 +380,57 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 bg-white/90 p-8 rounded-[24px] border border-slate-100/60" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-black text-slate-900">Revenue Trend</h3>
-            <div className="flex gap-2">
-              <button onClick={() => setChartDays('7')} className={`px-3 py-1 text-xs font-bold rounded-lg ${chartDays === '7' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}>7D</button>
-              <button onClick={() => setChartDays('30')} className={`px-3 py-1 text-xs font-bold rounded-lg ${chartDays === '30' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}>30D</button>
+            <div>
+              <h3 className="text-lg font-black text-slate-900">Collection Snapshot</h3>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">What matters most to a gym owner right now</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Latest Ticket</p>
+              <p className="text-sm font-black text-slate-900">₹{collectionsSnapshot.averageTicket.toLocaleString()}</p>
             </div>
           </div>
-          <div className="h-[300px] w-full">
-            {chartData.length > 0 ? (
-              <ResponsiveContainer width="99%" height="100%">
-                <AreaChart data={chartData}>
-                  <defs><linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.2}/><stop offset="95%" stopColor="#8B5CF6" stopOpacity={0}/></linearGradient></defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 'bold' }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 'bold' }} />
-                  <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }} />
-                  <Area type="monotone" dataKey="revenue" stroke="#7C3AED" strokeWidth={4} fillOpacity={1} fill="url(#colorRevenue)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                <div className="w-14 h-14 rounded-2xl bg-white shadow-md flex items-center justify-center text-slate-300 border border-slate-100">
-                  <TrendingUp size={28} />
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Completed</p>
+              <p className="text-2xl font-black text-slate-900">{collectionsSnapshot.completedCount}</p>
+            </div>
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600/70 mb-1">Avg Ticket</p>
+              <p className="text-2xl font-black text-emerald-600">₹{collectionsSnapshot.averageTicket.toLocaleString()}</p>
+            </div>
+            <div className="rounded-2xl bg-orange-50 border border-orange-100 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-orange-600/70 mb-1">Pending</p>
+              <p className="text-2xl font-black text-orange-500">{collectionsSnapshot.pendingCount}</p>
+            </div>
+            <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600/70 mb-1">Online Share</p>
+              <p className="text-2xl font-black text-indigo-600">{collectionsSnapshot.onlineShare}%</p>
+            </div>
+          </div>
+          <div className="rounded-[22px] border border-slate-100 overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-500">Recent Collections</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Last 5 transactions</p>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {collectionsSnapshot.latest.length > 0 ? collectionsSnapshot.latest.map((payment) => (
+                <div key={`snapshot-${payment.id}`} className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-900 truncate">{payment.member_name}</p>
+                    <p className="text-[11px] text-slate-500 font-semibold truncate">{payment.plan_name || 'No plan'} · {new Date(payment.payment_date).toLocaleDateString()}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-black text-emerald-600">₹{parseFloat(payment.amount_paid || 0).toLocaleString()}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">{payment.payment_mode || 'Cash'}</p>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <p className="text-sm font-black text-slate-600 mb-1">No Revenue Data Yet</p>
-                  <p className="text-xs font-bold text-slate-400">Record a payment to see your revenue trend</p>
+              )) : (
+                <div className="px-4 py-10 text-center">
+                  <p className="text-sm font-black text-slate-600 mb-1">No collections recorded yet</p>
+                  <p className="text-xs font-bold text-slate-400">Record your first transaction to populate this panel.</p>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 

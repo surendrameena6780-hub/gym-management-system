@@ -9,6 +9,7 @@ import {
   X, TrendingUp, ChevronRight, UserPlus, RefreshCw,
   Bot, Play // <-- 🚨 ADDED ICONS
 } from 'lucide-react';
+import { normalizeProfileImageUrl } from './utils/profileImage';
 
 // ─── Count-Up Hook ─────────────────────────────────────────────────────────────
 function useCountUp(target, duration = 900) {
@@ -34,12 +35,7 @@ function useCountUp(target, duration = 900) {
   return display;
 }
 
-const getApiOrigin = () => (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-const buildProfileUrl = (pic) => {
-  if (!pic) return null;
-  if (pic.startsWith('http') || pic.startsWith('blob:') || pic.startsWith('data:')) return pic;
-  return `${getApiOrigin()}/uploads/profiles/${pic}`;
-};
+const buildProfileUrl = (pic) => normalizeProfileImageUrl(pic);
 
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {
@@ -261,7 +257,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 // 🚨 ADDED startTour to props!
-const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startTour }) => {
+const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startTour, isActive = true }) => {
   const navigateTo = navTo || ((page) => setCurrentPage?.(page));
   const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
   const MAX_WARMUP_RETRIES = 8;
@@ -312,6 +308,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [broadcastChannel, setBroadcastChannel] = useState('WHATSAPP');
   const [broadcastTemplateKey, setBroadcastTemplateKey] = useState('');
   const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastSearch, setBroadcastSearch] = useState('');
+  const [broadcastCustomIds, setBroadcastCustomIds] = useState([]);
   const [campaignPreviewCount, setCampaignPreviewCount] = useState(0);
   const [campaignPreviewLoading, setCampaignPreviewLoading] = useState(false);
   const [broadcastTemplates, setBroadcastTemplates] = useState([]);
@@ -362,7 +360,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         return unwrapped ?? fallback;
       };
 
-      setMembers(asArray(pickData(membersRes, [])));
+      setMembers(asArray(pickData(membersRes, [])).map((member) => ({
+        ...member,
+        profile_pic: normalizeProfileImageUrl(member?.profile_pic),
+      })));
       setPlans(asArray(pickData(plansRes, [])));
       setPayStats(asObject(pickData(statsRes, { total_revenue: 0, today_revenue: 0, pending_dues: 0 }), { total_revenue: 0, today_revenue: 0, pending_dues: 0 }));
       setChart30(asArray(pickData(chart30Res, [])));
@@ -579,6 +580,11 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   const loadCampaignPreview = async (audience) => {
     if (!token || !showBroadcastModal) return;
+    if (broadcastCustomIds.length > 0) {
+      setCampaignPreviewCount(broadcastCustomIds.length);
+      setCampaignPreviewLoading(false);
+      return;
+    }
     setCampaignPreviewLoading(true);
     try {
       const segment = audienceToSegment(audience);
@@ -594,7 +600,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   useEffect(() => {
     loadCampaignPreview(broadcastAudience);
-  }, [broadcastAudience, showBroadcastModal]);
+  }, [broadcastAudience, showBroadcastModal, broadcastCustomIds.length]);
 
   useEffect(() => {
     const loadTemplates = async () => {
@@ -633,6 +639,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         channel: broadcastChannel,
         template_key: broadcastTemplateKey || undefined,
         message: broadcastMessage,
+        member_ids: broadcastCustomIds,
       }, headers);
 
       const payload = unwrapApiData(res.data) || {};
@@ -651,6 +658,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       setShowBroadcastModal(false);
       setBroadcastTemplateKey('');
       setBroadcastMessage('');
+      setBroadcastSearch('');
+      setBroadcastCustomIds([]);
       fetchData();
     } catch (err) {
       toast(err?.response?.data?.error || 'Broadcast launch failed.', 'error');
@@ -946,7 +955,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         priority: 'P2',
         cta: 'Open Churn List',
         sub: 'Stay ahead of drop-offs',
-        action: () => navigateTo('Members', 'Inactive'),
+        action: () => navigateTo('Insights'),
       },
     ];
 
@@ -1029,6 +1038,26 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       return String(a.full_name || '').localeCompare(String(b.full_name || ''));
     });
   }, [members, checkinQuery, checkedInMemberIds]);
+
+  const broadcastSelectedMembers = useMemo(() => {
+    if (broadcastCustomIds.length === 0) return [];
+    const idSet = new Set(broadcastCustomIds.map((id) => Number(id)));
+    return members.filter((member) => idSet.has(Number(member.id)));
+  }, [broadcastCustomIds, members]);
+
+  const broadcastSearchResults = useMemo(() => {
+    const query = String(broadcastSearch || '').trim().toLowerCase();
+    if (!query) return [];
+    return members
+      .filter((member) => !broadcastCustomIds.includes(Number(member.id)))
+      .filter((member) => {
+        const name = String(member.full_name || '').toLowerCase();
+        const phone = String(member.phone || '').toLowerCase();
+        const email = String(member.email || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || email.includes(query);
+      })
+      .slice(0, 8);
+  }, [broadcastSearch, broadcastCustomIds, members]);
 
 
   if (loading) return <DashboardSkeleton />;
@@ -1184,7 +1213,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </div>
             </div>
             <div className="flex-1 min-h-[220px]">
-              {displayChartData.length > 0 ? (
+              {isActive && displayChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={displayChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
@@ -1421,19 +1450,19 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             { label: 'Check In',   icon: <CheckCircle size={15} strokeWidth={2.5} />, color: 'sky',    onClick: () => { setCheckinQuery(''); setShowCheckinModal(true); } },
           ].map(({ label, icon, color, onClick: onBtnClick }) => {
             const btnCls = {
-              emerald: 'bg-emerald-500/10 active:bg-emerald-500/25 text-emerald-400',
-              indigo:  'bg-indigo-500/10 active:bg-indigo-500/25 text-indigo-400',
-              violet:  'bg-violet-500/10 active:bg-violet-500/25 text-violet-400',
-              sky:     'bg-sky-500/10 active:bg-sky-500/25 text-sky-400',
+              emerald: 'text-emerald-400',
+              indigo:  'text-indigo-400',
+              violet:  'text-violet-400',
+              sky:     'text-sky-400',
             }[color];
             return (
               <button
                 key={label}
                 onClick={onBtnClick}
-                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] ${btnCls}`}
+                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] hover:bg-white/5 ${btnCls}`}
               >
                 {icon}
-                <span className="text-[10px] font-bold leading-none tracking-wide opacity-75">{label}</span>
+                <span className="text-[10px] font-bold leading-none tracking-wide">{label}</span>
               </button>
             );
           })}
@@ -1575,7 +1604,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* Record Payment */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[92dvh] flex flex-col">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 1rem)' }}>
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -1728,7 +1757,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* Broadcast */}
       {showBroadcastModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[92dvh] flex flex-col">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 1rem)' }}>
             <div className="px-6 py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
               <div className="flex items-center gap-3">
@@ -1741,6 +1770,55 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </div>
             <form onSubmit={handleBroadcast} className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
+                <input
+                  type="text"
+                  value={broadcastSearch}
+                  onChange={(e) => setBroadcastSearch(e.target.value)}
+                  placeholder="Search by name, phone, or email"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+                {broadcastSelectedMembers.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {broadcastSelectedMembers.map((member) => (
+                      <button
+                        key={`broadcast-chip-${member.id}`}
+                        type="button"
+                        onClick={() => setBroadcastCustomIds((prev) => prev.filter((id) => Number(id) !== Number(member.id)))}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black border border-emerald-100"
+                      >
+                        <span className="truncate max-w-[120px]">{member.full_name}</span>
+                        <X size={12} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {broadcastSearchResults.length > 0 && (
+                  <div className="mt-2 rounded-2xl border border-slate-200 bg-white max-h-48 overflow-y-auto">
+                    {broadcastSearchResults.map((member) => (
+                      <button
+                        key={`broadcast-member-${member.id}`}
+                        type="button"
+                        onClick={() => {
+                          setBroadcastCustomIds((prev) => [...prev, Number(member.id)]);
+                          setBroadcastSearch('');
+                        }}
+                        className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-emerald-50 border-b border-slate-100 last:border-b-0"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-black text-slate-900 truncate">{member.full_name}</p>
+                          <p className="text-[11px] text-slate-500 font-semibold truncate">{member.phone}{member.email ? ` · ${member.email}` : ''}</p>
+                        </div>
+                        <span className="text-[10px] font-black text-emerald-600 uppercase">Add</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">
+                  {broadcastSelectedMembers.length > 0 ? 'Custom list selected. Segment buttons below are ignored until you clear these members.' : 'Leave empty to send by audience segment.'}
+                </p>
+              </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Target Audience</label>
                 <div className="flex flex-wrap gap-1.5">
@@ -1757,7 +1835,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                       type="button"
                       onClick={() => setBroadcastAudience(value)}
                       className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-150 ${
-                        broadcastAudience === value
+                        broadcastSelectedMembers.length === 0 && broadcastAudience === value
                           ? 'bg-emerald-500 text-white shadow shadow-emerald-200'
                           : 'bg-slate-100 text-slate-600 active:bg-slate-200'
                       }`}
@@ -1767,7 +1845,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   ))}
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">
-                  {campaignPreviewLoading ? 'Loading preview...' : `Estimated reach: ${campaignPreviewCount} member${campaignPreviewCount !== 1 ? 's' : ''}`}
+                  {campaignPreviewLoading ? 'Loading preview...' : `Estimated reach: ${(broadcastSelectedMembers.length || campaignPreviewCount)} member${(broadcastSelectedMembers.length || campaignPreviewCount) !== 1 ? 's' : ''}`}
                 </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1816,7 +1894,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {showCheckinModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden max-h-[80dvh] flex flex-col">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 1.25rem)' }}>
             <div
               className="px-6 py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)' }}
@@ -1855,7 +1933,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   <p className="text-sm font-bold text-slate-500">No members found for this search.</p>
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-[34vh] overflow-y-auto pr-1">
                   {checkinMembers.map((member) => {
                     const isCheckedIn = checkedInMemberIds.has(Number(member.id));
                     const membershipStatus = String(member.membership_status || 'UNPAID').toUpperCase();
@@ -1875,14 +1953,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     return (
                       <div key={member.id} className="p-3 rounded-2xl border border-slate-100 bg-white flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-11 h-11 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
+                          <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0 relative">
+                            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-[11px] font-black">
+                              {initials}
+                            </div>
                             {member.profile_pic ? (
-                              <img src={buildProfileUrl(member.profile_pic)} alt={member.full_name} className="w-full h-full object-cover" onError={e => { e.target.onerror = null; e.target.style.display = 'none'; }} />
-                            ) : (
-                              <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-xs font-black">
-                                {initials}
-                              </div>
-                            )}
+                              <img src={buildProfileUrl(member.profile_pic)} alt={member.full_name} className="relative z-10 w-full h-full object-cover" onError={e => { e.currentTarget.onerror = null; e.currentTarget.style.display = 'none'; }} />
+                            ) : null}
                           </div>
 
                           <div className="min-w-0">

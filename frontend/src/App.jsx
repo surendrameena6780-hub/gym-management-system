@@ -1021,7 +1021,7 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Dashboard') && (
                 currentUser?.role === 'OWNER'
-                  ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} />
+                  ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} isActive={currentPage === 'Dashboard'} />
                   : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} />
               )}
             </div>
@@ -1050,14 +1050,14 @@ function App() {
             {/* Attendance */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Attendance') && (
-                <AttendancePage token={token} toast={toast} />
+                <AttendancePage token={token} toast={toast} isActive={currentPage === 'Attendance'} />
               )}
             </div>
 
             {/* Insights */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Insights') && (
-                <InsightsPage token={token} toast={toast} currentUser={currentUser} />
+                <InsightsPage token={token} toast={toast} currentUser={currentUser} isActive={currentPage === 'Insights'} />
               )}
             </div>
 

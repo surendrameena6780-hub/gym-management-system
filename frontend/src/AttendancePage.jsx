@@ -102,17 +102,7 @@ const asObject = (value, fallback = {}) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
 );
 
-const HeatmapCell = ({ count }) => {
-  let bg = 'bg-slate-100';
-  if (count > 0) bg = 'bg-indigo-100';
-  if (count >= 4) bg = 'bg-indigo-300';
-  if (count >= 8) bg = 'bg-indigo-500';
-  if (count >= 12) bg = 'bg-indigo-700';
-
-  return <div className={`h-3.5 w-3.5 rounded-[3px] ${bg}`} title={`${count} check-ins`} />;
-};
-
-function AttendancePage({ token, toast }) {
+function AttendancePage({ token, toast, isActive = true }) {
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
 
   const [overview, setOverview] = useState({
@@ -332,16 +322,34 @@ function AttendancePage({ token, toast }) {
     window.open(`https://wa.me/91${member.phone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  const attendanceStreak = useMemo(() => {
-    const uniqueDays = new Set(feed.map((item) => new Date(item.check_in_time).toDateString()));
-    return uniqueDays.size;
-  }, [feed]);
+  const weekdayPerformance = useMemo(() => {
+    const totals = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label, dayIndex) => ({
+      label,
+      dayIndex,
+      total: 0,
+      days: 0,
+    }));
 
-  const avgVisitsPerWeek = useMemo(() => {
-    if (!heatmap.length) return 0;
-    const total = heatmap.reduce((sum, d) => sum + (d.count || 0), 0);
-    const weeks = Math.max(1, Math.round(heatmap.length / 7));
-    return (total / weeks).toFixed(1);
+    heatmap.forEach((entry) => {
+      const date = new Date(entry.date);
+      if (Number.isNaN(date.getTime())) return;
+      const bucket = totals[date.getDay()];
+      bucket.total += Number(entry.count || 0);
+      bucket.days += 1;
+    });
+
+    const enriched = totals.map((item) => ({
+      ...item,
+      avg: item.days > 0 ? Math.round((item.total / item.days) * 10) / 10 : 0,
+    }));
+    const maxTotal = Math.max(1, ...enriched.map((item) => item.total));
+
+    return enriched
+      .map((item) => ({
+        ...item,
+        width: Math.max(10, Math.round((item.total / maxTotal) * 100)),
+      }))
+      .sort((a, b) => b.total - a.total);
   }, [heatmap]);
 
   // Count-up animated values for stat cards (must be before any conditional return)
@@ -648,16 +656,24 @@ function AttendancePage({ token, toast }) {
         <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
           <div className="flex items-center gap-2 mb-3">
             <CalendarDays size={16} className="text-indigo-500" />
-            <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Attendance Heatmap</h3>
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Best Attendance Days</h3>
           </div>
-          <div className="overflow-x-auto">
-            <div className="grid grid-rows-7 grid-flow-col gap-1 min-w-[620px]">
-              {heatmap.map((d, idx) => (
-                <HeatmapCell key={`${d.date}-${idx}`} count={d.count || 0} />
-              ))}
-            </div>
+          <div className="space-y-3">
+            {weekdayPerformance.map((item) => (
+              <div key={item.label} className="rounded-2xl border border-slate-100 bg-white p-3">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-sm font-black text-slate-900">{item.label}</p>
+                    <p className="text-[11px] text-slate-500 font-semibold">Avg {item.avg} visits per day</p>
+                  </div>
+                  <p className="text-sm font-black text-indigo-600">{item.total}</p>
+                </div>
+                <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="mt-3 text-xs text-slate-500 font-semibold">Lighter = low traffic, darker = peak traffic.</div>
         </div>
 
         <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
@@ -666,6 +682,7 @@ function AttendancePage({ token, toast }) {
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Peak Hour Analysis (30D)</h3>
           </div>
           <div className="h-[260px] min-h-[260px] w-full">
+            {isActive ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={peakHours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef2ff" />
@@ -675,6 +692,7 @@ function AttendancePage({ token, toast }) {
                 <Bar dataKey="count" fill="#6366f1" radius={[5, 5, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
           </div>
         </div>
       </div>
@@ -714,21 +732,6 @@ function AttendancePage({ token, toast }) {
               </div>
             ))
           )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
-          <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Visit Streak (Recent)</p>
-          <h4 className="text-2xl font-black text-slate-900 mt-1">{attendanceStreak} day slots</h4>
-        </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
-          <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Avg Visits / Week</p>
-          <h4 className="text-2xl font-black text-indigo-600 mt-1">{avgVisitsPerWeek}</h4>
-        </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4">
-          <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Anti-Abuse Rule</p>
-          <h4 className="text-sm font-black text-slate-900 mt-2">Duplicate check-ins blocked for 10 minutes</h4>
         </div>
       </div>
 

@@ -83,6 +83,8 @@ const PlansPage = ({ token, toast, showConfirm }) => {
     return themes[color] || themes.blue;
   };
 
+  const analyticsGraphMax = Math.max(1, ...((analyticsData?.graphData || []).map((item) => Number(item.revenue || 0))));
+
   // --- HANDLERS ---
   const openAddModal = () => {
     setIsEditing(false);
@@ -300,7 +302,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
       {/* --- ANALYTICS MODAL --- */}
       {showAnalyticsModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
-            <div className="bg-white rounded-[40px] w-full max-w-4xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col md:flex-row max-h-[90vh]">
+            <div className="bg-white rounded-[32px] w-full max-w-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col md:flex-row max-h-[82dvh]">
                 <div className="bg-slate-900 text-white p-8 md:w-1/3 flex flex-col justify-between relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500 rounded-full blur-[100px] opacity-20 -mr-20 -mt-20 pointer-events-none"></div>
                     <div>
@@ -337,20 +339,20 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                         </div>
                     </div>
                 </div>
-                <div className="p-8 md:w-2/3 bg-slate-50 flex flex-col">
+                <div className="p-6 md:p-8 md:w-2/3 bg-slate-50 flex flex-col overflow-y-auto">
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-lg font-black text-slate-900">Revenue Trend</h3>
                         <button onClick={() => setShowAnalyticsModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-all"><X size={20} className="text-slate-400" /></button>
                     </div>
-                    <div className="flex-1 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-end justify-between gap-4 min-h-[250px] relative">
+                    <div className="flex-1 bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-end justify-between gap-3 min-h-[220px] relative overflow-hidden">
                         {loadingAnalytics ? (
                             <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold animate-pulse">Calculating Data...</div>
                         ) : (
                             analyticsData?.graphData?.map((item, idx) => (
                                 <div key={idx} className="flex flex-col items-center gap-2 w-full group">
-                                    <div className="relative w-full bg-slate-100 rounded-t-xl overflow-hidden h-[180px] flex items-end justify-center">
+                            <div className="relative w-full bg-slate-100 rounded-t-xl overflow-hidden h-[150px] flex items-end justify-center">
                                         <div 
-                                            style={{ height: `${(item.revenue / analyticsData.totalRevenue) * 300}%` }} 
+                                style={{ height: `${Math.max(10, Math.round((Number(item.revenue || 0) / analyticsGraphMax) * 100))}%` }} 
                                             className="w-full mx-1 bg-slate-900 rounded-t-lg transition-all duration-500 group-hover:bg-purple-600 relative"
                                         >
                                             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">₹{item.revenue}</div>

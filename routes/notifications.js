@@ -181,6 +181,45 @@ LIMIT $2`;
     return result.rows;
 }
 
+async function getMembersByIds(gymId, memberIds = []) {
+    const ids = Array.from(new Set(
+        memberIds
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isInteger(value) && value > 0)
+    ));
+
+    if (ids.length === 0) {
+        return [];
+    }
+
+    const result = await pool.query(
+        `${CHURN_SCORE_SQL}
+         SELECT
+            id,
+            full_name,
+            phone,
+            membership_status,
+            plan_name,
+            last_visit,
+            end_date,
+            days_inactive,
+            days_to_expiry,
+            amount_due,
+            churn_score,
+            CASE
+                WHEN churn_score >= 70 THEN 'HIGH'
+                WHEN churn_score >= 40 THEN 'MEDIUM'
+                ELSE 'LOW'
+            END AS churn_tier
+         FROM scored
+         WHERE id = ANY($2::int[])
+         ORDER BY full_name ASC`,
+        [gymId, ids]
+    );
+
+    return result.rows;
+}
+
 // --- 1. GET ALL NOTIFICATIONS & UNREAD COUNT ---
 router.get('/', auth, saasMiddleware, async (req, res) => {
     try {
@@ -270,6 +309,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         const userId = req.user.user_id || req.user.id || null;
         const segmentInput = req.body.segment || 'ALL';
         const segment = AUDIENCE_MAP[segmentInput] || String(segmentInput).toUpperCase();
+        const customMemberIds = Array.isArray(req.body.member_ids) ? req.body.member_ids : [];
         const templateKey = String(req.body.template_key || '').trim().toUpperCase();
         let message = String(req.body.message || '').trim();
         const channel = String(req.body.channel || 'WHATSAPP').toUpperCase();
@@ -355,9 +395,11 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         }
 
         const sendLimit = Math.min(remainingThisMonth, perCampaignLimit, 500);
-        const members = await getSegmentMembers(gymId, segment, sendLimit * 2);
+        const members = customMemberIds.length > 0
+            ? await getMembersByIds(gymId, customMemberIds)
+            : await getSegmentMembers(gymId, segment, sendLimit * 2);
         if (members.length === 0) {
-            return fail(res, 400, 'EMPTY_CAMPAIGN_SEGMENT', 'No members found in selected segment.');
+            return fail(res, 400, 'EMPTY_CAMPAIGN_SEGMENT', customMemberIds.length > 0 ? 'No members found in selected list.' : 'No members found in selected segment.');
         }
 
         const client = twilio(accountSid, authToken);
@@ -430,23 +472,25 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
 
         const status = successCount === 0 ? 'FAILED' : failedCount > 0 ? 'PARTIAL' : 'SENT';
 
+        const logSegment = customMemberIds.length > 0 ? 'CUSTOM' : segment;
+
         const insertLog = await pool.query(
             `INSERT INTO broadcast_logs (gym_id, segment, channel, message, sent_to_count, status, created_by)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING id, created_at`,
-            [gymId, segment, channel, message, successCount, status, userId]
+            [gymId, logSegment, channel, message, successCount, status, userId]
         );
 
         await pool.query(
             `INSERT INTO notifications (gym_id, title, message)
              VALUES ($1, $2, $3)`,
-            [gymId, 'Campaign sent', `Broadcast ${status.toLowerCase()} · ${successCount} delivered, ${failedCount} failed [${segment}]`]
+            [gymId, 'Campaign sent', `Broadcast ${status.toLowerCase()} · ${successCount} delivered, ${failedCount} failed [${logSegment}]`]
         );
 
         return ok(res, {
             campaign_id: insertLog.rows[0].id,
             created_at: insertLog.rows[0].created_at,
-            segment,
+            segment: logSegment,
             channel,
             template_key: selectedTemplate?.template_key || null,
             template_title: selectedTemplate?.title || null,
