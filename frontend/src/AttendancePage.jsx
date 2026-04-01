@@ -652,36 +652,18 @@ function AttendancePage({ token, toast, isActive = true }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <CalendarDays size={16} className="text-indigo-500" />
-            <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Best Attendance Days</h3>
-          </div>
-          <div className="space-y-3">
-            {weekdayPerformance.map((item) => (
-              <div key={item.label} className="rounded-2xl border border-slate-100 bg-white p-3">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div>
-                    <p className="text-sm font-black text-slate-900">{item.label}</p>
-                    <p className="text-[11px] text-slate-500 font-semibold">Avg {item.avg} visits per day</p>
-                  </div>
-                  <p className="text-sm font-black text-indigo-600">{item.total}</p>
-                </div>
-                <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
-                </div>
-              </div>
-            ))}
+      <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Activity size={16} className="text-indigo-500 shrink-0" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Peak Hour Analysis (30D)</h3>
+              <p className="text-[11px] text-slate-500 font-semibold mt-0.5">Top attendance days are folded into this view.</p>
+            </div>
           </div>
         </div>
-
-        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Activity size={16} className="text-indigo-500" />
-            <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Peak Hour Analysis (30D)</h3>
-          </div>
-          <div className="h-[260px] min-h-[260px] w-full">
+        <div className="grid grid-cols-[minmax(0,1fr)_116px] sm:grid-cols-[minmax(0,1fr)_180px] gap-3 h-[260px]">
+          <div className="min-w-0 h-full">
             {isActive ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={peakHours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -693,6 +675,23 @@ function AttendancePage({ token, toast, isActive = true }) {
               </BarChart>
             </ResponsiveContainer>
             ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
+          </div>
+          <div className="space-y-2 overflow-hidden">
+            {weekdayPerformance.slice(0, 3).map((item, index) => (
+              <div key={item.label} className="rounded-2xl border border-slate-100 bg-white p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{index + 1} day</p>
+                    <p className="text-sm font-black text-slate-900 truncate">{item.label}</p>
+                  </div>
+                  <p className="text-sm font-black text-indigo-600 shrink-0">{item.total}</p>
+                </div>
+                <p className="text-[11px] text-slate-500 font-semibold mb-2">Avg {item.avg} visits</p>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

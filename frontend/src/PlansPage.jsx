@@ -301,19 +301,19 @@ const PlansPage = ({ token, toast, showConfirm }) => {
 
       {/* --- ANALYTICS MODAL --- */}
       {showAnalyticsModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
-            <div className="bg-white rounded-[32px] w-full max-w-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col md:flex-row max-h-[82dvh]">
-                <div className="bg-slate-900 text-white p-8 md:w-1/3 flex flex-col justify-between relative overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-start md:items-center justify-center bg-slate-900/80 backdrop-blur-md p-3 sm:p-4 pt-4 pb-[calc(var(--mobile-nav-offset)+0.75rem)] overflow-y-auto animate-in fade-in duration-300">
+          <div className="bg-white rounded-[28px] sm:rounded-[32px] w-full max-w-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col md:flex-row max-h-[calc(100dvh-var(--mobile-nav-offset)-0.75rem)] md:max-h-[82dvh]">
+            <div className="bg-slate-900 text-white p-5 sm:p-6 md:p-8 md:w-1/3 flex flex-col justify-between relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500 rounded-full blur-[100px] opacity-20 -mr-20 -mt-20 pointer-events-none"></div>
                     <div>
                         <h2 className="text-2xl font-black mb-1">{analyticsData?.name || 'Plan'}</h2>
-                        <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Performance Report</p>
-                        <div className="space-y-6">
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-6 md:mb-8">Performance Report</p>
+                <div className="space-y-5 md:space-y-6">
                             <div>
                                 <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Total Revenue</div>
                                 <div className="text-3xl font-black text-emerald-400">₹{analyticsData?.totalRevenue?.toLocaleString() || 0}</div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4">
                                 <div>
                                     <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Active Members</div>
                                     <div className="text-xl font-bold flex items-center gap-2">
@@ -329,7 +329,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                             </div>
                         </div>
                     </div>
-                    <div className="mt-8 pt-8 border-t border-slate-800">
+                          <div className="mt-5 pt-5 md:mt-8 md:pt-8 border-t border-slate-800">
                         <div className="flex items-center gap-3 bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
                             <div className="bg-emerald-500/20 p-2 rounded-lg text-emerald-400"><ArrowUpRight size={20} /></div>
                             <div>
@@ -339,18 +339,18 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                         </div>
                     </div>
                 </div>
-                <div className="p-6 md:p-8 md:w-2/3 bg-slate-50 flex flex-col overflow-y-auto">
-                    <div className="flex justify-between items-center mb-6">
+                        <div className="p-5 sm:p-6 md:p-8 md:w-2/3 bg-slate-50 flex flex-col overflow-y-auto">
+                          <div className="flex justify-between items-center mb-5 md:mb-6">
                         <h3 className="text-lg font-black text-slate-900">Revenue Trend</h3>
                         <button onClick={() => setShowAnalyticsModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition-all"><X size={20} className="text-slate-400" /></button>
                     </div>
-                    <div className="flex-1 bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-end justify-between gap-3 min-h-[220px] relative overflow-hidden">
+                          <div className="flex-1 bg-white p-4 sm:p-5 rounded-3xl border border-slate-100 shadow-sm flex items-end justify-between gap-2 sm:gap-3 min-h-[190px] sm:min-h-[220px] relative overflow-hidden">
                         {loadingAnalytics ? (
                             <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold animate-pulse">Calculating Data...</div>
                         ) : (
                             analyticsData?.graphData?.map((item, idx) => (
                                 <div key={idx} className="flex flex-col items-center gap-2 w-full group">
-                            <div className="relative w-full bg-slate-100 rounded-t-xl overflow-hidden h-[150px] flex items-end justify-center">
+                              <div className="relative w-full bg-slate-100 rounded-t-xl overflow-hidden h-[125px] sm:h-[150px] flex items-end justify-center">
                                         <div 
                                 style={{ height: `${Math.max(10, Math.round((Number(item.revenue || 0) / analyticsGraphMax) * 100))}%` }} 
                                             className="w-full mx-1 bg-slate-900 rounded-t-lg transition-all duration-500 group-hover:bg-purple-600 relative"

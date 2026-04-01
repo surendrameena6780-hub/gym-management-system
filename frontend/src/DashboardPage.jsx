@@ -685,6 +685,15 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     }
   };
 
+  const openBroadcastDraft = (audience, message) => {
+    setBroadcastAudience(audience);
+    setBroadcastTemplateKey('');
+    setBroadcastSearch('');
+    setBroadcastCustomIds([]);
+    setBroadcastMessage(message);
+    setShowBroadcastModal(true);
+  };
+
   const dashboardData = useMemo(() => {
     const today = new Date();
     const active   = members.filter(m => m.membership_status === 'ACTIVE');
@@ -764,6 +773,18 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       ? new Date(lastAutomationAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
       : 'No runs yet';
 
+    const incompleteSetupSteps = Object.entries(setup.steps || {})
+      .filter(([, isDone]) => !isDone)
+      .map(([key]) => key);
+    const setupStepLabels = {
+      profile: 'business profile',
+      plans: 'plan catalog',
+      members: 'member base',
+    };
+    const nextSetupStep = incompleteSetupSteps[0] || null;
+    const targetTodayTraffic = active.length > 0 ? Math.max(3, Math.round(active.length * 0.14)) : 3;
+    const trafficGap = Math.max(0, targetTodayTraffic - todayCheckins);
+
     const buildRecommendation = ({
       id,
       title,
@@ -807,11 +828,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         priority: 'P0',
         cta: 'Launch Retention',
         sub: 'Prevent churn before expiry',
-        action: () => {
-          setBroadcastAudience('HighChurn');
-          setBroadcastMessage('Hi from GymVault! We noticed your gym momentum dipped. We would love to support your comeback—reply and we will unlock a personalized renewal offer. 💪');
-          setShowBroadcastModal(true);
-        },
+        action: () => openBroadcastDraft('HighChurn', 'Hi from GymVault! We noticed your gym momentum dipped. Reply and we will help you with the right renewal option.'),
       }),
       buildRecommendation({
         id: 'EXPIRING_72H',
@@ -824,11 +841,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         priority: 'P0',
         cta: 'Draft Renewal Broadcast',
         sub: 'Immediate revenue protection',
-        action: () => {
-          setBroadcastAudience('Expiring');
-          setBroadcastMessage('Hi! Quick reminder from GymVault: Your membership expires very soon. Renew today to keep crushing your fitness goals with us! 💪🔥');
-          setShowBroadcastModal(true);
-        },
+        action: () => openBroadcastDraft('Expiring', 'Hi from GymVault! Your membership expires very soon. Renew today to keep your progress on track.'),
       }),
       buildRecommendation({
         id: 'EXPIRED_WINBACK',
@@ -841,11 +854,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         priority: 'P1',
         cta: 'Broadcast Winback',
         sub: 'Recover dormant revenue',
-        action: () => {
-          setBroadcastAudience('Expired');
-          setBroadcastMessage('Hi from GymVault! Your membership has expired. We miss your energy at the gym. Let us know if you want to renew your plan! 🏋️‍♂️');
-          setShowBroadcastModal(true);
-        },
+        action: () => openBroadcastDraft('Expired', 'Hi from GymVault! Your membership has expired. Reply if you want help restarting with the best plan for you.'),
       }),
       buildRecommendation({
         id: 'GHOST_REACTIVATION',
@@ -895,73 +904,141 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     ].filter((candidate) => candidate.count > 0)
       .sort((a, b) => b.score - a.score);
 
-    const recommendations = aiCandidates.slice(0, 3);
-    const primary = recommendations[0] || {
-      id: 'GROWTH',
-      title: 'Launch growth campaign',
-      reason: 'Retention signals are stable. Focus on acquiring and onboarding new members.',
-      count: 0,
-      impact: avgPlanPrice * 3,
-      confidence: 78,
-      urgency: 'This week',
-      priority: 'P2',
-      cta: 'Grow Business',
-      sub: 'Acquire new members',
-      action: () => setShowAddModal(true),
-    };
-
-    const aiSummary = recommendations.length > 0
-      ? `Top priority: ${primary.title}. Estimated impact ₹${primary.impact.toLocaleString()} with ${primary.confidence}% confidence.`
-      : `Gym health is ${healthScore}%. Operations are stable. Focus on growth by adding new members this week.`;
-
-    const ACTION_SLOT_COUNT = 3;
-    const actionRequiredRows = aiCandidates
-      .filter((item) => item.priority === 'P0' || item.priority === 'P1')
-      .slice(0, ACTION_SLOT_COUNT);
-
-    const proactiveRows = [
-      {
-        id: 'PROACTIVE_GROWTH',
-        title: 'Run growth outreach campaign',
-        count: Math.max(1, Math.min(20, active.length || members.length || 1)),
-        impact: Math.round(avgPlanPrice * 2.5),
+    const opportunityCandidates = [
+      incompleteSetupSteps.length > 0 && buildRecommendation({
+        id: 'SETUP_PROGRESS',
+        title: setup.progress < 50 ? 'Finish core setup' : 'Close onboarding gaps',
+        reason: `${incompleteSetupSteps.length} setup step${incompleteSetupSteps.length === 1 ? '' : 's'} still need attention`,
+        count: incompleteSetupSteps.length,
+        impact: Math.round(avgPlanPrice * Math.max(1.5, incompleteSetupSteps.length * 1.1)),
+        confidence: Math.min(92, 72 + incompleteSetupSteps.length * 5),
+        urgency: setup.progress < 50 ? 'Today' : 'This week',
+        priority: setup.progress < 50 ? 'P1' : 'P2',
+        cta: nextSetupStep === 'plans' ? 'Create Plan' : nextSetupStep === 'members' ? 'Add Member' : 'Open Settings',
+        sub: `Finish ${setupStepLabels[nextSetupStep] || 'onboarding'}`,
+        action: () => {
+          if (nextSetupStep === 'plans') {
+            navigateTo('Plans');
+            return;
+          }
+          if (nextSetupStep === 'members') {
+            setShowAddModal(true);
+            return;
+          }
+          navigateTo('Settings');
+        },
+      }),
+      active.length >= 10 && trafficGap > 0 && buildRecommendation({
+        id: 'TODAY_TRAFFIC',
+        title: todayCheckins === 0 ? 'Kickstart check-ins for today' : 'Today\'s floor traffic is soft',
+        reason: `${todayCheckins} check-ins recorded vs ${targetTodayTraffic} expected today`,
+        count: trafficGap,
+        impact: Math.round(Math.max(avgPlanPrice, trafficGap * avgPlanPrice * 0.25)),
+        confidence: Math.min(88, 68 + trafficGap * 4),
+        urgency: 'Today',
+        priority: todayCheckins === 0 && active.length >= 18 ? 'P1' : 'P2',
+        cta: 'Open Check-In',
+        sub: 'Move reception focus to attendance',
+        action: () => {
+          setCheckinQuery('');
+          setShowCheckinModal(true);
+        },
+      }),
+      members.length >= 12 && weeklyRuns === 0 && buildRecommendation({
+        id: 'AUTOMATION_RESTART',
+        title: 'Restart member outreach cadence',
+        reason: 'No campaign was sent in the last 7 days',
+        count: Math.max(active.length, members.length),
+        impact: Math.round(Math.max(avgPlanPrice * 2, active.length * avgPlanPrice * 0.12)),
+        confidence: Math.min(84, 64 + Math.min(20, Math.round(active.length / 2))),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Launch Broadcast',
+        sub: 'Re-engage active and silent members',
+        action: () => openBroadcastDraft('Active', 'Hi from GymVault! New week, new goals. Reply if you want help with your next workout plan or renewal options.'),
+      }),
+      topPlanEntry && topPlanPct >= 65 && plans.length >= 2 && buildRecommendation({
+        id: 'PLAN_CONCENTRATION',
+        title: `Reduce reliance on ${topPlanEntry[0]}`,
+        reason: `${topPlanPct}% of members sit on one plan`,
+        count: topPlanEntry[1],
+        impact: Math.round(monthlyRevenue > 0 ? monthlyRevenue * 0.18 : avgPlanPrice * topPlanEntry[1]),
+        confidence: Math.min(82, 60 + Math.round(topPlanPct / 2)),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Review Plans',
+        sub: 'Broaden pricing mix',
+        action: () => navigateTo('Plans'),
+      }),
+      plans.length === 1 && members.length >= 8 && buildRecommendation({
+        id: 'SECOND_TIER',
+        title: 'Add a second pricing tier',
+        reason: 'One plan limits upsell and downgrade paths',
+        count: members.length,
+        impact: Math.round(avgPlanPrice * 2),
+        confidence: 78,
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Add Tier',
+        sub: 'Improve pricing coverage',
+        action: () => navigateTo('Plans'),
+      }),
+      active.length >= 12 && expiringIn7Days.length === 0 && highChurnMembers.length < 3 && pendingDues < avgPlanPrice && buildRecommendation({
+        id: 'GROWTH_PUSH',
+        title: 'Use this calm week for a growth push',
+        reason: `Risk signals are stable across ${active.length} active members`,
+        count: Math.max(6, Math.round(active.length * 0.35)),
+        impact: Math.round(avgPlanPrice * 3),
+        confidence: 76,
         urgency: 'This week',
         priority: 'P2',
         cta: 'Launch Growth',
-        sub: 'Fill pipeline with fresh leads',
-        action: () => {
-          setBroadcastAudience('All');
-          setBroadcastMessage('Hi from GymVault! Ready to crush your fitness goals this week? Reply to this message and we will unlock a special joining offer for you. 💪');
-          setShowBroadcastModal(true);
-        },
-      },
-      {
-        id: 'PROACTIVE_ADD_MEMBER',
-        title: 'Add and activate a new member',
-        count: 1,
-        impact: avgPlanPrice,
-        urgency: 'Today',
-        priority: 'P2',
-        cta: 'Add Member',
-        sub: 'Daily growth execution',
-        action: () => setShowAddModal(true),
-      },
-      {
-        id: 'PROACTIVE_CHURN_REVIEW',
-        title: 'Review medium/high churn list',
-        count: Math.max(1, (churnInsights.summary?.high || 0) + (churnInsights.summary?.medium || 0)),
-        impact: Math.round((highChurnRiskAmount + ghostRiskAmount) * 0.25),
-        urgency: 'This week',
-        priority: 'P2',
-        cta: 'Open Churn List',
-        sub: 'Stay ahead of drop-offs',
-        action: () => navigateTo('Insights'),
-      },
-    ];
+        sub: 'Convert momentum into fresh joins',
+        action: () => openBroadcastDraft('All', 'Hi from GymVault! Bring your momentum back this week. Reply if you want help choosing the right plan or bringing a friend along.'),
+      }),
+    ].filter(Boolean)
+      .sort((a, b) => b.score - a.score);
 
-    // Required actions temporarily occupy proactive slots until resolved.
-    const mergedActionRows = [...actionRequiredRows, ...proactiveRows]
+    const recommendations = [...aiCandidates, ...opportunityCandidates]
+      .filter((item, index, arr) => arr.findIndex((candidate) => candidate.id === item.id) === index)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+
+    const primary = recommendations[0] || {
+      id: 'BASELINE',
+      title: 'Keep gym momentum high',
+      reason: 'Core operations are stable. Stay consistent with growth and daily follow-ups.',
+      count: active.length || members.length || 0,
+      impact: avgPlanPrice * 2,
+      confidence: 76,
+      urgency: 'This week',
+      priority: 'P2',
+      cta: plans.length > 0 ? 'Add Member' : 'Create Plan',
+      sub: plans.length > 0 ? 'Steady growth execution' : 'Set up your plan catalog',
+      action: () => {
+        if (plans.length === 0) {
+          navigateTo('Plans');
+          return;
+        }
+        setShowAddModal(true);
+      },
+    };
+
+    const aiSummary = recommendations.length > 0
+      ? `Focus now: ${primary.title}. ${primary.reason}. Potential value ₹${primary.impact.toLocaleString()} at ${primary.confidence}% confidence.`
+      : `Gym health is ${healthScore}%. Operations are stable. Focus on growth and daily follow-ups this week.`;
+
+    const ACTION_SLOT_COUNT = 3;
+    const priorityRank = { P0: 0, P1: 1, P2: 2 };
+    const actionRequiredRows = aiCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
+
+    const mergedActionRows = [...actionRequiredRows, ...opportunityCandidates]
       .filter((item, index, arr) => arr.findIndex((x) => x.id === item.id) === index)
+      .sort((a, b) => {
+        const priorityDelta = (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
+        if (priorityDelta !== 0) return priorityDelta;
+        return b.score - a.score;
+      })
       .slice(0, ACTION_SLOT_COUNT);
     const urgentCount = aiCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1').length;
 
@@ -991,7 +1068,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         lastAutomationLabel,
       },
     };
-  }, [members, plans, chart30, attendanceHeatmap, churnInsights, campaignLogs, payStats.pending_dues]);
+  }, [members, plans, chart30, attendanceHeatmap, churnInsights, campaignLogs, payStats.pending_dues, setup, todayCheckins]);
 
   const [isAutomating, setIsAutomating] = useState(false);
 
@@ -1756,9 +1833,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
       {/* Broadcast */}
       {showBroadcastModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 1rem)' }}>
-            <div className="px-6 py-5 flex justify-between items-center"
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start sm:items-center justify-center z-[200] p-3 sm:p-4 pt-4 sm:pt-6 pb-[calc(var(--mobile-nav-offset)+0.75rem)] overflow-y-auto">
+          <div className="bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100dvh - var(--mobile-nav-offset) - 0.75rem)' }}>
+            <div className="px-5 py-4 sm:px-6 sm:py-5 flex justify-between items-center"
               style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
               <div className="flex items-center gap-3">
                 <MessageSquare size={20} className="text-white" />
@@ -1769,7 +1846,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <X size={16} className="text-white" />
               </button>
             </div>
-            <form onSubmit={handleBroadcast} className="p-6 space-y-4 overflow-y-auto flex-1">
+            <form onSubmit={handleBroadcast} className="p-5 sm:p-6 space-y-3.5 overflow-y-auto flex-1">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
                 <input
@@ -1795,7 +1872,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   </div>
                 )}
                 {broadcastSearchResults.length > 0 && (
-                  <div className="mt-2 rounded-2xl border border-slate-200 bg-white max-h-48 overflow-y-auto">
+                  <div className="mt-2 rounded-2xl border border-slate-200 bg-white max-h-40 sm:max-h-48 overflow-y-auto">
                     {broadcastSearchResults.map((member) => (
                       <button
                         key={`broadcast-member-${member.id}`}

@@ -1190,17 +1190,17 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
               <p className="text-sm font-medium text-slate-500 mb-6">Connect payment gateways, messaging services &amp; manage campaign templates.</p>
 
               {/* Sub-tab switcher */}
-              <div className="flex bg-slate-100 rounded-2xl p-1 mb-8 gap-1 max-w-md">
+              <div className="grid w-full max-w-2xl grid-cols-3 bg-slate-100 rounded-2xl p-1 mb-8 gap-1">
                 <button onClick={() => setIntegSubTab('payments')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all duration-200 ${integSubTab === 'payments' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'payments' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <CreditCard size={14} /> Payments
                 </button>
                 <button onClick={() => setIntegSubTab('messaging')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all duration-200 ${integSubTab === 'messaging' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'messaging' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <MessageSquare size={14} /> Messaging
                 </button>
                 <button onClick={() => setIntegSubTab('campaigns')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all duration-200 ${integSubTab === 'campaigns' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                  className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'campaigns' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <Zap size={14} /> Campaigns
                 </button>
               </div>
@@ -1208,42 +1208,42 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
               {integrationLoading ? (
                 <div className="p-10 bg-white border border-slate-100 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading integrations...</div>
               ) : (
-                <div className="max-w-2xl">
+                <div className="w-full max-w-4xl min-w-0 overflow-x-hidden">
 
                   {/* â•â• PAYMENTS TAB â•â• */}
                   {integSubTab === 'payments' && (
                     <div className="space-y-4 animate-in fade-in duration-200">
 
                       {/* Razorpay Connect Hero Card */}
-                      <div className={`rounded-2xl p-6 border ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-50 border-emerald-200' : 'bg-gradient-to-br from-indigo-50 to-white border-indigo-200'}`}>
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
+                      <div className={`rounded-2xl p-5 sm:p-6 border ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-50 border-emerald-200' : 'bg-gradient-to-br from-indigo-50 to-white border-indigo-200'}`}>
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
                               <div className={`w-2.5 h-2.5 rounded-full ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-500' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'bg-amber-400' : 'bg-slate-300'}`} />
                               <span className={`text-xs font-black uppercase tracking-wider ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'text-emerald-700' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'text-amber-700' : 'text-slate-500'}`}>
-                                {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connected via Razorpay Route' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'Authorized â€“ Setup Pending' : integrationData.member_payments?.onboarding_status === 'FAILED' ? 'Connection Failed' : 'Not Connected'}
+                                {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connected via Razorpay Route' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'Authorized - Setup Pending' : integrationData.member_payments?.onboarding_status === 'FAILED' ? 'Connection Failed' : 'Not Connected'}
                               </span>
                             </div>
                             <h3 className="text-lg font-black text-slate-900 mb-1">
-                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Razorpay Connected âœ“' : 'Connect with Razorpay'}
+                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Razorpay Connected' : 'Connect with Razorpay'}
                             </h3>
-                            <p className="text-xs font-medium text-slate-500 mb-4">
+                            <p className="text-xs font-medium text-slate-500 mb-4 break-all">
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? `Account: ${integrationData.member_payments.connected_account_id}` : 'Members pay membership fees directly to your account. GymVault auto-collects its platform fee via Route.'}
                             </p>
-                            <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
                               <button type="button" onClick={handleConnectRazorpay} disabled={connectingGateway}
-                                className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
-                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : 'âš¡ Connect Razorpay'}
+                                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : 'Connect Razorpay'}
                               </button>
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
                                 <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}
-                                  className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 active:scale-95 transition-all disabled:opacity-60">
+                                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 active:scale-95 transition-all disabled:opacity-60">
                                   {disconnectingGateway ? 'Disconnecting...' : 'Disconnect'}
                                 </button>
                               )}
                             </div>
                           </div>
-                          <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center shrink-0">
+                          <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center shrink-0 self-start">
                             <CreditCard size={22} className="text-indigo-500" />
                           </div>
                         </div>
@@ -1262,7 +1262,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         {showLinkedAccountForm && (
                           <div className="px-5 pb-5 space-y-3 animate-in fade-in duration-200">
                             <div className="h-px bg-slate-100" />
-                            <p className="text-xs text-slate-500 font-medium">Go to <strong>Razorpay â†’ Route â†’ Accounts</strong> and copy your Account ID (starts with <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">acc_</code>)</p>
+                            <p className="text-xs text-slate-500 font-medium break-words">Go to <strong>Razorpay &gt; Route &gt; Accounts</strong> and copy your Account ID (starts with <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">acc_</code>)</p>
                             <input
                               value={linkedAccountForm.account_id || ''}
                               onChange={(e) => setLinkedAccountForm(p => ({ ...p, account_id: e.target.value }))}
@@ -1279,7 +1279,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
 
                       {/* Manual API Keys */}
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
                           <div>
                             <h4 className="font-black text-slate-900 text-sm">Manual API Keys</h4>
                             <p className="text-xs text-slate-500 mt-0.5">For gyms using their own Razorpay account directly</p>
@@ -1320,7 +1320,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                             className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
                           <p className="text-xs text-slate-400 mt-1 font-medium">Displayed to members as a payment option</p>
                         </div>
-                        <div className="flex items-center justify-between py-1">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between py-1">
                           <div>
                             <p className="font-bold text-slate-800 text-sm">Enable Member Online Payments</p>
                             <p className="text-xs text-slate-500 mt-0.5">Members can pay membership fees through the app</p>
@@ -1332,9 +1332,9 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         </div>
                       </div>
 
-                      <div className="flex justify-end">
+                      <div className="flex justify-stretch sm:justify-end">
                         <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
-                          className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                          className="w-full sm:w-auto px-6 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
                           <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Payment Settings'}
                         </button>
                       </div>
@@ -1353,11 +1353,11 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                           onChange={(e) => setIntegrationData(prev => ({ ...prev, owner_mobile: e.target.value }))}
                           placeholder="+91XXXXXXXXXX"
                           className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
-                        <p className="text-[11px] mt-2 text-slate-400 font-medium">Twilio credentials are managed by GymVault â€” you only need to set this number.</p>
+                        <p className="text-[11px] mt-2 text-slate-400 font-medium">Twilio credentials are managed by GymVault. You only need to set this number.</p>
                       </div>
 
                       {/* Gateway status cards */}
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className={`rounded-2xl p-4 border ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-50 border-emerald-200' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
                           <div className="flex items-center gap-2 mb-2">
                             <div className={`w-2 h-2 rounded-full ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-500' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-400' : 'bg-slate-300'}`} />
@@ -1383,7 +1383,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         <h4 className="font-black text-slate-900 text-sm mb-1">Send Test Message</h4>
                         <p className="text-xs text-slate-500 mb-4 font-medium">Verify your messaging setup is working correctly</p>
                         <form onSubmit={handleTestMessage} className="space-y-3">
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
                               <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Channel</label>
                               <select value={integrationTest.channel}
@@ -1412,9 +1412,9 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         </form>
                       </div>
 
-                      <div className="flex justify-end">
+                      <div className="flex justify-stretch sm:justify-end">
                         <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
-                          className="px-6 py-3 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                          className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
                           <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Messaging Settings'}
                         </button>
                       </div>
@@ -1427,7 +1427,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
 
                       {/* Usage + Controls */}
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
                           <div>
                             <h4 className="font-black text-slate-900 text-sm">Bulk Messaging</h4>
                             <p className="text-xs text-slate-500 mt-0.5 font-medium">Send campaigns to multiple members at once</p>
@@ -1440,7 +1440,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
 
                         {/* Usage bar */}
                         <div className="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
-                          <div className="flex items-end justify-between mb-2">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between mb-2">
                             <div>
                               <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Monthly Usage</p>
                               <p className="text-2xl font-black text-slate-900">{integrationData.monthly_usage}<span className="text-sm text-slate-400 font-bold"> / {integrationData.bulk_monthly_limit}</span></p>
@@ -1456,7 +1456,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         </div>
 
                         {/* Limits */}
-                        <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                           <div>
                             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Monthly Limit</label>
                             <input type="number" min="10" value={integrationData.bulk_monthly_limit}
@@ -1472,7 +1472,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         </div>
 
                         {/* Channel toggles */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
                             <span className="text-sm font-bold text-slate-700">WhatsApp</span>
                             <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { ...prev.bulk_channels, whatsapp: !prev.bulk_channels?.whatsapp } }))}
@@ -1510,7 +1510,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                               </button>
                               {expandedTemplate === template.template_key && (
                                 <div className="px-5 pb-5 space-y-3 animate-in fade-in duration-150 bg-slate-50/50">
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                                     <input value={template.title}
                                       onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], title: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
                                       className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-800 focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
@@ -1522,7 +1522,7 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                                       </button>
                                     </div>
                                   </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div>
                                       <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">WhatsApp</label>
                                       <textarea rows={3} value={template.whatsapp_text}
@@ -1543,9 +1543,9 @@ const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000').trim
                         </div>
                       </div>
 
-                      <div className="flex justify-end">
+                      <div className="flex justify-stretch sm:justify-end">
                         <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
-                          className="px-6 py-3 rounded-xl bg-purple-600 text-white font-black text-sm hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
+                          className="w-full sm:w-auto px-6 py-3 rounded-xl bg-purple-600 text-white font-black text-sm hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
                           <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Campaign Settings'}
                         </button>
                       </div>

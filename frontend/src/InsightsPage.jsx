@@ -284,7 +284,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
       </div>
 
       {/* 2. KPI STRIP */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard title="Total Revenue" value={`₹${analytics.revenue.total.toLocaleString()}`} change={analytics.revenue.growth} trend="up" icon={DollarSign} color="bg-emerald-500" className="gv-fade-up" />
         <KPICard title="Active Members" value={analytics.health.active} change="+4" trend="up" icon={Users} color="bg-blue-500" className="gv-fade-up gv-fade-up-1" />
         <KPICard title="Retention Rate" value={`${analytics.health.retention}%`} change="-1.2%" trend="down" icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />

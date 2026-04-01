@@ -75,6 +75,39 @@ const PaymentSkeletonRow = () => (
   </tr>
 );
 
+const INSIGHT_TONE_STYLES = {
+  emerald: {
+    wrapper: 'bg-emerald-50 border-emerald-100',
+    icon: 'bg-white text-emerald-500',
+    title: 'text-emerald-700',
+    detail: 'text-emerald-700/80',
+  },
+  indigo: {
+    wrapper: 'bg-indigo-50 border-indigo-100',
+    icon: 'bg-white text-indigo-500',
+    title: 'text-indigo-700',
+    detail: 'text-indigo-700/80',
+  },
+  orange: {
+    wrapper: 'bg-orange-50 border-orange-100',
+    icon: 'bg-white text-orange-500',
+    title: 'text-orange-700',
+    detail: 'text-orange-700/80',
+  },
+  sky: {
+    wrapper: 'bg-sky-50 border-sky-100',
+    icon: 'bg-white text-sky-500',
+    title: 'text-sky-700',
+    detail: 'text-sky-700/80',
+  },
+  slate: {
+    wrapper: 'bg-slate-50 border-slate-100',
+    icon: 'bg-white text-slate-500',
+    title: 'text-slate-700',
+    detail: 'text-slate-600',
+  },
+};
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 const PaymentsPage = ({ token, toast, showConfirm }) => {
@@ -263,21 +296,78 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
     return { cash: cashTotal, online: onlineTotal, onlineCount, cashPer: total > 0 ? (cashTotal / total) * 100 : 0, onlinePer: total > 0 ? (onlineTotal / total) * 100 : 0 };
   }, [payments]);
 
-  const collectionsSnapshot = useMemo(() => {
+  const collectionIntelligence = useMemo(() => {
     const completed = payments.filter((payment) => payment.status === 'Completed');
     const pending = payments.filter((payment) => payment.status !== 'Completed');
     const totalCollected = completed.reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
     const averageTicket = completed.length > 0 ? Math.round(totalCollected / completed.length) : 0;
-    const latest = completed.slice(0, 5);
+    const todayKey = new Date().toDateString();
+    const todayCompleted = completed.filter((payment) => {
+      const paymentDate = new Date(payment.payment_date);
+      return !Number.isNaN(paymentDate.getTime()) && paymentDate.toDateString() === todayKey;
+    });
+    const onlineShare = Math.round(revenueSplit.onlinePer || 0);
+    const pendingValue = Number(stats.pending_dues || 0);
+    const dominantMode = revenueSplit.online === 0 && revenueSplit.cash === 0
+      ? 'No mix yet'
+      : revenueSplit.online >= revenueSplit.cash ? 'Online' : 'Cash';
+
+    const actions = [];
+    if (pendingValue > 0) {
+      actions.push({
+        id: 'recover-dues',
+        icon: AlertCircle,
+        tone: 'orange',
+        title: 'Recover outstanding dues',
+        detail: `₹${pendingValue.toLocaleString()} is still pending across ${pending.length} record${pending.length === 1 ? '' : 's'}.`,
+      });
+    }
+    if (onlineShare < 45 && completed.length >= 4) {
+      actions.push({
+        id: 'increase-online-share',
+        icon: CreditCard,
+        tone: 'indigo',
+        title: 'Increase digital collections',
+        detail: `Only ${onlineShare}% of revenue is online. Push UPI or gateway payments at the desk.`,
+      });
+    }
+    if (Number(stats.today_revenue || 0) > 0) {
+      actions.push({
+        id: 'today-pace',
+        icon: CheckCircle2,
+        tone: 'emerald',
+        title: `${todayCompleted.length} payment${todayCompleted.length === 1 ? '' : 's'} logged today`,
+        detail: `₹${Number(stats.today_revenue || 0).toLocaleString()} collected so far today.`,
+      });
+    } else {
+      actions.push({
+        id: 'today-pace',
+        icon: Clock,
+        tone: 'sky',
+        title: 'No collections recorded today',
+        detail: 'Capture walk-in renewals early to keep the day on pace.',
+      });
+    }
+    if (actions.length < 2) {
+      actions.push({
+        id: 'protect-ticket',
+        icon: History,
+        tone: 'slate',
+        title: averageTicket > 0 ? 'Protect average ticket value' : 'Start building ticket history',
+        detail: averageTicket > 0
+          ? `Average ticket is ₹${averageTicket.toLocaleString()}. Upsell longer renewals during collections.`
+          : 'Complete a few payments to unlock smarter collection guidance.',
+      });
+    }
 
     return {
       completedCount: completed.length,
-      pendingCount: pending.length,
       averageTicket,
-      onlineShare: Math.round(revenueSplit.onlinePer || 0),
-      latest,
+      onlineShare,
+      dominantMode,
+      actions: actions.slice(0, 2),
     };
-  }, [payments, revenueSplit.onlinePer]);
+  }, [payments, revenueSplit, stats.pending_dues, stats.today_revenue]);
 
   const getEmptySubtitle = () => {
     if (searchTerm) return `No results matching "${searchTerm}"`;
@@ -346,8 +436,8 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       </div>
 
       {/* STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="relative overflow-hidden rounded-[20px] p-6 border md:col-span-2"
+      <div className="grid grid-cols-2 gap-5">
+          <div className="relative overflow-hidden rounded-[20px] p-6 border col-span-2"
             style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
               <div className="absolute right-4 top-4 w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.12)' }}>
                 <DollarSign size={20} className="text-emerald-600" />
@@ -362,7 +452,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                 <Clock size={20} className="text-blue-600" />
               </div>
               <p className="text-blue-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Collected Today</p>
-              <h3 className="text-3xl font-black text-slate-900">₹{animatedTodayRevenue.toLocaleString()}</h3>
+              <h3 className="text-2xl sm:text-3xl font-black text-slate-900">₹{animatedTodayRevenue.toLocaleString()}</h3>
               <p className="text-blue-600 text-xs font-bold mt-1.5">Today's collection</p>
           </div>
           <div className="relative overflow-hidden rounded-[20px] p-6 border"
@@ -371,66 +461,56 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                 <AlertCircle size={20} className="text-orange-600" />
               </div>
               <p className="text-orange-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Pending Dues</p>
-              <h3 className="text-3xl font-black text-orange-500">₹{animatedPendingDues.toLocaleString()}</h3>
+              <h3 className="text-2xl sm:text-3xl font-black text-orange-500">₹{animatedPendingDues.toLocaleString()}</h3>
               <p className="text-orange-500 text-xs font-bold mt-1.5">Awaiting payment</p>
           </div>
       </div>
 
       {/* CHARTS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white/90 p-8 rounded-[24px] border border-slate-100/60" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
-          <div className="flex justify-between items-center mb-6">
+          <div className="lg:col-span-2 bg-white/90 p-6 sm:p-8 rounded-[24px] border border-slate-100/60" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
             <div>
-              <h3 className="text-lg font-black text-slate-900">Collection Snapshot</h3>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">What matters most to a gym owner right now</p>
+              <h3 className="text-lg font-black text-slate-900">Collection Intelligence</h3>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Short signals to improve cashflow today</p>
             </div>
-            <div className="text-right">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Latest Ticket</p>
-              <p className="text-sm font-black text-slate-900">₹{collectionsSnapshot.averageTicket.toLocaleString()}</p>
+            <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 self-start">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Dominant Mode</p>
+              <p className="text-sm font-black text-slate-900">{collectionIntelligence.dominantMode} · {collectionIntelligence.onlineShare}% digital</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
-            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 sm:p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Completed</p>
-              <p className="text-2xl font-black text-slate-900">{collectionsSnapshot.completedCount}</p>
+              <p className="text-xl sm:text-2xl font-black text-slate-900">{collectionIntelligence.completedCount}</p>
             </div>
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4">
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 sm:p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600/70 mb-1">Avg Ticket</p>
-              <p className="text-2xl font-black text-emerald-600">₹{collectionsSnapshot.averageTicket.toLocaleString()}</p>
+              <p className="text-xl sm:text-2xl font-black text-emerald-600">₹{collectionIntelligence.averageTicket.toLocaleString()}</p>
             </div>
-            <div className="rounded-2xl bg-orange-50 border border-orange-100 p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-orange-600/70 mb-1">Pending</p>
-              <p className="text-2xl font-black text-orange-500">{collectionsSnapshot.pendingCount}</p>
-            </div>
-            <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600/70 mb-1">Online Share</p>
-              <p className="text-2xl font-black text-indigo-600">{collectionsSnapshot.onlineShare}%</p>
+            <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-3 sm:p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600/70 mb-1">Digital Mix</p>
+              <p className="text-xl sm:text-2xl font-black text-indigo-600">{collectionIntelligence.onlineShare}%</p>
             </div>
           </div>
-          <div className="rounded-[22px] border border-slate-100 overflow-hidden">
-            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-              <p className="text-xs font-black uppercase tracking-widest text-slate-500">Recent Collections</p>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Last 5 transactions</p>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {collectionsSnapshot.latest.length > 0 ? collectionsSnapshot.latest.map((payment) => (
-                <div key={`snapshot-${payment.id}`} className="px-4 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-black text-slate-900 truncate">{payment.member_name}</p>
-                    <p className="text-[11px] text-slate-500 font-semibold truncate">{payment.plan_name || 'No plan'} · {new Date(payment.payment_date).toLocaleDateString()}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-black text-emerald-600">₹{parseFloat(payment.amount_paid || 0).toLocaleString()}</p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">{payment.payment_mode || 'Cash'}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {collectionIntelligence.actions.map((item) => {
+              const tone = INSIGHT_TONE_STYLES[item.tone] || INSIGHT_TONE_STYLES.slate;
+              const Icon = item.icon;
+              return (
+                <div key={item.id} className={`rounded-2xl border p-4 ${tone.wrapper}`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${tone.icon}`}>
+                      <Icon size={18} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-black ${tone.title}`}>{item.title}</p>
+                      <p className={`text-xs font-semibold mt-1 leading-relaxed ${tone.detail}`}>{item.detail}</p>
+                    </div>
                   </div>
                 </div>
-              )) : (
-                <div className="px-4 py-10 text-center">
-                  <p className="text-sm font-black text-slate-600 mb-1">No collections recorded yet</p>
-                  <p className="text-xs font-bold text-slate-400">Record your first transaction to populate this panel.</p>
-                </div>
-              )}
-            </div>
+              );
+            })}
           </div>
         </div>
 
