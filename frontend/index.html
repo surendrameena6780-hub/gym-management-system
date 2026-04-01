@@ -44,15 +44,25 @@
         min-height: 100%;
       }
 
+      /* Dark base so the splash screen has no white flash on load */
+      html {
+        background: #0b0c1e;
+      }
+
       body {
         font-family: 'Inter', sans-serif !important;
         -webkit-font-smoothing: antialiased;
+        background: #0b0c1e;
+        margin: 0;
+      }
+
+      /* Light app gradient is applied once React paints */
+      #root {
         background:
           radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.12) 0%, transparent 48%),
           radial-gradient(circle at 82% 20%, rgba(168, 85, 247, 0.09) 0%, transparent 42%),
           radial-gradient(circle at 78% 82%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
           #eef0ff;
-        margin: 0;
       }
       .premium-card {
         background: white;

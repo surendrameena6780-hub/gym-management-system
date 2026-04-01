@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Check, Plus, Trash2, Edit2, Zap, Crown, X, 
-  TrendingUp, Save, BarChart3, Users, PieChart, ArrowUpRight, Percent, Clock 
+  TrendingUp, Save, BarChart3, Users, PieChart, Percent, Clock 
 } from 'lucide-react';
 
 const extractArray = (value, keys = []) => {
@@ -302,84 +302,68 @@ const PlansPage = ({ token, toast, showConfirm }) => {
       {/* --- ANALYTICS MODAL --- */}
       {showAnalyticsModal && (
         <div className="app-modal-shell z-[100] bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="app-modal-panel app-modal-panel--wide bg-white rounded-[28px] sm:rounded-[32px] w-full max-w-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col md:flex-row">
-            <div className="bg-slate-900 text-white p-5 sm:p-6 md:p-8 md:w-[320px] shrink-0 flex flex-col gap-5 relative">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500 rounded-full blur-[100px] opacity-20 -mr-20 -mt-20 pointer-events-none"></div>
-              <div className="relative flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-black mb-1">{analyticsData?.name || 'Plan'}</h2>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Performance Report</p>
-                </div>
-                <button onClick={() => setShowAnalyticsModal(false)} className="shrink-0 p-2 rounded-full bg-white/10 hover:bg-white/15 transition-all">
-                  <X size={18} className="text-white/80" />
-                </button>
+          <div className="app-modal-panel bg-white rounded-[28px] sm:rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
+            {/* Header — dark strip */}
+            <div className="bg-slate-900 text-white px-5 py-4 flex items-start justify-between gap-3 shrink-0">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-purple-500 rounded-full blur-[80px] opacity-20 -mr-12 -mt-12 pointer-events-none"></div>
+              <div className="relative">
+                <h2 className="text-xl font-black mb-0.5">{analyticsData?.name || 'Plan'}</h2>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Performance Report</p>
               </div>
+              <button onClick={() => setShowAnalyticsModal(false)} className="relative shrink-0 p-2 rounded-full bg-white/10 hover:bg-white/15 transition-all">
+                <X size={18} className="text-white/80" />
+              </button>
+            </div>
 
-              <div className="relative space-y-5">
-                <div>
-                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Total Revenue</div>
-                  <div className="text-3xl font-black text-emerald-400 tracking-tight">₹{analyticsData?.totalRevenue?.toLocaleString() || 0}</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-slate-800 bg-slate-800/60 p-3">
-                    <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Active Members</div>
-                    <div className="text-xl font-bold flex items-center gap-2 text-white">
-                      <Users size={16} className="text-blue-400" /> {analyticsData?.activeCount || 0}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-800/60 p-3">
-                    <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Churn Rate</div>
-                    <div className="text-xl font-bold flex items-center gap-2 text-rose-400">
-                      <PieChart size={16} /> {analyticsData?.churnRate || 0}%
-                    </div>
+            {/* Stats row */}
+            <div className="bg-slate-900 text-white px-5 pb-5 shrink-0">
+              <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Total Revenue</div>
+              <div className="text-3xl font-black text-emerald-400 tracking-tight mb-4">₹{analyticsData?.totalRevenue?.toLocaleString() || 0}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-slate-800 bg-slate-800/60 p-3">
+                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Active Members</div>
+                  <div className="text-xl font-bold flex items-center gap-2 text-white">
+                    <Users size={16} className="text-blue-400" /> {analyticsData?.activeCount || 0}
                   </div>
                 </div>
-              </div>
-
-              <div className="relative rounded-2xl border border-slate-700 bg-slate-800/50 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-emerald-500/20 p-2 rounded-lg text-emerald-400"><ArrowUpRight size={20} /></div>
-                  <div>
-                    <div className="text-sm font-bold text-white">High Retention</div>
-                    <div className="text-[10px] text-slate-400 font-bold">Renewal rate is above 80%</div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-800/60 p-3">
+                  <div className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">Churn Rate</div>
+                  <div className="text-xl font-bold flex items-center gap-2 text-rose-400">
+                    <PieChart size={16} /> {analyticsData?.churnRate || 0}%
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="app-modal-scroll p-5 sm:p-6 md:p-8 bg-slate-50 flex flex-col min-h-0">
-              <div className="flex items-center justify-between gap-3 mb-5 md:mb-6">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">Revenue Trend</h3>
-                  <p className="text-xs font-semibold text-slate-400 mt-1">Monthly earning pattern for this plan.</p>
-                </div>
-                <button onClick={() => setShowAnalyticsModal(false)} className="hidden md:inline-flex p-2 hover:bg-slate-200 rounded-full transition-all"><X size={20} className="text-slate-400" /></button>
+            {/* Revenue trend chart — full width, no scroll */}
+            <div className="bg-slate-50 p-5 flex flex-col gap-3 flex-1">
+              <div>
+                <h3 className="text-base font-black text-slate-900">Revenue Trend</h3>
+                <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Monthly earning pattern for this plan.</p>
               </div>
-
-              <div className="flex-1 bg-white p-4 sm:p-5 rounded-3xl border border-slate-100 shadow-sm min-h-[240px] relative overflow-hidden">
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 relative" style={{ minHeight: '180px' }}>
                 {loadingAnalytics ? (
                   <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold animate-pulse">Calculating Data...</div>
                 ) : (
-                  <div className="grid h-full items-end gap-2 sm:gap-3" style={{ gridTemplateColumns: `repeat(${Math.max((analyticsData?.graphData || []).length, 1)}, minmax(0, 1fr))` }}>
+                  <div className="flex items-end gap-2 h-[160px]" style={{ width: '100%' }}>
                     {(analyticsData?.graphData || []).map((item, idx) => (
-                      <div key={idx} className="flex h-full min-w-0 flex-col items-center justify-end gap-2 group">
-                        <div className="relative w-full bg-slate-100 rounded-[22px] overflow-hidden h-[160px] sm:h-[190px] flex items-end justify-center px-1.5 pb-0 pt-2">
+                      <div key={idx} className="flex flex-col items-center justify-end gap-1.5 flex-1 h-full group">
+                        <div className="relative w-full bg-slate-100 rounded-xl overflow-hidden flex-1 flex items-end justify-center px-1 pb-0">
                           <div
                             style={{ height: `${Math.max(8, Math.round((Number(item.revenue || 0) / analyticsGraphMax) * 100))}%` }}
-                            className="w-full bg-slate-900 rounded-t-xl transition-all duration-500 group-hover:bg-purple-600 relative"
+                            className="w-full bg-slate-900 rounded-t-lg transition-all duration-500 group-hover:bg-purple-600 relative"
                           >
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">₹{item.revenue}</div>
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">₹{item.revenue}</div>
                           </div>
                         </div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase truncate max-w-full">{item.month}</span>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-full">{item.month}</span>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-
-              <div className="mt-5 flex justify-end">
-                <button onClick={() => setShowAnalyticsModal(false)} className="text-sm font-bold text-slate-400 hover:text-slate-900 uppercase tracking-widest">Close Report</button>
+              <div className="flex justify-end pt-1">
+                <button onClick={() => setShowAnalyticsModal(false)} className="text-xs font-bold text-slate-400 hover:text-slate-900 uppercase tracking-widest">Close Report</button>
               </div>
             </div>
           </div>

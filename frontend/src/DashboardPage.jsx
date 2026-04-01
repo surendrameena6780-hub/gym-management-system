@@ -929,15 +929,15 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const opportunityCandidates = [
       incompleteSetupSteps.length > 0 && buildRecommendation({
         id: 'SETUP_PROGRESS',
-        title: setup.progress < 50 ? 'Finish core setup' : 'Close onboarding gaps',
-        reason: `${incompleteSetupSteps.length} setup step${incompleteSetupSteps.length === 1 ? '' : 's'} still need attention`,
+        title: setup.progress < 50 ? 'Complete your gym setup' : 'Finish remaining setup steps',
+        reason: `${incompleteSetupSteps.length} step${incompleteSetupSteps.length === 1 ? '' : 's'} not yet configured — complete them to unlock full features`,
         count: incompleteSetupSteps.length,
         impact: Math.round(avgPlanPrice * Math.max(1.5, incompleteSetupSteps.length * 1.1)),
         confidence: Math.min(92, 72 + incompleteSetupSteps.length * 5),
         urgency: setup.progress < 50 ? 'Today' : 'This week',
         priority: setup.progress < 50 ? 'P1' : 'P2',
-        cta: nextSetupStep === 'plans' ? 'Create Plan' : nextSetupStep === 'members' ? 'Add Member' : 'Open Settings',
-        sub: `Finish ${setupStepLabels[nextSetupStep] || 'onboarding'}`,
+        cta: nextSetupStep === 'plans' ? 'Create Plan' : nextSetupStep === 'members' ? 'Add Member' : 'Go to Settings',
+        sub: `Next step: ${setupStepLabels[nextSetupStep] || 'Settings'}`,
         action: () => {
           if (nextSetupStep === 'plans') {
             navigateTo('Plans');
@@ -981,8 +981,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       }),
       topPlanEntry && topPlanPct >= 65 && plans.length >= 2 && buildRecommendation({
         id: 'PLAN_CONCENTRATION',
-        title: `Reduce reliance on ${topPlanEntry[0]}`,
-        reason: `${topPlanPct}% of members sit on one plan`,
+        title: `Diversify beyond "${topPlanEntry[0]}" plan`,
+        reason: `${topPlanPct}% of members are on a single plan — spreading risk improves revenue stability`,
         count: topPlanEntry[1],
         impact: Math.round(monthlyRevenue > 0 ? monthlyRevenue * 0.18 : avgPlanPrice * topPlanEntry[1]),
         confidence: Math.min(82, 60 + Math.round(topPlanPct / 2)),
@@ -1431,6 +1431,28 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </div>
               
               <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                {dashboardData.actionRows.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-6 gap-3 text-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
+                      <CheckCircle size={20} className="text-emerald-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800">All clear right now!</p>
+                      <p className="text-[10px] text-slate-400 font-semibold mt-0.5">No urgent actions needed today.</p>
+                    </div>
+                    <div className="w-full space-y-1.5 text-left mt-1">
+                      {[{label:'Complete gym profile', sub:'Add logo, address & contact info', nav:'Settings'},{label:'Set up SMS messaging', sub:'Enable WhatsApp or SMS alerts for members', nav:'Settings'},{label:'Add integration links', sub:'Connect Razorpay or payment gateway', nav:'Settings'}].map((item) => (
+                        <button key={item.label} onClick={() => navigateTo(item.nav)} className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 text-left transition-colors">
+                          <div>
+                            <p className="text-[11px] font-bold text-slate-700">{item.label}</p>
+                            <p className="text-[9px] text-slate-400 font-semibold mt-0.5">{item.sub}</p>
+                          </div>
+                          <ChevronRight size={13} className="text-slate-300 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {dashboardData.actionRows.map((row) => {
                   const meta = getPriorityMeta(row.priority);
                   return (
