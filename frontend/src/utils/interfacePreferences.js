@@ -3,6 +3,7 @@ const STORAGE_KEY = 'gymvault:ui-preferences';
 export const normalizeInterfacePreferences = (value) => ({
   reduce_motion: Boolean(value?.reduce_motion ?? value?.interface_reduce_motion),
   compact_mode: Boolean(value?.compact_mode ?? value?.interface_compact_mode),
+  dark_mode: Boolean(value?.dark_mode ?? value?.interface_dark_mode),
 });
 
 export const applyInterfacePreferences = (value) => {
@@ -10,6 +11,7 @@ export const applyInterfacePreferences = (value) => {
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('gv-reduce-motion', normalized.reduce_motion);
     document.documentElement.classList.toggle('gv-compact-ui', normalized.compact_mode);
+    document.documentElement.classList.toggle('gv-dark-mode', normalized.dark_mode);
   }
   return normalized;
 };

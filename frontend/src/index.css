@@ -404,3 +404,222 @@ html.gv-compact-ui main.app-scroll-shell > div {
 @media (min-width: 1280px) {
   html { font-size: 15px; }
 }
+
+/* ── Dark Mode ─────────────────────────────────────────────── */
+html.gv-dark-mode {
+  color-scheme: dark;
+}
+
+html.gv-dark-mode body {
+  background: #0d1117;
+  color: #e2e8f0;
+}
+
+html.gv-dark-mode #root {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.07) 0%, transparent 48%),
+    radial-gradient(circle at 82% 20%, rgba(168, 85, 247, 0.05) 0%, transparent 42%),
+    radial-gradient(circle at 78% 82%, rgba(59, 130, 246, 0.04) 0%, transparent 40%),
+    #0d1117 !important;
+}
+
+/* Header */
+html.gv-dark-mode .app-header-safe {
+  background: rgba(13, 17, 23, 0.9) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Mobile bottom nav */
+html.gv-dark-mode .app-mobile-nav {
+  background: rgba(15, 19, 28, 0.96) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Bottom sheets & drawers */
+html.gv-dark-mode .drawer-sheet,
+html.gv-dark-mode .app-bottom-sheet {
+  background: #161d2e !important;
+  box-shadow: 0 -4px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05) !important;
+}
+
+/* ── Backgrounds ─────────────────────────────────────────── */
+html.gv-dark-mode .bg-white {
+  background-color: #161d2e !important;
+}
+html.gv-dark-mode .bg-slate-50 {
+  background-color: #111827 !important;
+}
+html.gv-dark-mode .bg-slate-100 {
+  background-color: #1a2236 !important;
+}
+html.gv-dark-mode .bg-slate-200 {
+  background-color: #1e2844 !important;
+}
+html.gv-dark-mode .bg-gray-50 {
+  background-color: #111827 !important;
+}
+html.gv-dark-mode .bg-gray-100 {
+  background-color: #1a2236 !important;
+}
+
+/* Coloured tinted backgrounds (keep hue, darken) */
+html.gv-dark-mode .bg-indigo-50 {
+  background-color: rgba(99, 102, 241, 0.14) !important;
+}
+html.gv-dark-mode .bg-indigo-100 {
+  background-color: rgba(99, 102, 241, 0.22) !important;
+}
+html.gv-dark-mode .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+html.gv-dark-mode .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.2) !important;
+}
+html.gv-dark-mode .bg-rose-50 {
+  background-color: rgba(244, 63, 94, 0.12) !important;
+}
+html.gv-dark-mode .bg-rose-100 {
+  background-color: rgba(244, 63, 94, 0.2) !important;
+}
+html.gv-dark-mode .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+}
+html.gv-dark-mode .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+}
+html.gv-dark-mode .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+}
+html.gv-dark-mode .bg-blue-100 {
+  background-color: rgba(59, 130, 246, 0.2) !important;
+}
+html.gv-dark-mode .bg-violet-50 {
+  background-color: rgba(139, 92, 246, 0.12) !important;
+}
+html.gv-dark-mode .bg-purple-50 {
+  background-color: rgba(168, 85, 247, 0.12) !important;
+}
+html.gv-dark-mode .bg-green-50 {
+  background-color: rgba(34, 197, 94, 0.12) !important;
+}
+html.gv-dark-mode .bg-orange-50 {
+  background-color: rgba(249, 115, 22, 0.12) !important;
+}
+html.gv-dark-mode .bg-teal-50 {
+  background-color: rgba(20, 184, 166, 0.12) !important;
+}
+html.gv-dark-mode .bg-sky-50 {
+  background-color: rgba(14, 165, 233, 0.12) !important;
+}
+
+/* ── Text ────────────────────────────────────────────────── */
+html.gv-dark-mode .text-slate-900 {
+  color: #edf0fb !important;
+}
+html.gv-dark-mode .text-slate-800 {
+  color: #d4daf2 !important;
+}
+html.gv-dark-mode .text-slate-700 {
+  color: #bdc8e8 !important;
+}
+html.gv-dark-mode .text-slate-600 {
+  color: #8fa0c4 !important;
+}
+html.gv-dark-mode .text-slate-500 {
+  color: #6a7ea8 !important;
+}
+html.gv-dark-mode .text-slate-400 {
+  color: #4e6088 !important;
+}
+html.gv-dark-mode .text-gray-900 {
+  color: #edf0fb !important;
+}
+html.gv-dark-mode .text-gray-700 {
+  color: #bdc8e8 !important;
+}
+html.gv-dark-mode .text-gray-600 {
+  color: #8fa0c4 !important;
+}
+html.gv-dark-mode .text-gray-500 {
+  color: #6a7ea8 !important;
+}
+
+/* ── Borders ─────────────────────────────────────────────── */
+html.gv-dark-mode .border-slate-100 {
+  border-color: #1e2b45 !important;
+}
+html.gv-dark-mode .border-slate-200 {
+  border-color: #243358 !important;
+}
+html.gv-dark-mode .border-slate-300 {
+  border-color: #2e426e !important;
+}
+html.gv-dark-mode .border-gray-200 {
+  border-color: #243358 !important;
+}
+html.gv-dark-mode .divide-slate-100 > * + * {
+  border-color: #1e2b45 !important;
+}
+html.gv-dark-mode .divide-slate-200 > * + * {
+  border-color: #243358 !important;
+}
+html.gv-dark-mode .divide-gray-100 > * + * {
+  border-color: #1e2b45 !important;
+}
+
+/* ── Inputs ──────────────────────────────────────────────── */
+html.gv-dark-mode input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+html.gv-dark-mode select,
+html.gv-dark-mode textarea {
+  background-color: #0f1624 !important;
+  color: #e2e8f0 !important;
+  border-color: #243358 !important;
+}
+html.gv-dark-mode input::placeholder,
+html.gv-dark-mode textarea::placeholder {
+  color: #3d5278 !important;
+}
+
+/* ── Hover states ────────────────────────────────────────── */
+html.gv-dark-mode .hover\:bg-slate-50:hover {
+  background-color: #1a283c !important;
+}
+html.gv-dark-mode .hover\:bg-slate-100:hover {
+  background-color: #1e304a !important;
+}
+html.gv-dark-mode .hover\:bg-white:hover {
+  background-color: #1e2a42 !important;
+}
+html.gv-dark-mode .hover\:bg-indigo-50:hover {
+  background-color: rgba(99, 102, 241, 0.2) !important;
+}
+html.gv-dark-mode .hover\:bg-rose-50:hover {
+  background-color: rgba(244, 63, 94, 0.18) !important;
+}
+html.gv-dark-mode .hover\:bg-gray-50:hover {
+  background-color: #1a283c !important;
+}
+
+/* ── Skeleton shimmer (dark version) ────────────────────── */
+html.gv-dark-mode .gv-skeleton {
+  background: linear-gradient(90deg, #1a2035 25%, #243358 50%, #1a2035 75%);
+  background-size: 800px 100%;
+}
+
+/* ── Smooth transition when theme switches ───────────────── */
+html.gv-dark-mode,
+html:not(.gv-dark-mode) {
+  transition: background-color 0.25s ease;
+}
+html.gv-dark-mode #root,
+html:not(.gv-dark-mode) #root {
+  transition: background 0.25s ease;
+}
+html.gv-dark-mode .bg-white,
+html.gv-dark-mode .bg-slate-50,
+html.gv-dark-mode .bg-slate-100,
+html.gv-dark-mode .app-header-safe,
+html.gv-dark-mode .app-mobile-nav,
+html.gv-dark-mode .drawer-sheet {
+  transition: background-color 0.25s ease, background 0.25s ease, border-color 0.25s ease !important;
+}

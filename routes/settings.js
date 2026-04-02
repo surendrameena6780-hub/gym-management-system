@@ -200,7 +200,8 @@ const ensurePreferenceSchema = async () => {
             await pool.query(`
                 ALTER TABLE gyms
                 ADD COLUMN IF NOT EXISTS interface_reduce_motion BOOLEAN DEFAULT FALSE,
-                ADD COLUMN IF NOT EXISTS interface_compact_mode BOOLEAN DEFAULT FALSE;
+                ADD COLUMN IF NOT EXISTS interface_compact_mode BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS interface_dark_mode BOOLEAN DEFAULT FALSE;
             `);
             await pool.query(`
                 ALTER TABLE users
@@ -229,7 +230,7 @@ router.get('/', auth, async (req, res) => {
 
         const userRes = await pool.query('SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1', [req.user.id]);
         const gymRes = await pool.query(
-            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, interface_reduce_motion, interface_compact_mode FROM gyms WHERE id = $1', 
+            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, interface_reduce_motion, interface_compact_mode, interface_dark_mode FROM gyms WHERE id = $1', 
             [req.user.gym_id]
         );
 
@@ -259,7 +260,7 @@ router.get('/preferences', auth, async (req, res) => {
         await ensurePreferenceSchema();
 
         const result = await pool.query(
-            `SELECT currency, timezone, interface_reduce_motion, interface_compact_mode
+            `SELECT currency, timezone, interface_reduce_motion, interface_compact_mode, interface_dark_mode
              FROM gyms
              WHERE id = $1
              LIMIT 1`,
@@ -271,6 +272,7 @@ router.get('/preferences', auth, async (req, res) => {
             timezone: 'Asia/Kolkata',
             interface_reduce_motion: false,
             interface_compact_mode: false,
+            interface_dark_mode: false,
         });
     } catch (err) {
         console.error('PREFERENCES FETCH ERROR:', err.message);
@@ -694,6 +696,7 @@ router.put('/preferences', auth, async (req, res) => {
         timezone,
         interface_reduce_motion,
         interface_compact_mode,
+        interface_dark_mode,
     } = req.body || {};
     try {
         await ensurePreferenceSchema();
@@ -702,9 +705,10 @@ router.put('/preferences', auth, async (req, res) => {
              SET currency = $1,
                  timezone = $2,
                  interface_reduce_motion = $3,
-                 interface_compact_mode = $4
-             WHERE id = $5`,
-            [currency, timezone, Boolean(interface_reduce_motion), Boolean(interface_compact_mode), req.user.gym_id]
+                 interface_compact_mode = $4,
+                 interface_dark_mode = $5
+             WHERE id = $6`,
+            [currency, timezone, Boolean(interface_reduce_motion), Boolean(interface_compact_mode), Boolean(interface_dark_mode), req.user.gym_id]
         );
         res.json({ message: "Preferences updated successfully" });
     } catch (err) {

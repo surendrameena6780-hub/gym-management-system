@@ -7,7 +7,7 @@ import {
   CheckCircle, Plus, Download, Smartphone, Monitor, Globe,
   Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
   RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
-  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft
+  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
@@ -176,6 +176,7 @@ const loadRazorpayScript = () => {
   const [interfacePreferences, setInterfacePreferences] = useState({
     reduce_motion: false,
     compact_mode: false,
+    dark_mode: false,
   });
   const [twoFactor, setTwoFactor] = useState(false);
   const [staffMembers, setStaffMembers] = useState([]);
@@ -232,6 +233,7 @@ const loadRazorpayScript = () => {
           const nextInterfacePreferences = {
             reduce_motion: Boolean(res.data.gym.interface_reduce_motion),
             compact_mode: Boolean(res.data.gym.interface_compact_mode),
+            dark_mode: Boolean(res.data.gym.interface_dark_mode),
           };
           setInterfacePreferences(nextInterfacePreferences);
           applyInterfacePreferences(nextInterfacePreferences);
@@ -746,6 +748,7 @@ const loadRazorpayScript = () => {
         timezone: gymData.timezone,
         interface_reduce_motion: interfacePreferences.reduce_motion,
         interface_compact_mode: interfacePreferences.compact_mode,
+        interface_dark_mode: interfacePreferences.dark_mode,
       }, headers);
       applyInterfacePreferences(interfacePreferences);
       saveInterfacePreferencesLocal(interfacePreferences);
@@ -1709,6 +1712,31 @@ const loadRazorpayScript = () => {
               <p className="text-sm font-medium text-slate-500 mb-8">Apply real interface behavior changes across the app.</p>
 
               <div className="space-y-4 max-w-3xl">
+                <div className="border border-slate-200 rounded-2xl p-6 bg-white">
+                  <div className="flex justify-between items-center gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
+                        <Moon size={16} className="text-indigo-300" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm mb-0.5">Dark Mode</h3>
+                        <p className="text-xs text-slate-500">Switch the entire app to a dark theme. Easy on the eyes in low-light environments.</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const next = { ...interfacePreferences, dark_mode: !interfacePreferences.dark_mode };
+                        setInterfacePreferences(next);
+                        applyInterfacePreferences(next);
+                        saveInterfacePreferencesLocal(next);
+                      }}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200 ${interfacePreferences.dark_mode ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${interfacePreferences.dark_mode ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
                 <div className="border border-slate-200 rounded-2xl p-6 bg-white">
                   <div className="flex justify-between items-center gap-4">
                     <div><h3 className="font-bold text-slate-900 text-sm mb-1">Reduce Motion</h3><p className="text-xs text-slate-500">Turns off most animations and transitions across the dashboard.</p></div>
