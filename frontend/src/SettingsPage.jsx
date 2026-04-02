@@ -49,6 +49,14 @@ const SAAS_PLANS = {
   ],
 };
 
+// Per-plan limits used in ProgressBars and feature descriptions
+const PLAN_LIMITS = {
+  test:  { members: 'Unlimited', staff: 'Unlimited', storage: 2  },
+  basic: { members: 100,         staff: 1,           storage: 5  },
+  pro:   { members: 'Unlimited', staff: 3,           storage: 10 },
+  elite: { members: 'Unlimited', staff: 'Unlimited', storage: 20 },
+};
+
 const STAFF_ROLE_OPTIONS = [
   'MANAGER',
   'RECEPTION',
@@ -637,12 +645,13 @@ const loadRazorpayScript = () => {
               handler: async function (response) {
                   try {
                       // 1. Optimistic UI Update
+                      const optDays = selectedPlan.id === 'test' ? 1 : billingCycle === 'annual' ? 365 : 30;
                       setGymData(prev => ({
                           ...prev,
                           saas_status: 'ACTIVE',
                           current_plan: selectedPlan.id,
                           saas_billing_cycle: billingCycle,
-                          saas_valid_until: new Date(Date.now() + (billingCycle === 'annual' ? 365 : 30) * 24 * 60 * 60 * 1000).toISOString()
+                          saas_valid_until: new Date(Date.now() + optDays * 24 * 60 * 60 * 1000).toISOString()
                       }));
 
                       setLocalInvoice({
@@ -1104,8 +1113,12 @@ const loadRazorpayScript = () => {
                           </div>
                           <div>
                               <div className="flex items-center gap-2 mb-1">
-                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                      Enterprise License
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                                      gymData.current_plan === 'test'
+                                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                        : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                  }`}>
+                                      {gymData.current_plan === 'test' ? 'Dev Test' : 'Enterprise License'}
                                   </span>
                                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                                       {gymData.saas_billing_cycle === 'annual' ? 'Annual Plan' : 'Monthly Plan'}
@@ -1268,20 +1281,20 @@ const loadRazorpayScript = () => {
                       <ProgressBar 
                           label="Total Registered Members" 
                           current={usageData.members} 
-                          max={gymData.current_plan === 'basic' ? 100 : 'Unlimited'} 
+                          max={PLAN_LIMITS[gymData.current_plan]?.members ?? 'Unlimited'} 
                           icon={Users} 
                       />
                       <ProgressBar 
                           label="Cloud Storage (Images & Backups)" 
                           current={usageData.storage} 
-                          max={10} 
+                          max={PLAN_LIMITS[gymData.current_plan]?.storage ?? 10} 
                           unit="GB" 
                           icon={HardDrive} 
                       />
                       <ProgressBar 
                           label="Active Staff Accounts" 
                           current={usageData.staff} 
-                          max={gymData.current_plan === 'basic' ? 1 : gymData.current_plan === 'pro' ? 3 : 'Unlimited'} 
+                          max={PLAN_LIMITS[gymData.current_plan]?.staff ?? 'Unlimited'} 
                           icon={User} 
                       />
                   </div>

@@ -59,7 +59,8 @@ router.post('/create-order', async (req, res) => {
         const options = {
             amount: resolved.amountInr * 100,
             currency: "INR",
-            receipt: `master_saas_${req.user.gym_id}_${resolved.planTier}_${resolved.cycle}_${Date.now()}`,
+            // Razorpay receipt max 40 chars — keep short
+            receipt: `saas_${req.user.gym_id}_${resolved.planTier}_${Date.now().toString().slice(-8)}`,
             notes: {
                 gym_id: String(req.user.gym_id),
                 plan_tier: resolved.planTier,
@@ -100,7 +101,8 @@ router.post('/verify', async (req, res) => {
             await pool.query('BEGIN');
             const targetPlan = resolved.planTier;
             const targetCycle = resolved.cycle;
-            const daysToAdd = targetCycle === 'annual' ? 365 : 30;
+            // Test plan expires in 1 day; real plans: annual=365, monthly=30
+            const daysToAdd = targetPlan === 'test' ? 1 : targetCycle === 'annual' ? 365 : 30;
 
             await pool.query(
                 `UPDATE gyms 
