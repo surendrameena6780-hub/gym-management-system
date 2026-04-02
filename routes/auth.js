@@ -460,7 +460,7 @@ router.post('/member/verify-otp', async (req, res) => {
     try {
         const memberResult = await pool.query(
             `SELECT m.*, g.name AS gym_name,
-                    ms.end_date, ms.status AS membership_status,
+                    ms.start_date, ms.end_date, ms.status AS membership_status,
                     p.name AS plan_name
              FROM members m
              JOIN gyms g ON m.gym_id = g.id
@@ -502,6 +502,7 @@ router.post('/member/verify-otp', async (req, res) => {
                 email: member.email,
                 gym_name: member.gym_name,
                 plan_name: member.plan_name,
+                membership_start: member.start_date,
                 membership_end: member.end_date,
                 membership_status: member.membership_status,
                 status: member.status,
@@ -551,6 +552,31 @@ router.get('/member/me', async (req, res) => {
             status: m.status,
             joining_date: m.joining_date,
         });
+    } catch (err) {
+        return res.status(401).json({ message: 'Token is not valid.' });
+    }
+});
+
+// GET /api/auth/member/attendance — last 30 days attendance (member JWT required)
+router.get('/member/attendance', async (req, res) => {
+    const token = req.header('x-auth-token');
+    if (!token) return res.status(401).json({ message: 'No token.' });
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const memberId = decoded?.member?.id;
+        if (!memberId) return res.status(401).json({ message: 'Invalid token.' });
+
+        const result = await pool.query(
+            `SELECT DATE(check_in_time AT TIME ZONE 'Asia/Kolkata') AS date,
+                    COUNT(*) AS count
+             FROM attendance
+             WHERE member_id = $1 AND deleted_at IS NULL
+               AND check_in_time >= NOW() - INTERVAL '30 days'
+             GROUP BY DATE(check_in_time AT TIME ZONE 'Asia/Kolkata')
+             ORDER BY date DESC`,
+            [memberId]
+        );
+        return res.json({ attendance: result.rows });
     } catch (err) {
         return res.status(401).json({ message: 'Token is not valid.' });
     }

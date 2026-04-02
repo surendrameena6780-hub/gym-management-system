@@ -50,67 +50,245 @@ function SocialBtn({ icon, label, onClick }) {
   );
 }
 
-// ─── Member mini-dashboard shown after OTP verification ──────────────────────
-function MemberCard({ member, onSignOut }) {
+// ─── Full-screen Member Portal Dashboard (shown after OTP verification) ──────
+function MemberPortalDashboard({ member, token, onSignOut }) {
+  const [attendance, setAttendance] = useState([]);
+  const [loadingAtt, setLoadingAtt] = useState(true);
+
+  useEffect(() => {
+    axios.get('/api/auth/member/attendance', { headers: { 'x-auth-token': token } })
+      .then(res => setAttendance(res.data.attendance || []))
+      .catch(() => {})
+      .finally(() => setLoadingAtt(false));
+  }, [token]);
+
+  const toDateStr = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const todayStr = toDateStr(new Date());
+
+  const last14 = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (13 - i));
+    return { date: toDateStr(d), day: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][d.getDay()], dayNum: d.getDate() };
+  });
+
+  const attendedDates = new Set(attendance.map(a => String(a.date).slice(0, 10)));
+
   const daysLeft = member.membership_end
     ? Math.max(0, Math.ceil((new Date(member.membership_end) - Date.now()) / 86400000))
     : null;
+  const totalDays = (member.membership_start && member.membership_end)
+    ? Math.max(1, Math.ceil((new Date(member.membership_end) - new Date(member.membership_start)) / 86400000))
+    : null;
+  const progressPct = (totalDays && daysLeft !== null)
+    ? Math.max(0, Math.min(100, Math.round(((totalDays - daysLeft) / totalDays) * 100)))
+    : null;
+
+  const now = new Date();
+  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const thisMonthCount = attendance.filter(a => String(a.date).startsWith(currentYM)).length;
+
+  const streak = (() => {
+    let s = 0;
+    const checkedToday = attendedDates.has(todayStr);
+    for (let i = checkedToday ? 0 : 1; i <= 30; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      if (attendedDates.has(toDateStr(d))) s++;
+      else if (i > 0) break;
+    }
+    return s;
+  })();
+
   const urgency = daysLeft === null ? 'gray' : daysLeft <= 7 ? 'rose' : daysLeft <= 30 ? 'amber' : 'emerald';
-  const clr = { rose: '#f87171', amber: '#fbbf24', emerald: '#34d399', gray: '#94a3b8' }[urgency];
+  const clr     = { rose: '#f87171', amber: '#fbbf24', emerald: '#34d399', gray: '#94a3b8' }[urgency];
+  const expiryLabel = member.membership_end
+    ? new Date(member.membership_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'No active plan';
 
   return (
-    <div className="space-y-3">
-      {/* Identity card */}
-      <div className="p-5 rounded-2xl" style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(168,85,247,0.12) 100%)', border: '1px solid rgba(99,102,241,0.28)' }}>
-        <div className="flex items-start gap-3">
-          <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-black text-white flex-shrink-0"
+    <div className="min-h-[100dvh] font-['Inter'] overflow-y-auto"
+      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)' }}>
+
+      {/* Ambient blobs */}
+      <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.22) 0%, transparent 70%)', filter: 'blur(90px)' }} />
+      <div className="fixed bottom-0 right-0 w-80 h-80 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(168,85,247,0.15) 0%, transparent 70%)', filter: 'blur(90px)' }} />
+
+      {/* ── Sticky header ── */}
+      <div className="sticky top-0 z-10 px-5 py-4 flex items-center justify-between"
+        style={{ background: 'rgba(6,11,20,0.88)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+            <Dumbbell size={15} className="text-white" strokeWidth={2.5} />
+          </div>
+          <div>
+            <p className="text-white font-black text-sm leading-none">GymVault</p>
+            <p className="text-slate-500 text-[10px] font-semibold">Member Portal</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right hidden sm:block">
+            <p className="text-white font-bold text-sm leading-none">{member.full_name.split(' ')[0]}</p>
+            <p className="text-slate-500 text-[10px]">{member.gym_name}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base font-black text-white"
             style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
             {member.full_name[0].toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-white font-black text-lg leading-tight truncate">{member.full_name}</p>
-            <p className="text-indigo-400 text-sm font-semibold truncate">{member.gym_name}</p>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${member.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                {member.status === 'ACTIVE' ? '● Active' : '● Inactive'}
-              </span>
-              {member.plan_name && (
-                <span className="text-slate-400 text-[11px] font-semibold bg-white/5 px-2.5 py-0.5 rounded-full">{member.plan_name}</span>
-              )}
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Expiry */}
-      {member.membership_end && (
-        <div className="flex items-center justify-between p-4 rounded-xl"
-          style={{ background: `${clr}12`, border: `1px solid ${clr}28` }}>
-          <div>
-            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Membership Expires</p>
-            <p className="text-white font-black mt-0.5">
-              {new Date(member.membership_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+      {/* ── Body ── */}
+      <div className="max-w-lg mx-auto px-4 py-6 space-y-4 pb-12">
+
+        {/* Welcome banner */}
+        <div className="p-5 rounded-2xl relative overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(168,85,247,0.12) 100%)', border: '1px solid rgba(99,102,241,0.28)' }}>
+          <div className="absolute right-0 top-0 bottom-0 w-24 opacity-10 pointer-events-none"
+            style={{ background: 'radial-gradient(circle at right, white 0%, transparent 70%)' }} />
+          <p className="text-indigo-300 text-[11px] font-black uppercase tracking-wider mb-1">Welcome back</p>
+          <h2 className="text-white font-black text-2xl leading-tight">{member.full_name.split(' ')[0]}! 💪</h2>
+          <p className="text-slate-400 text-sm font-medium mt-1">{member.gym_name}</p>
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${member.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+              {member.status === 'ACTIVE' ? '● Active' : '● Inactive'}
+            </span>
+            {member.plan_name && (
+              <span className="px-3 py-1 rounded-full text-xs font-bold text-indigo-400"
+                style={{ background: 'rgba(99,102,241,0.15)' }}>
+                {member.plan_name}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 3-stat grid */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Days Left',  value: daysLeft !== null ? String(daysLeft) : '—', color: clr,       sub: 'until expiry'  },
+            { label: 'This Month', value: String(thisMonthCount),                      color: '#818cf8', sub: 'check-ins'     },
+            { label: 'Streak',     value: String(streak),                              color: '#34d399', sub: 'days in a row' },
+          ].map(({ label, value, color, sub }) => (
+            <div key={label} className="p-3.5 rounded-2xl text-center"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <p className="font-black text-2xl leading-none" style={{ color }}>{value}</p>
+              <p className="text-white text-[10px] font-bold mt-1">{label}</p>
+              <p className="text-slate-600 text-[9px] mt-0.5">{sub}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Membership card */}
+        {member.membership_end ? (
+          <div className="p-5 rounded-2xl"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Membership Plan</p>
+                <p className="text-white font-black text-xl leading-tight mt-0.5">{member.plan_name || 'Active Plan'}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-slate-500 text-[10px] font-bold">Expires</p>
+                <p className="text-white font-bold text-sm mt-0.5">{expiryLabel}</p>
+              </div>
+            </div>
+            {progressPct !== null && (
+              <>
+                <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1.5">
+                  <span>Progress</span><span>{progressPct}% used</span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                  <div className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${progressPct}%`, background: `linear-gradient(90deg, #6366f1, ${clr})` }} />
+                </div>
+                <div className="flex justify-between text-[10px] font-medium text-slate-600 mt-1">
+                  <span>Start → End</span>
+                  <span style={{ color: clr }}>{daysLeft} days remaining</span>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl text-center"
+            style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.18)' }}>
+            <p className="text-slate-400 text-sm font-semibold">No active membership found.</p>
+            <p className="text-slate-500 text-xs mt-1">Contact your gym to renew.</p>
+          </div>
+        )}
+
+        {/* 14-day attendance grid */}
+        <div className="p-5 rounded-2xl"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-white font-black text-sm">Last 14 Days</p>
+            {loadingAtt && (
+              <div className="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />
+            )}
+          </div>
+          <div className="grid grid-cols-7 gap-2">
+            {last14.map(({ date, day, dayNum }) => {
+              const checked = attendedDates.has(date);
+              const isToday = date === todayStr;
+              return (
+                <div key={date} className="flex flex-col items-center gap-1">
+                  <p className="text-slate-600 text-[9px] font-bold">{day}</p>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center text-[11px] font-black"
+                    style={{
+                      background: checked  ? 'linear-gradient(135deg, #6366f1, #a855f7)'
+                                 : isToday ? 'rgba(99,102,241,0.15)'
+                                 :           'rgba(255,255,255,0.04)',
+                      border:    checked  ? 'none'
+                                 : isToday ? '1.5px solid rgba(99,102,241,0.5)'
+                                 :           '1px solid rgba(255,255,255,0.07)',
+                      color:     checked  ? 'white'
+                                 : isToday ? '#818cf8'
+                                 :           'rgba(255,255,255,0.2)',
+                    }}>
+                    {checked ? '✓' : dayNum}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-4 mt-3 justify-end">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }} />
+              <span className="text-slate-500 text-[10px] font-semibold">Checked in</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
+              <span className="text-slate-500 text-[10px] font-semibold">Missed</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Motivational message */}
+        {thisMonthCount > 0 && (
+          <div className="p-4 rounded-2xl text-center"
+            style={{ background: 'linear-gradient(135deg, rgba(52,211,153,0.08), rgba(99,102,241,0.08))', border: '1px solid rgba(52,211,153,0.15)' }}>
+            <p className="text-emerald-400 font-black text-sm">
+              {thisMonthCount >= 20 ? "🔥 You're crushing it this month!"
+               : thisMonthCount >= 12 ? '💪 Great consistency this month!'
+               : thisMonthCount >= 5  ? '⚡ Keep that momentum going!'
+               :                        '🌟 Every session counts. Keep going!'}
+            </p>
+            <p className="text-slate-500 text-xs mt-1">
+              {thisMonthCount} check-in{thisMonthCount !== 1 ? 's' : ''} this month
             </p>
           </div>
-          <div className="text-right">
-            <p className="font-black text-2xl" style={{ color: clr }}>{daysLeft}</p>
-            <p className="text-slate-500 text-[10px]">days left</p>
-          </div>
-        </div>
-      )}
+        )}
 
-      {!member.membership_end && (
-        <div className="p-4 rounded-xl text-center" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.18)' }}>
-          <p className="text-slate-400 text-sm font-semibold">No active membership found.</p>
-          <p className="text-slate-500 text-xs mt-1">Contact your gym to renew.</p>
-        </div>
-      )}
-
-      <button type="button" onClick={onSignOut}
-        className="w-full py-3 rounded-xl text-slate-500 hover:text-slate-300 text-xs font-bold uppercase tracking-widest transition-colors"
-        style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-        Sign Out
-      </button>
+        {/* Sign out */}
+        <button type="button" onClick={onSignOut}
+          className="w-full py-3.5 rounded-xl text-slate-500 hover:text-slate-300 text-xs font-bold uppercase tracking-widest transition-colors mt-2"
+          style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+          Sign Out
+        </button>
+      </div>
     </div>
   );
 }
@@ -131,6 +309,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [otpLoading, setOtpLoading] = useState(false);
   const [firstName, setFirstName]   = useState('');
   const [memberData, setMemberData] = useState(null);
+  const [memberToken, setMemberToken] = useState(null);
 
   // Read auth_error from OAuth redirect URL param
   useEffect(() => {
@@ -204,11 +383,23 @@ export default function LoginPage({ setToken, onShowSignup }) {
     try {
       const res = await axios.post('/api/auth/member/verify-otp', { phone, otp });
       setMemberData(res.data.member);
+      setMemberToken(res.data.token);
     } catch (err) { setError(err?.response?.data?.message || 'Invalid OTP. Please try again.'); }
     finally { setOtpLoading(false); }
   };
 
-  const switchTab = (t) => { setTab(t); setError(''); setOtpSent(false); setOtp(''); setMemberData(null); };
+  const switchTab = (t) => { setTab(t); setError(''); setOtpSent(false); setOtp(''); setMemberData(null); setMemberToken(null); };
+
+  // Full-screen member portal — takes over the entire page after OTP verification
+  if (tab === 'MEMBER' && memberData && memberToken) {
+    return (
+      <MemberPortalDashboard
+        member={memberData}
+        token={memberToken}
+        onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setOtp(''); setOtpSent(false); setError(''); }}
+      />
+    );
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -478,12 +669,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
           )}
 
           {/* ════════ MEMBER DASHBOARD after OTP ════════ */}
-          {tab === 'MEMBER' && memberData && (
-            <MemberCard
-              member={memberData}
-              onSignOut={() => { setMemberData(null); setPhone(''); setOtp(''); setOtpSent(false); setError(''); }}
-            />
-          )}
+          {/* Handled full-screen above — nothing to render here */}
 
           <p className="text-center text-slate-700 text-[10px] font-medium mt-8">
             Authorized Personnel Only &nbsp;·&nbsp; GymVault v2.0
