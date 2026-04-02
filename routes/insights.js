@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
+const { getGymTimezone } = require('../utils/gymTime');
 
 const RANGE_TO_MONTHS = {
     '1M': 1,
@@ -33,6 +34,7 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
     const peakHourDays = Math.min(months * 31, 365);
 
     try {
+        const gymTimezone = await getGymTimezone(pool, gymId);
         const [memberRowsRes, revenueGraphRes, planRevenueRes, peakHoursRes, last30RevenueRes] = await Promise.all([
             pool.query(
                 `WITH latest_memberships AS (
@@ -81,20 +83,22 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
             pool.query(
                 `WITH month_series AS (
                     SELECT generate_series(
-                        date_trunc('month', CURRENT_DATE) - (($2::int - 1) * INTERVAL '1 month'),
-                        date_trunc('month', CURRENT_DATE),
+                                                date_trunc('month', timezone($3, NOW())) - (($2::int - 1) * INTERVAL '1 month'),
+                                                date_trunc('month', timezone($3, NOW())),
                         INTERVAL '1 month'
                     ) AS month_start
                  ),
                  revenue_by_month AS (
                     SELECT
-                        date_trunc('month', payment_date) AS month_start,
+                                                date_trunc('month', timezone($3, payment_date)) AS month_start,
                         COALESCE(SUM(amount_paid), 0) AS revenue
                     FROM payments
                     WHERE gym_id = $1
                       AND deleted_at IS NULL
-                      AND payment_date >= date_trunc('month', CURRENT_DATE) - (($2::int - 1) * INTERVAL '1 month')
-                    GROUP BY date_trunc('month', payment_date)
+                                            AND payment_date >= (
+                                                date_trunc('month', timezone($3, NOW())) - (($2::int - 1) * INTERVAL '1 month')
+                                            ) AT TIME ZONE $3
+                                        GROUP BY date_trunc('month', timezone($3, payment_date))
                  )
                  SELECT
                     TO_CHAR(ms.month_start, 'Mon') AS name,
@@ -102,7 +106,7 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  FROM month_series ms
                  LEFT JOIN revenue_by_month rbm ON rbm.month_start = ms.month_start
                  ORDER BY ms.month_start ASC`,
-                [gymId, months]
+                                [gymId, months, gymTimezone]
             ),
             pool.query(
                 `SELECT
@@ -113,23 +117,25 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  LEFT JOIN plans p ON p.id = pay.plan_id
                  WHERE pay.gym_id = $1
                    AND pay.deleted_at IS NULL
-                   AND pay.payment_date >= date_trunc('month', CURRENT_DATE) - (($2::int - 1) * INTERVAL '1 month')
+                                     AND pay.payment_date >= (
+                                                date_trunc('month', timezone($3, NOW())) - (($2::int - 1) * INTERVAL '1 month')
+                                     ) AT TIME ZONE $3
                  GROUP BY COALESCE(p.name, 'Unassigned Plan')
                  ORDER BY revenue DESC, name ASC
                  LIMIT 8`,
-                [gymId, months]
+                                [gymId, months, gymTimezone]
             ),
             pool.query(
                 `SELECT
-                    EXTRACT(HOUR FROM check_in_time)::INTEGER AS hour,
+                                        EXTRACT(HOUR FROM timezone($3, check_in_time))::INTEGER AS hour,
                     COUNT(*)::INTEGER AS count
                  FROM attendance
                  WHERE gym_id = $1
                    AND deleted_at IS NULL
                    AND check_in_time >= NOW() - ($2::int || ' day')::interval
-                 GROUP BY EXTRACT(HOUR FROM check_in_time)
+                                 GROUP BY EXTRACT(HOUR FROM timezone($3, check_in_time))
                  ORDER BY hour ASC`,
-                [gymId, peakHourDays]
+                                [gymId, peakHourDays, gymTimezone]
             ),
             pool.query(
                 `SELECT COALESCE(ROUND(SUM(amount_paid)), 0)::INTEGER AS revenue

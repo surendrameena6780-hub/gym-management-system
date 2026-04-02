@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner, requirePermission } = require('../middleware/rbac');
+const { getGymTimezone } = require('../utils/gymTime');
 
 const CHECKIN_METHODS = new Set(['STAFF', 'QR', 'SELF', 'RFID']);
 
@@ -255,6 +256,7 @@ router.get('/search', auth, saasMiddleware, requirePermission('attendance:read')
 // --- 2. TODAY'S ATTENDANCE LIST ---
 router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
+        const gymTimezone = await getGymTimezone(pool, req.user.gym_id);
         const list = await pool.query(
             `SELECT
                 a.id,
@@ -273,9 +275,9 @@ router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'),
              WHERE a.gym_id = $1
                              AND a.deleted_at IS NULL
                              AND m.deleted_at IS NULL
-               AND a.check_in_time::date = CURRENT_DATE
+                             AND timezone($2, a.check_in_time)::date = timezone($2, NOW())::date
              ORDER BY a.check_in_time DESC`,
-            [req.user.gym_id]
+                        [req.user.gym_id, gymTimezone]
         );
         res.json(list.rows);
     } catch (err) {
@@ -290,19 +292,20 @@ router.get('/history/:member_id', auth, saasMiddleware, requirePermission('atten
     if (!member_id || member_id === 'undefined') return res.json([]);
 
     try {
+        const gymTimezone = await getGymTimezone(pool, req.user.gym_id);
         const history = await pool.query(
             `SELECT
                 id,
                 check_in_time,
                      checkin_method,
                      checkin_status,
-                TO_CHAR(check_in_time, 'DD Mon YYYY') AS date_label,
-                TO_CHAR(check_in_time, 'HH12:MI AM')  AS time_label
+                TO_CHAR(timezone($3, check_in_time), 'DD Mon YYYY') AS date_label,
+                TO_CHAR(timezone($3, check_in_time), 'HH12:MI AM')  AS time_label
              FROM attendance
              WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL
              ORDER BY check_in_time DESC
              LIMIT 30`,
-            [member_id, req.user.gym_id]
+            [member_id, req.user.gym_id, gymTimezone]
         );
         res.json(history.rows);
     } catch (err) {
@@ -315,17 +318,18 @@ router.get('/history/:member_id', auth, saasMiddleware, requirePermission('atten
 router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     const gym_id = req.user.gym_id;
     try {
+        const gymTimezone = await getGymTimezone(pool, gym_id);
         const result = await pool.query(
             `SELECT
-                EXTRACT(HOUR FROM check_in_time)::INTEGER AS hour,
+                EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
                 COUNT(*)::INTEGER AS count
              FROM attendance
              WHERE gym_id = $1
                              AND deleted_at IS NULL
                AND check_in_time >= NOW() - INTERVAL '7 days'
-             GROUP BY EXTRACT(HOUR FROM check_in_time)
+             GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
              ORDER BY hour ASC`,
-            [gym_id]
+            [gym_id, gymTimezone]
         );
         res.json(result.rows);
     } catch (err) {
@@ -338,19 +342,24 @@ router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'
 router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const gymTimezone = await getGymTimezone(pool, gym_id);
 
         const [today, yesterday, activeToday, peakHour] = await Promise.all([
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM attendance
-                 WHERE gym_id = $1 AND deleted_at IS NULL AND check_in_time::date = CURRENT_DATE`,
-                [gym_id]
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND timezone($2, check_in_time)::date = timezone($2, NOW())::date`,
+                [gym_id, gymTimezone]
             ),
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM attendance
-                 WHERE gym_id = $1 AND deleted_at IS NULL AND check_in_time::date = CURRENT_DATE - INTERVAL '1 day'`,
-                [gym_id]
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND timezone($2, check_in_time)::date = (timezone($2, NOW())::date - 1)`,
+                [gym_id, gymTimezone]
             ),
             pool.query(
                 `SELECT COUNT(DISTINCT a.member_id)::INTEGER AS count
@@ -359,18 +368,20 @@ router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read
                  WHERE a.gym_id = $1
                          AND a.deleted_at IS NULL
                          AND ms.deleted_at IS NULL
-                   AND a.check_in_time::date = CURRENT_DATE
+                   AND timezone($2, a.check_in_time)::date = timezone($2, NOW())::date
                    AND ms.status = 'ACTIVE'`,
-                [gym_id]
+                [gym_id, gymTimezone]
             ),
             pool.query(
-                `SELECT EXTRACT(HOUR FROM check_in_time)::INTEGER AS hour, COUNT(*)::INTEGER AS count
+                `SELECT EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour, COUNT(*)::INTEGER AS count
                  FROM attendance
-                 WHERE gym_id = $1 AND deleted_at IS NULL AND check_in_time::date = CURRENT_DATE
-                 GROUP BY EXTRACT(HOUR FROM check_in_time)
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND timezone($2, check_in_time)::date = timezone($2, NOW())::date
+                 GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
                  ORDER BY count DESC
                  LIMIT 1`,
-                [gym_id]
+                [gym_id, gymTimezone]
             )
         ]);
 
@@ -427,18 +438,19 @@ router.get('/feed', auth, saasMiddleware, requirePermission('attendance:read'), 
 router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const gymTimezone = await getGymTimezone(pool, gym_id);
         const range = String(req.query.range || 'today').toLowerCase();
         const from = req.query.from ? String(req.query.from) : null;
         const to = req.query.to ? String(req.query.to) : null;
 
-        let dateClause = 'a.check_in_time::date = CURRENT_DATE';
-        const params = [gym_id];
+        let dateClause = 'timezone($2, a.check_in_time)::date = timezone($2, NOW())::date';
+        const params = [gym_id, gymTimezone];
 
         if (range === 'yesterday') {
-            dateClause = `a.check_in_time::date = CURRENT_DATE - INTERVAL '1 day'`;
+            dateClause = `timezone($2, a.check_in_time)::date = (timezone($2, NOW())::date - 1)`;
         } else if (range === 'custom' && from && to) {
             params.push(from, to);
-            dateClause = `a.check_in_time::date BETWEEN $2::date AND $3::date`;
+            dateClause = `timezone($2, a.check_in_time)::date BETWEEN $3::date AND $4::date`;
         }
 
         const query = `
@@ -482,12 +494,13 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
 router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const gymTimezone = await getGymTimezone(pool, gym_id);
         const days = Math.min(Math.max(parseInt(req.query.days || '90', 10), 7), 365);
 
         const result = await pool.query(
             `WITH date_series AS (
-                SELECT (CURRENT_DATE - ($2::int - 1) + i)::date AS d
-                FROM generate_series(0, $2::int - 1) AS g(i)
+                SELECT (timezone($2, NOW())::date - ($3::int - 1) + i)::date AS d
+                FROM generate_series(0, $3::int - 1) AS g(i)
             )
             SELECT
                 ds.d::text AS date,
@@ -495,15 +508,15 @@ router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'
                 COALESCE(a.count, 0)::INTEGER AS count
             FROM date_series ds
             LEFT JOIN (
-                SELECT check_in_time::date AS d, COUNT(*)::INTEGER AS count
+                SELECT timezone($2, check_in_time)::date AS d, COUNT(*)::INTEGER AS count
                 FROM attendance
                 WHERE gym_id = $1
                                     AND deleted_at IS NULL
-                  AND check_in_time::date >= CURRENT_DATE - ($2::int - 1)
-                GROUP BY check_in_time::date
+                  AND timezone($2, check_in_time)::date >= timezone($2, NOW())::date - ($3::int - 1)
+                GROUP BY timezone($2, check_in_time)::date
             ) a ON a.d = ds.d
             ORDER BY ds.d ASC`,
-            [gym_id, days]
+            [gym_id, gymTimezone, days]
         );
 
         res.json(result.rows);
@@ -517,19 +530,20 @@ router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'
 router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const gymTimezone = await getGymTimezone(pool, gym_id);
         const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 1), 90);
 
         const result = await pool.query(
             `SELECT
-                EXTRACT(HOUR FROM check_in_time)::INTEGER AS hour,
+                EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
                 COUNT(*)::INTEGER AS count
              FROM attendance
              WHERE gym_id = $1
                              AND deleted_at IS NULL
-               AND check_in_time >= NOW() - ($2::int || ' day')::interval
-             GROUP BY EXTRACT(HOUR FROM check_in_time)
+               AND check_in_time >= NOW() - ($3::int || ' day')::interval
+             GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
              ORDER BY hour ASC`,
-            [gym_id, days]
+            [gym_id, gymTimezone, days]
         );
 
         res.json(result.rows);

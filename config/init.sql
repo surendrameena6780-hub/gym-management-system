@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS members (
     email        VARCHAR(100),
     profile_pic  TEXT,
     joining_date DATE,
-    last_visit   TIMESTAMP,
+    last_visit   TIMESTAMPTZ,
     status       VARCHAR(20) DEFAULT 'UNPAID', -- ACTIVE, UNPAID
     deleted_at   TIMESTAMP,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS payments (
     invoice_id     VARCHAR(100),
     notes          TEXT DEFAULT '',
     status         VARCHAR(20) DEFAULT 'Completed', -- Completed, Pending
-    payment_date   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    payment_date   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     deleted_at     TIMESTAMP,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     id            SERIAL PRIMARY KEY,
     gym_id        INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
     member_id     INTEGER REFERENCES members(id) ON DELETE CASCADE,
-    check_in_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    check_in_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     deleted_at    TIMESTAMP
 );
 
@@ -137,7 +137,7 @@ ALTER TABLE plans ADD COLUMN IF NOT EXISTS discount_valid_until DATE;
 -- members: extended fields
 ALTER TABLE members ADD COLUMN IF NOT EXISTS profile_pic  TEXT;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS joining_date DATE;
-ALTER TABLE members ADD COLUMN IF NOT EXISTS last_visit   TIMESTAMP;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS last_visit   TIMESTAMPTZ;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS status       VARCHAR(20) DEFAULT 'UNPAID';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS deleted_at   TIMESTAMP;
 
@@ -150,12 +150,15 @@ ALTER TABLE payments ADD COLUMN IF NOT EXISTS total_amount   DECIMAL(10, 2) DEFA
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_mode   VARCHAR(50) DEFAULT 'Cash';
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_id     VARCHAR(100);
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS notes          TEXT DEFAULT '';
-ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_date   TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_date   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS deleted_at     TIMESTAMP;
 
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMP;
 ALTER TABLE attendance  ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMP;
 ALTER TABLE plans       ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMP;
+ALTER TABLE members    ALTER COLUMN last_visit TYPE TIMESTAMPTZ USING last_visit AT TIME ZONE current_setting('TIMEZONE');
+ALTER TABLE payments   ALTER COLUMN payment_date TYPE TIMESTAMPTZ USING payment_date AT TIME ZONE current_setting('TIMEZONE');
+ALTER TABLE attendance ALTER COLUMN check_in_time TYPE TIMESTAMPTZ USING check_in_time AT TIME ZONE current_setting('TIMEZONE');
 
 -- =============================================================
 -- PERFORMANCE INDEXES
