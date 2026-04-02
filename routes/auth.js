@@ -94,8 +94,8 @@ router.post('/register-owner', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const newGym = await pool.query(
-            `INSERT INTO gyms (name, address, city, branches_count, current_plan)
-             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+            `INSERT INTO gyms (name, address, city, branches_count, current_plan, saas_status)
+             VALUES ($1, $2, $3, $4, $5, 'FREE_TRIAL') RETURNING id`,
             [gym_name, gym_address, gym_city, branches_count, selected_plan]
         );
         const gymId = newGym.rows[0].id;

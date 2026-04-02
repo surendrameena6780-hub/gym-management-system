@@ -1113,6 +1113,25 @@ const loadRazorpayScript = () => {
                   </div>
               )}
 
+              {/* FREE TRIAL BANNER */}
+              {realStatus === 'FREE_TRIAL' && (
+                  <div className="mb-8 p-6 rounded-[28px] border-2 border-dashed border-indigo-300 bg-indigo-50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in slide-in-from-top-4">
+                      <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center shrink-0">
+                              <Zap size={22} className="text-indigo-600" />
+                          </div>
+                          <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                  <span className="px-2.5 py-0.5 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">Free Trial</span>
+                                  <span className="text-[11px] font-bold text-indigo-400">Expires {formatExpiry(gymData.saas_valid_until)}</span>
+                              </div>
+                              <h3 className="text-lg font-black text-slate-900">You're on a 14-day free trial</h3>
+                              <p className="text-sm text-slate-500 font-medium mt-0.5">All features unlocked. Choose a plan below to continue after your trial — no charges until then.</p>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
               {/* PREMIUM ACTIVE BANNER */}
               {realStatus === 'ACTIVE' && (
                   <div className="mb-8 p-8 bg-slate-900 rounded-[32px] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden border border-slate-800">
@@ -1186,6 +1205,7 @@ const loadRazorpayScript = () => {
                   {SAAS_PLANS[billingCycle].map((plan) => {
                     const Icon = plan.icon;
                     const isCurrentPlan = gymData.current_plan === plan.id;
+                    const isTrial = realStatus === 'FREE_TRIAL' && isCurrentPlan;
                     const isActive = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
                     const isSamePlanDifferentCycle = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle !== billingCycle;
                     const needsRenewal = (realStatus === 'EXPIRED' || realStatus === 'GRACE_PERIOD') && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
@@ -1193,23 +1213,24 @@ const loadRazorpayScript = () => {
                     // button label
                     let btnLabel = `Upgrade to ${plan.name}`;
                     if (isActive) btnLabel = 'Currently Active';
+                    else if (isTrial) btnLabel = 'Activate Now — Avoid Interruption';
                     else if (needsRenewal) btnLabel = 'Renew Subscription';
                     else if (isSamePlanDifferentCycle) btnLabel = `Switch to ${billingCycle === 'annual' ? 'Annual' : 'Monthly'}`;
-                    else if (plan.test) btnLabel = 'Pay ₹1 — Test';
+                    else if (plan.test) btnLabel = 'Pay \u20B91 \u2014 Test';
 
                     return (
                       <div
                         key={plan.id}
                         className={`
                           relative flex flex-col
-                          /* mobile: each card is ~82% viewport, snap-centered */
                           min-w-[82vw] max-w-[340px]
-                          /* desktop: let grid control width */
                           lg:min-w-0 lg:max-w-none
                           flex-shrink-0 snap-center
                           p-5 rounded-[24px] transition-all duration-300
                           ${plan.test
                             ? 'gv-test-plan-card bg-amber-50 border-2 border-amber-300 border-dashed'
+                            : isTrial
+                            ? 'bg-indigo-50 border-2 border-indigo-400 border-dashed shadow-lg'
                             : isActive
                             ? 'bg-indigo-50 border-2 border-indigo-500 shadow-xl'
                             : 'bg-white border border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-xl'
@@ -1217,12 +1238,17 @@ const loadRazorpayScript = () => {
                         `}
                       >
                         {/* badge */}
-                        {plan.popular && !isActive && !plan.test && (
+                        {plan.popular && !isActive && !isTrial && !plan.test && (
                           <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md whitespace-nowrap">Most Popular</span>
                         )}
                         {isActive && (
                           <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md flex items-center gap-1 whitespace-nowrap">
                             <CheckCircle size={10}/> Current Plan
+                          </span>
+                        )}
+                        {isTrial && (
+                          <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md flex items-center gap-1 whitespace-nowrap">
+                            <Zap size={10} fill="currentColor"/> In Trial
                           </span>
                         )}
                         {plan.test && (
@@ -1258,6 +1284,8 @@ const loadRazorpayScript = () => {
                           className={`w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 active:scale-95 ${
                             isActive
                               ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 cursor-not-allowed'
+                              : isTrial
+                              ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-500/30'
                               : plan.test
                               ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/30'
                               : 'bg-slate-900 text-white hover:bg-slate-700 shadow-md'

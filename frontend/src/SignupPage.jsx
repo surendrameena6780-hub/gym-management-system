@@ -5,7 +5,7 @@ import {
   Eye, EyeOff, Check, Phone, MapPin, Sun, Moon, Loader2, AlertCircle,
 } from 'lucide-react';
 
-// â”€â”€â”€ Plans (14-day trial automatic on all â€” no "Test Drive" option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Plans (14-day trial automatic on all  -  no "Test Drive" option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PLANS = [
   { key: 'basic', label: 'Basic',  price: '\u20B9999',   color: '#6366f1', desc: 'Up to 100 members'  },
   { key: 'pro',   label: 'Pro',    price: '\u20B91,999', color: '#a855f7', desc: 'Up to 500 members'  },
@@ -271,7 +271,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
 
   const STEP_TITLES = ['Get started', 'About you', 'Your gym', 'Secure your account'];
   const STEP_SUBS   = [
-    'Quick setup â€” no credit card required',
+    'Quick setup  -  no credit card required',
     'Tell us a bit about yourself',
     'A few details about your gym',
     'Set a strong password and choose your plan',
@@ -339,13 +339,13 @@ export default function SignupPage({ onShowLogin, setToken }) {
           {/* â”€â”€ Animated step content â”€â”€ */}
           <div key={step} className={stepDir > 0 ? 'gv-step-forward' : 'gv-step-backward'}>
 
-            {/* â•â•â•â• STEP 0 â€” Email + Social â•â•â•â• */}
+            {/* â•â•â•â• STEP 0  -  Email + Social â•â•â•â• */}
             {step === 0 && (
               <div className="space-y-3.5">
                 <button type="button" onClick={handleGoogle}
                   className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-2xl text-sm font-bold transition-all duration-200 hover:scale-[1.015] active:scale-[0.985]"
                   style={{ ...T.social, color: T.socialTxt }}>
-                  <GoogleIcon /> Continue with Google â€” quick &amp; easy
+                  <GoogleIcon /> Continue with Google  -  quick &amp; easy
                 </button>
                 <button type="button" onClick={handleApple}
                   className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-2xl text-sm font-bold transition-all duration-200 hover:scale-[1.015] active:scale-[0.985]"
@@ -383,7 +383,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   </div>
                   {emailSt === 'taken' && (
                     <p className="text-[10px] font-bold mt-1.5 text-rose-400 flex items-center gap-1 gv-fade-in">
-                      <AlertCircle size={10} /> Already registered â€”{' '}
+                      <AlertCircle size={10} /> Already registered  - {' '}
                       <button type="button" onClick={onShowLogin} className="underline ml-0.5">sign in instead</button>
                     </p>
                   )}
@@ -392,12 +392,12 @@ export default function SignupPage({ onShowLogin, setToken }) {
                 <button type="button" onClick={goNext} disabled={loading}
                   className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-70"
                   style={primaryBtn}>
-                  {loading ? <><Loader2 size={15} className="animate-spin" /> Checkingâ€¦</> : <>Continue <ArrowRight size={16} /></>}
+                  {loading ? <><Loader2 size={15} className="animate-spin" /> Checking...</> : <>Continue <ArrowRight size={16} /></>}
                 </button>
               </div>
             )}
 
-            {/* â•â•â•â• STEP 1 â€” About You â•â•â•â• */}
+            {/* â•â•â•â• STEP 1  -  About You â•â•â•â• */}
             {step === 1 && (
               <div className="space-y-4">
                 <div>
@@ -432,7 +432,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   </div>
                   {phoneSt === 'taken' && (
                     <p className="text-[10px] font-bold mt-1.5 text-rose-400 flex items-center gap-1 gv-fade-in">
-                      <AlertCircle size={10} /> Number already registered â€”{' '}
+                      <AlertCircle size={10} /> Number already registered  - {' '}
                       <button type="button" onClick={onShowLogin} className="underline ml-0.5">sign in</button>
                     </p>
                   )}
@@ -447,13 +447,13 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   <button type="button" onClick={goNext} disabled={loading}
                     className="flex-[2] py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-70"
                     style={primaryBtn}>
-                    {loading ? <><Loader2 size={15} className="animate-spin" /> Checkingâ€¦</> : <>Continue <ArrowRight size={16} /></>}
+                    {loading ? <><Loader2 size={15} className="animate-spin" /> Checking...</> : <>Continue <ArrowRight size={16} /></>}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* â•â•â•â• STEP 2 â€” Your Gym â•â•â•â• */}
+            {/* â•â•â•â• STEP 2  -  Your Gym â•â•â•â• */}
             {step === 2 && (
               <div className="space-y-4">
                 <div>
@@ -517,7 +517,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
               </div>
             )}
 
-            {/* â•â•â•â• STEP 3 â€” Password + Plan â•â•â•â• */}
+            {/* â•â•â•â• STEP 3  -  Password + Plan â•â•â•â• */}
             {step === 3 && (
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* Password */}
@@ -640,7 +640,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                     className="flex-[2] py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all disabled:opacity-70"
                     style={primaryBtn}>
                     {loading
-                      ? <><Loader2 size={15} className="animate-spin" /> Creatingâ€¦</>
+                      ? <><Loader2 size={15} className="animate-spin" /> Creating...</>
                       : <>Create Gym <ArrowRight size={16} /></>}
                   </button>
                 </div>
@@ -653,7 +653,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
             <button type="button" onClick={onShowLogin}
               className="text-[11px] font-bold transition-colors hover:text-indigo-400"
               style={{ color: T.footer }}>
-              Already have an account? Sign in â†’
+              Already have an account? Sign in →
             </button>
           </p>
         </div>

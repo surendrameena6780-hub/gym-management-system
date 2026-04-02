@@ -21,6 +21,14 @@ const connectDB = async () => {
             ALTER TABLE gyms ADD COLUMN IF NOT EXISTS city            VARCHAR(100);
             ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branches_count  INTEGER DEFAULT 1;
         `);
+        // Fix gyms that got saas_status='ACTIVE' from the old DB default but have never paid
+        // (saas_valid_until is within 14 days of creation = still in trial window, no razorpay customer)
+        await pool.query(`
+            UPDATE gyms SET saas_status = 'FREE_TRIAL'
+            WHERE saas_status = 'ACTIVE'
+              AND razorpay_customer_id IS NULL
+              AND saas_valid_until <= (CURRENT_TIMESTAMP + INTERVAL '14 days' + INTERVAL '1 hour')
+        `);
 
         const isProduction = process.env.NODE_ENV === 'production';
         const runInitOnBoot = String(process.env.RUN_DB_INIT_ON_BOOT || '').toLowerCase() === 'true';
