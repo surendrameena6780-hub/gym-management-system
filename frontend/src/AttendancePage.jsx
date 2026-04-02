@@ -367,15 +367,18 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
       ...item,
       avg: item.days > 0 ? Math.round((item.total / item.days) * 10) / 10 : 0,
     }));
-    const maxTotal = Math.max(1, ...enriched.map((item) => item.total));
+    const maxTotal = Math.max(...enriched.map((item) => item.total), 0);
 
     return enriched
       .map((item) => ({
         ...item,
-        width: Math.max(10, Math.round((item.total / maxTotal) * 100)),
+        width: maxTotal > 0 ? Math.round((item.total / maxTotal) * 100) : 0,
       }))
       .sort((a, b) => b.total - a.total);
   }, [heatmap]);
+
+  const hasPeakHoursData = peakHours.some((item) => Number(item.count || 0) > 0);
+  const hasWeekdayPerformance = weekdayPerformance.some((item) => Number(item.total || 0) > 0);
 
   // Count-up animated values for stat cards (must be before any conditional return)
   const animatedTodayCheckins      = useCountUp(overview.today_checkins || 0);
@@ -696,52 +699,66 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px] gap-4">
           <div className="min-w-0 h-[240px] sm:h-[280px] xl:h-[260px]">
-            {isActive ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={peakHours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef2ff" />
-                <XAxis dataKey="hourLabel" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#6366f1" radius={[5, 5, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-            ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
+            {hasPeakHoursData ? (
+              isActive ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={peakHours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef2ff" />
+                    <XAxis dataKey="hourLabel" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} axisLine={false} tickLine={false} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#6366f1" radius={[5, 5, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-2xl border border-slate-100 bg-slate-50 text-center text-sm font-bold text-slate-400">
+                No attendance traffic recorded for this period.
+              </div>
+            )}
           </div>
-          <div className="xl:hidden -mx-1 overflow-x-auto pb-1">
-            <div className="flex min-w-max gap-3 px-1">
-              {weekdayPerformance.map((item, index) => (
-                <div key={item.label} className="w-[148px] rounded-2xl border border-slate-100 bg-white p-3 shrink-0">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{index + 1} day</p>
-                      <p className="text-sm font-black text-slate-900 truncate">{item.label}</p>
+          {hasWeekdayPerformance ? (
+            <>
+              <div className="xl:hidden -mx-1 overflow-x-auto pb-1">
+                <div className="flex min-w-max gap-3 px-1">
+                  {weekdayPerformance.map((item, index) => (
+                    <div key={item.label} className="w-[148px] rounded-2xl border border-slate-100 bg-white p-3 shrink-0">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{index + 1} day</p>
+                          <p className="text-sm font-black text-slate-900 truncate">{item.label}</p>
+                        </div>
+                        <p className="text-base font-black text-indigo-600 shrink-0">{item.total}</p>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
+                      </div>
                     </div>
-                    <p className="text-base font-black text-indigo-600 shrink-0">{item.total}</p>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                    <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="hidden xl:flex xl:flex-col xl:gap-2.5 xl:max-h-[260px] xl:overflow-y-auto xl:pr-1">
-            {weekdayPerformance.map((item, index) => (
-              <div key={item.label} className="rounded-2xl border border-slate-100 bg-white p-3">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{index + 1} day</p>
-                    <p className="text-sm font-black text-slate-900 truncate">{item.label}</p>
-                  </div>
-                  <p className="text-sm font-black text-indigo-600 shrink-0">{item.total}</p>
-                </div>
-                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
+              <div className="hidden xl:flex xl:flex-col xl:gap-2.5 xl:max-h-[260px] xl:overflow-y-auto xl:pr-1">
+                {weekdayPerformance.map((item, index) => (
+                  <div key={item.label} className="rounded-2xl border border-slate-100 bg-white p-3">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{index + 1} day</p>
+                        <p className="text-sm font-black text-slate-900 truncate">{item.label}</p>
+                      </div>
+                      <p className="text-sm font-black text-indigo-600 shrink-0">{item.total}</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${item.width}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
+              No weekday attendance trend is available yet.
+            </div>
+          )}
         </div>
       </div>
 
