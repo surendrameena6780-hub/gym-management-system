@@ -470,16 +470,17 @@ router.post('/member/send-otp', async (req, res) => {
             [otp, expiresAt, member.id]
         );
 
-        // Send via Twilio if configured
-        if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
+        // Send via Twilio SMS if configured
+        if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_SMS_FROM) {
             const twilio = require('twilio');
             const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
             const toPhone = rawPhone.startsWith('+') ? rawPhone : `+91${phone}`;
             await client.messages.create({
                 body: `Your GymVault OTP is: ${otp}. Valid for 10 minutes. Do not share this with anyone.`,
-                from: process.env.TWILIO_PHONE_NUMBER,
+                from: process.env.TWILIO_SMS_FROM,
                 to: toPhone,
             });
+            console.log(`[OTP] SMS sent to ${toPhone}`);
         } else {
             // Dev mode — log OTP to console
             console.log(`[DEV] Member OTP for ${phone}: ${otp}`);
