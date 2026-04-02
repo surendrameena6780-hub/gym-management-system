@@ -251,6 +251,22 @@ ALTER TABLE gyms ADD COLUMN IF NOT EXISTS saas_valid_until TIMESTAMP DEFAULT (CU
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS razorpay_customer_id VARCHAR(100);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS saas_billing_cycle VARCHAR(20) DEFAULT 'monthly';
 
+-- =============================================================
+-- OAUTH & MEMBER PORTAL: Google, Apple, and OTP-based member login
+-- =============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id    VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_id     VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url   TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) DEFAULT 'local';
+
+-- Create unique indexes (safer than UNIQUE constraint on nullable columns)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_id  ON users(apple_id)  WHERE apple_id  IS NOT NULL;
+
+-- Members OTP for self-service portal login
+ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_code       VARCHAR(10);
+ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP;
+
 -- Gym-level member payment gateway (separate from SaaS billing gateway)
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT FALSE;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120);

@@ -10,6 +10,7 @@ import SettingsPage from './SettingsPage';
 import HelpSupportPage from './HelpSupportPage';
 import StaffDashboard from './StaffDashboard';
 import LoginPage from './LoginPage';
+import SignupPage from './SignupPage';
 import SuperAdminLogin from './SuperAdminLogin';
 import SuperAdminDashboard from './SuperAdminDashboard';
 import SuspensionOverlay from './SuspensionOverlay'; 
@@ -301,6 +302,7 @@ function App() {
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [isStandaloneMode, setIsStandaloneMode] = useState(false);
   const [showMobileMoreNav, setShowMobileMoreNav] = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
 
   // 🚨 MASTERCLASS TOUR STATE 🚨
   const [tour, setTour] = useState({ isActive: false, step: 0, isWaitingForAction: false });
@@ -321,6 +323,17 @@ function App() {
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
+
+  // Handle ?token= query param from Google / Apple OAuth redirect
+  useEffect(() => {
+    if (isHQ) return;
+    const params   = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (!urlToken) return;
+    localStorage.setItem('token', urlToken);
+    setToken(urlToken);
+    window.history.replaceState({}, '', '/dashboard');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '');
@@ -754,7 +767,15 @@ function App() {
   }
 
   if (!token) {
-    return <LoginPage setToken={(t, user) => { localStorage.setItem('token', t); setToken(t); if (user) { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); } }} />;
+    const storeToken = (t, user) => {
+      localStorage.setItem('token', t);
+      setToken(t);
+      if (user) { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); }
+    };
+    if (showSignup) {
+      return <SignupPage onShowLogin={() => setShowSignup(false)} setToken={storeToken} />;
+    }
+    return <LoginPage setToken={storeToken} onShowSignup={() => setShowSignup(true)} />;
   }
 
   // Stamp current page into visitedPagesRef every render (ref mutation is safe during render)
