@@ -7,9 +7,9 @@ import {
 
 // â”€â”€â”€ Plans (14-day trial automatic on all â€” no "Test Drive" option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PLANS = [
-  { key: 'basic', label: 'Basic',  price: 'â‚¹999',   color: '#6366f1', desc: 'Up to 100 members'  },
-  { key: 'pro',   label: 'Pro',    price: 'â‚¹1,999', color: '#a855f7', desc: 'Up to 500 members'  },
-  { key: 'elite', label: 'Elite',  price: 'â‚¹3,499', color: '#10b981', desc: 'Unlimited members'  },
+  { key: 'basic', label: 'Basic',  price: '\u20B9999',   color: '#6366f1', desc: 'Up to 100 members'  },
+  { key: 'pro',   label: 'Pro',    price: '\u20B91,999', color: '#a855f7', desc: 'Up to 500 members'  },
+  { key: 'elite', label: 'Elite',  price: '\u20B93,499', color: '#10b981', desc: 'Unlimited members'  },
 ];
 
 // â”€â”€â”€ Password strength â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -572,12 +572,12 @@ export default function SignupPage({ onShowLogin, setToken }) {
                 <div>
                   <div className="flex items-start gap-2.5 p-3.5 rounded-xl mb-3"
                     style={{ background: T.trialBg, border: `1px solid ${T.trialBd}` }}>
-                    <span className="text-lg leading-none mt-px flex-shrink-0">ðŸŽ‰</span>
+                    <span className="text-lg leading-none mt-px flex-shrink-0">{String.fromCodePoint(0x1F389)}</span>
                     <div>
                       <p className="font-black text-sm text-emerald-400">14-day free trial on every plan</p>
                       <p className="text-[11px] mt-0.5" style={{ color: T.sub }}>
                         No payment today. Trial ends <strong>{trialEndStr}</strong>.
-                        {planObj && <> Pick a plan below â€” you'll be billed <strong>{planObj.price}/mo</strong> after your trial.</>}
+                        {planObj && <> Pick a plan below &mdash; you&apos;ll be billed <strong>{planObj.price}/mo</strong> after your trial.</>}
                       </p>
                     </div>
                   </div>
@@ -605,7 +605,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   </div>
                   {planObj && (
                     <p className="text-[10px] text-center mt-2" style={{ color: T.label }}>
-                      First bill: <strong>{planObj.price}/mo</strong> Â· starts {trialEndStr} Â· cancel anytime
+                      First bill: <strong>{planObj.price}/mo</strong> &middot; starts {trialEndStr} &middot; cancel anytime
                     </p>
                   )}
                 </div>

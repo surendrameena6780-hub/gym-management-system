@@ -16,6 +16,12 @@ const connectDB = async () => {
         await pool.query('SELECT NOW()');
         console.log('✅ Database Connected!');
 
+        // Always run idempotent column migrations (safe to run every boot)
+        await pool.query(`
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS city            VARCHAR(100);
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branches_count  INTEGER DEFAULT 1;
+        `);
+
         const isProduction = process.env.NODE_ENV === 'production';
         const runInitOnBoot = String(process.env.RUN_DB_INIT_ON_BOOT || '').toLowerCase() === 'true';
 
