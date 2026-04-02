@@ -1174,8 +1174,8 @@ const loadRazorpayScript = () => {
               {/* ── Plan carousel (swipeable on mobile, grid on desktop) ── */}
               <div className="relative mb-10">
                 {/* scroll hint arrows — mobile only */}
-                <div className="absolute left-0 top-9 bottom-4 w-6 bg-gradient-to-r from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
-                <div className="absolute right-0 top-9 bottom-4 w-6 bg-gradient-to-l from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="gv-carousel-fade-l absolute left-0 top-9 bottom-4 w-6 bg-gradient-to-r from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="gv-carousel-fade-r absolute right-0 top-9 bottom-4 w-6 bg-gradient-to-l from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
 
                 {/* the scroll container becomes a grid on lg+ */}
                 <div

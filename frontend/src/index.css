@@ -553,6 +553,9 @@ html.gv-dark-mode .border-amber-200   { border-color: rgba(245, 158, 11, 0.3) !i
 html.gv-dark-mode .border-amber-300   { border-color: rgba(245, 158, 11, 0.45) !important; }
 /* Test plan card in dark mode: dark background, dim amber border only */
 html.gv-dark-mode .gv-test-plan-card  { background-color: var(--dm-card) !important; }
+/* Billing carousel edge-fade overlays */
+html.gv-dark-mode .gv-carousel-fade-l { background: linear-gradient(to right, var(--dm-bg) 0%, transparent 100%) !important; }
+html.gv-dark-mode .gv-carousel-fade-r { background: linear-gradient(to left,  var(--dm-bg) 0%, transparent 100%) !important; }
 
 /* ── Divide colors ── */
 html.gv-dark-mode .divide-slate-100 > * + *,
