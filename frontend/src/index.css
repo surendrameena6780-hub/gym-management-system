@@ -196,6 +196,13 @@ html.gv-compact-ui main.app-scroll-shell > div {
   transform: translateY(140%);
 }
 
+/* When modal/keyboard is open, collapse the bottom nav padding so the page
+   doesn't show 84px of empty space where the now-hidden nav was */
+.app-modal-open .app-main-scroll,
+.app-keyboard-open .app-main-scroll {
+  padding-bottom: calc(var(--safe-area-bottom) + 1rem) !important;
+}
+
 .app-keyboard-open .app-floating-action-bar,
 .app-modal-open .app-floating-action-bar {
   opacity: 0;

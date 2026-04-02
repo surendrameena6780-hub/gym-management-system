@@ -220,6 +220,34 @@ const loadRazorpayScript = () => {
   });
 };
 
+const SuccessModal = ({ memberName, onClose, onDownload }) => {
+  const [countdown, setCountdown] = useState(4);
+  useEffect(() => {
+    const t = setInterval(() => setCountdown((c) => c - 1), 1000);
+    const auto = setTimeout(() => { clearInterval(t); onClose(); }, 4000);
+    return () => { clearInterval(t); clearTimeout(auto); };
+  }, [onClose]);
+  return (
+    <div className="app-modal-shell z-[200] backdrop-blur-md animate-in fade-in duration-300" style={{ background: 'rgba(15,23,42,0.85)' }}>
+      <div className="app-modal-panel p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-300 max-w-sm w-full border border-emerald-500/20" style={{ background: 'linear-gradient(180deg, #0d2b1e 0%, #0f172a 100%)' }}>
+        <div className="relative mb-6">
+          <div className="w-24 h-24 rounded-full flex items-center justify-center" style={{ background: 'radial-gradient(circle, rgba(16,185,129,0.25) 0%, rgba(16,185,129,0.05) 70%)', boxShadow: '0 0 40px rgba(16,185,129,0.3)' }}>
+            <CheckCircle size={52} className="text-emerald-400" strokeWidth={1.5} />
+          </div>
+          <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white text-xs font-black">{countdown}</div>
+        </div>
+        <h2 className="text-2xl font-black text-white tracking-tight mb-1">Activated!</h2>
+        <p className="text-emerald-400/80 font-semibold text-sm mb-2">Membership live for</p>
+        <p className="text-white font-black text-lg mb-8">{memberName}</p>
+        <div className="w-full space-y-3">
+          <button onClick={onDownload} className="w-full py-4 text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] hover:opacity-90" style={{ background: 'linear-gradient(135deg, #10b981, #059669)', boxShadow: '0 6px 20px rgba(16,185,129,0.35)' }}><Download size={18} /> Download Receipt</button>
+          <button onClick={onClose} className="w-full py-2 text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors">Close · auto in {countdown}s</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, currentUser = null }) => {
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -774,17 +802,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   return (
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative">
       {showSuccessAnim && (
-        <div className="app-modal-shell z-[200] bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="app-modal-panel bg-white p-10 rounded-[40px] shadow-2xl text-center flex flex-col items-center animate-in zoom-in-95 duration-500 max-w-sm w-full">
-            <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4 animate-bounce"><CheckCircle size={48} /></div>
-            <h2 className="text-2xl font-black text-slate-900">Success!</h2>
-            <p className="text-slate-500 font-bold mb-8">Membership Activated for {selectedMember?.full_name}</p>
-            <div className="w-full space-y-3">
-              <button onClick={downloadReceipt} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-[0.98]"><Download size={18} /> Download Receipt</button>
-              <button onClick={() => { setShowSuccessAnim(false); fetchMembers(); }} className="w-full py-2 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors">Close & Refresh</button>
-            </div>
-          </div>
-        </div>
+        <SuccessModal
+          memberName={selectedMember?.full_name}
+          onClose={() => { setShowSuccessAnim(false); fetchMembers(); }}
+          onDownload={downloadReceipt}
+        />
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1170,26 +1192,27 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       )}
 
       {showActivateModal && (
-        <div className="app-modal-shell z-[110] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 border">
-            <div className="p-8 text-center bg-gradient-to-b from-slate-50 to-white">
-              <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3 shadow-inner"><Zap size={32} fill="currentColor" /></div>
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight">Activate Plan</h2>
+        <div className="app-modal-shell z-[110] bg-slate-900/70 backdrop-blur-sm">
+          <div className="app-modal-panel rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200"
+            style={{ background: 'linear-gradient(180deg, #1e1b4b 0%, #0f172a 100%)' }}>
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3 border border-purple-500/30"><Zap size={32} fill="currentColor" /></div>
+              <h2 className="text-2xl font-black text-white tracking-tight">Activate Plan</h2>
               <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">For {selectedMember?.full_name}</p>
             </div>
-            <div className="app-modal-scroll px-8 pb-8 space-y-4">
+            <div className="px-8 pb-8 space-y-4">
               <div className="relative">
-                <select required className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-purple-500 focus:outline-none text-sm font-black appearance-none cursor-pointer" value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)}>
-                  <option value="">Select Membership Plan...</option>
-                  {plans.map((p) => (<option key={p.id} value={p.id}>{p.name} — ₹{p.price}</option>))}
+                <select required className="w-full px-5 py-4 rounded-2xl focus:outline-none text-sm font-black appearance-none cursor-pointer border border-white/10" style={{ background: 'rgba(255,255,255,0.07)', color: '#e2e8f0' }} value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)}>
+                  <option value="" style={{ background: '#1e1b4b' }}>Select Membership Plan...</option>
+                  {plans.map((p) => (<option key={p.id} value={p.id} style={{ background: '#1e1b4b' }}>{p.name} — ₹{p.price}</option>))}
                 </select>
                 <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><Calendar size={18} /></div>
               </div>
               <div className="pt-2 space-y-3">
                 <button onClick={() => handleActivateSubscription(null, 'online')} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98]" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}><CreditCard size={18} /> Proceed for Payment</button>
-                <button onClick={() => handleActivateSubscription(null, 'cash')} className="w-full py-4 bg-white text-slate-600 border-2 border-slate-100 rounded-2xl font-black text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2"><span className="text-emerald-500 font-black text-lg">₹</span> Paid as Cash</button>
+                <button onClick={() => handleActivateSubscription(null, 'cash')} className="w-full py-4 rounded-2xl font-black text-sm hover:opacity-80 transition-all flex items-center justify-center gap-2 border border-white/10" style={{ background: 'rgba(255,255,255,0.06)', color: '#6ee7b7' }}><span className="font-black text-lg">₹</span> Paid as Cash</button>
               </div>
-              <button onClick={() => setShowActivateModal(false)} className="w-full text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors">Cancel Transaction</button>
+              <button onClick={() => setShowActivateModal(false)} className="w-full text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors pt-1">Cancel Transaction</button>
             </div>
           </div>
         </div>
