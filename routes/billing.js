@@ -24,8 +24,8 @@ const getRazorpay = () => {
 };
 
 const SAAS_PRICING = {
-    monthly: { basic: 999, pro: 1999, elite: 3999 },
-    annual: { basic: 10068, pro: 19992, elite: 39996 },
+    monthly: { test: 1, basic: 999, pro: 1999, elite: 3999 },
+    annual:  { test: 1, basic: 10068, pro: 19992, elite: 39996 },
 };
 
 const normalizeCycle = (value) => String(value || 'monthly').trim().toLowerCase();

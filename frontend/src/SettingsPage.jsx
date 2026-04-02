@@ -36,15 +36,17 @@ const normalizeSettingsTab = (value) => {
 
 const SAAS_PLANS = {
   monthly: [
-    { id: 'basic', name: 'Basic', price: 999, billed: 999, features: ['Up to 100 Members', 'Basic Analytics', '1 Staff Account', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'pro', name: 'Pro Vault', price: 1999, billed: 1999, features: ['Unlimited Members', 'AI Financial Insights', 'Auto WhatsApp Alerts', '3 Staff Accounts'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'elite', name: 'Elite', price: 3999, billed: 3999, features: ['Multi-Branch Support', 'Custom Branded App', 'Dedicated Manager', 'Unlimited Staff'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' }
+    { id: 'test',  name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
+    { id: 'basic', name: 'Basic',      price: 999,  billed: 999,   features: ['Up to 100 Members', 'Basic Analytics', '1 Staff Account', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'pro',   name: 'Pro Vault',  price: 1999, billed: 1999,  features: ['Unlimited Members', 'AI Financial Insights', 'Auto WhatsApp Alerts', '3 Staff Accounts'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'elite', name: 'Elite',      price: 3999, billed: 3999,  features: ['Multi-Branch Support', 'Custom Branded App', 'Dedicated Manager', 'Unlimited Staff'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
   annual: [
-    { id: 'basic', name: 'Basic', price: 839, billed: 10068, features: ['Up to 100 Members', 'Basic Analytics', '1 Staff Account', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'pro', name: 'Pro Vault', price: 1666, billed: 19992, features: ['Unlimited Members', 'AI Financial Insights', 'Auto WhatsApp Alerts', '3 Staff Accounts'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'elite', name: 'Elite', price: 3333, billed: 39996, features: ['Multi-Branch Support', 'Custom Branded App', 'Dedicated Manager', 'Unlimited Staff'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' }
-  ]
+    { id: 'test',  name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
+    { id: 'basic', name: 'Basic',      price: 839,  billed: 10068, features: ['Up to 100 Members', 'Basic Analytics', '1 Staff Account', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'pro',   name: 'Pro Vault',  price: 1666, billed: 19992, features: ['Unlimited Members', 'AI Financial Insights', 'Auto WhatsApp Alerts', '3 Staff Accounts'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'elite', name: 'Elite',      price: 3333, billed: 39996, features: ['Multi-Branch Support', 'Custom Branded App', 'Dedicated Manager', 'Unlimited Staff'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+  ],
 };
 
 const STAFF_ROLE_OPTIONS = [
@@ -1117,72 +1119,131 @@ const loadRazorpayScript = () => {
                   </div>
               )}
 
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
+              {/* ── Billing cycle toggle ── */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4">
                 <div>
-                    <h2 className="text-2xl font-black text-slate-900 mb-1">Billing & Subscription</h2>
-                    <p className="text-sm font-medium text-slate-500">Upgrade to unlock your gym's full potential.</p>
+                  <h2 className="text-2xl font-black text-slate-900 mb-1">Billing &amp; Subscription</h2>
+                  <p className="text-sm font-medium text-slate-500">Upgrade to unlock your gym's full potential.</p>
                 </div>
-                
-                {/* Monthly/Annual Toggle */}
-                <div className="bg-slate-100 p-1 rounded-xl inline-flex shadow-inner">
-                    <button onClick={() => setBillingCycle('monthly')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${billingCycle === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                        Monthly
-                    </button>
-                    <button onClick={() => setBillingCycle('annual')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${billingCycle === 'annual' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                        Annually <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">Save 16%</span>
-                    </button>
+                <div className="bg-slate-100 p-1 rounded-xl inline-flex shadow-inner shrink-0">
+                  <button
+                    onClick={() => setBillingCycle('monthly')}
+                    className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${billingCycle === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >Monthly</button>
+                  <button
+                    onClick={() => setBillingCycle('annual')}
+                    className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${billingCycle === 'annual' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    Annually
+                    <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">Save 16%</span>
+                  </button>
                 </div>
               </div>
-              
-              {/* Tiered Pricing Cards */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+
+              {/* ── Plan carousel (swipeable on mobile, grid on desktop) ── */}
+              <div className="relative mb-10">
+                {/* scroll hint arrows — mobile only */}
+                <div className="absolute left-0 top-0 bottom-4 w-6 bg-gradient-to-r from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="absolute right-0 top-0 bottom-4 w-6 bg-gradient-to-l from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+
+                {/* the scroll container becomes a grid on lg+ */}
+                <div
+                  className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 scroll-smooth lg:grid lg:grid-cols-4 lg:overflow-visible lg:snap-none"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
+                >
                   {SAAS_PLANS[billingCycle].map((plan) => {
-                      const Icon = plan.icon;
-                      const isCurrentPlan = gymData.current_plan === plan.id;
-                      const isActive = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
-                      const isSamePlanDifferentCycle = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle !== billingCycle;
-                      const needsRenewal = (realStatus === 'EXPIRED' || realStatus === 'GRACE_PERIOD') && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
-                      
-                      return (
-                          <div key={plan.id} className={`relative flex flex-col p-6 rounded-[28px] transition-all duration-300 ${isActive ? 'bg-indigo-50 border-2 border-indigo-500 shadow-xl scale-[1.02]' : 'bg-white border border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-xl'}`}>
-                              {plan.popular && !isActive && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md">Most Popular</span>}
-                              {isActive && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md flex items-center gap-1"><CheckCircle size={10}/> Current Plan</span>}
-                              
-                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 ${isActive ? 'bg-indigo-500 text-white' : plan.bg + ' ' + plan.color}`}>
-                                  <Icon size={24} />
-                              </div>
-                              <h3 className="text-xl font-black mb-1 text-slate-900">{plan.name}</h3>
-                              <div className="flex items-baseline gap-1 mb-6 text-slate-900">
-                                  <span className="text-3xl font-black">â‚¹{plan.price}</span>
-                                  <span className="text-sm font-medium text-slate-500">/mo</span>
-                              </div>
+                    const Icon = plan.icon;
+                    const isCurrentPlan = gymData.current_plan === plan.id;
+                    const isActive = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
+                    const isSamePlanDifferentCycle = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle !== billingCycle;
+                    const needsRenewal = (realStatus === 'EXPIRED' || realStatus === 'GRACE_PERIOD') && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
 
-                              <ul className="space-y-3 mb-8 flex-1">
-                                  {plan.features.map((feature, i) => (
-                                      <li key={i} className="flex items-start gap-2 text-sm font-medium text-slate-600">
-                                          <Check size={16} className={isActive ? 'text-indigo-500 shrink-0' : 'text-slate-400 shrink-0'} />
-                                          {feature}
-                                      </li>
-                                  ))}
-                              </ul>
+                    // button label
+                    let btnLabel = `Upgrade to ${plan.name}`;
+                    if (isActive) btnLabel = 'Currently Active';
+                    else if (needsRenewal) btnLabel = 'Renew Subscription';
+                    else if (isSamePlanDifferentCycle) btnLabel = `Switch to ${billingCycle === 'annual' ? 'Annual' : 'Monthly'}`;
+                    else if (plan.test) btnLabel = 'Pay ₹1 — Test';
 
-                             <button 
-    onClick={() => handleSubscribe(plan)}
-    disabled={isProcessingPayment || isActive}
-    className={`w-full py-3.5 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 ${isActive ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 cursor-not-allowed' : 'bg-slate-100 text-slate-900 hover:bg-slate-200'}`}
->
-    {isActive 
-        ? 'Currently Active' 
-        : needsRenewal 
-            ? 'Renew Subscription' 
-            : isSamePlanDifferentCycle 
-                ? `Switch to ${billingCycle === 'annual' ? 'Annual' : 'Monthly'}` 
-                : `Upgrade to ${plan.name}`
-    }
-</button>
-                          </div>
-                      );
+                    return (
+                      <div
+                        key={plan.id}
+                        className={`
+                          relative flex flex-col
+                          /* mobile: each card is ~82% viewport, snap-centered */
+                          min-w-[82vw] max-w-[340px]
+                          /* desktop: let grid control width */
+                          lg:min-w-0 lg:max-w-none
+                          flex-shrink-0 snap-center
+                          p-5 rounded-[24px] transition-all duration-300
+                          ${plan.test
+                            ? 'bg-amber-50 border-2 border-amber-300 border-dashed'
+                            : isActive
+                            ? 'bg-indigo-50 border-2 border-indigo-500 shadow-xl'
+                            : 'bg-white border border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-xl'
+                          }
+                        `}
+                      >
+                        {/* badge */}
+                        {plan.popular && !isActive && !plan.test && (
+                          <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md whitespace-nowrap">Most Popular</span>
+                        )}
+                        {isActive && (
+                          <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md flex items-center gap-1 whitespace-nowrap">
+                            <CheckCircle size={10}/> Current Plan
+                          </span>
+                        )}
+                        {plan.test && (
+                          <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-md whitespace-nowrap">DEV TEST</span>
+                        )}
+
+                        {/* icon */}
+                        <div className={`w-11 h-11 rounded-2xl flex items-center justify-center mb-4 ${isActive ? 'bg-indigo-500 text-white' : plan.bg + ' ' + plan.color}`}>
+                          <Icon size={22} />
+                        </div>
+
+                        {/* name + price */}
+                        <h3 className="text-lg font-black mb-0.5 text-slate-900">{plan.name}</h3>
+                        <div className="flex items-baseline gap-1 mb-5 text-slate-900">
+                          <span className="text-3xl font-black">&#8377;{plan.price}</span>
+                          <span className="text-sm font-medium text-slate-500">/mo</span>
+                        </div>
+
+                        {/* features */}
+                        <ul className="space-y-2.5 mb-6 flex-1">
+                          {plan.features.map((feature, i) => (
+                            <li key={i} className="flex items-start gap-2 text-sm font-medium text-slate-600">
+                              <Check size={15} className={`shrink-0 mt-0.5 ${isActive ? 'text-indigo-500' : plan.test ? 'text-amber-500' : 'text-slate-400'}`} />
+                              {feature}
+                            </li>
+                          ))}
+                        </ul>
+
+                        {/* CTA button */}
+                        <button
+                          onClick={() => handleSubscribe(plan)}
+                          disabled={isProcessingPayment || isActive}
+                          className={`w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                            isActive
+                              ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 cursor-not-allowed'
+                              : plan.test
+                              ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/30'
+                              : 'bg-slate-900 text-white hover:bg-slate-700 shadow-md'
+                          } disabled:opacity-60`}
+                        >
+                          {isProcessingPayment ? <><RefreshCw size={14} className="animate-spin" /> Processing…</> : btnLabel}
+                        </button>
+                      </div>
+                    );
                   })}
+                </div>
+
+                {/* dot indicators — mobile only */}
+                <div className="flex justify-center gap-1.5 mt-1 lg:hidden">
+                  {SAAS_PLANS[billingCycle].map((plan, i) => (
+                    <div key={plan.id} className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                  ))}
+                </div>
               </div>
 
               {/* Usage & Limits Dashboard */}
@@ -1231,7 +1292,7 @@ const loadRazorpayScript = () => {
                               <div>
                                   <p className="font-black text-slate-800 text-sm mb-1">{localInvoice.plan}</p>
                                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                      {formatExpiry(localInvoice.date)} â€¢ #{localInvoice.id.slice(0,10)}...
+                                      {formatExpiry(localInvoice.date)} &bull; #{localInvoice.id.slice(0,10)}...
                                   </p>
                               </div>
                               <button onClick={() => generateSaaSInvoice(localInvoice)} className="text-indigo-600 font-black text-xs uppercase tracking-wider hover:bg-indigo-100 bg-indigo-50 px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm">
@@ -1675,7 +1736,7 @@ const loadRazorpayScript = () => {
               <div className="border border-slate-200 rounded-2xl p-6 bg-white">
                 <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><Monitor size={18}/> Active Sessions</h3>
                 <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                  <div><p className="font-bold text-sm text-slate-800">Windows â€¢ Chrome Browser</p><p className="text-xs text-emerald-500 font-bold">Current Session</p></div><Globe size={20} className="text-slate-300" />
+                  <div><p className="font-bold text-sm text-slate-800">Windows &bull; Chrome Browser</p><p className="text-xs text-emerald-500 font-bold">Current Session</p></div><Globe size={20} className="text-slate-300" />
                 </div>
               </div>
             </div>
