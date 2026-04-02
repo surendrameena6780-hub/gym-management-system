@@ -1666,7 +1666,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       ════════════════════════════════════════ */}
       <div className="app-floating-action-bar fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1.5rem)] max-w-[520px]">
         <div
-          className="rounded-[22px] border border-white/8 backdrop-blur-2xl p-1.5"
+          className="gv-fab-shell rounded-[22px] border border-white/8 backdrop-blur-2xl p-1.5"
           style={{
             background: 'rgba(10, 12, 30, 0.94)',
             boxShadow: '0 8px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.07)'

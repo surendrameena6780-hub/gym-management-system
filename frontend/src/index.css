@@ -616,6 +616,7 @@ html.gv-dark-mode .gv-pay-card-orange { background: rgba(249,115,22,0.1) !import
 
 /* ── Member list bottom fade ── */
 html.gv-dark-mode .gv-list-bottom-fade { background: linear-gradient(to top, var(--dm-bg) 0%, transparent 100%) !important; }
+html.gv-dark-mode .gv-fab-shell { box-shadow: 0 8px 48px rgba(0,0,0,0.65) !important; border-color: rgba(255,255,255,0.04) !important; }
 
 /* ── Avatar ring (ring-white → dark border) ── */
 html.gv-dark-mode .ring-white { --tw-ring-color: rgba(255,255,255,0.12) !important; }
