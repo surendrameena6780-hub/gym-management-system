@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
+import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 
 const TABS = [
   { id: 'account', label: 'Account & Business', icon: User, group: 'Personal & Business' },
@@ -110,6 +111,7 @@ const loadRazorpayScript = () => {
   const fileInputRef = useRef(null); 
   const [profileImage, setProfileImage] = useState(null); 
   const [previewUrl, setPreviewUrl] = useState(null); 
+  const [removeProfileImage, setRemoveProfileImage] = useState(false);
 
   const [accountData, setAccountData] = useState({ 
     full_name: '', email: '', phone: '', 
@@ -118,7 +120,7 @@ const loadRazorpayScript = () => {
   
   const [gymData, setGymData] = useState({ 
     name: '', phone: '', email: '', address: '', 
-    currency: 'â‚¹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
+    currency: '₹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
     saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: 'pro', saas_billing_cycle: 'monthly'
   });
 
@@ -171,7 +173,10 @@ const loadRazorpayScript = () => {
     message: 'Test message from GymVault integration setup.',
   });
 
-  const [darkMode, setDarkMode] = useState(false);
+  const [interfacePreferences, setInterfacePreferences] = useState({
+    reduce_motion: false,
+    compact_mode: false,
+  });
   const [twoFactor, setTwoFactor] = useState(false);
   const [staffMembers, setStaffMembers] = useState([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
@@ -201,7 +206,10 @@ const loadRazorpayScript = () => {
           }));
           if (res.data.account.profile_pic) {
               setPreviewUrl(normalizeProfileImageUrl(res.data.account.profile_pic));
+          } else {
+            setPreviewUrl(null);
           }
+          setRemoveProfileImage(false);
       }
 
       if (res.data.gym) {
@@ -220,6 +228,14 @@ const loadRazorpayScript = () => {
             current_plan: res.data.gym.current_plan || 'pro',
             saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly'
           }));
+
+          const nextInterfacePreferences = {
+            reduce_motion: Boolean(res.data.gym.interface_reduce_motion),
+            compact_mode: Boolean(res.data.gym.interface_compact_mode),
+          };
+          setInterfacePreferences(nextInterfacePreferences);
+          applyInterfacePreferences(nextInterfacePreferences);
+          saveInterfacePreferencesLocal(nextInterfacePreferences);
           
           if (res.data.gym.saas_billing_cycle) {
               setBillingCycle(res.data.gym.saas_billing_cycle);
@@ -677,6 +693,7 @@ const loadRazorpayScript = () => {
     if (file) {
       setProfileImage(file);
       setPreviewUrl(URL.createObjectURL(file));
+      setRemoveProfileImage(false);
     }
   };
 
@@ -689,6 +706,7 @@ const loadRazorpayScript = () => {
     formData.append('email', accountData.email);
     formData.append('phone', accountData.phone);
     if (profileImage) formData.append('profile_pic', profileImage);
+    if (removeProfileImage && !profileImage) formData.append('remove_profile_pic', 'true');
 
     if (accountData.new_password) {
         if (accountData.new_password !== accountData.confirm_password) {
@@ -700,13 +718,19 @@ const loadRazorpayScript = () => {
     }
 
     try {
-      await axios.put('/api/settings/account', formData, {
+      const accountRes = await axios.put('/api/settings/account', formData, {
         headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' }
       });
       await axios.put('/api/settings/gym', gymData, headers);
+      if (accountRes.data?.profile_pic) {
+        setPreviewUrl(normalizeProfileImageUrl(accountRes.data.profile_pic));
+      } else if (removeProfileImage) {
+        setPreviewUrl(null);
+      }
       toast('Profile & Business details updated successfully!', 'success');
       setAccountData(prev => ({ ...prev, current_password: '', new_password: '', confirm_password: '' })); 
       setProfileImage(null);
+      setRemoveProfileImage(false);
     } catch (err) {
       toast(err.response?.data?.error || "Failed to update details", "error");
     } finally {
@@ -714,17 +738,32 @@ const loadRazorpayScript = () => {
     }
   };
 
-  const handlePreferencesSave = async (e) => {
-    e.preventDefault();
+  const persistPreferences = async (successMessage) => {
     setIsSaving(true);
     try {
-      await axios.put('/api/settings/preferences', { currency: gymData.currency, timezone: gymData.timezone }, headers);
-      toast('System preferences saved!', 'success');
+      await axios.put('/api/settings/preferences', {
+        currency: gymData.currency,
+        timezone: gymData.timezone,
+        interface_reduce_motion: interfacePreferences.reduce_motion,
+        interface_compact_mode: interfacePreferences.compact_mode,
+      }, headers);
+      applyInterfacePreferences(interfacePreferences);
+      saveInterfacePreferencesLocal(interfacePreferences);
+      toast(successMessage, 'success');
     } catch (err) {
-      toast("Failed to update preferences", "error");
+      toast(err?.response?.data?.error || 'Failed to update preferences', 'error');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handlePreferencesSave = async (e) => {
+    e.preventDefault();
+    await persistPreferences('System preferences saved!');
+  };
+
+  const handleInterfaceSave = async () => {
+    await persistPreferences('Interface preferences saved!');
   };
 
   const handleDeleteGym = async () => {
@@ -839,7 +878,7 @@ const loadRazorpayScript = () => {
                       <div className="flex gap-2">
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
                         <button type="button" onClick={() => fileInputRef.current.click()} className="px-4 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors">Upload New</button>
-                        <button type="button" onClick={() => {setPreviewUrl(null); setProfileImage(null);}} className="px-4 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors">Remove</button>
+                        <button type="button" onClick={() => { setPreviewUrl(null); setProfileImage(null); setRemoveProfileImage(true); }} className="px-4 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors">Remove</button>
                       </div>
                     </div>
                   </div>
@@ -1649,7 +1688,7 @@ const loadRazorpayScript = () => {
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Currency Symbol</label>
                     <select value={gymData.currency} onChange={e => setGymData({...gymData, currency: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
-                      <option value="â‚¹">â‚¹ (INR)</option><option value="$">$ (USD)</option><option value="â‚¬">â‚¬ (EUR)</option><option value="Â£">Â£ (GBP)</option>
+                      <option value="₹">INR (₹)</option><option value="$">USD ($)</option><option value="€">EUR (€)</option><option value="£">GBP (£)</option>
                     </select>
                   </div>
                   <div>
@@ -1667,13 +1706,24 @@ const loadRazorpayScript = () => {
           {activeTab === 'interface' && (
             <div className="animate-in fade-in duration-300">
               <h2 className="text-2xl font-black text-slate-900 mb-1">Interface Preferences</h2>
-              <p className="text-sm font-medium text-slate-500 mb-8">Customize how the dashboard looks.</p>
-              
-              <div className="border border-slate-200 rounded-2xl p-6 bg-white mb-6 max-w-3xl">
-                <div className="flex justify-between items-center">
-                  <div><h3 className="font-bold text-slate-900 text-sm mb-1">Dark Mode (Coming Soon)</h3><p className="text-xs text-slate-500">Switch the entire dashboard to a dark theme.</p></div>
-                  <button onClick={() => setDarkMode(!darkMode)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${darkMode ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${darkMode ? 'translate-x-6' : 'translate-x-1'}`} /></button>
+              <p className="text-sm font-medium text-slate-500 mb-8">Apply real interface behavior changes across the app.</p>
+
+              <div className="space-y-4 max-w-3xl">
+                <div className="border border-slate-200 rounded-2xl p-6 bg-white">
+                  <div className="flex justify-between items-center gap-4">
+                    <div><h3 className="font-bold text-slate-900 text-sm mb-1">Reduce Motion</h3><p className="text-xs text-slate-500">Turns off most animations and transitions across the dashboard.</p></div>
+                    <button onClick={() => setInterfacePreferences((prev) => ({ ...prev, reduce_motion: !prev.reduce_motion }))} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${interfacePreferences.reduce_motion ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${interfacePreferences.reduce_motion ? 'translate-x-6' : 'translate-x-1'}`} /></button>
+                  </div>
                 </div>
+
+                <div className="border border-slate-200 rounded-2xl p-6 bg-white">
+                  <div className="flex justify-between items-center gap-4">
+                    <div><h3 className="font-bold text-slate-900 text-sm mb-1">Compact Layout</h3><p className="text-xs text-slate-500">Reduces page spacing and header height for a denser dashboard layout.</p></div>
+                    <button onClick={() => setInterfacePreferences((prev) => ({ ...prev, compact_mode: !prev.compact_mode }))} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${interfacePreferences.compact_mode ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${interfacePreferences.compact_mode ? 'translate-x-6' : 'translate-x-1'}`} /></button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2"><button type="button" disabled={isSaving} onClick={handleInterfaceSave} className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-70"><Save size={16} /> {isSaving ? 'Saving...' : 'Save Interface Preferences'}</button></div>
               </div>
             </div>
           )}

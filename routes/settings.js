@@ -9,6 +9,7 @@ const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
 const {
     createProfileUploadMiddleware,
     cleanupUploadedFile,
+    getStoredProfileValue,
     resolveStoredProfileImagePath,
 } = require('../utils/profileUploads');
 
@@ -17,6 +18,7 @@ router.use(auth, requireOwner);
 let ensureSupportProfileTablePromise;
 let ensureMessagingSchemaPromise;
 let ensureMemberPaymentsSchemaPromise;
+let ensurePreferenceSchemaPromise;
 
 const MESSAGE_TEMPLATE_DEFAULTS = [
     {
@@ -192,9 +194,27 @@ const ensureMemberPaymentsSchema = async () => {
     await ensureMemberPaymentsSchemaPromise;
 };
 
+const ensurePreferenceSchema = async () => {
+    if (!ensurePreferenceSchemaPromise) {
+        ensurePreferenceSchemaPromise = (async () => {
+            await pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS interface_reduce_motion BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS interface_compact_mode BOOLEAN DEFAULT FALSE;
+            `);
+            await pool.query(`
+                ALTER TABLE users
+                ALTER COLUMN profile_pic TYPE TEXT;
+            `);
+        })();
+    }
+    await ensurePreferenceSchemaPromise;
+};
+
 const uploadProfilePic = createProfileUploadMiddleware({
     prefix: 'profile',
     getActorId: (req) => req.user?.id || 'owner',
+    storageMode: 'inline',
 });
 
 const discardUploadedProfile = async (req) => {
@@ -205,10 +225,11 @@ router.get('/', auth, async (req, res) => {
     try {
         await ensureSupportProfileTable();
         await ensureMessagingSchema();
+        await ensurePreferenceSchema();
 
         const userRes = await pool.query('SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1', [req.user.id]);
         const gymRes = await pool.query(
-            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle FROM gyms WHERE id = $1', 
+            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, interface_reduce_motion, interface_compact_mode FROM gyms WHERE id = $1', 
             [req.user.gym_id]
         );
 
@@ -230,6 +251,30 @@ router.get('/', auth, async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: "Server Error" });
+    }
+});
+
+router.get('/preferences', auth, async (req, res) => {
+    try {
+        await ensurePreferenceSchema();
+
+        const result = await pool.query(
+            `SELECT currency, timezone, interface_reduce_motion, interface_compact_mode
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [req.user.gym_id]
+        );
+
+        return res.json(result.rows[0] || {
+            currency: '₹',
+            timezone: 'Asia/Kolkata',
+            interface_reduce_motion: false,
+            interface_compact_mode: false,
+        });
+    } catch (err) {
+        console.error('PREFERENCES FETCH ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
     }
 });
 
@@ -519,9 +564,11 @@ router.post('/integrations/test-message', auth, async (req, res) => {
 // --- 3. MASTER ACCOUNT UPDATE ---
 router.put('/account', auth, uploadProfilePic, async (req, res) => {
     const { full_name, email, phone, current_password, new_password } = req.body;
-    let profile_pic_path = req.file ? `/uploads/profiles/${req.file.filename}` : null;
+    const removeProfilePic = String(req.body?.remove_profile_pic || '').trim().toLowerCase() === 'true';
+    const uploadedProfileValue = getStoredProfileValue(req.file);
 
     try {
+        await ensurePreferenceSchema();
         const normalizedCurrentPassword = String(current_password || '').trim();
         const normalizedNewPassword = String(new_password || '');
         const currentUserRes = await pool.query('SELECT profile_pic, password_hash FROM users WHERE id = $1', [req.user.id]);
@@ -544,10 +591,16 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
 
         await pool.query('BEGIN');
 
-        if (profile_pic_path) {
+        const nextProfileValue = uploadedProfileValue
+            ? uploadedProfileValue
+            : removeProfilePic
+                ? null
+                : currentUser.profile_pic || null;
+
+        if (uploadedProfileValue || removeProfilePic) {
             await pool.query(
                 'UPDATE users SET full_name=$1, email=$2, phone=$3, profile_pic=$4 WHERE id=$5', 
-                [full_name, email, phone, profile_pic_path, req.user.id]
+                [full_name, email, phone, nextProfileValue, req.user.id]
             );
         } else {
             await pool.query(
@@ -576,16 +629,16 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
 
         await pool.query('COMMIT');
 
-        if (profile_pic_path) {
+        if (uploadedProfileValue || removeProfilePic) {
             const previousProfilePath = resolveStoredProfileImagePath(currentUser.profile_pic);
-            if (previousProfilePath && previousProfilePath !== req.file.path) {
+            if (previousProfilePath && previousProfilePath !== req.file?.path) {
                 await cleanupUploadedFile(previousProfilePath);
             }
         }
 
         res.json({ 
             message: "Account updated successfully", 
-            profile_pic: profile_pic_path
+            profile_pic: nextProfileValue
         });
 
     } catch (err) {
@@ -636,11 +689,22 @@ router.put('/gym', auth, async (req, res) => {
 
 // --- 5. UPDATE SYSTEM PREFERENCES ---
 router.put('/preferences', auth, async (req, res) => {
-    const { currency, timezone } = req.body;
+    const {
+        currency,
+        timezone,
+        interface_reduce_motion,
+        interface_compact_mode,
+    } = req.body || {};
     try {
+        await ensurePreferenceSchema();
         await pool.query(
-            'UPDATE gyms SET currency = $1, timezone = $2 WHERE id = $3',
-            [currency, timezone, req.user.gym_id]
+            `UPDATE gyms
+             SET currency = $1,
+                 timezone = $2,
+                 interface_reduce_motion = $3,
+                 interface_compact_mode = $4
+             WHERE id = $5`,
+            [currency, timezone, Boolean(interface_reduce_motion), Boolean(interface_compact_mode), req.user.gym_id]
         );
         res.json({ message: "Preferences updated successfully" });
     } catch (err) {

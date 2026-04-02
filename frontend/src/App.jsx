@@ -13,6 +13,7 @@ import LoginPage from './LoginPage';
 import SuperAdminLogin from './SuperAdminLogin';
 import SuperAdminDashboard from './SuperAdminDashboard';
 import SuspensionOverlay from './SuspensionOverlay'; 
+import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
@@ -443,6 +444,25 @@ function App() {
       .catch(() => {
         if (!currentUser) handleLogout();
       });
+  }, [token, isHQ]);
+
+  useEffect(() => {
+    if (isHQ || !token) return undefined;
+
+    let cancelled = false;
+    axios.get('/api/settings/preferences', { headers: { 'x-auth-token': token } })
+      .then((res) => {
+        if (cancelled) return;
+        const applied = applyInterfacePreferences(res.data || {});
+        saveInterfacePreferencesLocal(applied);
+      })
+      .catch(() => {
+        // Preference fetch should never block app rendering.
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [token, isHQ]);
 
   useEffect(() => {

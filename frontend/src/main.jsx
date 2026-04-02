@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import axios from 'axios'
 import './index.css'
 import App from './App.jsx'
+import { applyInterfacePreferences, loadInterfacePreferencesLocal } from './utils/interfacePreferences'
 
 const unwrapApiData = (payload) => {
   let current = payload
@@ -62,6 +63,8 @@ axios.interceptors.response.use((response) => {
 
   return Promise.reject(error)
 })
+
+applyInterfacePreferences(loadInterfacePreferencesLocal())
 
 if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   window.__gymvaultViewportSyncInstalled = true

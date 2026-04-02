@@ -89,6 +89,29 @@ html.gv-splash-active #root {
   background: #161d4f !important;
 }
 
+html.gv-reduce-motion *,
+html.gv-reduce-motion *::before,
+html.gv-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html.gv-compact-ui .app-header-row {
+  min-height: 3.4rem;
+}
+
+html.gv-compact-ui main.app-scroll-shell > div {
+  padding: 0.85rem !important;
+}
+
+@media (min-width: 768px) {
+  html.gv-compact-ui main.app-scroll-shell > div {
+    padding: 1rem 1rem 1.5rem !important;
+  }
+}
+
 .app-shell-height {
   min-height: var(--app-viewport-height);
   height: var(--app-viewport-height);

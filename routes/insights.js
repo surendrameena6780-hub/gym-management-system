@@ -1,0 +1,246 @@
+const express = require('express');
+const router = express.Router();
+const { pool } = require('../config/db');
+const auth = require('../middleware/authMiddleware');
+const saasMiddleware = require('../middleware/saasMiddleware');
+const { requirePermission } = require('../middleware/rbac');
+
+const RANGE_TO_MONTHS = {
+    '1M': 1,
+    '3M': 3,
+    '6M': 6,
+    '1Y': 12,
+};
+
+const normalizeRange = (value) => {
+    const key = String(value || '6M').trim().toUpperCase();
+    return RANGE_TO_MONTHS[key] ? key : '6M';
+};
+
+const diffInDays = (endDate, startDate) => {
+    const end = new Date(endDate);
+    const start = new Date(startDate);
+    if (Number.isNaN(end.getTime()) || Number.isNaN(start.getTime())) return null;
+    end.setHours(0, 0, 0, 0);
+    start.setHours(0, 0, 0, 0);
+    return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+};
+
+router.get('/overview', auth, saasMiddleware, requirePermission('insights:read'), async (req, res) => {
+    const gymId = req.user.gym_id;
+    const range = normalizeRange(req.query.range);
+    const months = RANGE_TO_MONTHS[range];
+    const peakHourDays = Math.min(months * 31, 365);
+
+    try {
+        const [memberRowsRes, revenueGraphRes, planRevenueRes, peakHoursRes, last30RevenueRes] = await Promise.all([
+            pool.query(
+                `WITH latest_memberships AS (
+                    SELECT DISTINCT ON (ms.member_id)
+                        ms.member_id,
+                        ms.status,
+                        ms.end_date,
+                        p.name AS plan_name,
+                        COALESCE(p.price, 0) AS plan_price
+                     FROM memberships ms
+                     LEFT JOIN plans p ON p.id = ms.plan_id
+                     WHERE ms.gym_id = $1
+                       AND ms.deleted_at IS NULL
+                     ORDER BY ms.member_id, ms.end_date DESC NULLS LAST, ms.id DESC
+                 ),
+                 payment_totals AS (
+                    SELECT
+                        user_id AS member_id,
+                        COALESCE(SUM(amount_paid), 0) AS total_paid
+                    FROM payments
+                    WHERE gym_id = $1
+                      AND deleted_at IS NULL
+                    GROUP BY user_id
+                 )
+                 SELECT
+                    m.id,
+                    m.full_name,
+                    m.phone,
+                    m.email,
+                    m.last_visit,
+                    m.joining_date,
+                    m.profile_pic,
+                    COALESCE(lm.status, 'UNPAID') AS membership_status,
+                    lm.plan_name,
+                    lm.end_date,
+                    COALESCE(lm.plan_price, 0) AS plan_price,
+                    COALESCE(pt.total_paid, 0) AS total_paid
+                 FROM members m
+                 LEFT JOIN latest_memberships lm ON lm.member_id = m.id
+                 LEFT JOIN payment_totals pt ON pt.member_id = m.id
+                 WHERE m.gym_id = $1
+                   AND m.deleted_at IS NULL
+                 ORDER BY m.full_name ASC`,
+                [gymId]
+            ),
+            pool.query(
+                `WITH month_series AS (
+                    SELECT generate_series(
+                        date_trunc('month', CURRENT_DATE) - (($2::int - 1) * INTERVAL '1 month'),
+                        date_trunc('month', CURRENT_DATE),
+                        INTERVAL '1 month'
+                    ) AS month_start
+                 ),
+                 revenue_by_month AS (
+                    SELECT
+                        date_trunc('month', payment_date) AS month_start,
+                        COALESCE(SUM(amount_paid), 0) AS revenue
+                    FROM payments
+                    WHERE gym_id = $1
+                      AND deleted_at IS NULL
+                      AND payment_date >= date_trunc('month', CURRENT_DATE) - (($2::int - 1) * INTERVAL '1 month')
+                    GROUP BY date_trunc('month', payment_date)
+                 )
+                 SELECT
+                    TO_CHAR(ms.month_start, 'Mon') AS name,
+                    COALESCE(ROUND(rbm.revenue), 0)::INTEGER AS revenue
+                 FROM month_series ms
+                 LEFT JOIN revenue_by_month rbm ON rbm.month_start = ms.month_start
+                 ORDER BY ms.month_start ASC`,
+                [gymId, months]
+            ),
+            pool.query(
+                `SELECT
+                    COALESCE(p.name, 'Unassigned Plan') AS name,
+                    COALESCE(ROUND(SUM(pay.amount_paid)), 0)::INTEGER AS revenue,
+                    COUNT(DISTINCT pay.user_id)::INTEGER AS buyers
+                 FROM payments pay
+                 LEFT JOIN plans p ON p.id = pay.plan_id
+                 WHERE pay.gym_id = $1
+                   AND pay.deleted_at IS NULL
+                   AND pay.payment_date >= date_trunc('month', CURRENT_DATE) - (($2::int - 1) * INTERVAL '1 month')
+                 GROUP BY COALESCE(p.name, 'Unassigned Plan')
+                 ORDER BY revenue DESC, name ASC
+                 LIMIT 8`,
+                [gymId, months]
+            ),
+            pool.query(
+                `SELECT
+                    EXTRACT(HOUR FROM check_in_time)::INTEGER AS hour,
+                    COUNT(*)::INTEGER AS count
+                 FROM attendance
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND check_in_time >= NOW() - ($2::int || ' day')::interval
+                 GROUP BY EXTRACT(HOUR FROM check_in_time)
+                 ORDER BY hour ASC`,
+                [gymId, peakHourDays]
+            ),
+            pool.query(
+                `SELECT COALESCE(ROUND(SUM(amount_paid)), 0)::INTEGER AS revenue
+                 FROM payments
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND payment_date >= NOW() - INTERVAL '30 days'`,
+                [gymId]
+            ),
+        ]);
+
+        const today = new Date();
+        const memberRows = memberRowsRes.rows.map((row) => {
+            const daysLeft = row.end_date ? diffInDays(row.end_date, today) : null;
+            return {
+                ...row,
+                plan_price: Number(row.plan_price || 0),
+                total_paid: Number(row.total_paid || 0),
+                days_left: daysLeft,
+            };
+        });
+
+        const activeMembers = memberRows.filter((member) => member.membership_status === 'ACTIVE');
+        const expiredMembers = memberRows.filter((member) => member.membership_status === 'EXPIRED');
+        const payingMembersCount = activeMembers.length + expiredMembers.length;
+
+        const retention = payingMembersCount > 0
+            ? Number(((activeMembers.length / payingMembersCount) * 100).toFixed(1))
+            : 0;
+        const churn = payingMembersCount > 0 ? Number((100 - retention).toFixed(1)) : 0;
+
+        const expiringMembers = memberRows
+            .filter((member) => member.days_left !== null && member.days_left >= -7 && member.days_left <= 7)
+            .sort((left, right) => {
+                if (left.days_left === right.days_left) return String(left.full_name).localeCompare(String(right.full_name));
+                return Number(left.days_left) - Number(right.days_left);
+            });
+
+        const inactiveMembers = activeMembers
+            .filter((member) => {
+                if (!member.last_visit) return true;
+                const inactiveDays = diffInDays(today, member.last_visit);
+                return inactiveDays !== null && inactiveDays >= 7;
+            })
+            .map((member) => ({
+                ...member,
+                days_inactive: member.last_visit ? diffInDays(today, member.last_visit) : null,
+            }))
+            .sort((left, right) => {
+                const leftDays = Number(left.days_inactive ?? 9999);
+                const rightDays = Number(right.days_inactive ?? 9999);
+                return rightDays - leftDays;
+            });
+
+        const activeUsersByPlan = activeMembers.reduce((acc, member) => {
+            const key = String(member.plan_name || 'Unassigned Plan');
+            acc.set(key, (acc.get(key) || 0) + 1);
+            return acc;
+        }, new Map());
+
+        const topPlans = planRevenueRes.rows.map((plan) => ({
+            ...plan,
+            users: activeUsersByPlan.get(String(plan.name || 'Unassigned Plan')) || 0,
+        }));
+
+        const topMembers = activeMembers
+            .filter((member) => member.total_paid > 0)
+            .sort((left, right) => {
+                if (right.total_paid === left.total_paid) return String(left.full_name).localeCompare(String(right.full_name));
+                return right.total_paid - left.total_paid;
+            })
+            .slice(0, 5);
+
+        const revenueAtRisk = expiringMembers.reduce((sum, member) => sum + Math.max(0, Number(member.plan_price || 0)), 0);
+        const lostRevenue = expiredMembers.reduce((sum, member) => sum + Math.max(0, Number(member.plan_price || 0)), 0);
+        const last30Revenue = Number(last30RevenueRes.rows[0]?.revenue || 0);
+        const arpu = activeMembers.length > 0 ? Math.round(last30Revenue / activeMembers.length) : 0;
+
+        return res.json({
+            range,
+            revenue: {
+                graphData: revenueGraphRes.rows,
+                arpu,
+                lostRevenue,
+                topPlans,
+            },
+            health: {
+                active: activeMembers.length,
+                expired: expiredMembers.length,
+                retention,
+                churn,
+            },
+            risk: {
+                expiringCount: expiringMembers.length,
+                revenueAtRisk,
+                expiringList: expiringMembers.slice(0, 10),
+                inactiveCount: inactiveMembers.length,
+                inactiveList: inactiveMembers.slice(0, 5),
+            },
+            attendance: {
+                heatmap: peakHoursRes.rows.map((item) => ({
+                    time: item.hour === 0 ? '12AM' : item.hour < 12 ? `${item.hour}AM` : item.hour === 12 ? '12PM' : `${item.hour - 12}PM`,
+                    count: Number(item.count || 0),
+                })),
+                topMembers,
+            },
+        });
+    } catch (err) {
+        console.error('INSIGHTS OVERVIEW ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+module.exports = router;

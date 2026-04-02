@@ -192,11 +192,28 @@ const resolveStoredProfileImagePath = (value) => {
     return path.join(PROFILE_UPLOAD_DIR, fileName);
 };
 
+const getStoredProfileValue = (file) => {
+    if (!file) {
+        return null;
+    }
+
+    if (typeof file.inlineDataUrl === 'string' && file.inlineDataUrl) {
+        return file.inlineDataUrl;
+    }
+
+    if (file.filename) {
+        return `/uploads/profiles/${file.filename}`;
+    }
+
+    return null;
+};
+
 module.exports = {
     PROFILE_UPLOAD_DIR,
     MAX_PROFILE_IMAGE_BYTES,
     allowedProfileImageExtensions,
     createProfileUploadMiddleware,
     cleanupUploadedFile,
+    getStoredProfileValue,
     resolveStoredProfileImagePath,
 };
