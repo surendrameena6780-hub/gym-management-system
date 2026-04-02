@@ -6,7 +6,7 @@ import {
 import {
   Users, DollarSign, Plus, Zap, MessageSquare, ShieldAlert,
   Sparkles, Clock, CheckCircle, CreditCard, Flame, UserMinus, Activity,
-  X, TrendingUp, ChevronRight, UserPlus, RefreshCw,
+  X, TrendingUp, ChevronRight, UserPlus, RefreshCw, Check,
   Bot, Play // <-- 🚨 ADDED ICONS
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
@@ -306,6 +306,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [selectedPlanForPay, setSelectedPlanForPay] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentStep, setPaymentStep] = useState('idle'); // 'idle' | 'processing' | 'success'
   const [broadcastAudience, setBroadcastAudience] = useState('All');
   const [broadcastChannel, setBroadcastChannel] = useState('WHATSAPP');
   const [broadcastTemplateKey, setBroadcastTemplateKey] = useState('');
@@ -538,11 +539,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     }
 
     setPaymentSubmitting(true);
+    setPaymentStep('processing');
     try {
       if (paymentMode === 'Online') {
         const scriptLoaded = await loadRazorpayScript();
         if (!scriptLoaded) {
           toast('Failed to load Razorpay checkout.', 'error');
+          setPaymentStep('idle');
           return;
         }
 
@@ -555,6 +558,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         const keyId = orderRes.data?.key_id;
         if (!order?.id || !keyId) {
           toast('Failed to start online payment. Missing gateway details.', 'error');
+          setPaymentStep('idle');
           return;
         }
 
@@ -581,19 +585,26 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   razorpay_payment_id: response.razorpay_payment_id,
                   razorpay_signature: response.razorpay_signature,
                 }, headers);
-                toast('Online payment recorded successfully!', 'success');
+                // Auto check-in for today so member shows ACTIVE immediately
+                try { await axios.post('/api/attendance/checkin', { member_id: selectedMemberForPay, method: 'STAFF' }, headers); } catch (_) {}
+                window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
+                setPaymentStep('success');
+                await new Promise(r => setTimeout(r, 1500));
                 setShowPaymentModal(false);
                 setSelectedMemberForPay('');
                 setSelectedPlanForPay('');
+                setPaymentStep('idle');
                 fetchData();
               } catch (verifyErr) {
                 toast(verifyErr?.response?.data?.error || 'Payment verification failed.', 'error');
+                setPaymentStep('idle');
               } finally {
                 resolve();
               }
             },
             modal: {
               ondismiss: () => {
+                setPaymentStep('idle');
                 resolve();
               },
             },
@@ -602,20 +613,27 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
           rzp.open();
         });
       } else {
+        const paidMemberId = selectedMemberForPay;
         await axios.post('/api/memberships/activate', {
-          member_id: selectedMemberForPay,
+          member_id: paidMemberId,
           plan_id: selectedPlanForPay,
           payment_mode: paymentMode,
           payment_id: null,
         }, headers);
-        toast('Payment recorded successfully!', 'success');
+        // Auto check-in for today so member shows ACTIVE immediately
+        try { await axios.post('/api/attendance/checkin', { member_id: paidMemberId, method: 'STAFF' }, headers); } catch (_) {}
+        window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
+        setPaymentStep('success');
+        await new Promise(r => setTimeout(r, 1500));
         setShowPaymentModal(false);
         setSelectedMemberForPay('');
         setSelectedPlanForPay('');
+        setPaymentStep('idle');
         fetchData();
       }
     } catch (_err) {
       toast(_err?.response?.data?.error || 'Payment recording failed.', 'error');
+      setPaymentStep('idle');
     } finally {
       setPaymentSubmitting(false);
     }
@@ -1834,7 +1852,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       {/* Record Payment */}
       {showPaymentModal && (
         <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="app-modal-panel bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+          <div className="app-modal-panel relative bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -1974,12 +1992,38 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 </div>
               </div>
               <button type="submit"
-                disabled={paymentSubmitting}
+                disabled={paymentSubmitting || paymentStep !== 'idle'}
                 className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-98"
                 style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>
-                <Zap size={16} fill="currentColor" /> {paymentSubmitting ? 'Processing...' : 'Complete Transaction'}
+                <Zap size={16} fill="currentColor" /> Complete Transaction
               </button>
             </form>
+
+            {/* Payment processing / success animation overlay */}
+            {paymentStep !== 'idle' && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-[24px] animate-in fade-in duration-150"
+                style={{ background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(8px)' }}>
+                {paymentStep === 'processing' ? (
+                  <div className="flex flex-col items-center gap-5">
+                    <div className="w-16 h-16 rounded-full border-4 border-slate-100 border-t-indigo-600 animate-spin" />
+                    <div className="text-center">
+                      <p className="font-black text-slate-900 text-xl">Processing…</p>
+                      <p className="text-sm text-slate-500 mt-1 font-medium">Do not close this window</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-5 animate-in zoom-in-90 duration-300">
+                    <div className="w-20 h-20 rounded-full bg-emerald-500 flex items-center justify-center shadow-xl shadow-emerald-500/30">
+                      <Check size={36} className="text-white" strokeWidth={3} />
+                    </div>
+                    <div className="text-center">
+                      <p className="font-black text-slate-900 text-xl">Payment Complete!</p>
+                      <p className="text-sm text-slate-500 mt-1 font-medium">Member activated &amp; checked in ✓</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -697,7 +697,8 @@ const loadRazorpayScript = () => {
                   email: accountData.email,
                   contact: accountData.phone || gymData.phone
               },
-              theme: { color: "#4f46e5" }
+              theme: { color: "#4f46e5" },
+              modal: { ondismiss: () => setIsProcessingPayment(false) }
           };
 
               if (!options.key) {

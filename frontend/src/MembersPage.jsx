@@ -339,6 +339,14 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     return () => clearTimeout(timer);
   }, [token, searchTerm]);
 
+  // Instantly refresh when dashboard check-in or payment fires the data-changed event
+  useEffect(() => {
+    if (!token) return;
+    const handler = () => fetchMembers({ search: searchTerm });
+    window.addEventListener('gymvault:data-changed', handler);
+    return () => window.removeEventListener('gymvault:data-changed', handler);
+  }, [token, searchTerm]);
+
   useEffect(() => {
     if (!focusAction || focusMemberId) return;
     if (focusAction === 'add') {
