@@ -618,6 +618,16 @@ const loadRazorpayScript = () => {
     printWindow.document.close();
   };
 
+  const handleResetTest = async () => {
+      try {
+          const res = await axios.post('/api/billing/reset-test', {}, headers);
+          setGymData(prev => ({ ...prev, saas_valid_until: res.data.saas_valid_until }));
+          toast('Test timer reset — expires in 1 day.', 'success');
+      } catch (err) {
+          toast(err?.response?.data?.error || 'Failed to reset test timer.', 'error');
+      }
+  };
+
   const handleSubscribe = async (selectedPlan) => {
       setIsProcessingPayment(true);
       const scriptLoaded = await loadRazorpayScript();
@@ -1198,7 +1208,7 @@ const loadRazorpayScript = () => {
                           flex-shrink-0 snap-center
                           p-5 rounded-[24px] transition-all duration-300
                           ${plan.test
-                            ? 'bg-amber-50 border-2 border-amber-300 border-dashed'
+                            ? 'gv-test-plan-card bg-amber-50 border-2 border-amber-300 border-dashed'
                             : isActive
                             ? 'bg-indigo-50 border-2 border-indigo-500 shadow-xl'
                             : 'bg-white border border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-xl'
@@ -1254,6 +1264,14 @@ const loadRazorpayScript = () => {
                         >
                           {isProcessingPayment ? <><RefreshCw size={14} className="animate-spin" /> Processing…</> : btnLabel}
                         </button>
+                        {plan.test && isActive && (
+                          <button
+                            onClick={handleResetTest}
+                            className="w-full mt-2 py-2 rounded-xl font-bold text-xs text-amber-600 border border-amber-200 hover:bg-amber-50 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <RefreshCw size={12} /> Reset Test Timer
+                          </button>
+                        )}
                       </div>
                     );
                   })}

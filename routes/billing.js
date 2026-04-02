@@ -124,4 +124,24 @@ router.post('/verify', async (req, res) => {
         res.status(400).json({ error: "Invalid signature!" });
     }
 });
+
+// --- 3. RESET TEST PLAN TIMER (dev only, only works if current_plan is 'test') ---
+router.post('/reset-test', async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT current_plan FROM gyms WHERE id = $1', [req.user.gym_id]);
+        if (!rows[0] || rows[0].current_plan !== 'test') {
+            return res.status(400).json({ error: 'Reset is only available for the Test Drive plan.' });
+        }
+        const newExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        await pool.query(
+            `UPDATE gyms SET saas_valid_until = CURRENT_TIMESTAMP + INTERVAL '1 day' WHERE id = $1`,
+            [req.user.gym_id]
+        );
+        res.json({ message: 'Test timer reset to 1 day.', saas_valid_until: newExpiry });
+    } catch (err) {
+        console.error('Reset test error:', err);
+        res.status(500).json({ error: 'Failed to reset test timer.' });
+    }
+});
+
 module.exports = router;
