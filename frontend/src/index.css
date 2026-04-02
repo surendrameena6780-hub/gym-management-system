@@ -492,6 +492,12 @@ html.gv-dark-mode .bg-slate-100,
 html.gv-dark-mode .bg-gray-100 { background-color: var(--dm-surface) !important; }
 html.gv-dark-mode .bg-slate-200,
 html.gv-dark-mode .bg-gray-200 { background-color: var(--dm-raise) !important; }
+/* opacity-modifier variants of slate-50 (used in AI Engine inner cells) */
+html.gv-dark-mode .bg-slate-50\/50,
+html.gv-dark-mode .bg-slate-50\/60,
+html.gv-dark-mode .bg-slate-50\/70,
+html.gv-dark-mode .bg-slate-50\/80,
+html.gv-dark-mode .bg-slate-50\/90 { background-color: var(--dm-raise) !important; }
 
 /* ── Colored tinted backgrounds ── */
 html.gv-dark-mode .bg-emerald-50,
@@ -566,18 +572,22 @@ html.gv-dark-mode .text-slate-400,
 html.gv-dark-mode .text-gray-400 { color: #4d6080 !important; }
 
 /* ── Text — colored (700-range darks → brighter pastels) ── */
-html.gv-dark-mode .text-emerald-700 { color: #34d399 !important; }
+html.gv-dark-mode .text-emerald-700,
+html.gv-dark-mode .text-emerald-700\/80 { color: #34d399 !important; }
 html.gv-dark-mode .text-emerald-800,
 html.gv-dark-mode .text-emerald-900 { color: #6ee7b7 !important; }
 html.gv-dark-mode .text-green-700   { color: #4ade80 !important; }
 html.gv-dark-mode .text-blue-700,
 html.gv-dark-mode .text-blue-800    { color: #60a5fa !important; }
 html.gv-dark-mode .text-indigo-700,
+html.gv-dark-mode .text-indigo-700\/80,
 html.gv-dark-mode .text-indigo-800  { color: #818cf8 !important; }
 html.gv-dark-mode .text-orange-700,
+html.gv-dark-mode .text-orange-700\/80,
 html.gv-dark-mode .text-orange-800,
 html.gv-dark-mode .text-orange-900  { color: #fb923c !important; }
 html.gv-dark-mode .text-sky-700,
+html.gv-dark-mode .text-sky-700\/80,
 html.gv-dark-mode .text-sky-800     { color: #38bdf8 !important; }
 html.gv-dark-mode .text-amber-700,
 html.gv-dark-mode .text-amber-800   { color: #fbbf24 !important; }
