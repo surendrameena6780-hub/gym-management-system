@@ -439,7 +439,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
       {/* STATS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-          <div className="relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
+          <div className="gv-pay-card-emerald relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
             style={{ gridColumn: '1 / -1', background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -452,7 +452,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                 </div>
               </div>
           </div>
-          <div className="relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
+          <div className="gv-pay-card-blue relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
             style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: 'rgba(59,130,246,0.15)', boxShadow: '0 4px 20px rgba(59,130,246,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 210ms forwards' }}>
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -465,7 +465,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                 </div>
               </div>
           </div>
-          <div className="relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
+          <div className="gv-pay-card-orange relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
             style={{ background: 'linear-gradient(135deg, #fff7ed 0%, #fef9f0 100%)', borderColor: 'rgba(249,115,22,0.15)', boxShadow: '0 4px 20px rgba(249,115,22,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 300ms forwards' }}>
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 pr-2">
