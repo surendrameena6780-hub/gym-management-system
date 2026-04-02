@@ -522,10 +522,11 @@ router.post('/member/send-otp', async (req, res) => {
             console.log(`[DEV] OTP for ${phone}: ${otp}`);
         }
 
+        const bypass = process.env.OTP_BYPASS === 'true';
         return res.json({
-            message: sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).',
+            message: bypass ? 'OTP bypassed — tap Verify to continue.' : (sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).'),
             member_name: member.full_name.split(' ')[0],
-            dev_otp: (!sent && process.env.NODE_ENV !== 'production') ? otp : undefined,
+            dev_otp: (bypass || (!sent && process.env.NODE_ENV !== 'production')) ? otp : undefined,
         });
     } catch (err) {
         console.error('MEMBER OTP SEND ERROR:', err.message);
@@ -563,12 +564,15 @@ router.post('/member/verify-otp', async (req, res) => {
 
         const member = memberResult.rows[0];
 
-        if (!member.otp_code || member.otp_code !== otp) {
-            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
-        }
-
-        if (!member.otp_expires_at || new Date() > new Date(member.otp_expires_at)) {
-            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        // OTP_BYPASS=true skips code verification (dev/testing mode)
+        const bypass = process.env.OTP_BYPASS === 'true';
+        if (!bypass) {
+            if (!member.otp_code || member.otp_code !== otp) {
+                return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+            }
+            if (!member.otp_expires_at || new Date() > new Date(member.otp_expires_at)) {
+                return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+            }
         }
 
         // Clear OTP after use

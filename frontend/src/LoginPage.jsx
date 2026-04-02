@@ -371,13 +371,15 @@ export default function LoginPage({ setToken, onShowSignup }) {
     setOtpLoading(true); setError('');
     try {
       const res = await axios.post('/api/auth/member/send-otp', { phone });
-      setOtpSent(true);
       setFirstName(res.data.member_name || '');
-      // Dev mode: backend returned the OTP directly (no SMS service configured)
+      // Bypass mode: backend returned OTP directly — auto-verify immediately
       if (res.data.dev_otp) {
-        setOtp(res.data.dev_otp);
-        setError(`Dev mode: OTP auto-filled (${res.data.dev_otp})`);
+        const verifyRes = await axios.post('/api/auth/member/verify-otp', { phone, otp: res.data.dev_otp });
+        setMemberData(verifyRes.data.member);
+        setMemberToken(verifyRes.data.token);
+        return;
       }
+      setOtpSent(true);
     } catch (err) { setError(err?.response?.data?.message || 'Failed to send OTP.'); }
     finally { setOtpLoading(false); }
   };
