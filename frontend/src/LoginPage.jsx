@@ -373,6 +373,11 @@ export default function LoginPage({ setToken, onShowSignup }) {
       const res = await axios.post('/api/auth/member/send-otp', { phone });
       setOtpSent(true);
       setFirstName(res.data.member_name || '');
+      // Dev mode: backend returned the OTP directly (no SMS service configured)
+      if (res.data.dev_otp) {
+        setOtp(res.data.dev_otp);
+        setError(`Dev mode: OTP auto-filled (${res.data.dev_otp})`);
+      }
     } catch (err) { setError(err?.response?.data?.message || 'Failed to send OTP.'); }
     finally { setOtpLoading(false); }
   };

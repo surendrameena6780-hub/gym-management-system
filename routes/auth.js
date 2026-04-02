@@ -470,23 +470,63 @@ router.post('/member/send-otp', async (req, res) => {
             [otp, expiresAt, member.id]
         );
 
-        // Send via Twilio SMS if configured
-        if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_SMS_FROM) {
-            const twilio = require('twilio');
-            const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-            const toPhone = rawPhone.startsWith('+') ? rawPhone : `+91${phone}`;
-            await client.messages.create({
-                body: `Your GymVault OTP is: ${otp}. Valid for 10 minutes. Do not share this with anyone.`,
-                from: process.env.TWILIO_SMS_FROM,
-                to: toPhone,
-            });
-            console.log(`[OTP] SMS sent to ${toPhone}`);
-        } else {
-            // Dev mode — log OTP to console
-            console.log(`[DEV] Member OTP for ${phone}: ${otp}`);
+        // ── Send OTP: try each channel in priority order ───────────────────
+        const toPhone = `+91${phone}`;
+        const otpMsg  = `Your GymVault OTP is: ${otp}. Valid for 10 minutes. Do not share this.`;
+        let sent = false;
+
+        // 1. Fast2SMS (free Indian SMS — set FAST2SMS_API_KEY in .env)
+        if (!sent && process.env.FAST2SMS_API_KEY) {
+            try {
+                const axios = require('axios');
+                const res2 = await axios.post('https://www.fast2sms.com/dev/bulkV2', {
+                    route: 'otp',
+                    variables_values: otp,
+                    numbers: phone,
+                }, { headers: { authorization: process.env.FAST2SMS_API_KEY }, timeout: 8000 });
+                if (res2.data?.return === true) {
+                    console.log(`[OTP] Fast2SMS sent to ${phone}`);
+                    sent = true;
+                }
+            } catch (e) { console.error('[OTP] Fast2SMS failed:', e.message); }
         }
 
-        return res.json({ message: 'OTP sent successfully.', member_name: member.full_name.split(' ')[0] });
+        // 2. Twilio WhatsApp sandbox (free, no payment needed)
+        if (!sent && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM) {
+            try {
+                const twilio = require('twilio');
+                const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                await client.messages.create({
+                    body: otpMsg,
+                    from: process.env.TWILIO_WHATSAPP_FROM,
+                    to: `whatsapp:${toPhone}`,
+                });
+                console.log(`[OTP] WhatsApp sent to ${toPhone}`);
+                sent = true;
+            } catch (e) { console.error('[OTP] Twilio WhatsApp failed:', e.message); }
+        }
+
+        // 3. Twilio SMS (paid)
+        if (!sent && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_SMS_FROM) {
+            try {
+                const twilio = require('twilio');
+                const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                await client.messages.create({ body: otpMsg, from: process.env.TWILIO_SMS_FROM, to: toPhone });
+                console.log(`[OTP] SMS sent to ${toPhone}`);
+                sent = true;
+            } catch (e) { console.error('[OTP] Twilio SMS failed:', e.message); }
+        }
+
+        // 4. Dev fallback — print to console
+        if (!sent) {
+            console.log(`[DEV] OTP for ${phone}: ${otp}`);
+        }
+
+        return res.json({
+            message: sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).',
+            member_name: member.full_name.split(' ')[0],
+            dev_otp: (!sent && process.env.NODE_ENV !== 'production') ? otp : undefined,
+        });
     } catch (err) {
         console.error('MEMBER OTP SEND ERROR:', err.message);
         return res.status(500).json({ message: 'Failed to send OTP. Please try again.' });
