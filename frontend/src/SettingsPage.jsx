@@ -1018,7 +1018,7 @@ const loadRazorpayScript = () => {
                       <td className="px-6 py-4 font-bold text-slate-800">{accountData.full_name} <span className="block text-xs font-medium text-slate-400">{accountData.email}</span></td>
                       <td className="px-6 py-4"><span className="px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold uppercase tracking-wider">Owner</span></td>
                       <td className="px-6 py-4"><span className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold"><CheckCircle size={14}/> Active</span></td>
-                      <td className="px-6 py-4 text-slate-300 text-xs font-bold">â€”</td>
+                      <td className="px-6 py-4 text-slate-300 text-xs font-bold">—</td>
                       <td className="px-6 py-4 text-right text-slate-300 font-bold text-xs">Cannot edit owner</td>
                     </tr>
 

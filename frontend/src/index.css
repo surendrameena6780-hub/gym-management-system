@@ -726,3 +726,37 @@ html.gv-dark-mode .app-mobile-nav,
 html.gv-dark-mode .drawer-sheet {
   transition: background-color 0.25s ease, background 0.25s ease, border-color 0.25s ease !important;
 }
+
+/* ── Missing dark-mode overrides (borders, rings, slash-opacity bg ── */
+
+/* Avatar / element rings — slate ring appears bright silver without override */
+html.gv-dark-mode .ring-slate-200\/60,
+html.gv-dark-mode .ring-slate-200\/40,
+html.gv-dark-mode .ring-slate-200,
+html.gv-dark-mode .ring-slate-300 { --tw-ring-color: rgba(255,255,255,0.07) !important; }
+html.gv-dark-mode .ring-white     { --tw-ring-color: rgba(255,255,255,0.10) !important; }
+
+/* Slash-opacity colored backgrounds (NOT caught by base .bg-*-50 selector) */
+html.gv-dark-mode .bg-blue-50\/60   { background-color: rgba(59, 130, 246, 0.13) !important; }
+html.gv-dark-mode .bg-orange-50\/60 { background-color: rgba(249, 115, 22, 0.13) !important; }
+html.gv-dark-mode .bg-emerald-50\/60{ background-color: rgba(16, 185, 129, 0.13) !important; }
+html.gv-dark-mode .bg-purple-50\/60 { background-color: rgba(168, 85, 247, 0.13) !important; }
+html.gv-dark-mode .bg-indigo-50\/60 { background-color: rgba(99, 102, 241, 0.13) !important; }
+html.gv-dark-mode .bg-rose-50\/60   { background-color: rgba(244, 63, 94, 0.13) !important; }
+html.gv-dark-mode .bg-amber-50\/60  { background-color: rgba(245, 158, 11, 0.13) !important; }
+html.gv-dark-mode .bg-slate-50\/50  { background-color: var(--dm-raise) !important; }
+
+/* Deep-shade text not visible on dark bg (900-level) */
+html.gv-dark-mode .text-blue-900   { color: #93c5fd !important; }
+html.gv-dark-mode .text-purple-900 { color: #c4b5fd !important; }
+html.gv-dark-mode .text-blue-500   { color: #60a5fa !important; }
+html.gv-dark-mode .text-purple-500,
+html.gv-dark-mode .text-purple-600 { color: #a78bfa !important; }
+
+/* Darker border emphasis for containers — reduce white border glow */
+html.gv-dark-mode .border-white\/60,
+html.gv-dark-mode .border-white\/70,
+html.gv-dark-mode .border-white\/80 { border-color: rgba(255,255,255,0.05) !important; }
+
+/* outline-none / focus rings should not flash white in dark mode */
+html.gv-dark-mode *:focus-visible { outline-color: rgba(99,102,241,0.7) !important; }
