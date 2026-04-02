@@ -143,6 +143,8 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState('6M');
+  const [insightsPeakDays, setInsightsPeakDays] = useState('today');
+  const [insightsPeakHours, setInsightsPeakHours] = useState([]);
   const cacheRef = useRef(new Map());
 
   const sendWhatsApp = (member, type) => {
@@ -192,8 +194,24 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
     fetchInsights(dateRange, true);
   }, [token, dateRange, isActive, fetchInsights]);
 
+  useEffect(() => {
+    if (!token) return;
+    const url = insightsPeakDays === 'today'
+      ? '/api/attendance/peak-hours?today=true'
+      : `/api/attendance/peak-hours?days=${insightsPeakDays}`;
+    axios.get(url, { headers: { 'x-auth-token': token } })
+      .then((res) => {
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setInsightsPeakHours(rows.map((item) => ({
+          time: `${String(item.hour).padStart(2, '0')}:00`,
+          count: Number(item.count || 0),
+        })));
+      })
+      .catch(() => {});
+  }, [token, insightsPeakDays, isActive]);
+
   const hasRevenueGraph = analytics.revenue.graphData.some((item) => Number(item.revenue || 0) > 0);
-  const hasPeakHourData = analytics.attendance.heatmap.some((item) => Number(item.count || 0) > 0);
+  const hasPeakHourData = insightsPeakHours.some((item) => Number(item.count || 0) > 0);
 
   if (loading) return <PageLoader className="min-h-[56vh]" />;
 
@@ -346,12 +364,27 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
         {activeTab === 'attendance' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card className="p-6">
-              <h3 className="font-bold text-lg text-slate-900 mb-6">Peak Visiting Hours</h3>
+              <div className="flex items-center justify-between gap-3 mb-6">
+                <h3 className="font-bold text-lg text-slate-900">
+                  Peak Visiting Hours ({insightsPeakDays === 'today' ? 'Today' : insightsPeakDays === 7 ? '7D' : '30D'})
+                </h3>
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg shrink-0">
+                  {[['today', 'Today'], [7, '7D'], [30, '30D']].map(([val, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => setInsightsPeakDays(val)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all ${insightsPeakDays === val ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="h-[300px] w-full">
                 {hasPeakHourData ? (
                   isActive ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={analytics.attendance.heatmap}>
+                      <BarChart data={insightsPeakHours}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                         <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
                         <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none' }} />
@@ -360,7 +393,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
                     </ResponsiveContainer>
                   ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />
                 ) : (
-                  <div className="flex items-center justify-center h-full text-slate-400 font-bold">No attendance data yet.</div>
+                  <div className="flex items-center justify-center h-full text-slate-400 font-bold">No attendance data yet for this period.</div>
                 )}
               </div>
             </Card>

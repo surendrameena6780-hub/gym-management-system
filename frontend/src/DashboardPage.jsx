@@ -751,6 +751,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       }, headers);
       toast?.(`Checked in ${member.full_name}.`, 'success');
       await fetchData();
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'dashboard-checkin' } }));
     } catch (err) {
       toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Check-in failed.', 'error');
     } finally {

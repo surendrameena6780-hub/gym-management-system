@@ -207,6 +207,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       setShowModal(false);
       setFormData({ user_id: '', plan_id: '', amount_paid: '', total_amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
       await fetchData();
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
       toast?.("Payment recorded successfully!", "success");
     } catch (err) {
       toast?.("Error recording payment. Please try again.", "error");
@@ -226,6 +227,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
           });
           setShowReceipt(false);
           await fetchData();
+          window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
           toast?.("Transaction deleted. Member status reset.", "success");
         } catch (err) {
           console.error("Delete failed", err);

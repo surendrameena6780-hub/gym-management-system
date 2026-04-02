@@ -156,6 +156,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
 
   const [heatmap, setHeatmap] = useState([]);
   const [peakHours, setPeakHours] = useState([]);
+  const [peakHoursDays, setPeakHoursDays] = useState('today');
   const [inactiveDays, setInactiveDays] = useState(7);
   const [inactiveMembers, setInactiveMembers] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -167,23 +168,16 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
     : `${String(overview.peak_hour_today).padStart(2, '0')}:00`;
 
   const loadOverviewBundle = async () => {
-    const [overviewRes, feedRes, heatmapRes, peakRes, modeRes] = await Promise.all([
+    const [overviewRes, feedRes, heatmapRes, modeRes] = await Promise.all([
       axios.get('/api/attendance/overview', headers),
       axios.get('/api/attendance/feed?limit=25', headers),
       axios.get('/api/attendance/heatmap?days=84', headers),
-      axios.get('/api/attendance/peak-hours?days=30', headers),
       axios.get('/api/attendance/mode', headers),
     ]);
 
     setOverview(asObject(unwrapApiData(overviewRes.data), {}));
     setFeed(asArray(unwrapApiData(feedRes.data)));
     setHeatmap(asArray(unwrapApiData(heatmapRes.data)));
-    setPeakHours(
-      asArray(unwrapApiData(peakRes.data)).map((item) => ({
-        hourLabel: `${String(item.hour).padStart(2, '0')}:00`,
-        count: item.count || 0,
-      }))
-    );
 
     const modeData = asObject(unwrapApiData(modeRes.data), {});
     setModeSettings((prev) => ({
@@ -197,6 +191,19 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
     }));
 
     setCheckinMethod(modeData.attendance_mode || 'STAFF');
+  };
+
+  const loadPeakHours = async (period) => {
+    const url = period === 'today'
+      ? '/api/attendance/peak-hours?today=true'
+      : `/api/attendance/peak-hours?days=${period}`;
+    const res = await axios.get(url, headers);
+    setPeakHours(
+      asArray(unwrapApiData(res.data)).map((item) => ({
+        hourLabel: `${String(item.hour).padStart(2, '0')}:00`,
+        count: item.count || 0,
+      }))
+    );
   };
 
   const loadRecords = async () => {
@@ -222,7 +229,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
     if (!token) return;
     setLoading(true);
     try {
-      await Promise.all([loadOverviewBundle(), loadRecords(), loadInactive(), loadLeaderboard()]);
+      await Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDays), loadRecords(), loadInactive(), loadLeaderboard()]);
     } catch (_err) {
       toast?.('Failed to load attendance dashboard.', 'error');
     } finally {
@@ -233,6 +240,11 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
   useEffect(() => {
     loadAll();
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    loadPeakHours(peakHoursDays);
+  }, [peakHoursDays]);
 
   useEffect(() => {
     if (!token) return;
@@ -324,7 +336,21 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
 
       setWarningState(null);
       setCheckinNote('');
-      await Promise.all([loadOverviewBundle(), loadRecords(), loadInactive(), loadLeaderboard()]);
+
+      // Optimistic instant UI update
+      setOverview((prev) => ({ ...prev, today_checkins: (Number(prev.today_checkins) || 0) + 1 }));
+      setFeed((prev) => [{
+        id: `opt-${Date.now()}`,
+        full_name: selectedMember.full_name,
+        check_in_time: new Date().toISOString(),
+        checkin_method: checkinMethod,
+        staff_name: null,
+        was_override: false,
+      }, ...prev]);
+
+      // Fire full refresh in background (non-blocking so UI already feels snappy)
+      Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDays), loadRecords(), loadInactive(), loadLeaderboard()]);
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'attendance' } }));
     } catch (err) {
       const errorBody = asObject(err?.response?.data, {});
       const code = errorBody.code;
@@ -692,9 +718,22 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
           <div className="flex items-center gap-2 min-w-0">
             <Activity size={16} className="text-indigo-500 shrink-0" />
             <div className="min-w-0">
-              <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Peak Hour Analysis (30D)</h3>
+              <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">
+                Peak Hour Analysis ({peakHoursDays === 'today' ? 'Today' : peakHoursDays === 7 ? '7D' : '30D'})
+              </h3>
               <p className="text-[11px] text-slate-500 font-semibold mt-0.5">Hourly traffic and full weekday rankings stay accessible on every screen.</p>
             </div>
+          </div>
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg shrink-0">
+            {[['today', 'Today'], [7, '7D'], [30, '30D']].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setPeakHoursDays(val)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all ${peakHoursDays === val ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px] gap-4">

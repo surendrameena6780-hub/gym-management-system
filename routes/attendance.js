@@ -531,20 +531,37 @@ router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:re
     try {
         const gym_id = req.user.gym_id;
         const gymTimezone = await getGymTimezone(pool, gym_id);
-        const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 1), 90);
+        const todayOnly = req.query.today === 'true';
 
-        const result = await pool.query(
-            `SELECT
-                EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
-                COUNT(*)::INTEGER AS count
-             FROM attendance
-             WHERE gym_id = $1
-                             AND deleted_at IS NULL
-               AND check_in_time >= NOW() - ($3::int || ' day')::interval
-             GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
-             ORDER BY hour ASC`,
-            [gym_id, gymTimezone, days]
-        );
+        let result;
+        if (todayOnly) {
+            result = await pool.query(
+                `SELECT
+                    EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
+                    COUNT(*)::INTEGER AS count
+                 FROM attendance
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND timezone($2, check_in_time)::date = timezone($2, NOW())::date
+                 GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
+                 ORDER BY hour ASC`,
+                [gym_id, gymTimezone]
+            );
+        } else {
+            const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 1), 90);
+            result = await pool.query(
+                `SELECT
+                    EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
+                    COUNT(*)::INTEGER AS count
+                 FROM attendance
+                 WHERE gym_id = $1
+                   AND deleted_at IS NULL
+                   AND check_in_time >= NOW() - ($3::int || ' day')::interval
+                 GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
+                 ORDER BY hour ASC`,
+                [gym_id, gymTimezone, days]
+            );
+        }
 
         res.json(result.rows);
     } catch (err) {
