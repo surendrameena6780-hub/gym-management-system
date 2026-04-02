@@ -462,8 +462,10 @@ router.post('/member/send-otp', async (req, res) => {
         }
 
         const member = memberResult.rows[0];
-        const otp = String(Math.floor(100000 + Math.random() * 900000));
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        // OTP bypass — set MEMBER_OTP_BYPASS=false in env to require real OTP
+        const bypassMode = process.env.MEMBER_OTP_BYPASS !== 'false';
+        const otp = bypassMode ? 'BYPASS' : String(Math.floor(100000 + Math.random() * 900000));
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await pool.query(
             'UPDATE members SET otp_code = $1, otp_expires_at = $2 WHERE id = $3',
@@ -518,15 +520,14 @@ router.post('/member/send-otp', async (req, res) => {
         }
 
         // 4. Dev fallback — print to console
-        if (!sent) {
+        if (!sent && !bypassMode) {
             console.log(`[DEV] OTP for ${phone}: ${otp}`);
         }
 
-        const bypass = process.env.OTP_BYPASS === 'true';
         return res.json({
-            message: bypass ? 'OTP bypassed — tap Verify to continue.' : (sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).'),
+            message: bypassMode ? 'Logging you in...' : (sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).'),
             member_name: member.full_name.split(' ')[0],
-            dev_otp: (bypass || (!sent && process.env.NODE_ENV !== 'production')) ? otp : undefined,
+            dev_otp: bypassMode ? otp : undefined,
         });
     } catch (err) {
         console.error('MEMBER OTP SEND ERROR:', err.message);
@@ -564,9 +565,9 @@ router.post('/member/verify-otp', async (req, res) => {
 
         const member = memberResult.rows[0];
 
-        // OTP_BYPASS=true skips code verification (dev/testing mode)
-        const bypass = process.env.OTP_BYPASS === 'true';
-        if (!bypass) {
+        // Skip OTP check if bypass mode (member.otp_code === 'BYPASS')
+        const isBypass = member.otp_code === 'BYPASS';
+        if (!isBypass) {
             if (!member.otp_code || member.otp_code !== otp) {
                 return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
             }
