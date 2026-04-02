@@ -7,9 +7,11 @@
 
 -- 1. GYMS: The top-level tenant bucket
 CREATE TABLE IF NOT EXISTS gyms (
-    id         SERIAL PRIMARY KEY,
-    name       VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL,
+    city            VARCHAR(100),
+    branches_count  INTEGER DEFAULT 1,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 2. USERS: Gym owners and staff who log in
@@ -278,6 +280,12 @@ ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARC
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
+
+-- =============================================================
+-- SIGNUP EXPANSION: Gym city, branch count
+-- =============================================================
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS city            VARCHAR(100);
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branches_count  INTEGER DEFAULT 1;
 
 -- Attendance platform configuration (supports STAFF/QR/SELF/RFID modes)
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS attendance_mode VARCHAR(20) DEFAULT 'STAFF';

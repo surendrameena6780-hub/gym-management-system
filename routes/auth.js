@@ -9,18 +9,53 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.en
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
 }
 
+// POST /api/auth/check-email — real-time duplicate check (called on blur during signup)
+router.post('/check-email', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ message: 'Email required.' });
+    try {
+        const existing = await pool.query('SELECT id, gym_id FROM users WHERE email = $1', [email]);
+        if (existing.rows.length === 0) return res.json({ available: true });
+        // Ghost check: if their gym was deleted treat account as available
+        const gymId = existing.rows[0].gym_id;
+        if (!gymId) return res.json({ available: true });
+        const gymExists = await pool.query('SELECT id FROM gyms WHERE id = $1', [gymId]);
+        if (gymExists.rows.length === 0) return res.json({ available: true });
+        return res.status(409).json({ message: 'An account with this email already exists.' });
+    } catch (err) {
+        return res.status(500).json({ message: 'Check failed.' });
+    }
+});
+
+// POST /api/auth/check-phone — real-time duplicate check for owner phone
+router.post('/check-phone', async (req, res) => {
+    const phone = String(req.body?.phone || '').replace(/\D/g, '').slice(-10);
+    if (!phone || phone.length < 10) return res.status(400).json({ message: 'Valid 10-digit phone required.' });
+    try {
+        const existing = await pool.query('SELECT id FROM users WHERE phone LIKE $1', [`%${phone}`]);
+        if (existing.rows.length > 0) return res.status(409).json({ message: 'This phone number is already registered.' });
+        return res.json({ available: true });
+    } catch (err) {
+        return res.status(500).json({ message: 'Check failed.' });
+    }
+});
+
 // POST /api/auth/register-owner
 // Creates a new gym + owner account securely. Includes Self-Healing for deleted HQ accounts.
 router.post('/register-owner', async (req, res) => {
-    const gym_name = String(req.body?.gym_name || '').trim();
-    const full_name = String(req.body?.full_name || '').trim();
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
+    const gym_name      = String(req.body?.gym_name  || '').trim();
+    const full_name     = String(req.body?.full_name || '').trim();
+    const email         = String(req.body?.email     || '').trim().toLowerCase();
+    const password      = String(req.body?.password  || '');
+    const owner_phone   = String(req.body?.owner_phone   || '').replace(/\D/g, '').slice(-10);
+    const gym_address   = req.body?.gym_address   ? String(req.body.gym_address).trim()   : null;
+    const gym_city      = req.body?.gym_city      ? String(req.body.gym_city).trim()      : null;
+    const branches_count = parseInt(req.body?.branches_count) || 1;
+    const selected_plan = ['basic', 'pro', 'elite'].includes(req.body?.selected_plan) ? req.body.selected_plan : 'basic';
 
     if (!gym_name || !full_name || !email || !password) {
-        return res.status(400).json({ message: "All fields are required." });
+        return res.status(400).json({ message: 'All fields are required.' });
     }
-
     if (password.length < 8) {
         return res.status(400).json({ message: "Password must be at least 8 characters." });
     }
@@ -41,7 +76,16 @@ router.post('/register-owner', async (req, res) => {
             } else {
                 // The gym still exists, so it's a real duplicate. Block it.
                 await pool.query('ROLLBACK');
-                return res.status(400).json({ message: "An account with this email already exists." });
+                return res.status(400).json({ message: 'An account with this email already exists.' });
+            }
+        }
+
+        // Duplicate phone check (if phone provided)
+        if (owner_phone && owner_phone.length === 10) {
+            const existingPhone = await pool.query('SELECT id FROM users WHERE phone LIKE $1', [`%${owner_phone}`]);
+            if (existingPhone.rows.length > 0) {
+                await pool.query('ROLLBACK');
+                return res.status(400).json({ message: 'This phone number is already registered.' });
             }
         }
 
@@ -50,16 +94,17 @@ router.post('/register-owner', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const newGym = await pool.query(
-            'INSERT INTO gyms (name) VALUES ($1) RETURNING id',
-            [gym_name]
+            `INSERT INTO gyms (name, address, city, branches_count, current_plan)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+            [gym_name, gym_address, gym_city, branches_count, selected_plan]
         );
         const gymId = newGym.rows[0].id;
 
         const newUser = await pool.query(
-            `INSERT INTO users (gym_id, full_name, email, password_hash, role, staff_role, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO users (gym_id, full_name, email, phone, password_hash, role, staff_role, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING id`,
-            [gymId, full_name, email, hashedPassword, 'OWNER', 'OWNER', true]
+            [gymId, full_name, email, owner_phone || null, hashedPassword, 'OWNER', 'OWNER', true]
         );
 
         await pool.query('COMMIT');

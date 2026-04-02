@@ -531,11 +531,14 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
           {/* Error banner */}
           {error && (
-            <div className="mb-5 px-4 py-3 rounded-xl text-sm font-semibold text-rose-300"
+            <div className="mb-5 px-4 py-3 rounded-xl text-sm font-semibold text-rose-300 gv-fade-in"
               style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.2)' }}>
               {error}
             </div>
           )}
+
+          {/* Animated tab content */}
+          <div key={tab} className="gv-fade-in">
 
           {/* ════════ OWNER FORM ════════ */}
           {tab === 'OWNER' && (
@@ -670,6 +673,8 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
           {/* ════════ MEMBER DASHBOARD after OTP ════════ */}
           {/* Handled full-screen above — nothing to render here */}
+
+          </div>{/* end animated tab content */}
 
           <p className="text-center text-slate-700 text-[10px] font-medium mt-8">
             Authorized Personnel Only &nbsp;·&nbsp; GymVault v2.0
