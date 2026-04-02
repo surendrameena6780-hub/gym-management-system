@@ -428,6 +428,9 @@ html.gv-dark-mode {
 /* ── Page shell ── */
 html.gv-dark-mode body { background: var(--dm-bg); color: var(--dm-t1); }
 html.gv-dark-mode #root { background: var(--dm-bg) !important; }
+html.gv-dark-mode .app-scroll-shell { background: var(--dm-bg) !important; }
+/* page content wrapper divs inside the scroll shell */
+html.gv-dark-mode .app-scroll-shell > div { background: transparent !important; }
 
 /* ── App chrome ── */
 html.gv-dark-mode .app-header-safe {
@@ -436,6 +439,10 @@ html.gv-dark-mode .app-header-safe {
   backdrop-filter: blur(32px) saturate(1.5) !important;
   -webkit-backdrop-filter: blur(32px) saturate(1.5) !important;
 }
+/* Header breadcrumb text */
+html.gv-dark-mode .app-header-safe span { color: var(--dm-t2) !important; }
+html.gv-dark-mode .app-header-safe span.font-bold,
+html.gv-dark-mode .app-header-safe span.text-slate-800 { color: var(--dm-t1) !important; }
 html.gv-dark-mode .app-mobile-nav {
   background: rgba(9, 11, 20, 0.98) !important;
   border-top: 1px solid var(--dm-border) !important;
@@ -607,6 +614,25 @@ html.gv-dark-mode .gv-skeleton {
   background: linear-gradient(90deg, var(--dm-surface) 25%, var(--dm-raise) 50%, var(--dm-surface) 75%);
   background-size: 800px 100%;
 }
+
+/* ── PageLoader dark mode ── */
+html.gv-dark-mode .gv-page-loader {
+  background: var(--dm-surface) !important;
+  border-color: var(--dm-border) !important;
+  box-shadow: none !important;
+}
+/* spinner rings go white in dark mode */
+html.gv-dark-mode .gv-page-loader [style*="border-t-black"],
+html.gv-dark-mode .gv-page-loader [style*="border-r-black"] {
+  border-top-color: rgba(255,255,255,0.85) !important;
+  border-right-color: rgba(255,255,255,0.5) !important;
+}
+html.gv-dark-mode .gv-page-loader [style*="border-b-black"],
+html.gv-dark-mode .gv-page-loader [style*="border-l-black"] {
+  border-bottom-color: rgba(255,255,255,0.3) !important;
+  border-left-color: rgba(255,255,255,0.15) !important;
+}
+html.gv-dark-mode .gv-page-loader .text-slate-400 { color: var(--dm-t2) !important; }
 
 /* ── Smooth transition when toggling ── */
 html.gv-dark-mode .bg-white,

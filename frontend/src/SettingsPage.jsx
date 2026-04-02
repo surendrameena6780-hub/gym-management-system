@@ -80,9 +80,9 @@ const loadRazorpayScript = () => {
     });
 };
 
-// ðŸš¨ FIX: Added defaultTab to the props here!
+// FIX: Added defaultTab to the props here!
   const SettingsPage = ({ toast, token, defaultTab }) => { 
-    const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
+  const [razorpayKey, setRazorpayKey] = useState('');
   
   const [activeTab, setActiveTab] = useState(() => normalizeSettingsTab(defaultTab));
   const [mobileMenuVisible, setMobileMenuVisible] = useState(() => {
@@ -109,6 +109,14 @@ const loadRazorpayScript = () => {
   
   const [billingCycle, setBillingCycle] = useState('monthly');
   const [autoRenew, setAutoRenew] = useState(true);
+
+  // Fetch Razorpay public key from backend (avoids need for VITE_ build-time env var)
+  useEffect(() => {
+    if (!token) return;
+    axios.get('/api/billing/config', { headers: { 'x-auth-token': token } })
+      .then(res => setRazorpayKey(res.data.razorpay_key_id || ''))
+      .catch(() => {});
+  }, [token]);
 
   const fileInputRef = useRef(null); 
   const [profileImage, setProfileImage] = useState(null); 
@@ -1143,12 +1151,12 @@ const loadRazorpayScript = () => {
               {/* ── Plan carousel (swipeable on mobile, grid on desktop) ── */}
               <div className="relative mb-10">
                 {/* scroll hint arrows — mobile only */}
-                <div className="absolute left-0 top-0 bottom-4 w-6 bg-gradient-to-r from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
-                <div className="absolute right-0 top-0 bottom-4 w-6 bg-gradient-to-l from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="absolute left-0 top-9 bottom-4 w-6 bg-gradient-to-r from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="absolute right-0 top-9 bottom-4 w-6 bg-gradient-to-l from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
 
                 {/* the scroll container becomes a grid on lg+ */}
                 <div
-                  className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 scroll-smooth lg:grid lg:grid-cols-4 lg:overflow-visible lg:snap-none"
+                  className="flex gap-4 overflow-x-auto snap-x snap-mandatory pt-6 pb-4 scroll-smooth lg:grid lg:grid-cols-4 lg:overflow-visible lg:snap-none lg:pt-6"
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
                 >
                   {SAAS_PLANS[billingCycle].map((plan) => {

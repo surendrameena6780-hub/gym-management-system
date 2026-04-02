@@ -20,7 +20,7 @@ const loaderStyles = `
 
 const PageLoader = ({ className = '', label = '' }) => (
   <div
-    className={`flex w-full items-center justify-center rounded-[32px] border border-white/70 bg-white/82 px-4 py-6 shadow-[0_22px_50px_-34px_rgba(79,70,229,0.18)] backdrop-blur-sm ${className}`}
+    className={`gv-page-loader flex w-full items-center justify-center rounded-[32px] border border-white/70 bg-white/82 px-4 py-6 shadow-[0_22px_50px_-34px_rgba(79,70,229,0.18)] backdrop-blur-sm ${className}`}
     style={{ minHeight: 'calc(var(--app-viewport-height) - var(--safe-area-top) - 4rem - var(--app-bottom-ui-offset) - 2rem)' }}
   >
     <style>{loaderStyles}</style>

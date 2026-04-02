@@ -41,6 +41,13 @@ const resolveSaasPrice = (planTier, cycle) => {
     return { planTier: normalizedPlan, cycle: normalizedCycle, amountInr: cycleMap[normalizedPlan] };
 };
 
+// --- 0. PUBLIC CONFIG — returns the Razorpay key_id to authenticated frontend ---
+router.get('/config', (req, res) => {
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    if (!keyId) return res.status(503).json({ error: 'Payment gateway not configured.' });
+    res.json({ razorpay_key_id: keyId });
+});
+
 // --- 1. CREATE DYNAMIC SAAS ORDER ---
 router.post('/create-order', async (req, res) => {
     try {
