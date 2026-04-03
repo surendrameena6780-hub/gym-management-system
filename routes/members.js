@@ -62,9 +62,13 @@ const tableHasColumn = async (tableName, columnName) => {
     return columns.has(columnName);
 };
 
-const normalizeExternalUrl = (value) => {
+const normalizeDocumentUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
+
+    if (/^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=\s]+$/i.test(raw)) {
+        return raw;
+    }
 
     const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
 
@@ -532,7 +536,7 @@ router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:re
             tableHasColumn('member_documents', 'notes'),
             tableHasColumn('member_documents', 'uploaded_at'),
         ]);
-        const notesSelect = hasNotesColumn ? 'md.notes' : "NULLIF(md.doc_name, '')";
+        const notesSelect = hasNotesColumn ? 'md.notes' : 'NULL';
         const uploadedAtSelect = hasUploadedAtColumn ? 'md.uploaded_at' : 'md.created_at';
         const result = await pool.query(
             `SELECT md.*, ${notesSelect} AS notes, ${uploadedAtSelect} AS uploaded_at
@@ -547,12 +551,13 @@ router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:re
 router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        const { doc_type, doc_url, notes } = req.body || {};
+        const { doc_type, doc_url, doc_name, notes } = req.body || {};
         const normalizedDocType = String(doc_type || '').trim();
-        const normalizedDocUrl = normalizeExternalUrl(doc_url);
+        const normalizedDocUrl = normalizeDocumentUrl(doc_url);
+        const normalizedDocName = String(doc_name || '').trim();
         const normalizedNotes = String(notes || '').trim();
         if (!normalizedDocType || !normalizedDocUrl) {
-            return res.status(400).json({ error: 'doc_type and a valid doc_url are required' });
+            return res.status(400).json({ error: 'doc_type and a valid document are required' });
         }
         const [hasNotesColumn, hasDocNameColumn, hasUploadedByColumn] = await Promise.all([
             tableHasColumn('member_documents', 'notes'),
@@ -564,9 +569,10 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
         if (hasNotesColumn) {
             columns.push('notes');
             values.push(normalizedNotes || null);
-        } else if (hasDocNameColumn) {
+        }
+        if (hasDocNameColumn) {
             columns.push('doc_name');
-            values.push(normalizedNotes);
+            values.push(normalizedDocName || normalizedDocType);
         }
         if (hasUploadedByColumn) {
             columns.push('uploaded_by');

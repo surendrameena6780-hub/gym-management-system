@@ -383,7 +383,7 @@ router.get('/', auth, async (req, res) => {
 
         const userRes = await pool.query('SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1', [req.user.id]);
         const gymRes = await pool.query(
-            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, interface_reduce_motion, interface_compact_mode, interface_dark_mode FROM gyms WHERE id = $1', 
+            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, grace_period_days, interface_reduce_motion, interface_compact_mode, interface_dark_mode FROM gyms WHERE id = $1', 
             [req.user.gym_id]
         );
 

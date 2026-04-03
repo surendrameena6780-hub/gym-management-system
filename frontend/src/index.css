@@ -255,12 +255,12 @@ html.gv-compact-ui main.app-scroll-shell > div {
 .drawer-sheet {
   position: fixed;
   left: 10px; right: 10px;
+  top: calc(var(--safe-area-top) + 4.75rem);
   bottom: calc(var(--mobile-nav-offset) + 6px);
   z-index: 80;
   background: #fff;
   border-radius: 24px;
   box-shadow: 0 8px 60px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.05);
-  max-height: calc(var(--app-viewport-height) - var(--mobile-nav-offset) - var(--safe-area-top) - 1rem);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -300,6 +300,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
   .drawer-sheet {
     left: 50%; right: auto;
+    top: auto;
     bottom: 1.5rem;
     transform: translateX(-50%) translateY(calc(100% + 3rem));
     width: 460px;

@@ -185,7 +185,7 @@ const loadRazorpayScript = () => {
   const [gymData, setGymData] = useState({ 
     name: '', phone: '', email: '', address: '', 
     currency: '₹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
-    saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: 'pro', saas_billing_cycle: 'monthly'
+    saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: 'pro', saas_billing_cycle: 'monthly', grace_period_days: 3
   });
 
   const [usageData, setUsageData] = useState({
@@ -310,7 +310,8 @@ const loadRazorpayScript = () => {
             saas_status: res.data.gym.saas_status || 'FREE_TRIAL',
             saas_valid_until: res.data.gym.saas_valid_until || '',
             current_plan: res.data.gym.current_plan || 'pro',
-            saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly'
+            saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly',
+            grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3)
           }));
 
           const nextInterfacePreferences = {
@@ -847,26 +848,42 @@ const loadRazorpayScript = () => {
 
   // --- SMART TIME-AWARE STATUS CALCULATOR ---
   // This reads the clock directly to enforce lockouts instantly, even if backend text hasn't updated yet.
-  const getDerivedStatus = () => {
+  const getBillingWindow = () => {
+      const graceDays = Math.max(0, Number(gymData.grace_period_days || 3));
       if (!gymData.saas_valid_until) {
-        // No date set at all — genuinely new trial
-        return gymData.saas_status === 'EXPIRED' ? 'EXPIRED' : 'FREE_TRIAL';
+        const fallbackStatus = gymData.saas_status === 'EXPIRED' ? 'EXPIRED' : 'FREE_TRIAL';
+        return { status: fallbackStatus, daysUntilExpiry: null, graceDays, isExpiringSoon: false, expiresToday: false, graceDaysRemaining: graceDays };
       }
 
-      const validUntil = new Date(gymData.saas_valid_until);
-      const now = new Date();
-      const diffDays = (validUntil.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+      const expiry = new Date(gymData.saas_valid_until);
+      if (Number.isNaN(expiry.getTime())) {
+        const fallbackStatus = gymData.saas_status === 'EXPIRED' ? 'EXPIRED' : 'FREE_TRIAL';
+        return { status: fallbackStatus, daysUntilExpiry: null, graceDays, isExpiringSoon: false, expiresToday: false, graceDaysRemaining: graceDays };
+      }
 
-      // Trial or paid subscription expired
-      if (diffDays <= -3 || gymData.saas_status === 'EXPIRED') return 'EXPIRED';
-      if (diffDays < 0) return 'GRACE_PERIOD';
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const expiryDay = new Date(expiry.getFullYear(), expiry.getMonth(), expiry.getDate());
+      const dayMs = 1000 * 60 * 60 * 24;
+      const daysUntilExpiry = Math.round((expiryDay.getTime() - todayStart.getTime()) / dayMs);
 
-      // Still within valid period
-      if (gymData.saas_status === 'FREE_TRIAL') return 'FREE_TRIAL';
-      return 'ACTIVE';
+      let status = 'ACTIVE';
+      if (gymData.saas_status === 'EXPIRED' || daysUntilExpiry < -graceDays) status = 'EXPIRED';
+      else if (daysUntilExpiry < 0) status = 'GRACE_PERIOD';
+      else if (gymData.saas_status === 'FREE_TRIAL') status = 'FREE_TRIAL';
+
+      return {
+        status,
+        daysUntilExpiry,
+        graceDays,
+        isExpiringSoon: daysUntilExpiry >= 0 && daysUntilExpiry <= 1,
+        expiresToday: daysUntilExpiry === 0,
+        graceDaysRemaining: daysUntilExpiry < 0 ? Math.max(0, graceDays + daysUntilExpiry) : graceDays,
+      };
   };
 
-  const realStatus = getDerivedStatus();
+  const billingWindow = getBillingWindow();
+  const realStatus = billingWindow.status;
   const isLockedOut = realStatus === 'EXPIRED';
 
   // Force Tab to Billing if Locked Out
@@ -1420,10 +1437,20 @@ const loadRazorpayScript = () => {
                       <AlertTriangle className="text-amber-500 mt-0.5" size={20} />
                       <div>
                           <h4 className="font-bold text-amber-800 text-sm">Action Required: Grace Period Ending</h4>
-                          <p className="text-xs text-amber-700 mt-0.5">Your subscription expired on {formatExpiry(gymData.saas_valid_until)}. You have a few days to renew before your vault is locked.</p>
+                      <p className="text-xs text-amber-700 mt-0.5">Your subscription expired on {formatExpiry(gymData.saas_valid_until)}. {billingWindow.graceDaysRemaining > 0 ? `${billingWindow.graceDaysRemaining} day${billingWindow.graceDaysRemaining === 1 ? '' : 's'} left before your vault is locked.` : 'Renew now to avoid lockout.'}</p>
                       </div>
                   </div>
               )}
+
+                {!isLockedOut && realStatus !== 'GRACE_PERIOD' && billingWindow.isExpiringSoon && (
+                  <div className="mb-8 bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3 animate-in slide-in-from-top-4">
+                    <AlertTriangle className="text-amber-500 mt-0.5" size={20} />
+                    <div>
+                      <h4 className="font-bold text-amber-800 text-sm">Billing Warning</h4>
+                      <p className="text-xs text-amber-700 mt-0.5">{realStatus === 'FREE_TRIAL' ? `Your free trial ${billingWindow.expiresToday ? 'ends today' : 'ends tomorrow'}. Choose a plan now to avoid interruption.` : `Your subscription ${billingWindow.expiresToday ? 'ends today' : 'ends tomorrow'}. Renew now to avoid entering grace period.`}</p>
+                    </div>
+                  </div>
+                )}
 
               {/* FREE TRIAL BANNER */}
               {realStatus === 'FREE_TRIAL' && (

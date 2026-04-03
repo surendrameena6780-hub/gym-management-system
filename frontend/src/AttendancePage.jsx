@@ -33,6 +33,8 @@ import {
   Copy,
   Fingerprint,
   QrCode,
+  RefreshCw,
+  ScanLine,
   Search,
   Shield,
   Smartphone,

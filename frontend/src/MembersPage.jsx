@@ -84,20 +84,6 @@ const getApiErrorMessage = (error, fallback) => {
   return fallback;
 };
 
-const normalizeExternalLink = (value) => {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-
-  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
-  try {
-    const parsed = new URL(withProtocol);
-    if (!/^https?:$/i.test(parsed.protocol)) return '';
-    return parsed.toString();
-  } catch (_err) {
-    return '';
-  }
-};
-
 const normalizePhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
 const isValidPhoneInput = (value) => /^\d{10}$/.test(normalizePhoneInput(value));
 const toDateInputValue = (value) => {
@@ -110,8 +96,10 @@ const toDateInputValue = (value) => {
   return `${year}-${month}-${day}`;
 };
 const MAX_PROFILE_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_MEMBER_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const PROFILE_IMAGE_MAX_DIMENSION = 1600;
 const allowedProfileImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
+const allowedMemberDocumentMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
 const getProfileImageTypeError = (file) => {
   const mimeType = String(file?.type || '').toLowerCase();
   if (mimeType && !allowedProfileImageMimeTypes.has(mimeType)) {
@@ -210,6 +198,13 @@ const normalizeProfileImageFile = async (file) => {
   }
 
   if (Number(file.size || 0) <= MAX_PROFILE_IMAGE_BYTES) {
+
+  const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Unable to read file.'));
+    reader.readAsDataURL(file);
+  });
     return { file, error: null, wasCompressed: false };
   }
 
@@ -314,7 +309,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [newNote, setNewNote] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [docForm, setDocForm] = useState({ doc_type: 'ID Proof', doc_url: '', notes: '' });
+  const [docForm, setDocForm] = useState({ doc_type: 'ID Proof', doc_url: '', doc_name: '', notes: '' });
   const [docSaving, setDocSaving] = useState(false);
   const [savingOnboarding, setSavingOnboarding] = useState(false);
   const [onboardingForm, setOnboardingForm] = useState({
@@ -329,6 +324,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const membersListRef = useRef(null);
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
+  const docCameraInputRef = useRef(null);
+  const docGalleryInputRef = useRef(null);
 
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
@@ -418,10 +415,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   };
   const handleAddDocument = async () => {
     const normalizedDocType = String(docForm.doc_type || '').trim();
-    const normalizedDocUrl = normalizeExternalLink(docForm.doc_url);
+    const normalizedDocUrl = String(docForm.doc_url || '').trim();
     if (!selectedMember) return;
     if (!normalizedDocType || !normalizedDocUrl) {
-      toast?.('Enter a document type and a valid link.', 'warning');
+      toast?.('Choose a document from camera or gallery first.', 'warning');
       return;
     }
     setDocSaving(true);
@@ -429,9 +426,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       await axios.post(`/api/members/${selectedMember.id}/documents`, {
         doc_type: normalizedDocType,
         doc_url: normalizedDocUrl,
+        doc_name: String(docForm.doc_name || '').trim(),
         notes: docForm.notes.trim(),
       }, { headers: { 'x-auth-token': token } });
-      setDocForm({ doc_type: 'ID Proof', doc_url: '', notes: '' });
+      setDocForm({ doc_type: 'ID Proof', doc_url: '', doc_name: '', notes: '' });
       fetchMemberDocs(selectedMember.id);
       toast?.('Document added', 'success');
     } catch (err) {
@@ -439,6 +437,43 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     } finally {
       setDocSaving(false);
     }
+  };
+  const handleSelectDocumentFile = async (event) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = '';
+    if (!selectedFile) return;
+
+    const mimeType = String(selectedFile.type || '').toLowerCase();
+    if (!allowedMemberDocumentMimeTypes.has(mimeType)) {
+      toast?.('Only JPG, JPEG, PNG, and WEBP documents are supported.', 'warning');
+      return;
+    }
+
+    try {
+      const normalized = await normalizeProfileImageFile(selectedFile);
+      if (normalized.error || !normalized.file) {
+        toast?.(normalized.error || 'Unable to process this document.', 'error');
+        return;
+      }
+
+      if (Number(normalized.file.size || 0) > MAX_MEMBER_DOCUMENT_BYTES) {
+        toast?.('Document is too large. Please keep it under 2MB.', 'warning');
+        return;
+      }
+
+      const dataUrl = await readFileAsDataUrl(normalized.file);
+      setDocForm((prev) => ({
+        ...prev,
+        doc_url: dataUrl,
+        doc_name: normalized.file.name || selectedFile.name || 'document.jpg',
+      }));
+      toast?.('Document ready to upload.', 'success');
+    } catch (_err) {
+      toast?.('Unable to read this document. Please try another image.', 'error');
+    }
+  };
+  const clearSelectedDocument = () => {
+    setDocForm((prev) => ({ ...prev, doc_url: '', doc_name: '' }));
   };
   const handleDeleteDocument = (docId) => {
     if (!selectedMember) return;
@@ -529,7 +564,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         </div>
         <div className="min-w-0">
           <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Date of Birth</label>
-          <input type="date" value={onboardingForm.date_of_birth} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, date_of_birth: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
+          <input type="date" value={onboardingForm.date_of_birth} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, date_of_birth: event.target.value }))} className="block w-full min-w-0 max-w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" style={{ WebkitAppearance: 'none', appearance: 'none' }} disabled={!canWriteMembers} />
         </div>
         <div className="min-w-0">
           <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Blood Group</label>
@@ -565,7 +600,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     if (showDetailsModal && selectedMember?.id) {
       setDrawerTab('profile');
       syncOnboardingForm(selectedMember);
-      setDocForm({ doc_type: 'ID Proof', doc_url: '', notes: '' });
+      setDocForm({ doc_type: 'ID Proof', doc_url: '', doc_name: '', notes: '' });
       fetchMemberNotes(selectedMember.id);
       fetchMemberDocs(selectedMember.id);
       fetchMemberWaivers(selectedMember.id);
@@ -1426,7 +1461,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </div>
 
             {drawerTab === 'profile' && (<>
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="w-7 h-7 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center shrink-0"><Phone size={12} /></div>
@@ -1450,7 +1485,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </div>
 
             {/* stats row */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100 text-center">
                 <p className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Visits</p>
                 <p className="text-base font-black text-blue-900">{selectedMember.total_visits || 0}</p>
@@ -1585,11 +1620,29 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               <div className="space-y-3">
                 {canWriteMembers && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Add Document Link</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Upload Document</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input value={docForm.doc_type} onChange={(event) => setDocForm((prev) => ({ ...prev, doc_type: event.target.value }))} className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700" placeholder="ID Proof" />
-                      <input value={docForm.doc_url} onChange={(event) => setDocForm((prev) => ({ ...prev, doc_url: event.target.value }))} className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700" placeholder="Drive / cloud link" />
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-500 min-h-[42px] flex items-center min-w-0">
+                        <span className="truncate">{docForm.doc_name || 'No file selected'}</span>
+                      </div>
                     </div>
+                    <input ref={docCameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleSelectDocumentFile} />
+                    <input ref={docGalleryInputRef} type="file" accept="image/*" className="hidden" onChange={handleSelectDocumentFile} />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button type="button" onClick={() => docCameraInputRef.current?.click()} className="w-full py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black hover:bg-indigo-100 transition-all">
+                        Open Camera
+                      </button>
+                      <button type="button" onClick={() => docGalleryInputRef.current?.click()} className="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black hover:bg-slate-50 transition-all">
+                        Choose From Gallery
+                      </button>
+                    </div>
+                    {docForm.doc_name ? (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                        <p className="text-xs font-bold text-emerald-700 truncate">Ready: {docForm.doc_name}</p>
+                        <button type="button" onClick={clearSelectedDocument} className="text-[10px] font-black uppercase tracking-wider text-rose-500 hover:text-rose-700 shrink-0">Clear</button>
+                      </div>
+                    ) : null}
                     <textarea value={docForm.notes} onChange={(event) => setDocForm((prev) => ({ ...prev, notes: event.target.value }))} rows={2} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 resize-none" placeholder="Optional note" />
                     <button onClick={handleAddDocument} disabled={docSaving} className="w-full py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-60">
                       {docSaving ? 'Saving...' : 'Attach Document'}
@@ -1602,6 +1655,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   <div key={d.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-slate-700">{d.doc_type}</p>
+                      {d.doc_name && <p className="text-xs text-slate-500 mt-0.5 truncate">{d.doc_name}</p>}
                       {d.notes && <p className="text-xs text-slate-400 mt-0.5">{d.notes}</p>}
                       <p className="text-[10px] text-slate-400 mt-1">{d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('en-GB') : ''}</p>
                     </div>
