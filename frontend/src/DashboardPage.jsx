@@ -786,6 +786,77 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     setShowBroadcastModal(true);
   };
 
+  const openBroadcastDraftForMembers = ({ memberIds = [], message = '', audience = 'All' }) => {
+    const normalizedIds = Array.from(new Set(
+      asArray(memberIds)
+        .map((id) => Number.parseInt(id, 10))
+        .filter((id) => Number.isInteger(id))
+    ));
+    setBroadcastAudience(audience);
+    setBroadcastTemplateKey('');
+    setBroadcastSearch('');
+    setBroadcastCustomIds(normalizedIds);
+    setBroadcastMessage(message);
+    setShowBroadcastModal(true);
+  };
+
+  const normalizeActionMembers = (sourceMembers) => {
+    const uniqueMembers = new Map();
+    asArray(sourceMembers).forEach((member) => {
+      const id = Number.parseInt(member?.id, 10);
+      if (!Number.isInteger(id) || uniqueMembers.has(id)) return;
+      uniqueMembers.set(id, member);
+    });
+    return Array.from(uniqueMembers.values());
+  };
+
+  const buildSmartMemberCta = ({
+    members: sourceMembers,
+    singleFilter = 'All',
+    singleOptions = {},
+    singleCta = 'Open Member',
+    bulkCta = 'Open Bulk Reminder',
+    bulkMessage = '',
+    bulkAudience = 'All',
+    fallbackAction,
+  }) => {
+    const members = normalizeActionMembers(sourceMembers);
+    const count = members.length;
+
+    if (count === 0) {
+      return {
+        members,
+        count,
+        cta: bulkCta,
+        action: fallbackAction || (() => {}),
+      };
+    }
+
+    if (count === 1) {
+      const target = members[0];
+      return {
+        members,
+        count,
+        cta: singleCta,
+        action: () => navigateTo('Members', singleFilter, {
+          memberId: target.id,
+          ...(singleOptions || {}),
+        }),
+      };
+    }
+
+    return {
+      members,
+      count,
+      cta: bulkCta,
+      action: () => openBroadcastDraftForMembers({
+        memberIds: members.map((member) => member.id),
+        message: bulkMessage,
+        audience: bulkAudience,
+      }),
+    };
+  };
+
   const dashboardData = useMemo(() => {
     const today = new Date();
     const toDayAge = (value) => {
@@ -894,6 +965,68 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const highChurnRiskAmount = highChurnMembers.reduce((sum, m) => sum + estimateMemberValue(m), 0);
     const ghostRiskAmount = ghosts.reduce((sum, m) => sum + Math.round(estimateMemberValue(m) * 0.65), 0);
     const expiredWinbackValue = Math.round(expired.length * avgPlanPrice * 0.5);
+    const expiringFollowupMembers = expiringIn7Days.filter((member) => member.days_left > 3);
+    const expiringFollowupRiskAmount = expiringFollowupMembers.reduce((sum, member) => sum + estimateMemberValue(member), 0);
+
+    const reminderMessages = {
+      highChurn: 'Hi {{name}}, we noticed your routine at {{gym_name}} has slowed down. Reply and we will help you with the right plan to get back on track.',
+      expiringImmediate: 'Hi {{name}}, your membership at {{gym_name}} expires in the next 3 days. Renew now to continue without interruption.',
+      expiringSoon: 'Hi {{name}}, your membership at {{gym_name}} expires this week. Renew in time to keep your plan active.',
+      expired: 'Hi {{name}}, your membership at {{gym_name}} has expired. Reply if you want help restarting with the best plan for you.',
+      inactive: 'Hi {{name}}, we have missed you at {{gym_name}}. Reply if you want help getting back into your routine.',
+      unpaid: 'Hi {{name}}, your membership at {{gym_name}} is still waiting for activation. Please complete your payment to start your plan.',
+      pendingDue: 'Hi {{name}}, you still have a pending balance for your membership at {{gym_name}}. Please clear the due amount to keep your plan up to date.',
+    };
+
+    const highChurnCta = buildSmartMemberCta({
+      members: highChurnMembers,
+      singleFilter: 'All',
+      bulkMessage: reminderMessages.highChurn,
+      bulkAudience: 'HighChurn',
+      bulkCta: 'Open Bulk Broadcast',
+    });
+    const expiringImmediateCta = buildSmartMemberCta({
+      members: expiringIn3Days,
+      singleFilter: 'Expiring Soon',
+      bulkMessage: reminderMessages.expiringImmediate,
+      bulkAudience: 'Expiring',
+      bulkCta: 'Open Renewal Broadcast',
+    });
+    const expiringSoonCta = buildSmartMemberCta({
+      members: expiringFollowupMembers,
+      singleFilter: 'Expiring Soon',
+      bulkMessage: reminderMessages.expiringSoon,
+      bulkAudience: 'Expiring',
+      bulkCta: 'Open Bulk Reminder',
+    });
+    const expiredCta = buildSmartMemberCta({
+      members: expired,
+      singleFilter: 'Expired',
+      bulkMessage: reminderMessages.expired,
+      bulkAudience: 'Expired',
+      bulkCta: 'Open Winback Broadcast',
+    });
+    const ghostCta = buildSmartMemberCta({
+      members: ghosts,
+      singleFilter: 'Inactive',
+      bulkMessage: reminderMessages.inactive,
+      bulkAudience: 'Ghosts',
+      bulkCta: 'Open Bulk Follow-up',
+    });
+    const unpaidCta = buildSmartMemberCta({
+      members: unpaid,
+      singleFilter: 'Unpaid',
+      bulkMessage: reminderMessages.unpaid,
+      bulkAudience: 'All',
+      bulkCta: 'Open Bulk Reminder',
+    });
+    const pendingDueCta = buildSmartMemberCta({
+      members: pendingDueMembers,
+      singleFilter: 'All',
+      bulkMessage: reminderMessages.pendingDue,
+      bulkAudience: 'All',
+      bulkCta: 'Open Due Reminder',
+    });
 
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
     const sentToday = campaignLogs
@@ -937,6 +1070,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       title,
       reason,
       count,
+      members,
       impact,
       confidence,
       urgency,
@@ -952,6 +1086,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         title,
         reason,
         count,
+        members,
         impact,
         confidence,
         urgency,
@@ -967,96 +1102,100 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       buildRecommendation({
         id: 'HIGH_CHURN',
         title: 'Launch retention for high-churn members',
-        reason: `${highChurnMembers.length} members are in HIGH churn tier`,
-        count: highChurnMembers.length,
+        reason: `${highChurnCta.count} member${highChurnCta.count === 1 ? ' is' : 's are'} in HIGH churn tier`,
+        count: highChurnCta.count,
+        members: highChurnCta.members,
         impact: highChurnRiskAmount,
         confidence: Math.min(95, 74 + highChurnMembers.length * 2),
         urgency: 'Today',
         priority: 'P0',
-        cta: 'Launch Retention',
+        cta: highChurnCta.cta,
         sub: 'Prevent churn before expiry',
-        action: () => openBroadcastDraft('HighChurn', 'Hi from GymVault! We noticed your gym momentum dipped. Reply and we will help you with the right renewal option.'),
+        action: highChurnCta.action,
       }),
       buildRecommendation({
         id: 'EXPIRING_72H',
         title: 'Renew plans expiring in 72 hours',
-        reason: `${expiringIn3Days.length} memberships will expire within 3 days`,
-        count: expiringIn3Days.length,
+        reason: `${expiringImmediateCta.count} membership${expiringImmediateCta.count === 1 ? '' : 's'} will expire within 3 days`,
+        count: expiringImmediateCta.count,
+        members: expiringImmediateCta.members,
         impact: immediateRiskAmount,
         confidence: Math.min(94, 70 + expiringIn3Days.length * 2),
         urgency: 'Today',
         priority: 'P0',
-        cta: 'Draft Renewal Broadcast',
+        cta: expiringImmediateCta.cta,
         sub: 'Immediate revenue protection',
-        action: () => openBroadcastDraft('Expiring', 'Hi from GymVault! Your membership expires very soon. Renew today to keep your progress on track.'),
+        action: expiringImmediateCta.action,
       }),
       buildRecommendation({
         id: 'EXPIRING_7D',
         title: 'Follow up on memberships expiring this week',
-        reason: `${expiringIn7Days.filter(m => m.days_left > 3).length} memberships expire within 7 days`,
-        count: expiringIn7Days.filter(m => m.days_left > 3).length,
-        impact: revenueAtRisk,
+        reason: `${expiringSoonCta.count} membership${expiringSoonCta.count === 1 ? '' : 's'} expire within 7 days`,
+        count: expiringSoonCta.count,
+        members: expiringSoonCta.members,
+        impact: expiringFollowupRiskAmount,
         confidence: Math.min(90, 66 + expiringIn7Days.length * 2),
         urgency: 'This week',
         priority: 'P1',
-        cta: 'Open Expiring Soon',
+        cta: expiringSoonCta.cta,
         sub: 'Prevent upcoming churn',
-        action: () => navigateTo('Members', 'Expiring Soon'),
+        action: expiringSoonCta.action,
       }),
       buildRecommendation({
         id: 'EXPIRED_WINBACK',
         title: 'Win back expired members',
-        reason: `${expired.length} members are already expired`,
-        count: expired.length,
+        reason: `${expiredCta.count} member${expiredCta.count === 1 ? ' is' : 's are'} already expired`,
+        count: expiredCta.count,
+        members: expiredCta.members,
         impact: expiredWinbackValue,
         confidence: Math.min(90, 62 + expired.length),
         urgency: 'This week',
         priority: 'P1',
-        cta: 'Broadcast Winback',
+        cta: expiredCta.cta,
         sub: 'Recover dormant revenue',
-        action: () => openBroadcastDraft('Expired', 'Hi from GymVault! Your membership has expired. Reply if you want help restarting with the best plan for you.'),
+        action: expiredCta.action,
       }),
       buildRecommendation({
         id: 'GHOST_REACTIVATION',
         title: 'Reactivate members who stopped visiting',
-        reason: `${ghosts.length} active member${ghosts.length === 1 ? '' : 's'} absent 14+ days`,
-        count: ghosts.length,
+        reason: `${ghostCta.count} active member${ghostCta.count === 1 ? '' : 's'} absent 14+ days`,
+        count: ghostCta.count,
+        members: ghostCta.members,
         impact: ghostRiskAmount,
         confidence: Math.min(88, 60 + Math.floor(ghosts.length * 0.8)),
         urgency: 'This week',
         priority: 'P1',
-        cta: 'Open Inactive Members',
+        cta: ghostCta.cta,
         sub: 'Stop silent churn',
-        action: () => navigateTo('Members', 'Inactive'),
+        action: ghostCta.action,
       }),
       buildRecommendation({
         id: 'UNPAID_ACTIVATION',
         title: 'Activate unpaid profiles',
-        reason: `${unpaid.length} unpaid members are waiting for activation`,
-        count: unpaid.length,
+        reason: `${unpaidCta.count} unpaid member${unpaidCta.count === 1 ? ' is' : 's are'} waiting for activation`,
+        count: unpaidCta.count,
+        members: unpaidCta.members,
         impact: Math.round(unpaid.length * avgPlanPrice * 0.5),
         confidence: Math.min(86, 58 + unpaid.length),
         urgency: 'This week',
         priority: 'P1',
-        cta: 'Activate Memberships',
+        cta: unpaidCta.cta,
         sub: 'Convert pending dues',
-        action: () => navigateTo('Members', 'Unpaid'),
+        action: unpaidCta.action,
       }),
       buildRecommendation({
         id: 'PENDING_DUES',
         title: 'Collect pending dues from recent payments',
-        reason: `${pendingDueMembers.length} member${pendingDueMembers.length === 1 ? '' : 's'} still have an outstanding balance`,
-        count: pendingDueMembers.length,
+        reason: `${pendingDueCta.count} member${pendingDueCta.count === 1 ? ' still has' : 's still have'} an outstanding balance`,
+        count: pendingDueCta.count,
+        members: pendingDueCta.members,
         impact: pendingDueValue,
         confidence: Math.min(92, 62 + pendingDueMembers.length * 4),
         urgency: 'This week',
         priority: 'P1',
-        cta: 'Open Pending Payments',
+        cta: pendingDueCta.cta,
         sub: 'Recover outstanding balance',
-        action: () => {
-          window.dispatchEvent(new CustomEvent('gymvault:payments-filter', { detail: { filter: 'Pending' } }));
-          navigateTo('Payments');
-        },
+        action: pendingDueCta.action,
       }),
       // Note: ESCALATED_CALLS is intentionally omitted here — the "Escalated Leads (Call Now)"
       // panel below the action cards already surfaces these members with direct call buttons.

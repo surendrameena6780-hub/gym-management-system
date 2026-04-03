@@ -395,6 +395,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         return;
       }
 
+      setSearchTerm('');
+      setSelectedIds([]);
+      setIsBulkMode(false);
+
       const memberFromList = members.find((member) => Number(member.id) === targetId);
       if (memberFromList) {
         setSelectedMember(memberFromList);
