@@ -1485,25 +1485,25 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </div>
 
             {/* stats row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100 text-center">
-                <p className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Visits</p>
-                <p className="text-base font-black text-blue-900">{selectedMember.total_visits || 0}</p>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="bg-blue-50/60 p-2 rounded-xl border border-blue-100 text-center min-w-0">
+                <p className="text-[8px] sm:text-[9px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Visits</p>
+                <p className="text-sm sm:text-base font-black text-blue-900">{selectedMember.total_visits || 0}</p>
               </div>
-              <div className="bg-orange-50/60 p-2.5 rounded-xl border border-orange-100 text-center">
-                <p className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter mb-0.5">Streak</p>
+              <div className="bg-orange-50/60 p-2 rounded-xl border border-orange-100 text-center min-w-0">
+                <p className="text-[8px] sm:text-[9px] font-bold text-orange-500 uppercase tracking-tighter mb-0.5">Streak</p>
                 <div className="flex items-center justify-center gap-0.5">
-                  <Flame size={10} className="text-orange-500" fill="currentColor" />
-                  <p className="text-base font-black text-orange-900">{selectedMember.streak || 0}</p>
+                  <Flame size={9} className="text-orange-500 shrink-0" fill="currentColor" />
+                  <p className="text-sm sm:text-base font-black text-orange-900">{selectedMember.streak || 0}</p>
                 </div>
               </div>
-              <div className="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100 text-center">
-                <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-tighter mb-0.5">Paid</p>
-                <p className="text-xs font-black text-emerald-900">₹{selectedMember.total_paid || 0}</p>
+              <div className="bg-emerald-50/60 p-2 rounded-xl border border-emerald-100 text-center min-w-0">
+                <p className="text-[8px] sm:text-[9px] font-bold text-emerald-500 uppercase tracking-tighter mb-0.5">Paid</p>
+                <p className="text-[10px] sm:text-xs font-black text-emerald-900 truncate">₹{selectedMember.total_paid || 0}</p>
               </div>
-              <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 text-center">
-                <p className="text-[9px] font-bold text-purple-500 uppercase tracking-tighter mb-0.5">Plan</p>
-                <p className="text-[10px] font-black text-purple-900 uppercase truncate">{selectedMember.plan_name || '—'}</p>
+              <div className="bg-purple-50/60 p-2 rounded-xl border border-purple-100 text-center min-w-0">
+                <p className="text-[8px] sm:text-[9px] font-bold text-purple-500 uppercase tracking-tighter mb-0.5">Plan</p>
+                <p className="text-[9px] sm:text-[10px] font-black text-purple-900 uppercase truncate">{selectedMember.plan_name || '—'}</p>
               </div>
             </div>
 

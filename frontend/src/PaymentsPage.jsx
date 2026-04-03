@@ -741,15 +741,6 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
         detail: `₹${pendingValue.toLocaleString()} is still pending across ${pending.length} record${pending.length === 1 ? '' : 's'}.`,
       });
     }
-    if (onlineShare < 45 && completed.length >= 4) {
-      actions.push({
-        id: 'increase-online-share',
-        icon: CreditCard,
-        tone: 'indigo',
-        title: 'Increase digital collections',
-        detail: `Only ${onlineShare}% of revenue is online. Push UPI or gateway payments at the desk.`,
-      });
-    }
     if (Number(stats.today_revenue || 0) > 0) {
       actions.push({
         id: 'today-pace',
