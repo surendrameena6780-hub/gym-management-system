@@ -59,7 +59,6 @@ const SkeletonRow = () => (
 const FILTER_TABS = [
   { key: 'All', label: 'All', active: 'bg-slate-800 text-white shadow-md', inactive: 'text-slate-500 hover:bg-slate-50 hover:text-slate-700', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-slate-100 text-slate-500' },
   { key: 'Active', label: 'Active', active: 'bg-emerald-500 text-white shadow-md shadow-emerald-200', inactive: 'text-emerald-600 hover:bg-emerald-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-emerald-50 text-emerald-600' },
-  { key: 'Frozen', label: 'Frozen', active: 'bg-cyan-500 text-white shadow-md shadow-cyan-200', inactive: 'text-cyan-600 hover:bg-cyan-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-cyan-50 text-cyan-600' },
   { key: 'Unpaid', label: 'Unpaid', active: 'bg-slate-700 text-white shadow-md shadow-slate-200', inactive: 'text-slate-600 hover:bg-slate-100', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-slate-100 text-slate-600' },
   { key: 'Inactive', label: 'Inactive', active: 'bg-amber-500 text-white shadow-md shadow-amber-200', inactive: 'text-amber-600 hover:bg-amber-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-amber-50 text-amber-600' },
   { key: 'Expired', label: 'Expired', active: 'bg-rose-500 text-white shadow-md shadow-rose-200', inactive: 'text-rose-600 hover:bg-rose-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-rose-50 text-rose-600' },
@@ -293,8 +292,6 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [newNote, setNewNote] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [showTransferModal, setShowTransferModal] = useState(false);
-  const [transferTargetId, setTransferTargetId] = useState('');
   const [docForm, setDocForm] = useState({ doc_type: 'ID Proof', doc_url: '', notes: '' });
   const [docSaving, setDocSaving] = useState(false);
   const [savingOnboarding, setSavingOnboarding] = useState(false);
@@ -463,18 +460,6 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       fetchMembers();
       notifyDashboardDataChanged();
     } catch { toast?.('Failed to cancel member', 'error'); }
-  };
-  const handleTransferMember = async () => {
-    if (!selectedMember || !transferTargetId) return;
-    try {
-      await axios.post(`/api/members/${selectedMember.id}/transfer`, { transfer_to_member_id: transferTargetId }, { headers: { 'x-auth-token': token } });
-      toast?.('Membership transferred', 'success');
-      setShowTransferModal(false);
-      setTransferTargetId('');
-      setShowDetailsModal(false);
-      fetchMembers();
-      notifyDashboardDataChanged();
-    } catch { toast?.('Transfer failed', 'error'); }
   };
   const handleSignWaiver = async () => {
     if (!selectedMember) return;
@@ -1342,7 +1327,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </span>
           </div>
           {/* scrollable body */}
-          <div className="flex-1 overflow-y-auto px-5 space-y-3 pt-2 pb-1 no-scrollbar">
+          <div className="flex-1 overflow-y-auto px-5 space-y-3 pt-2 pb-4" style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>
             {/* drawer tabs */}
             <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5">
               {[{ key: 'profile', label: 'Profile' }, { key: 'notes', label: 'Notes' }, { key: 'docs', label: 'Documents' }, { key: 'waivers', label: 'Waivers' }].map(t => (
@@ -1619,29 +1604,26 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             )}
           </div>
 
-          {/* action bar — no extra bottom padding needed, drawer sits above nav */}
-          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60 flex-wrap">
+          {/* action bar */}
+          <div className="px-5 py-3 border-t border-slate-100 shrink-0 bg-white">
+            <div className="grid grid-cols-3 gap-2">
             {canWritePayments && (getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
-              <button onClick={() => { setShowDetailsModal(false); openActivateModalForMember(selectedMember); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+              <button onClick={() => { setShowDetailsModal(false); openActivateModalForMember(selectedMember); }} className="col-span-3 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
                 <Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
               </button>
             )}
-            <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
+            <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
               <MessageSquare size={13} fill="currentColor" /> WhatsApp
             </button>
-            {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
+            {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
               <Edit2 size={13} /> Edit
             </button>}
-            {canWriteMembers && String(selectedMember.membership_status || '').toUpperCase() === 'ACTIVE' && (
-              <button onClick={() => setShowTransferModal(true)} className="py-2.5 px-3 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 transition-all active:scale-95">
-                Transfer
-              </button>
-            )}
             {canWriteMembers && ['ACTIVE', 'FROZEN'].includes(String(selectedMember.membership_status || '').toUpperCase()) && (
-              <button onClick={() => setShowCancelModal(true)} className="py-2.5 px-3 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all active:scale-95">
+              <button onClick={() => setShowCancelModal(true)} className="py-2.5 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all active:scale-95">
                 Cancel
               </button>
             )}
+            </div>
           </div>
         </>)}
       </div>
@@ -1794,27 +1776,6 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         </div>
       )}
 
-      {/* ── Transfer Member Modal ── */}
-      {showTransferModal && selectedMember && (
-        <div className="app-modal-shell z-[70] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden border border-slate-100">
-            <div className="p-6 text-white" style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' }}>
-              <h2 className="text-lg font-black">Transfer Membership</h2>
-              <p className="text-white/60 text-xs mt-1">From: {selectedMember.full_name}</p>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Transfer to (Member ID)</label>
-                <input type="number" value={transferTargetId} onChange={e => setTransferTargetId(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none" placeholder="Enter destination member ID" />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setShowTransferModal(false); setTransferTargetId(''); }} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Back</button>
-                <button onClick={handleTransferMember} disabled={!transferTargetId} className="flex-1 py-2.5 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50">Confirm Transfer</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

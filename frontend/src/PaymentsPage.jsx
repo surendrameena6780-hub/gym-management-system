@@ -257,7 +257,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     } else if (financeTab === 'pos') {
       fetchPosProducts();
       fetchPosSales();
-    } else if (financeTab === 'collections' || financeTab === 'reconciliation') {
+    } else if (financeTab === 'collections') {
       fetchFinanceOverview();
     }
   }, [financeTab, fetchExpenses, fetchPayroll, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchStaffOptions]);
@@ -885,12 +885,12 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
         <div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Finance Hub</h1>
           {/* Finance hub tabs */}
-          <div className="flex gap-1 mt-3 bg-slate-100 rounded-xl p-0.5 w-fit">
-            {[{ key: 'collections', label: 'Collections' }, { key: 'reconciliation', label: 'Reconciliation' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }].map(t => (
+          <div className="flex gap-1 mt-3 bg-slate-100 rounded-xl p-0.5 w-fit overflow-x-auto whitespace-nowrap">
+            {[{ key: 'collections', label: 'Collections' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }].map(t => (
               <button key={t.key} onClick={() => setFinanceTab(t.key)} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${financeTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
             ))}
           </div>
-          <p className="text-xs font-bold text-slate-400 mt-3 uppercase tracking-wider">{financeLoading ? 'Refreshing finance snapshot...' : 'Collections, reconciliation, payroll, and desk sales in one workspace.'}</p>
+          <p className="text-xs font-bold text-slate-400 mt-3 uppercase tracking-wider">{financeLoading ? 'Refreshing finance snapshot...' : 'Collections, payroll, expenses, and desk sales in one workspace.'}</p>
         </div>
         <div className="grid grid-cols-2 sm:flex gap-2.5 w-full sm:w-auto">
           {financeTab === 'collections' && <>
@@ -902,86 +902,6 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
         </div>
       </div>
-
-      {/* ═══════ RECONCILIATION TAB ═══════ */}
-      {financeTab === 'reconciliation' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div className="rounded-[22px] border border-emerald-100 bg-emerald-50 p-5">
-              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700/70">Membership Revenue</p>
-              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.membershipRevenue.toLocaleString()}</p>
-              <p className="text-xs font-bold text-emerald-700 mt-2">₹{financeSummary.todayRevenue.toLocaleString()} collected today</p>
-            </div>
-            <div className="rounded-[22px] border border-sky-100 bg-sky-50 p-5">
-              <p className="text-[10px] font-black uppercase tracking-widest text-sky-700/70">POS Revenue</p>
-              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.posRevenue.toLocaleString()}</p>
-              <p className="text-xs font-bold text-sky-700 mt-2">₹{financeSummary.posToday.toLocaleString()} sold today</p>
-            </div>
-            <div className="rounded-[22px] border border-rose-100 bg-rose-50 p-5">
-              <p className="text-[10px] font-black uppercase tracking-widest text-rose-700/70">Total Outflows</p>
-              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.totalOutflows.toLocaleString()}</p>
-              <p className="text-xs font-bold text-rose-700 mt-2">Expenses + payroll combined</p>
-            </div>
-            <div className={`rounded-[22px] border p-5 ${financeSummary.netPosition >= 0 ? 'border-indigo-100 bg-indigo-50' : 'border-amber-100 bg-amber-50'}`}>
-              <p className={`text-[10px] font-black uppercase tracking-widest ${financeSummary.netPosition >= 0 ? 'text-indigo-700/70' : 'text-amber-700/70'}`}>Net Cash Position</p>
-              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.netPosition.toLocaleString()}</p>
-              <p className={`text-xs font-bold mt-2 ${financeSummary.netPosition >= 0 ? 'text-indigo-700' : 'text-amber-700'}`}>{financeSummary.netPosition >= 0 ? 'Operating positive after recorded outflows' : 'Outflows are ahead of recognized income'}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
-            <div className="rounded-[24px] border border-slate-100 bg-white p-6">
-              <div className="flex items-center justify-between gap-3 mb-5">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">Desk Reconciliation Snapshot</h3>
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">Use this to close the day without leaving the app.</p>
-                </div>
-                <div className="px-3 py-2 rounded-2xl bg-slate-50 border border-slate-100">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gross Income</p>
-                  <p className="text-sm font-black text-slate-900 mt-1">₹{financeSummary.totalIncome.toLocaleString()}</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { label: 'Membership collections', value: financeSummary.membershipRevenue, detail: `${payments.length} payment records captured` },
-                  { label: 'POS sales', value: financeSummary.posRevenue, detail: `${financeSummary.posCount} POS bill${financeSummary.posCount === 1 ? '' : 's'} created` },
-                  { label: 'Expense ledger', value: -financeSummary.totalExpenses, detail: `₹${financeSummary.monthExpenses.toLocaleString()} logged this month` },
-                  { label: 'Payroll liability', value: -financeSummary.totalPayroll, detail: `${financeSummary.pendingPayrollCount} payroll entr${financeSummary.pendingPayrollCount === 1 ? 'y' : 'ies'} still pending` },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-black text-slate-800">{item.label}</p>
-                      <p className="text-xs font-bold text-slate-500 mt-1">{item.detail}</p>
-                    </div>
-                    <p className={`text-lg font-black ${item.value >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{item.value >= 0 ? '+' : '-'}₹{Math.abs(item.value).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[24px] border border-slate-100 bg-white p-6 space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Pressure Signals</h3>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">What still needs action from the front desk.</p>
-              </div>
-              <div className="rounded-2xl border border-orange-100 bg-orange-50 p-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-orange-600/80">Overdue Dues</p>
-                <p className="text-2xl font-black text-slate-900 mt-2">₹{financeSummary.overdueAmount.toLocaleString()}</p>
-                <p className="text-xs font-bold text-orange-700 mt-2">{financeSummary.overdueCount} member account{financeSummary.overdueCount === 1 ? '' : 's'} are 7+ days overdue.</p>
-              </div>
-              <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-600/80">Pending Payroll</p>
-                <p className="text-2xl font-black text-slate-900 mt-2">₹{financeSummary.pendingPayroll.toLocaleString()}</p>
-                <p className="text-xs font-bold text-amber-700 mt-2">Mark processed salaries as paid to keep the books current.</p>
-              </div>
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Recommended Closeout</p>
-                <p className="text-sm font-black text-slate-800 mt-2">Reconcile dues first, then clear pending payroll, and finish by matching POS sales against the day’s register total.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ═══════ COLLECTIONS TAB ═══════ */}
       {financeTab === 'collections' && (<>

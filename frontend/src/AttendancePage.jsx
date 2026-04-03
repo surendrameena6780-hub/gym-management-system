@@ -972,18 +972,11 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
             className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold resize-none"
           />
 
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button
-              onClick={openMemberQr}
-              disabled={!selectedMember || busyQrAction}
-              className="px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-black hover:bg-emerald-100 disabled:opacity-60"
-            >
-              {busyQrAction && qrModalState?.type !== 'gym' ? 'Loading...' : 'Show Member QR'}
-            </button>
+          <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               onClick={openGymQr}
               disabled={busyQrAction}
-              className="px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black hover:bg-indigo-100 disabled:opacity-60"
+              className="px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black hover:bg-indigo-100 disabled:opacity-60 transition-all active:scale-95"
             >
               {busyQrAction && qrModalState?.type === 'gym' ? 'Loading...' : 'Show Gym QR'}
             </button>
@@ -993,7 +986,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
                 setQrScannerOpen(true);
               }}
               disabled={busyQrAction || !canWriteAttendance}
-              className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black hover:bg-slate-50 disabled:opacity-60"
+              className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black hover:bg-slate-50 disabled:opacity-60 transition-all active:scale-95"
             >
               Scan Member QR
             </button>

@@ -176,6 +176,11 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
 
         const inactiveMembers = activeMembers
             .filter((member) => {
+                // Exclude members who joined in the last 7 days — they're new, not inactive
+                if (member.joining_date) {
+                    const daysSinceJoin = diffInDays(today, member.joining_date);
+                    if (daysSinceJoin !== null && daysSinceJoin < 7) return false;
+                }
                 if (!member.last_visit) return true;
                 const inactiveDays = diffInDays(today, member.last_visit);
                 return inactiveDays !== null && inactiveDays >= 7;

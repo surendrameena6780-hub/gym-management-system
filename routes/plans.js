@@ -48,7 +48,7 @@ router.get('/', async (req, res) => {
         res.json(plans.rows);
     } catch (err) {
         console.error(err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -89,7 +89,7 @@ router.post('/add', async (req, res) => {
         res.status(200).json(newPlan.rows[0]);
     } catch (err) {
         console.error("DATABASE ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -175,42 +175,62 @@ router.get('/:id/analytics', async (req, res) => {
         if (planResult.rows.length === 0) return res.status(404).json({ msg: "Plan not found" });
         const plan = planResult.rows[0];
 
-        const stats = await pool.query(
-            `SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) as active,
-                SUM(CASE WHEN status = 'EXPIRED' THEN 1 ELSE 0 END) as expired
-             FROM memberships 
-             WHERE plan_id = $1 AND gym_id = $2 AND deleted_at IS NULL`,
-            [id, gym_id]
-        );
+        const [stats, revenueByMonth, totalRevenueRes] = await Promise.all([
+            pool.query(
+                `SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) as active,
+                    SUM(CASE WHEN status = 'EXPIRED' THEN 1 ELSE 0 END) as expired
+                 FROM memberships 
+                 WHERE plan_id = $1 AND gym_id = $2 AND deleted_at IS NULL`,
+                [id, gym_id]
+            ),
+            pool.query(
+                `WITH month_series AS (
+                    SELECT generate_series(
+                        date_trunc('month', NOW()) - INTERVAL '5 months',
+                        date_trunc('month', NOW()),
+                        INTERVAL '1 month'
+                    ) AS month_start
+                 )
+                 SELECT
+                    TO_CHAR(ms.month_start, 'Mon') AS month,
+                    COALESCE(ROUND(SUM(p.amount_paid)), 0)::INTEGER AS revenue
+                 FROM month_series ms
+                 LEFT JOIN payments p
+                    ON p.plan_id = $1
+                    AND p.gym_id = $2
+                    AND p.deleted_at IS NULL
+                    AND date_trunc('month', p.payment_date) = ms.month_start
+                 GROUP BY ms.month_start
+                 ORDER BY ms.month_start ASC`,
+                [id, gym_id]
+            ),
+            pool.query(
+                `SELECT COALESCE(ROUND(SUM(amount_paid)), 0)::INTEGER AS total_revenue
+                 FROM payments
+                 WHERE plan_id = $1 AND gym_id = $2 AND deleted_at IS NULL`,
+                [id, gym_id]
+            ),
+        ]);
 
         const total = parseInt(stats.rows[0].total) || 0;
         const active = parseInt(stats.rows[0].active) || 0;
         const expired = parseInt(stats.rows[0].expired) || 0;
 
-        const revenue = total * parseFloat(plan.price);
+        const totalRevenue = parseInt(totalRevenueRes.rows[0]?.total_revenue) || 0;
         const retentionRate = total > 0 ? ((active / total) * 100).toFixed(1) : 0;
         const churnRate = total > 0 ? ((expired / total) * 100).toFixed(1) : 0;
-
-        const graphData = [
-            { month: 'Jan', revenue: revenue * 0.1 },
-            { month: 'Feb', revenue: revenue * 0.15 },
-            { month: 'Mar', revenue: revenue * 0.12 },
-            { month: 'Apr', revenue: revenue * 0.25 },
-            { month: 'May', revenue: revenue * 0.20 },
-            { month: 'Jun', revenue: revenue * 0.18 }
-        ];
 
         res.json({
             name: plan.name,
             totalMembers: total,
             activeCount: active,
             expiredCount: expired,
-            totalRevenue: revenue,
+            totalRevenue: totalRevenue,
             retentionRate: retentionRate,
             churnRate: churnRate,
-            graphData: graphData
+            graphData: revenueByMonth.rows
         });
 
     } catch (err) {
@@ -245,7 +265,7 @@ router.put('/:id/advanced-rules', async (req, res) => {
         res.json(result.rows[0]);
     } catch (err) {
         console.error('PLAN RULES:', err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 

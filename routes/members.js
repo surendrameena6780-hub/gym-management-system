@@ -401,7 +401,7 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
         res.json({ message: "Member Checked In" });
     } catch (err) {
         console.error("CHECK-IN ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -423,7 +423,7 @@ router.delete('/:id', auth, saasMiddleware, requirePermission('members:write'), 
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("DELETE MEMBER ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -449,7 +449,7 @@ router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:writ
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error('CANCEL MEMBER ERROR:', err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -484,7 +484,7 @@ router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:wr
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error('TRANSFER MEMBER ERROR:', err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -494,7 +494,7 @@ router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:re
         const gid = req.user.gym_id;
         const result = await pool.query('SELECT * FROM member_documents WHERE member_id=$1 AND gym_id=$2 ORDER BY uploaded_at DESC', [req.params.id, gid]);
         res.json(result.rows);
-    } catch(err) { console.error('GET DOCS:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('GET DOCS:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
@@ -505,14 +505,14 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
             'INSERT INTO member_documents (gym_id, member_id, doc_type, doc_url, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *',
             [gid, req.params.id, String(doc_type).trim(), String(doc_url).trim(), String(notes||'').trim() || null]);
         res.status(201).json(result.rows[0]);
-    } catch(err) { console.error('ADD DOC:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('ADD DOC:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 router.delete('/:mid/documents/:did', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
         await pool.query('DELETE FROM member_documents WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.did, req.params.mid, gid]);
         res.json({ message: 'Document deleted' });
-    } catch(err) { console.error('DEL DOC:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('DEL DOC:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 
 // --- 10. MEMBER NOTES ---
@@ -524,7 +524,7 @@ router.get('/:id/notes', auth, saasMiddleware, requirePermission('members:read')
              LEFT JOIN users u ON u.id = mn.created_by
              WHERE mn.member_id=$1 AND mn.gym_id=$2 ORDER BY mn.created_at DESC`, [req.params.id, gid]);
         res.json(result.rows);
-    } catch(err) { console.error('GET NOTES:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('GET NOTES:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
@@ -535,14 +535,14 @@ router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write
             'INSERT INTO member_notes (gym_id, member_id, created_by, note, note_type) VALUES ($1,$2,$3,$4,$5) RETURNING *',
             [gid, req.params.id, req.user.id, String(note).trim(), String(note_type || 'general').trim()]);
         res.status(201).json(result.rows[0]);
-    } catch(err) { console.error('ADD NOTE:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('ADD NOTE:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 router.delete('/:mid/notes/:nid', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
         await pool.query('DELETE FROM member_notes WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.nid, req.params.mid, gid]);
         res.json({ message: 'Note deleted' });
-    } catch(err) { console.error('DEL NOTE:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('DEL NOTE:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 
 // --- 11. MEMBER WAIVERS ---
@@ -557,14 +557,14 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
         await pool.query('UPDATE members SET waiver_signed_at=NOW() WHERE id=$1 AND gym_id=$2', [req.params.id, gid]);
         await pool.query('COMMIT');
         res.json({ message: 'Waiver signed' });
-    } catch(err) { await pool.query('ROLLBACK'); console.error('WAIVER:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { await pool.query('ROLLBACK'); console.error('WAIVER:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 router.get('/:id/waivers', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
         const result = await pool.query('SELECT * FROM member_waivers WHERE member_id=$1 AND gym_id=$2 ORDER BY signed_at DESC', [req.params.id, gid]);
         res.json(result.rows);
-    } catch(err) { console.error('GET WAIVERS:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('GET WAIVERS:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 
 // --- 12. UPDATE ONBOARDING ---
@@ -589,7 +589,7 @@ router.patch('/:id/onboarding', auth, saasMiddleware, requirePermission('members
         );
         if (!result.rows.length) return res.status(404).json({ error: 'Member not found' });
         res.json(result.rows[0]);
-    } catch(err) { console.error('ONBOARDING:', err.message); res.status(500).json({ error: err.message }); }
+    } catch(err) { console.error('ONBOARDING:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
 
 module.exports = router;

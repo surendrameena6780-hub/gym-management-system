@@ -136,6 +136,8 @@ app.use('/api/', (req, res, next) => {
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/superadmin/login', authLimiter);
+app.use('/api/auth/member/send-otp', authLimiter);
+app.use('/api/auth/member/verify-otp', authLimiter);
 
 app.use(
     '/uploads/profiles',
@@ -229,7 +231,7 @@ app.use((err, req, res, next) => {
     console.error('UNHANDLED ERROR:', err);
     if (res.headersSent) return next(err);
     return res.status(err.status || 500).json({
-        error: err?.message || 'Server Error',
+        error: 'Server Error',
     });
 });
 

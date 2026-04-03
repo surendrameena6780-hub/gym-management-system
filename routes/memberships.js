@@ -208,7 +208,7 @@ router.post('/activate', auth, saasMiddleware, requirePermission('payments:write
 
     } catch (err) {
         console.error("ACTIVATE ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -814,7 +814,7 @@ router.post('/remove-plan', auth, saasMiddleware, requirePermission('payments:wr
     } catch (err) {
         await pool.query('ROLLBACK');
         console.error("REMOVE PLAN ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -876,7 +876,7 @@ router.post('/renew', auth, saasMiddleware, requirePermission('payments:write'),
         res.json({ message: "Membership Renewed Successfully!" });
     } catch (err) {
         console.error("RENEWAL ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -1009,7 +1009,7 @@ router.post('/extend', auth, saasMiddleware, requirePermission('payments:write')
         res.json({ message: `Membership extended by ${days} days`, new_end_date: result.rows[0].end_date });
     } catch (err) {
         console.error("EXTEND ERROR:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -1030,7 +1030,7 @@ router.post('/:id/grace', auth, saasMiddleware, requirePermission('members:write
         res.json({ message: 'Grace period activated', membership: result.rows[0] });
     } catch (err) {
         console.error('GRACE ERROR:', err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 
@@ -1050,7 +1050,7 @@ router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:writ
         res.json({ message: 'Membership cancelled', membership: result.rows[0] });
     } catch (err) {
         console.error('CANCEL MS ERROR:', err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Server error' });
     }
 });
 

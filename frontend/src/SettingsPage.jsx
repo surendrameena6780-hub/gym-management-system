@@ -848,14 +848,21 @@ const loadRazorpayScript = () => {
   // --- SMART TIME-AWARE STATUS CALCULATOR ---
   // This reads the clock directly to enforce lockouts instantly, even if backend text hasn't updated yet.
   const getDerivedStatus = () => {
-      if (!gymData.saas_valid_until || gymData.saas_status === 'FREE_TRIAL') return 'FREE_TRIAL';
-      
+      if (!gymData.saas_valid_until) {
+        // No date set at all — genuinely new trial
+        return gymData.saas_status === 'EXPIRED' ? 'EXPIRED' : 'FREE_TRIAL';
+      }
+
       const validUntil = new Date(gymData.saas_valid_until);
       const now = new Date();
       const diffDays = (validUntil.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
 
-      if (gymData.saas_status === 'EXPIRED' || diffDays <= -3) return 'EXPIRED';
-      if (gymData.saas_status === 'GRACE_PERIOD' || (diffDays < 0 && diffDays > -3)) return 'GRACE_PERIOD';
+      // Trial or paid subscription expired
+      if (diffDays <= -3 || gymData.saas_status === 'EXPIRED') return 'EXPIRED';
+      if (diffDays < 0) return 'GRACE_PERIOD';
+
+      // Still within valid period
+      if (gymData.saas_status === 'FREE_TRIAL') return 'FREE_TRIAL';
       return 'ACTIVE';
   };
 

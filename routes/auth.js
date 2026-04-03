@@ -462,9 +462,9 @@ router.post('/member/send-otp', async (req, res) => {
         }
 
         const member = memberResult.rows[0];
-        // OTP bypass — set MEMBER_OTP_BYPASS=false in env to require real OTP
-        const bypassMode = process.env.MEMBER_OTP_BYPASS !== 'false';
-        const otp = bypassMode ? 'BYPASS' : String(Math.floor(100000 + Math.random() * 900000));
+        // OTP bypass — set MEMBER_OTP_BYPASS=true in env to skip real OTP (dev only)
+        const bypassMode = process.env.MEMBER_OTP_BYPASS === 'true';
+        const otp = bypassMode ? 'BYPASS' : String(require('crypto').randomInt(100000, 999999));
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         await pool.query(
@@ -527,7 +527,6 @@ router.post('/member/send-otp', async (req, res) => {
         return res.json({
             message: bypassMode ? 'Logging you in...' : (sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).'),
             member_name: member.full_name.split(' ')[0],
-            dev_otp: bypassMode ? otp : undefined,
         });
     } catch (err) {
         console.error('MEMBER OTP SEND ERROR:', err.message);
