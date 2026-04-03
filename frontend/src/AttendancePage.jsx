@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PageLoader from './PageLoader';
 import { QRCodeCanvas } from 'qrcode.react';
+import { openWhatsAppConversation } from './utils/externalNavigation';
 
 function useCountUp(target, duration = 800) {
   const [display, setDisplay] = useState(0);
@@ -568,7 +569,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
 
   const sendReminder = (member) => {
     const msg = `Hi ${member.full_name}, we missed you at the gym. It has been ${member.days_inactive} days since your last visit. Come back and continue your fitness streak!`;
-    window.open(`https://wa.me/91${member.phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    openWhatsAppConversation({ phone: member.phone, message: msg });
   };
 
   const weekdayPerformance = useMemo(() => {

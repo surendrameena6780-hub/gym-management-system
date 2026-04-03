@@ -810,6 +810,16 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     return Array.from(uniqueMembers.values());
   };
 
+  const normalizeActionPayments = (sourcePayments) => {
+    const uniquePayments = new Map();
+    asArray(sourcePayments).forEach((payment) => {
+      const id = Number.parseInt(payment?.id, 10);
+      if (!Number.isInteger(id) || uniquePayments.has(id)) return;
+      uniquePayments.set(id, payment);
+    });
+    return Array.from(uniquePayments.values());
+  };
+
   const buildSmartMemberCta = ({
     members: sourceMembers,
     singleFilter = 'All',
@@ -857,6 +867,50 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     };
   };
 
+  const buildSmartPaymentCta = ({
+    payments: sourcePayments,
+    members: sourceMembers = [],
+    singleCta = 'Collect Due',
+    bulkCta = 'Open Pending Dues',
+    fallbackAction,
+  }) => {
+    const payments = normalizeActionPayments(sourcePayments);
+    const members = normalizeActionMembers(sourceMembers.length > 0 ? sourceMembers : payments.map((payment) => payment.member).filter(Boolean));
+    const count = payments.length;
+
+    if (count === 0) {
+      return {
+        payments,
+        members,
+        count,
+        cta: bulkCta,
+        action: fallbackAction || (() => navigateTo('Payments', 'Pending')),
+      };
+    }
+
+    if (count === 1) {
+      const target = payments[0];
+      return {
+        payments,
+        members,
+        count,
+        cta: singleCta,
+        action: () => navigateTo('Payments', 'Pending', {
+          paymentId: target.id,
+          action: 'collectDue',
+        }),
+      };
+    }
+
+    return {
+      payments,
+      members,
+      count,
+      cta: bulkCta,
+      action: () => navigateTo('Payments', 'Pending'),
+    };
+  };
+
   const dashboardData = useMemo(() => {
     const today = new Date();
     const toDayAge = (value) => {
@@ -886,6 +940,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
     const active   = members.filter(m => m.membership_status === 'ACTIVE');
     const pendingDueMembers = members.filter((member) => !!getLatestPendingDue(member));
+    const pendingDuePayments = pendingDueMembers
+      .map((member) => {
+        const latestPayment = getLatestPendingDue(member);
+        return latestPayment ? { ...latestPayment, member } : null;
+      })
+      .filter(Boolean);
     const pendingDueMemberIds = new Set(pendingDueMembers.map((member) => member.id));
     const unpaid   = members.filter(m => m.membership_status === 'UNPAID' && !pendingDueMemberIds.has(m.id));
     const expired  = members.filter(m => m.membership_status === 'EXPIRED');
@@ -910,9 +970,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       return getDaysAbsent(m) > 14;
     });
 
-    const pendingDueValue = pendingDueMembers.reduce((sum, member) => {
-      const latestPayment = getLatestPendingDue(member);
-      return sum + Number(latestPayment?.amount_due || 0);
+    const pendingDueValue = pendingDuePayments.reduce((sum, payment) => {
+      return sum + Number(payment?.amount_due || 0);
     }, 0);
 
     const revenueAtRisk = expiringIn7Days.reduce((sum, m) => {
@@ -1020,12 +1079,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       bulkAudience: 'All',
       bulkCta: 'Open Bulk Reminder',
     });
-    const pendingDueCta = buildSmartMemberCta({
+    const pendingDueCta = buildSmartPaymentCta({
+      payments: pendingDuePayments,
       members: pendingDueMembers,
-      singleFilter: 'All',
-      bulkMessage: reminderMessages.pendingDue,
-      bulkAudience: 'All',
-      bulkCta: 'Open Due Reminder',
+      singleCta: 'Collect Due',
+      bulkCta: 'Open Pending Dues',
+      fallbackAction: () => navigateTo('Payments'),
     });
 
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
@@ -1387,6 +1446,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       expiring7: expiringIn7Days.length, expiring3: expiringIn3Days.length, ghosts: ghosts.length,
       escalated: escalatedLeads,
       monthlyRevenue, revenueAtRisk, healthScore,
+      pendingDueAction: pendingDuePayments.length > 0 ? pendingDueCta.action : () => navigateTo('Payments'),
       topPlan: topPlanEntry ? { name: topPlanEntry[0], count: topPlanEntry[1], pct: topPlanPct } : null,
       heatmap,
       churnHigh: churnInsights.summary?.high || 0,
@@ -1868,7 +1928,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Pending Dues" value={`₹${Number(payStats.pending_dues).toLocaleString()}`}
             icon={Activity} index={11}
             iconGradient="linear-gradient(135deg, #f97316, #ef4444)"
-            onClick={() => navigateTo('Members', 'Unpaid')}
+            onClick={dashboardData.pendingDueAction}
           />
         </div>
 

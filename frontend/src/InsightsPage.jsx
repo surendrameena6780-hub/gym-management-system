@@ -11,6 +11,7 @@ import {
   MessageSquare, Phone, Award,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import { openWhatsAppConversation } from './utils/externalNavigation';
 import PageLoader from './PageLoader';
 
 const EMPTY_ANALYTICS = {
@@ -158,7 +159,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
       message = `Hi ${member.full_name}, we missed you at ${gymName}. It's been a while since your last visit. Hope to see you back in the gym soon.`;
     }
 
-    window.open(`https://wa.me/91${member.phone}?text=${encodeURIComponent(message)}`, '_blank');
+    openWhatsAppConversation({ phone: member.phone, message });
   };
 
   const handleCall = (phoneNumber) => window.open(`tel:${phoneNumber}`, '_self');

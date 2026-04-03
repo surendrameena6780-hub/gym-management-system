@@ -285,6 +285,8 @@ function App() {
   const [currentPage, setCurrentPage] = useState('Dashboard');
   const [memberFilter, setMemberFilter] = useState('All');
   const [memberFocus, setMemberFocus] = useState({ id: null, action: null });
+  const [paymentFilter, setPaymentFilter] = useState('All');
+  const [paymentFocus, setPaymentFocus] = useState({ id: null, action: null });
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [currentUser, setCurrentUser] = useState(() => {
@@ -638,6 +640,14 @@ function App() {
     if (page === 'Members') {
       setMemberFilter('All');
       setMemberFocus({ id: null, action: null });
+    } else {
+      setMemberFocus({ id: null, action: null });
+    }
+    if (page === 'Payments') {
+      setPaymentFilter('All');
+      setPaymentFocus({ id: null, action: null });
+    } else {
+      setPaymentFocus({ id: null, action: null });
     }
     if (page === 'Settings') {
       setSettingsTab('menu');
@@ -657,6 +667,16 @@ function App() {
       });
     } else {
       setMemberFocus({ id: null, action: null });
+    }
+    if (page === 'Payments') {
+      const rawPaymentId = Number.parseInt(options?.paymentId, 10);
+      setPaymentFilter(typeof subPath === 'string' && subPath ? subPath : 'All');
+      setPaymentFocus({
+        id: Number.isInteger(rawPaymentId) ? rawPaymentId : null,
+        action: typeof options?.action === 'string' ? options.action : null,
+      });
+    } else {
+      setPaymentFocus({ id: null, action: null });
     }
     if (page === 'Settings') setSettingsTab(subPath || 'menu');
     setCurrentPage(page);
@@ -1150,7 +1170,15 @@ function App() {
             {/* Payments */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Payments') && (
-                <PaymentsPage token={token} toast={toast} showConfirm={showConfirm} />
+                <PaymentsPage
+                  token={token}
+                  toast={toast}
+                  showConfirm={showConfirm}
+                  defaultFilter={paymentFilter}
+                  focusPaymentId={paymentFocus.id}
+                  focusAction={paymentFocus.action}
+                  onFocusHandled={() => setPaymentFocus({ id: null, action: null })}
+                />
               )}
             </div>
 

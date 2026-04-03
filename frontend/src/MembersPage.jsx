@@ -6,6 +6,7 @@ import {
   MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import { openWhatsAppConversation } from './utils/externalNavigation';
 import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
@@ -620,7 +621,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const sendWhatsApp = (member, type) => {
     const gymName = 'GymVault';
     const message = type === 'reminder' ? `Hi ${member.full_name}, your membership at ${gymName} is expiring in ${member.days_left} days. Please renew to continue your fitness journey!` : `Hi ${member.full_name}, we missed you at ${gymName}! Hope to see you back soon!`;
-    window.open(`https://wa.me/91${member.phone}?text=${encodeURIComponent(message)}`, '_blank');
+    openWhatsAppConversation({ phone: member.phone, message });
   };
 
   const handleCall = (phoneNumber) => window.open(`tel:${phoneNumber}`, '_self');

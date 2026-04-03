@@ -38,6 +38,19 @@ const connectDB = async () => {
             )
         `);
         await pool.query(`
+            CREATE TABLE IF NOT EXISTS payment_collections (
+                id               SERIAL PRIMARY KEY,
+                gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                payment_id       INTEGER REFERENCES payments(id) ON DELETE CASCADE,
+                collected_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                payment_mode     VARCHAR(50) DEFAULT 'Cash',
+                transaction_id   VARCHAR(120),
+                notes            TEXT DEFAULT '',
+                collected_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at       TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+        await pool.query(`
             ALTER TABLE members ADD COLUMN IF NOT EXISTS rfid_tag_id VARCHAR(120);
 
             CREATE TABLE IF NOT EXISTS rfid_devices (
@@ -74,6 +87,12 @@ const connectDB = async () => {
             WHERE rfid_tag_id IS NOT NULL;
         `);
         await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_payment_collections_payment_id ON payment_collections(payment_id);
+            CREATE INDEX IF NOT EXISTS idx_payment_collections_gym_id ON payment_collections(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_payment_collections_created_at ON payment_collections(created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_collections_transaction_unique
+            ON payment_collections(gym_id, transaction_id)
+            WHERE transaction_id IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_rfid_devices_gym_id ON rfid_devices(gym_id);
             CREATE INDEX IF NOT EXISTS idx_rfid_devices_status ON rfid_devices(status);
             CREATE INDEX IF NOT EXISTS idx_rfid_events_gym_id ON rfid_events(gym_id);

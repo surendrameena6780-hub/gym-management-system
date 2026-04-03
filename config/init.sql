@@ -90,6 +90,17 @@ CREATE TABLE IF NOT EXISTS payments (
     deleted_at     TIMESTAMP,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS payment_collections (
+    id               SERIAL PRIMARY KEY,
+    gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    payment_id       INTEGER REFERENCES payments(id) ON DELETE CASCADE,
+    collected_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+    payment_mode     VARCHAR(50) DEFAULT 'Cash',
+    transaction_id   VARCHAR(120),
+    notes            TEXT DEFAULT '',
+    collected_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
 
 -- 7. ATTENDANCE: Every check-in event — enables real-time tracking
 CREATE TABLE IF NOT EXISTS attendance (
@@ -179,6 +190,12 @@ CREATE INDEX IF NOT EXISTS idx_payments_user_id      ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_gym_id       ON payments(gym_id);
 CREATE INDEX IF NOT EXISTS idx_payments_payment_date ON payments(payment_date);
 CREATE INDEX IF NOT EXISTS idx_payments_deleted      ON payments(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_payment_collections_payment_id ON payment_collections(payment_id);
+CREATE INDEX IF NOT EXISTS idx_payment_collections_gym_id     ON payment_collections(gym_id);
+CREATE INDEX IF NOT EXISTS idx_payment_collections_created_at ON payment_collections(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_collections_transaction_unique
+ON payment_collections(gym_id, transaction_id)
+WHERE transaction_id IS NOT NULL;
 
 -- Attendance: fast lookup for today's check-ins and member history
 CREATE INDEX IF NOT EXISTS idx_attendance_member_id     ON attendance(member_id);

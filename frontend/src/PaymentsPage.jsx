@@ -21,6 +21,19 @@ const extractObject = (value, fallback = {}) => {
   return fallback;
 };
 
+const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const loadRazorpayScript = () => {
+  return new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+
 // ─── Count-Up Hook ────────────────────────────────────────────────────────────
 
 function useCountUp(target, duration = 900) {
@@ -110,7 +123,7 @@ const INSIGHT_TONE_STYLES = {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const PaymentsPage = ({ token, toast, showConfirm }) => {
+const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled }) => {
   const [payments, setPayments] = useState([]);
   const [filteredPayments, setFilteredPayments] = useState([]);
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
@@ -123,7 +136,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('All');
+  const [activeFilter, setActiveFilter] = useState(defaultFilter || 'All');
 
   const [showModal, setShowModal] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
@@ -132,6 +145,10 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [memberHistory, setMemberHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [dueModalPayment, setDueModalPayment] = useState(null);
+  const [dueFormData, setDueFormData] = useState({ amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
+  const [dueSubmitting, setDueSubmitting] = useState(false);
+  const [dueStep, setDueStep] = useState('idle');
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -145,12 +162,27 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
   const getImageUrl = (path) => normalizeProfileImageUrl(path);
 
+  const matchesFilter = useCallback((payment, filter) => {
+    if (filter === 'Pending') {
+      return String(payment.status || '').toLowerCase() === 'pending' && Number(payment.amount_due || 0) > 0;
+    }
+    if (filter === 'Cash') {
+      const mode = String(payment.effective_payment_mode || payment.payment_mode || '').toLowerCase();
+      return mode === 'cash' || mode === 'mixed';
+    }
+    if (filter === 'Online') {
+      const mode = String(payment.effective_payment_mode || payment.payment_mode || '').toLowerCase();
+      return mode === 'online' || mode === 'mixed';
+    }
+    return true;
+  }, []);
+
   const fetchData = async () => {
     try {
       setLoading(true);
       const headers = { 'x-auth-token': token };
       const paymentUrl = searchTerm
-        ? `/api/payments?search=${searchTerm}`
+        ? `/api/payments?search=${encodeURIComponent(searchTerm)}`
         : '/api/payments';
       const [paymentsRes, statsRes, membersRes, plansRes] = await Promise.all([
         axios.get(paymentUrl, { headers }),
@@ -167,11 +199,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       const plansData = extractArray(plansRes.data, ['plans', 'rows', 'items']);
 
       setPayments(paymentsData);
-      let newData = paymentsData;
-      if (activeFilter === 'Pending') newData = newData.filter(p => p.status === 'Pending');
-      else if (activeFilter === 'Cash') newData = newData.filter(p => p.payment_mode === 'Cash');
-      else if (activeFilter === 'Online') newData = newData.filter(p => p.payment_mode === 'Online');
-      setFilteredPayments(newData);
+        setFilteredPayments(paymentsData.filter((payment) => matchesFilter(payment, activeFilter)));
 
       setStats(extractObject(statsRes.data, { total_revenue: 0, today_revenue: 0, pending_dues: 0 }));
       setMembers(membersData);
@@ -191,12 +219,12 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   }, [token, searchTerm]);
 
   useEffect(() => {
-    let data = payments;
-    if (activeFilter === 'Pending') data = data.filter(p => p.status === 'Pending');
-    else if (activeFilter === 'Cash') data = data.filter(p => p.payment_mode === 'Cash');
-    else if (activeFilter === 'Online') data = data.filter(p => p.payment_mode === 'Online');
-    setFilteredPayments(data);
-  }, [activeFilter, payments]);
+    setActiveFilter(defaultFilter || 'All');
+  }, [defaultFilter]);
+
+  useEffect(() => {
+    setFilteredPayments(payments.filter((payment) => matchesFilter(payment, activeFilter)));
+  }, [activeFilter, payments, matchesFilter]);
 
   useEffect(() => {
     const handleDashboardFilter = (event) => {
@@ -258,7 +286,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
     setFormData({ ...formData, plan_id: planId, total_amount: selectedPlan ? selectedPlan.price : '' });
   };
 
-  const openReceipt = async (payment) => {
+  const openReceipt = useCallback(async (payment) => {
     setSelectedPayment(payment);
     setShowReceipt(true);
     setMemberHistory([]);
@@ -274,7 +302,162 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
     } finally {
       setHistoryLoading(false);
     }
+  }, [token]);
+
+  const resetDueModal = useCallback(() => {
+    setDueModalPayment(null);
+    setDueFormData({ amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
+    setDueStep('idle');
+  }, []);
+
+  const openDueModal = useCallback((payment) => {
+    const remainingDue = roundMoney(payment?.amount_due || 0);
+    if (remainingDue <= 0) {
+      toast?.('This payment does not have any remaining due.', 'warning');
+      return;
+    }
+
+    setDueModalPayment(payment);
+    setDueFormData({
+      amount: String(remainingDue),
+      payment_mode: 'Online',
+      transaction_id: '',
+      notes: '',
+    });
+    setDueStep('idle');
+  }, [toast]);
+
+  const settleDueLocally = useCallback(async (payload, fallbackMessage) => {
+    const updatedPayment = { ...(dueModalPayment || {}), ...(payload?.payment || {}) };
+    resetDueModal();
+    await fetchData();
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments-due' } }));
+    toast?.(payload?.message || fallbackMessage || 'Pending due collected successfully.', 'success');
+    if (updatedPayment?.id) {
+      await openReceipt(updatedPayment);
+    }
+  }, [dueModalPayment, fetchData, openReceipt, resetDueModal, toast]);
+
+  const handleCollectDue = async (e) => {
+    if (e) e.preventDefault();
+    if (!dueModalPayment || dueSubmitting) return;
+
+    const remainingDue = roundMoney(dueModalPayment.amount_due || 0);
+    const requestedAmount = dueFormData.amount === '' ? remainingDue : roundMoney(Number.parseFloat(dueFormData.amount));
+
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      toast?.('Enter a valid amount to collect.', 'warning');
+      return;
+    }
+    if (requestedAmount - remainingDue > 0.009) {
+      toast?.('Collection amount cannot be greater than the remaining due.', 'warning');
+      return;
+    }
+
+    setDueSubmitting(true);
+    setDueStep('processing');
+
+    try {
+      if (dueFormData.payment_mode === 'Online') {
+        const scriptLoaded = await loadRazorpayScript();
+        if (!scriptLoaded) {
+          toast?.('Failed to load Razorpay checkout.', 'error');
+          setDueStep('idle');
+          return;
+        }
+
+        const orderRes = await axios.post(
+          `/api/payments/${dueModalPayment.id}/due/create-order`,
+          { amount: requestedAmount, notes: dueFormData.notes },
+          { headers: { 'x-auth-token': token } }
+        );
+
+        const order = orderRes.data?.order;
+        const keyId = orderRes.data?.key_id;
+        if (!order?.id || !keyId) {
+          toast?.('Failed to start online due payment.', 'error');
+          setDueStep('idle');
+          return;
+        }
+
+        await new Promise((resolve) => {
+          const options = {
+            key: keyId,
+            amount: order.amount,
+            currency: order.currency || 'INR',
+            name: 'Pending Due Collection',
+            description: `${dueModalPayment.member_name || 'Member'} · ${dueModalPayment.plan_name || 'Membership'}`,
+            order_id: order.id,
+            prefill: {
+              name: dueModalPayment.member_name || '',
+              email: dueModalPayment.member_email || '',
+              contact: orderRes.data?.payment?.member_phone || dueModalPayment.member_phone || '',
+            },
+            theme: { color: '#f97316' },
+            handler: async (response) => {
+              try {
+                const verifyRes = await axios.post(
+                  `/api/payments/${dueModalPayment.id}/due/verify`,
+                  {
+                    amount: requestedAmount,
+                    notes: dueFormData.notes,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature: response.razorpay_signature,
+                  },
+                  { headers: { 'x-auth-token': token } }
+                );
+                await settleDueLocally(verifyRes.data, 'Pending due collected successfully.');
+              } catch (err) {
+                toast?.(err?.response?.data?.error || 'Due payment verification failed.', 'error');
+                setDueStep('idle');
+              } finally {
+                resolve();
+              }
+            },
+            modal: {
+              ondismiss: () => {
+                setDueStep('idle');
+                resolve();
+              },
+            },
+          };
+          const rzp = new window.Razorpay(options);
+          rzp.open();
+        });
+      } else {
+        const cashRes = await axios.post(
+          `/api/payments/${dueModalPayment.id}/due/collect`,
+          {
+            amount: requestedAmount,
+            transaction_id: dueFormData.transaction_id,
+            notes: dueFormData.notes,
+          },
+          { headers: { 'x-auth-token': token } }
+        );
+        await settleDueLocally(cashRes.data, 'Pending due collected successfully.');
+      }
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to collect pending due.', 'error');
+      setDueStep('idle');
+    } finally {
+      setDueSubmitting(false);
+    }
   };
+
+  useEffect(() => {
+    if (!focusPaymentId) return;
+    const targetPayment = payments.find((payment) => Number(payment.id) === Number(focusPaymentId));
+    if (!targetPayment) return;
+
+    setActiveFilter('Pending');
+    if (focusAction === 'collectDue') {
+      openDueModal(targetPayment);
+    } else {
+      openReceipt(targetPayment);
+    }
+    onFocusHandled?.();
+  }, [focusAction, focusPaymentId, onFocusHandled, openDueModal, openReceipt, payments]);
 
   const handleDownloadReceipt = () => {
     if (!selectedPayment) return;
@@ -301,13 +484,18 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const revenueSplit = useMemo(() => {
     let cashTotal = 0, onlineTotal = 0, onlineCount = 0;
     payments.forEach(p => {
-      const amount = parseFloat(p.amount_paid) || 0;
+      const initialAmount = parseFloat(p.initial_amount_paid ?? p.amount_paid) || 0;
+      const dueOnlineAmount = parseFloat(p.due_online_collected || 0) || 0;
+      const dueCashAmount = parseFloat(p.due_cash_collected || 0) || 0;
       const modeLabel = p.payment_mode ? p.payment_mode.toString().toLowerCase().trim() : '';
       const txnId = p.transaction_id ? p.transaction_id.toString().toLowerCase().trim() : '';
       const invId = p.invoice_id ? p.invoice_id.toString().toLowerCase().trim() : '';
-      const isOnline = (txnId !== "" && txnId !== invId && txnId !== "null" && txnId !== "processing...") || modeLabel.includes('online') || modeLabel.includes('upi') || txnId.startsWith('pay_');
-      if (isOnline) { onlineTotal += amount; onlineCount++; }
-      else { cashTotal += amount; }
+      const isInitialOnline = (txnId !== "" && txnId !== invId && txnId !== "null" && txnId !== "processing...") || modeLabel.includes('online') || modeLabel.includes('upi') || txnId.startsWith('pay_');
+      if (isInitialOnline) onlineTotal += initialAmount;
+      else cashTotal += initialAmount;
+      onlineTotal += dueOnlineAmount;
+      cashTotal += dueCashAmount;
+      if (isInitialOnline || dueOnlineAmount > 0) onlineCount++;
     });
     const total = cashTotal + onlineTotal;
     return { cash: cashTotal, online: onlineTotal, onlineCount, cashPer: total > 0 ? (cashTotal / total) * 100 : 0, onlinePer: total > 0 ? (onlineTotal / total) * 100 : 0 };
@@ -607,7 +795,14 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${payment.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
                       {payment.status === 'Completed' ? 'Paid' : 'Pending'}
                     </span>
-                    <button onClick={() => openReceipt(payment)} className="text-xs font-bold text-indigo-600">View</button>
+                    <div className="flex items-center gap-2">
+                      {parseFloat(payment.amount_due) > 0 && (
+                        <button onClick={() => openDueModal(payment)} className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-orange-50 text-orange-600 border border-orange-100">
+                          Collect Due
+                        </button>
+                      )}
+                      <button onClick={() => openReceipt(payment)} className="text-xs font-bold text-indigo-600">View</button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -651,7 +846,7 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                     <td className="p-6"><div className="text-sm font-bold text-slate-600">{new Date(payment.payment_date).toLocaleDateString()}</div><div className="text-xs font-bold text-slate-400 mt-0.5">{new Date(payment.payment_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></td>
                     <td className="p-6"><div className="font-black text-slate-900">₹{parseFloat(payment.amount_paid).toLocaleString()}</div>{parseFloat(payment.amount_due) > 0 && (<div className="text-[10px] font-bold text-orange-500">Due: ₹{payment.amount_due}</div>)}</td>
                     <td className="p-6">{payment.status === 'Completed' ? (<span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700"><CheckCircle2 size={12} /> Paid</span>) : (<span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-700"><Clock size={12} /> Pending</span>)}</td>
-                    <td className="p-6"><button onClick={() => openReceipt(payment)} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-900 transition-all"><FileText size={18} /></button></td>
+                    <td className="p-6"><div className="flex items-center justify-end gap-2">{parseFloat(payment.amount_due) > 0 && (<button onClick={() => openDueModal(payment)} className="px-3 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[10px] font-black uppercase tracking-widest shadow-sm hover:opacity-90 transition-all">Collect Due</button>)}<button onClick={() => openReceipt(payment)} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-900 transition-all"><FileText size={18} /></button></div></td>
                   </tr>
                 ))
               )}
@@ -722,6 +917,86 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
         </div>
       )}
 
+      {dueModalPayment && (
+        <div className="app-modal-shell z-[95] bg-slate-950/65 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="app-modal-panel bg-white rounded-[30px] w-full max-w-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="relative overflow-hidden px-6 py-6 border-b border-orange-100 text-white" style={{ background: 'linear-gradient(135deg, #111827 0%, #7c2d12 45%, #f97316 100%)' }}>
+              <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at top right, rgba(255,255,255,0.7) 0%, transparent 32%)' }} />
+              <div className="relative flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-100/80 mb-2">Pending Balance</p>
+                  <h2 className="text-2xl font-black tracking-tight">Collect Due</h2>
+                  <p className="text-sm font-semibold text-orange-50/80 mt-1">Settle the remaining balance smoothly with Razorpay or cash.</p>
+                </div>
+                <button onClick={() => !dueSubmitting && resetDueModal()} className="bg-white/10 p-2 rounded-full text-white/80 hover:text-white transition-colors disabled:opacity-50" disabled={dueSubmitting}><X size={20} /></button>
+              </div>
+            </div>
+
+            <form onSubmit={handleCollectDue} className="app-modal-scroll p-6 space-y-5">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Member</p>
+                  <p className="text-lg font-black text-slate-900">{dueModalPayment.member_name}</p>
+                  <p className="text-xs font-semibold text-slate-500 mt-1">{dueModalPayment.plan_name || 'Membership'} · Invoice {dueModalPayment.invoice_id || dueModalPayment.id}</p>
+                </div>
+                <div className="rounded-2xl border border-orange-100 bg-orange-50 px-4 py-4 text-right">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-orange-500/70 mb-1">Remaining</p>
+                  <p className="text-2xl font-black text-orange-600">₹{roundMoney(dueModalPayment.amount_due || 0).toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Collection Amount</label>
+                  <input type="number" min="0" step="0.01" max={roundMoney(dueModalPayment.amount_due || 0)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-orange-500/20" value={dueFormData.amount} onChange={(e) => setDueFormData((prev) => ({ ...prev, amount: e.target.value }))} />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button type="button" onClick={() => setDueFormData((prev) => ({ ...prev, amount: String(roundMoney(dueModalPayment.amount_due || 0)) }))} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-100">Full Balance</button>
+                    <button type="button" onClick={() => setDueFormData((prev) => ({ ...prev, amount: String(roundMoney((dueModalPayment.amount_due || 0) / 2)) }))} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">Half Now</button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Payment Method</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Online', 'Cash'].map((mode) => (
+                      <button key={mode} type="button" onClick={() => setDueFormData((prev) => ({ ...prev, payment_mode: mode }))} className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${dueFormData.payment_mode === mode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-300'}`}>
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Razorpay opens with the exact pending balance.' : 'Record a smooth cash settlement right from the ledger.'}</p>
+                </div>
+              </div>
+
+              {dueFormData.payment_mode === 'Cash' && (
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Cash / UPI Reference</label>
+                  <input type="text" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10" placeholder="Optional desk reference" value={dueFormData.transaction_id} onChange={(e) => setDueFormData((prev) => ({ ...prev, transaction_id: e.target.value }))} />
+                </div>
+              )}
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Internal Note</label>
+                <textarea rows="3" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-medium text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10 resize-none" placeholder="Optional note for this settlement" value={dueFormData.notes} onChange={(e) => setDueFormData((prev) => ({ ...prev, notes: e.target.value }))} />
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">After Collection</p>
+                  <p className="text-sm font-bold text-slate-800 mt-1">Remaining due will be ₹{Math.max(0, roundMoney((dueModalPayment.amount_due || 0) - (Number.parseFloat(dueFormData.amount || 0) || 0))).toLocaleString()}</p>
+                </div>
+                <div className={`text-[10px] font-black uppercase tracking-[0.18em] px-2.5 py-1 rounded-full ${dueStep === 'processing' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                  {dueStep === 'processing' ? 'Processing' : 'Ready'}
+                </div>
+              </div>
+
+              <button type="submit" disabled={dueSubmitting} className="w-full py-4 rounded-2xl font-black text-sm uppercase tracking-[0.18em] text-white transition-all active:scale-[0.99] disabled:opacity-60" style={{ background: dueFormData.payment_mode === 'Online' ? 'linear-gradient(135deg, #f97316, #ea580c)' : 'linear-gradient(135deg, #111827, #334155)', boxShadow: dueFormData.payment_mode === 'Online' ? '0 14px 30px rgba(249,115,22,0.25)' : '0 14px 30px rgba(15,23,42,0.18)' }}>
+                {dueSubmitting ? (dueFormData.payment_mode === 'Online' ? 'Opening Razorpay...' : 'Collecting Due...') : (dueFormData.payment_mode === 'Online' ? 'Pay Pending Due Online' : 'Record Cash Collection')}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* RECEIPT MODAL */}
       {showReceipt && selectedPayment && (
         <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -744,13 +1019,18 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
                   <div className="text-center py-4 text-slate-400 text-xs">Loading history...</div>
                 ) : (
                   <div className="space-y-2">
-                    {memberHistory.map((hist, i) => (<div key={i} className="flex justify-between items-center text-xs p-2 rounded-lg bg-slate-50"><div className="font-bold text-slate-600">{new Date(hist.payment_date).toLocaleDateString()}</div><div className="font-black text-slate-900">₹{hist.amount_paid}</div><div className="text-slate-400">{hist.transaction_id || hist.invoice_id}</div></div>))}
+                    {memberHistory.map((hist, i) => (<div key={i} className="flex justify-between items-center text-xs p-2 rounded-lg bg-slate-50 gap-2"><div><div className="font-bold text-slate-600">{new Date(hist.payment_date).toLocaleDateString()}</div><div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mt-0.5">{hist.entry_type === 'DUE_COLLECTION' ? 'Due Collection' : 'Payment'}</div></div><div className="font-black text-slate-900">₹{hist.amount_paid}</div><div className="text-slate-400 text-right">{hist.transaction_id || hist.invoice_id}</div></div>))}
                     {memberHistory.length === 0 && <div className="text-xs text-slate-400 italic">No previous records found.</div>}
                   </div>
                 )}
               </div>
             </div>
             <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col gap-2">
+              {parseFloat(selectedPayment.amount_due || 0) > 0 && (
+                <button onClick={() => { setShowReceipt(false); openDueModal(selectedPayment); }} className="w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-sm hover:opacity-90 transition-all active:scale-95">
+                  Collect Remaining Due
+                </button>
+              )}
               <button onClick={handleDownloadReceipt} className="w-full py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 shadow-sm flex justify-center items-center gap-2 hover:bg-slate-100 active:scale-95 transition-all"><ArrowDownToLine size={16}/> Download Receipt</button>
               <button onClick={() => handleDeletePayment(selectedPayment.id)} className="w-full py-3 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-bold text-xs flex justify-center items-center gap-2 hover:bg-rose-600 hover:text-white transition-all active:scale-95"><Trash2 size={14}/> Delete This Record</button>
             </div>
