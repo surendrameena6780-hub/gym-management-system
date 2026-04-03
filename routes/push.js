@@ -4,12 +4,15 @@ const webpush = require('web-push');
 const { pool } = require('../config/db');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// Configure VAPID
-webpush.setVapidDetails(
-    process.env.VAPID_EMAIL || 'mailto:admin@gymvault.app',
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-);
+// Configure VAPID (only if keys are present — prevents crash on cold start without env vars)
+const vapidConfigured = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+if (vapidConfigured) {
+    webpush.setVapidDetails(
+        process.env.VAPID_EMAIL || 'mailto:admin@gymvault.app',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+    );
+}
 
 // GET /api/push/vapid-public-key  — frontend needs this to subscribe
 router.get('/vapid-public-key', (req, res) => {
