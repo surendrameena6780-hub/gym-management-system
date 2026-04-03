@@ -152,6 +152,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
+  const [staffOptions, setStaffOptions] = useState([]);
 
   const [formData, setFormData] = useState({
     user_id: '', plan_id: '', amount_paid: '', total_amount: '', payment_mode: 'Online', transaction_id: '', notes: ''
@@ -162,43 +163,104 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   // ── Finance Hub State ──
   const [financeTab, setFinanceTab] = useState('collections');
+  const [financeOverview, setFinanceOverview] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [payrollEntries, setPayrollEntries] = useState([]);
   const [posProducts, setPosProducts] = useState([]);
+  const [posSales, setPosSales] = useState([]);
+  const [posCart, setPosCart] = useState([]);
+  const [posCheckout, setPosCheckout] = useState({ member_id: '', payment_mode: 'Cash', notes: '' });
+  const [posSubmitting, setPosSubmitting] = useState(false);
   const [financeLoading, setFinanceLoading] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ category: '', vendor: '', description: '', amount: '', bill_date: '', payment_mode: 'Cash' });
   const [showPayrollModal, setShowPayrollModal] = useState(false);
-  const [payrollForm, setPayrollForm] = useState({ staff_name: '', role: '', base_salary: '', deductions: '0', bonus: '0', pay_period: '' });
+  const [payrollForm, setPayrollForm] = useState({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
   const [showPosModal, setShowPosModal] = useState(false);
   const [posForm, setPosForm] = useState({ name: '', category: 'supplement', price: '', stock_qty: '' });
 
+  const fetchFinanceOverview = useCallback(async () => {
+    setFinanceLoading(true);
+    try {
+      const res = await axios.get('/api/finance/overview', { headers: { 'x-auth-token': token } });
+      setFinanceOverview(extractObject(res.data, {}));
+    } catch {
+      setFinanceOverview(null);
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, [token]);
+
   const fetchExpenses = useCallback(async () => {
+    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/expenses', { headers: { 'x-auth-token': token } });
       setExpenses(Array.isArray(res.data) ? res.data : []);
-    } catch { setExpenses([]); }
+    } catch {
+      setExpenses([]);
+    } finally {
+      setFinanceLoading(false);
+    }
   }, [token]);
 
   const fetchPayroll = useCallback(async () => {
+    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/payroll', { headers: { 'x-auth-token': token } });
       setPayrollEntries(Array.isArray(res.data) ? res.data : []);
-    } catch { setPayrollEntries([]); }
+    } catch {
+      setPayrollEntries([]);
+    } finally {
+      setFinanceLoading(false);
+    }
   }, [token]);
 
   const fetchPosProducts = useCallback(async () => {
+    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/pos/products', { headers: { 'x-auth-token': token } });
       setPosProducts(Array.isArray(res.data) ? res.data : []);
-    } catch { setPosProducts([]); }
+    } catch {
+      setPosProducts([]);
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, [token]);
+
+  const fetchPosSales = useCallback(async () => {
+    setFinanceLoading(true);
+    try {
+      const res = await axios.get('/api/finance/pos/sales', { headers: { 'x-auth-token': token } });
+      setPosSales(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setPosSales([]);
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, [token]);
+
+  const fetchStaffOptions = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/users/staff', { headers: { 'x-auth-token': token } });
+      setStaffOptions(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setStaffOptions([]);
+    }
   }, [token]);
 
   useEffect(() => {
-    if (financeTab === 'expenses') fetchExpenses();
-    else if (financeTab === 'payroll') fetchPayroll();
-    else if (financeTab === 'pos') fetchPosProducts();
-  }, [financeTab, fetchExpenses, fetchPayroll, fetchPosProducts]);
+    if (financeTab === 'expenses') {
+      fetchExpenses();
+    } else if (financeTab === 'payroll') {
+      fetchPayroll();
+      fetchStaffOptions();
+    } else if (financeTab === 'pos') {
+      fetchPosProducts();
+      fetchPosSales();
+    } else if (financeTab === 'collections' || financeTab === 'reconciliation') {
+      fetchFinanceOverview();
+    }
+  }, [financeTab, fetchExpenses, fetchPayroll, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchStaffOptions]);
 
   const handleSaveExpense = async () => {
     try {
@@ -207,16 +269,22 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       setShowExpenseModal(false);
       setExpenseForm({ category: '', vendor: '', description: '', amount: '', bill_date: '', payment_mode: 'Cash' });
       fetchExpenses();
+      fetchFinanceOverview();
     } catch { toast?.('Failed to add expense', 'error'); }
   };
 
   const handleSavePayroll = async () => {
+    if (!payrollForm.user_id || !payrollForm.pay_period || !payrollForm.base_pay) {
+      toast?.('Select a staff member, pay period, and base pay.', 'warning');
+      return;
+    }
     try {
       await axios.post('/api/finance/payroll', payrollForm, { headers: { 'x-auth-token': token } });
       toast?.('Payroll entry added', 'success');
       setShowPayrollModal(false);
-      setPayrollForm({ staff_name: '', role: '', base_salary: '', deductions: '0', bonus: '0', pay_period: '' });
+      setPayrollForm({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
       fetchPayroll();
+      fetchFinanceOverview();
     } catch { toast?.('Failed to add payroll entry', 'error'); }
   };
 
@@ -228,6 +296,82 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       setPosForm({ name: '', category: 'supplement', price: '', stock_qty: '' });
       fetchPosProducts();
     } catch { toast?.('Failed to add product', 'error'); }
+  };
+
+  const addProductToCart = (product) => {
+    const existing = posCart.find((item) => item.product_id === product.id);
+    const nextQuantity = (existing?.quantity || 0) + 1;
+    if (nextQuantity > Number(product.stock_qty || 0)) {
+      toast?.('No more stock available for this product.', 'warning');
+      return;
+    }
+    setPosCart((prev) => {
+      if (existing) {
+        return prev.map((item) => item.product_id === product.id ? { ...item, quantity: nextQuantity } : item);
+      }
+      return [...prev, {
+        product_id: product.id,
+        name: product.name,
+        unit_price: Number(product.price || 0),
+        quantity: 1,
+        stock_qty: Number(product.stock_qty || 0),
+      }];
+    });
+  };
+
+  const updateCartQuantity = (productId, quantity) => {
+    setPosCart((prev) => prev
+      .map((item) => item.product_id === productId ? { ...item, quantity: Math.max(1, Math.min(Number(quantity || 1), item.stock_qty)) } : item)
+      .filter((item) => item.quantity > 0));
+  };
+
+  const removeCartItem = (productId) => {
+    setPosCart((prev) => prev.filter((item) => item.product_id !== productId));
+  };
+
+  const posCartTotal = useMemo(() => posCart.reduce((sum, item) => sum + (Number(item.unit_price || 0) * Number(item.quantity || 0)), 0), [posCart]);
+
+  const handleCheckoutPosSale = async () => {
+    if (posCart.length === 0) {
+      toast?.('Add at least one product to the POS cart.', 'warning');
+      return;
+    }
+    setPosSubmitting(true);
+    try {
+      await axios.post('/api/finance/pos/sales', {
+        member_id: posCheckout.member_id ? Number.parseInt(posCheckout.member_id, 10) : null,
+        payment_mode: posCheckout.payment_mode,
+        notes: posCheckout.notes,
+        items: posCart.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
+      }, { headers: { 'x-auth-token': token } });
+      toast?.('POS sale recorded.', 'success');
+      setPosCart([]);
+      setPosCheckout({ member_id: '', payment_mode: 'Cash', notes: '' });
+      fetchPosProducts();
+      fetchPosSales();
+      fetchFinanceOverview();
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to complete POS sale.', 'error');
+    } finally {
+      setPosSubmitting(false);
+    }
+  };
+
+  const markPayrollPaid = async (entry) => {
+    try {
+      await axios.put(`/api/finance/payroll/${entry.id}`, {
+        base_pay: entry.base_pay,
+        commission: entry.commission,
+        deductions: entry.deductions,
+        notes: entry.notes,
+        status: 'PAID',
+      }, { headers: { 'x-auth-token': token } });
+      toast?.('Payroll marked as paid.', 'success');
+      fetchPayroll();
+      fetchFinanceOverview();
+    } catch {
+      toast?.('Failed to update payroll status.', 'error');
+    }
   };
 
   const getImageUrl = (path) => normalizeProfileImageUrl(path);
@@ -644,6 +788,41 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     };
   }, [payments, revenueSplit, stats.pending_dues, stats.today_revenue]);
 
+  const financeSummary = useMemo(() => {
+    const revenue = extractObject(financeOverview?.revenue, {});
+    const expensesSummary = extractObject(financeOverview?.expenses, {});
+    const payrollSummary = extractObject(financeOverview?.payroll, {});
+    const posSummary = extractObject(financeOverview?.pos, {});
+    const overdueSummary = extractObject(financeOverview?.overdue, {});
+
+    const membershipRevenue = Number(revenue.total_revenue || 0);
+    const posRevenue = Number(posSummary.pos_revenue || 0);
+    const totalIncome = membershipRevenue + posRevenue;
+    const totalExpenses = Number(expensesSummary.total_expenses || 0);
+    const totalPayroll = Number(payrollSummary.total_payroll || 0);
+    const totalOutflows = totalExpenses + totalPayroll;
+    const netPosition = totalIncome - totalOutflows;
+    const overdueAmount = Number(overdueSummary.overdue_amount || revenue.total_pending || 0);
+
+    return {
+      membershipRevenue,
+      posRevenue,
+      totalIncome,
+      totalExpenses,
+      totalPayroll,
+      totalOutflows,
+      netPosition,
+      overdueAmount,
+      overdueCount: Number(overdueSummary.overdue_count || 0),
+      pendingPayroll: Number(payrollSummary.pending_payroll || 0),
+      pendingPayrollCount: Number(payrollSummary.pending_count || 0),
+      monthExpenses: Number(expensesSummary.month_expenses || 0),
+      posToday: Number(posSummary.pos_today || 0),
+      posCount: Number(posSummary.pos_count || 0),
+      todayRevenue: Number(revenue.today_revenue || 0),
+    };
+  }, [financeOverview]);
+
   const getEmptySubtitle = () => {
     if (searchTerm) return `No results matching "${searchTerm}"`;
     if (activeFilter !== 'All') return `No ${activeFilter} payments recorded yet`;
@@ -707,10 +886,11 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Finance Hub</h1>
           {/* Finance hub tabs */}
           <div className="flex gap-1 mt-3 bg-slate-100 rounded-xl p-0.5 w-fit">
-            {[{ key: 'collections', label: 'Collections' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }].map(t => (
+            {[{ key: 'collections', label: 'Collections' }, { key: 'reconciliation', label: 'Reconciliation' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }].map(t => (
               <button key={t.key} onClick={() => setFinanceTab(t.key)} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${financeTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
             ))}
           </div>
+          <p className="text-xs font-bold text-slate-400 mt-3 uppercase tracking-wider">{financeLoading ? 'Refreshing finance snapshot...' : 'Collections, reconciliation, payroll, and desk sales in one workspace.'}</p>
         </div>
         <div className="grid grid-cols-2 sm:flex gap-2.5 w-full sm:w-auto">
           {financeTab === 'collections' && <>
@@ -722,6 +902,86 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
         </div>
       </div>
+
+      {/* ═══════ RECONCILIATION TAB ═══════ */}
+      {financeTab === 'reconciliation' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="rounded-[22px] border border-emerald-100 bg-emerald-50 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700/70">Membership Revenue</p>
+              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.membershipRevenue.toLocaleString()}</p>
+              <p className="text-xs font-bold text-emerald-700 mt-2">₹{financeSummary.todayRevenue.toLocaleString()} collected today</p>
+            </div>
+            <div className="rounded-[22px] border border-sky-100 bg-sky-50 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-sky-700/70">POS Revenue</p>
+              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.posRevenue.toLocaleString()}</p>
+              <p className="text-xs font-bold text-sky-700 mt-2">₹{financeSummary.posToday.toLocaleString()} sold today</p>
+            </div>
+            <div className="rounded-[22px] border border-rose-100 bg-rose-50 p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-rose-700/70">Total Outflows</p>
+              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.totalOutflows.toLocaleString()}</p>
+              <p className="text-xs font-bold text-rose-700 mt-2">Expenses + payroll combined</p>
+            </div>
+            <div className={`rounded-[22px] border p-5 ${financeSummary.netPosition >= 0 ? 'border-indigo-100 bg-indigo-50' : 'border-amber-100 bg-amber-50'}`}>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${financeSummary.netPosition >= 0 ? 'text-indigo-700/70' : 'text-amber-700/70'}`}>Net Cash Position</p>
+              <p className="text-3xl font-black text-slate-900 mt-2">₹{financeSummary.netPosition.toLocaleString()}</p>
+              <p className={`text-xs font-bold mt-2 ${financeSummary.netPosition >= 0 ? 'text-indigo-700' : 'text-amber-700'}`}>{financeSummary.netPosition >= 0 ? 'Operating positive after recorded outflows' : 'Outflows are ahead of recognized income'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
+            <div className="rounded-[24px] border border-slate-100 bg-white p-6">
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Desk Reconciliation Snapshot</h3>
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">Use this to close the day without leaving the app.</p>
+                </div>
+                <div className="px-3 py-2 rounded-2xl bg-slate-50 border border-slate-100">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gross Income</p>
+                  <p className="text-sm font-black text-slate-900 mt-1">₹{financeSummary.totalIncome.toLocaleString()}</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {[
+                  { label: 'Membership collections', value: financeSummary.membershipRevenue, detail: `${payments.length} payment records captured` },
+                  { label: 'POS sales', value: financeSummary.posRevenue, detail: `${financeSummary.posCount} POS bill${financeSummary.posCount === 1 ? '' : 's'} created` },
+                  { label: 'Expense ledger', value: -financeSummary.totalExpenses, detail: `₹${financeSummary.monthExpenses.toLocaleString()} logged this month` },
+                  { label: 'Payroll liability', value: -financeSummary.totalPayroll, detail: `${financeSummary.pendingPayrollCount} payroll entr${financeSummary.pendingPayrollCount === 1 ? 'y' : 'ies'} still pending` },
+                ].map((item) => (
+                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-black text-slate-800">{item.label}</p>
+                      <p className="text-xs font-bold text-slate-500 mt-1">{item.detail}</p>
+                    </div>
+                    <p className={`text-lg font-black ${item.value >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{item.value >= 0 ? '+' : '-'}₹{Math.abs(item.value).toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[24px] border border-slate-100 bg-white p-6 space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Pressure Signals</h3>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">What still needs action from the front desk.</p>
+              </div>
+              <div className="rounded-2xl border border-orange-100 bg-orange-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-orange-600/80">Overdue Dues</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">₹{financeSummary.overdueAmount.toLocaleString()}</p>
+                <p className="text-xs font-bold text-orange-700 mt-2">{financeSummary.overdueCount} member account{financeSummary.overdueCount === 1 ? '' : 's'} are 7+ days overdue.</p>
+              </div>
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-amber-600/80">Pending Payroll</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">₹{financeSummary.pendingPayroll.toLocaleString()}</p>
+                <p className="text-xs font-bold text-amber-700 mt-2">Mark processed salaries as paid to keep the books current.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Recommended Closeout</p>
+                <p className="text-sm font-black text-slate-800 mt-2">Reconcile dues first, then clear pending payroll, and finish by matching POS sales against the day’s register total.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══════ COLLECTIONS TAB ═══════ */}
       {financeTab === 'collections' && (<>
@@ -998,23 +1258,33 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                     <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Role</th>
                     <th className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-wider">Base</th>
                     <th className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-wider">Deductions</th>
-                    <th className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-wider">Bonus</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-wider">Commission</th>
                     <th className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-wider">Net Pay</th>
                     <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Period</th>
                     <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {payrollEntries.map(p => (
                     <tr key={p.id} className="hover:bg-slate-50/50">
                       <td className="px-4 py-3 font-bold text-slate-700">{p.staff_name}</td>
-                      <td className="px-4 py-3 text-slate-600">{p.role || '—'}</td>
-                      <td className="px-4 py-3 text-right text-slate-700">₹{Number(p.base_salary).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-slate-600">{p.staff_role || '—'}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">₹{Number(p.base_pay).toLocaleString()}</td>
                       <td className="px-4 py-3 text-right text-rose-600">-₹{Number(p.deductions).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right text-emerald-600">+₹{Number(p.bonus).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-emerald-600">+₹{Number(p.commission).toLocaleString()}</td>
                       <td className="px-4 py-3 text-right font-black text-slate-900">₹{Number(p.net_pay).toLocaleString()}</td>
                       <td className="px-4 py-3 text-slate-500">{p.pay_period || '—'}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${p.paid_at ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{p.paid_at ? 'Paid' : 'Pending'}</span></td>
+                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${String(p.status || '').toUpperCase() === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{String(p.status || '').toUpperCase() === 'PAID' ? 'Paid' : 'Pending'}</span></td>
+                      <td className="px-4 py-3 text-right">
+                        {String(p.status || '').toUpperCase() === 'PAID' ? (
+                          <span className="text-xs font-bold text-slate-400">Cleared</span>
+                        ) : (
+                          <button onClick={() => markPayrollPaid(p)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800">
+                            Mark Paid
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1027,25 +1297,174 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       {/* ═══════ POS TAB ═══════ */}
       {financeTab === 'pos' && (
         <div className="space-y-4">
-          {posProducts.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              <p className="text-lg font-bold">No products in store</p>
-              <p className="text-sm mt-1">Add supplements, merchandise, or other products.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {posProducts.map(p => (
-                <div key={p.id} className="bg-white rounded-xl border border-slate-100 p-4 hover:shadow-sm transition-all">
-                  <p className="text-sm font-bold text-slate-800 truncate">{p.name}</p>
-                  <p className="text-[10px] uppercase font-bold text-slate-400 mt-0.5">{p.category}</p>
-                  <div className="flex justify-between items-end mt-3">
-                    <p className="text-lg font-black text-slate-900">₹{Number(p.price).toLocaleString()}</p>
-                    <p className={`text-xs font-bold ${p.stock_qty <= 5 ? 'text-rose-500' : 'text-emerald-600'}`}>{p.stock_qty} in stock</p>
+          <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-4">
+            <div className="space-y-4">
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5">
+                <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">Product Catalog</h3>
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">Tap products to add them to the checkout cart.</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 self-start">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sales Today</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">₹{financeSummary.posToday.toLocaleString()}</p>
                   </div>
                 </div>
-              ))}
+                {posProducts.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <p className="text-lg font-bold">No products in store</p>
+                    <p className="text-sm mt-1">Add supplements, merchandise, or other products.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+                    {posProducts.map(p => {
+                      const lowStock = Number(p.stock_qty || 0) <= Number(p.low_stock_threshold || 5);
+                      return (
+                        <button
+                          type="button"
+                          key={p.id}
+                          onClick={() => addProductToCart(p)}
+                          disabled={Number(p.stock_qty || 0) <= 0}
+                          className="text-left bg-white rounded-2xl border border-slate-100 p-4 hover:shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-bold text-slate-800 truncate">{p.name}</p>
+                              <p className="text-[10px] uppercase font-bold text-slate-400 mt-0.5">{p.category}</p>
+                            </div>
+                            <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase ${lowStock ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{lowStock ? 'Low Stock' : 'Ready'}</span>
+                          </div>
+                          <div className="flex justify-between items-end mt-4">
+                            <p className="text-lg font-black text-slate-900">₹{Number(p.price).toLocaleString()}</p>
+                            <p className={`text-xs font-bold ${lowStock ? 'text-rose-500' : 'text-emerald-600'}`}>{p.stock_qty} in stock</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">Recent POS Bills</h3>
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">Latest desk sales with line items.</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total POS Sales</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">{posSales.length}</p>
+                  </div>
+                </div>
+                {posSales.length === 0 ? (
+                  <div className="text-center py-10 text-slate-400">
+                    <p className="text-lg font-bold">No POS sales yet</p>
+                    <p className="text-sm mt-1">Complete the first checkout to start the counter ledger.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {posSales.slice(0, 5).map((sale) => (
+                      <div key={sale.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-black text-slate-900">{sale.member_name || 'Walk-in sale'}</p>
+                            <p className="text-xs font-bold text-slate-500 mt-1">{new Date(sale.created_at).toLocaleString()} • {sale.payment_mode}</p>
+                            <p className="text-xs font-semibold text-slate-500 mt-2">{Array.isArray(sale.items) ? sale.items.map((item) => `${item.product_name} x${item.quantity}`).join(', ') : 'Items unavailable'}</p>
+                          </div>
+                          <div className="text-left sm:text-right">
+                            <p className="text-lg font-black text-slate-900">₹{Number(sale.total_amount).toLocaleString()}</p>
+                            <p className="text-xs font-bold text-slate-400 mt-1">Sold by {sale.sold_by_name || 'Desk'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+
+            <div className="rounded-[24px] border border-slate-900 bg-slate-900 text-white p-5 h-fit">
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <div>
+                  <h3 className="text-lg font-black">Checkout Cart</h3>
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">Attach a member if needed and bill from the desk.</p>
+                </div>
+                <button type="button" onClick={() => setPosCart([])} className="text-xs font-black uppercase tracking-wider text-slate-300 hover:text-white">Clear</button>
+              </div>
+
+              <div className="space-y-3 mb-5">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Member</label>
+                  <select value={posCheckout.member_id} onChange={(e) => setPosCheckout((prev) => ({ ...prev, member_id: e.target.value }))} className="w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.5 text-sm text-white outline-none">
+                    <option value="">Walk-in / no member</option>
+                    {members.map((member) => (
+                      <option key={member.id} value={member.id}>{member.full_name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Payment Mode</label>
+                  <select value={posCheckout.payment_mode} onChange={(e) => setPosCheckout((prev) => ({ ...prev, payment_mode: e.target.value }))} className="w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.5 text-sm text-white outline-none">
+                    {['Cash', 'Online', 'Card', 'UPI'].map((mode) => (
+                      <option key={mode} value={mode}>{mode}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Desk Notes</label>
+                  <textarea value={posCheckout.notes} onChange={(e) => setPosCheckout((prev) => ({ ...prev, notes: e.target.value }))} className="w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.5 text-sm text-white outline-none min-h-[88px] resize-none" placeholder="Optional note for the sale" />
+                </div>
+              </div>
+
+              <div className="space-y-3 mb-5 max-h-[340px] overflow-y-auto pr-1">
+                {posCart.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-800 bg-slate-800/80 px-4 py-8 text-center text-slate-400">
+                    <p className="text-sm font-bold">Your cart is empty</p>
+                    <p className="text-xs font-semibold mt-1">Add a product from the catalog to start checkout.</p>
+                  </div>
+                ) : (
+                  posCart.map((item) => (
+                    <div key={item.product_id} className="rounded-2xl border border-slate-800 bg-slate-800/80 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-white">{item.name}</p>
+                          <p className="text-xs font-bold text-slate-400 mt-1">₹{Number(item.unit_price).toLocaleString()} each • {item.stock_qty} in stock</p>
+                        </div>
+                        <button type="button" onClick={() => removeCartItem(item.product_id)} className="p-2 rounded-xl hover:bg-slate-700 text-slate-400 hover:text-white">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 mt-3">
+                        <input
+                          type="number"
+                          min="1"
+                          max={item.stock_qty}
+                          value={item.quantity}
+                          onChange={(e) => updateCartQuantity(item.product_id, e.target.value)}
+                          className="w-24 rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-white outline-none"
+                        />
+                        <p className="text-sm font-black text-white">₹{(Number(item.unit_price) * Number(item.quantity)).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-2xl bg-white text-slate-900 px-4 py-4">
+                <div className="flex items-center justify-between text-sm font-bold text-slate-500">
+                  <span>Items</span>
+                  <span>{posCart.length}</span>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-base font-black">Total</span>
+                  <span className="text-2xl font-black">₹{posCartTotal.toLocaleString()}</span>
+                </div>
+                <button onClick={handleCheckoutPosSale} disabled={posSubmitting || posCart.length === 0} className="w-full mt-4 py-3 rounded-xl bg-slate-900 text-white font-black hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                  {posSubmitting ? 'Processing...' : 'Complete Sale'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1277,16 +1696,26 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               <button onClick={() => setShowPayrollModal(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
             </div>
             <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-bold text-slate-600 block mb-1">Staff Name</label><input value={payrollForm.staff_name} onChange={e => setPayrollForm(p => ({ ...p, staff_name: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
-                <div><label className="text-xs font-bold text-slate-600 block mb-1">Role</label><input value={payrollForm.role} onChange={e => setPayrollForm(p => ({ ...p, role: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="Trainer, Reception..." /></div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Staff Member</label>
+                <select value={payrollForm.user_id} onChange={e => setPayrollForm(p => ({ ...p, user_id: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
+                  <option value="">Select staff member</option>
+                  {staffOptions.map((staff) => (
+                    <option key={staff.id} value={staff.id}>{staff.full_name} {staff.staff_role ? `• ${staff.staff_role}` : ''}</option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <div><label className="text-xs font-bold text-slate-600 block mb-1">Base Salary</label><input type="number" value={payrollForm.base_salary} onChange={e => setPayrollForm(p => ({ ...p, base_salary: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
+                <div><label className="text-xs font-bold text-slate-600 block mb-1">Base Pay</label><input type="number" value={payrollForm.base_pay} onChange={e => setPayrollForm(p => ({ ...p, base_pay: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
                 <div><label className="text-xs font-bold text-slate-600 block mb-1">Deductions</label><input type="number" value={payrollForm.deductions} onChange={e => setPayrollForm(p => ({ ...p, deductions: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
-                <div><label className="text-xs font-bold text-slate-600 block mb-1">Bonus</label><input type="number" value={payrollForm.bonus} onChange={e => setPayrollForm(p => ({ ...p, bonus: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
+                <div><label className="text-xs font-bold text-slate-600 block mb-1">Commission</label><input type="number" value={payrollForm.commission} onChange={e => setPayrollForm(p => ({ ...p, commission: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
               </div>
               <div><label className="text-xs font-bold text-slate-600 block mb-1">Pay Period</label><input value={payrollForm.pay_period} onChange={e => setPayrollForm(p => ({ ...p, pay_period: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="e.g. Jan 2025" /></div>
+              <div><label className="text-xs font-bold text-slate-600 block mb-1">Notes</label><textarea value={payrollForm.notes} onChange={e => setPayrollForm(p => ({ ...p, notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional context for this payroll entry" /></div>
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Net Pay Preview</p>
+                <p className="text-lg font-black text-slate-900 mt-1">₹{(Number(payrollForm.base_pay || 0) + Number(payrollForm.commission || 0) - Number(payrollForm.deductions || 0)).toLocaleString()}</p>
+              </div>
               <button onClick={handleSavePayroll} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800">Save Payroll</button>
             </div>
           </div>

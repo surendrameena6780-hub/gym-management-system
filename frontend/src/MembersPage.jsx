@@ -295,6 +295,18 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [cancelReason, setCancelReason] = useState('');
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState('');
+  const [docForm, setDocForm] = useState({ doc_type: 'ID Proof', doc_url: '', notes: '' });
+  const [docSaving, setDocSaving] = useState(false);
+  const [savingOnboarding, setSavingOnboarding] = useState(false);
+  const [onboardingForm, setOnboardingForm] = useState({
+    onboarding_complete: false,
+    emergency_contact: '',
+    gender: '',
+    date_of_birth: '',
+    address: '',
+    blood_group: '',
+    medical_notes: '',
+  });
 
   const membersListRef = useRef(null);
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
@@ -313,6 +325,26 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         at: Date.now(),
       },
     }));
+  };
+
+  const syncOnboardingForm = (member) => {
+    setOnboardingForm({
+      onboarding_complete: Boolean(member?.onboarding_complete),
+      emergency_contact: String(member?.emergency_contact || ''),
+      gender: String(member?.gender || ''),
+      date_of_birth: toDateInputValue(member?.date_of_birth),
+      address: String(member?.address || ''),
+      blood_group: String(member?.blood_group || ''),
+      medical_notes: String(member?.medical_notes || ''),
+    });
+  };
+
+  const loadMemberDetails = async (memberId) => {
+    const res = await axios.get(`/api/members/${memberId}`, { headers: { 'x-auth-token': token } });
+    const normalized = normalizeMemberRecord(res.data);
+    setSelectedMember(normalized);
+    syncOnboardingForm(normalized);
+    return normalized;
   };
 
   // ── Lifecycle data fetchers ──
@@ -341,6 +373,84 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setNewNote('');
       fetchMemberNotes(selectedMember.id);
     } catch { toast?.('Failed to add note', 'error'); }
+  };
+  const handleDeleteNote = (noteId) => {
+    if (!selectedMember) return;
+    const runDelete = async () => {
+      try {
+        await axios.delete(`/api/members/${selectedMember.id}/notes/${noteId}`, { headers: { 'x-auth-token': token } });
+        fetchMemberNotes(selectedMember.id);
+        toast?.('Note deleted', 'success');
+      } catch {
+        toast?.('Failed to delete note', 'error');
+      }
+    };
+    if (showConfirm) {
+      showConfirm({
+        title: 'Delete Note',
+        message: 'This note will be removed permanently.',
+        confirmLabel: 'Delete Note',
+        variant: 'danger',
+        onConfirm: runDelete,
+      });
+      return;
+    }
+    if (window.confirm('Delete this note?')) runDelete();
+  };
+  const handleAddDocument = async () => {
+    if (!selectedMember || !docForm.doc_type.trim() || !docForm.doc_url.trim()) return;
+    setDocSaving(true);
+    try {
+      await axios.post(`/api/members/${selectedMember.id}/documents`, {
+        doc_type: docForm.doc_type.trim(),
+        doc_url: docForm.doc_url.trim(),
+        notes: docForm.notes.trim(),
+      }, { headers: { 'x-auth-token': token } });
+      setDocForm({ doc_type: 'ID Proof', doc_url: '', notes: '' });
+      fetchMemberDocs(selectedMember.id);
+      toast?.('Document added', 'success');
+    } catch {
+      toast?.('Failed to add document', 'error');
+    } finally {
+      setDocSaving(false);
+    }
+  };
+  const handleDeleteDocument = (docId) => {
+    if (!selectedMember) return;
+    const runDelete = async () => {
+      try {
+        await axios.delete(`/api/members/${selectedMember.id}/documents/${docId}`, { headers: { 'x-auth-token': token } });
+        fetchMemberDocs(selectedMember.id);
+        toast?.('Document deleted', 'success');
+      } catch {
+        toast?.('Failed to delete document', 'error');
+      }
+    };
+    if (showConfirm) {
+      showConfirm({
+        title: 'Delete Document',
+        message: 'This document reference will be removed permanently.',
+        confirmLabel: 'Delete Document',
+        variant: 'danger',
+        onConfirm: runDelete,
+      });
+      return;
+    }
+    if (window.confirm('Delete this document?')) runDelete();
+  };
+  const handleSaveOnboarding = async () => {
+    if (!selectedMember) return;
+    setSavingOnboarding(true);
+    try {
+      await axios.patch(`/api/members/${selectedMember.id}/onboarding`, onboardingForm, { headers: { 'x-auth-token': token } });
+      await loadMemberDetails(selectedMember.id);
+      await fetchMembers();
+      toast?.('Onboarding details saved', 'success');
+    } catch {
+      toast?.('Failed to save onboarding details', 'error');
+    } finally {
+      setSavingOnboarding(false);
+    }
   };
   const handleCancelMember = async () => {
     if (!selectedMember) return;
@@ -379,9 +489,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   useEffect(() => {
     if (showDetailsModal && selectedMember?.id) {
       setDrawerTab('profile');
+      syncOnboardingForm(selectedMember);
+      setDocForm({ doc_type: 'ID Proof', doc_url: '', notes: '' });
       fetchMemberNotes(selectedMember.id);
       fetchMemberDocs(selectedMember.id);
       fetchMemberWaivers(selectedMember.id);
+      loadMemberDetails(selectedMember.id).catch(() => {});
     }
   }, [showDetailsModal, selectedMember?.id]);
 
@@ -455,7 +568,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setSelectedMember(prev => {
         if (!prev) return prev;
         const fresh = normalizedMembers.find(m => m.id === prev.id);
-        return fresh || prev;
+        return fresh ? { ...prev, ...fresh } : prev;
       });
     } catch (err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
   };
@@ -1333,6 +1446,64 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
             </div>
 
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-indigo-500 mb-1">Onboarding</div>
+                  <p className="text-sm font-black text-slate-900">Health, identity, and emergency details</p>
+                </div>
+                <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${onboardingForm.onboarding_complete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {onboardingForm.onboarding_complete ? 'Complete' : 'Pending'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Emergency Contact</label>
+                  <input value={onboardingForm.emergency_contact} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, emergency_contact: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender</label>
+                  <select value={onboardingForm.gender} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, gender: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers}>
+                    <option value="">Select</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                    <option value="Prefer not to say">Prefer not to say</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Date of Birth</label>
+                  <input type="date" value={onboardingForm.date_of_birth} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, date_of_birth: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Blood Group</label>
+                  <input value={onboardingForm.blood_group} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, blood_group: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} placeholder="A+, O-, B+..." />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Address</label>
+                <textarea value={onboardingForm.address} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, address: event.target.value }))} rows={2} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700 resize-none" disabled={!canWriteMembers} />
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Medical Notes</label>
+                <textarea value={onboardingForm.medical_notes} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, medical_notes: event.target.value }))} rows={3} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700 resize-none" disabled={!canWriteMembers} placeholder="Injury history, movement restrictions, medications..." />
+              </div>
+
+              <label className="flex items-center justify-between rounded-xl border border-indigo-100 bg-white px-3 py-2.5">
+                <span className="text-sm font-bold text-slate-700">Mark onboarding complete</span>
+                <input type="checkbox" checked={onboardingForm.onboarding_complete} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, onboarding_complete: event.target.checked }))} disabled={!canWriteMembers} />
+              </label>
+
+              {canWriteMembers && (
+                <button onClick={handleSaveOnboarding} disabled={savingOnboarding} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider hover:bg-indigo-700 transition-all disabled:opacity-60">
+                  {savingOnboarding ? 'Saving...' : 'Save Onboarding'}
+                </button>
+              )}
+            </div>
+
             {/* payment history */}
             {selectedMember.payment_history?.length > 0 && (
               <div>
@@ -1378,7 +1549,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   <p className="text-sm text-slate-400 text-center py-6">No notes yet</p>
                 ) : memberNotes.map(n => (
                   <div key={n.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-                    <p className="text-sm text-slate-700">{n.note}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm text-slate-700 flex-1">{n.note}</p>
+                      {canWriteMembers && <button onClick={() => handleDeleteNote(n.id)} className="text-[10px] font-black uppercase tracking-wider text-rose-500 hover:text-rose-700">Delete</button>}
+                    </div>
                     <div className="flex justify-between mt-2">
                       <p className="text-[10px] text-slate-400">{n.author_name || 'Staff'}</p>
                       <p className="text-[10px] text-slate-400">{n.created_at ? new Date(n.created_at).toLocaleDateString('en-GB') : ''}</p>
@@ -1391,6 +1565,19 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             {/* ── Documents Tab ── */}
             {drawerTab === 'docs' && (
               <div className="space-y-3">
+                {canWriteMembers && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Add Document Link</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input value={docForm.doc_type} onChange={(event) => setDocForm((prev) => ({ ...prev, doc_type: event.target.value }))} className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700" placeholder="ID Proof" />
+                      <input value={docForm.doc_url} onChange={(event) => setDocForm((prev) => ({ ...prev, doc_url: event.target.value }))} className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700" placeholder="Drive / cloud link" />
+                    </div>
+                    <textarea value={docForm.notes} onChange={(event) => setDocForm((prev) => ({ ...prev, notes: event.target.value }))} rows={2} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 resize-none" placeholder="Optional note" />
+                    <button onClick={handleAddDocument} disabled={docSaving} className="w-full py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-60">
+                      {docSaving ? 'Saving...' : 'Attach Document'}
+                    </button>
+                  </div>
+                )}
                 {memberDocs.length === 0 ? (
                   <p className="text-sm text-slate-400 text-center py-6">No documents uploaded</p>
                 ) : memberDocs.map(d => (
@@ -1400,7 +1587,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                       {d.notes && <p className="text-xs text-slate-400 mt-0.5">{d.notes}</p>}
                       <p className="text-[10px] text-slate-400 mt-1">{d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('en-GB') : ''}</p>
                     </div>
-                    {d.doc_url && <a href={d.doc_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 text-xs font-bold hover:underline">View</a>}
+                    <div className="flex items-center gap-3 shrink-0">
+                      {d.doc_url && <a href={d.doc_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 text-xs font-bold hover:underline">View</a>}
+                      {canWriteMembers && <button onClick={() => handleDeleteDocument(d.id)} className="text-rose-500 text-xs font-black hover:text-rose-700 uppercase tracking-wider">Delete</button>}
+                    </div>
                   </div>
                 ))}
               </div>

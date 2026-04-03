@@ -20,6 +20,7 @@ const connectDB = async () => {
         await pool.query(`
             ALTER TABLE gyms ADD COLUMN IF NOT EXISTS city            VARCHAR(100);
             ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branches_count  INTEGER DEFAULT 1;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branch_directory JSONB DEFAULT '[]'::jsonb;
         `);
         await pool.query(`
             ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_code        VARCHAR(6);

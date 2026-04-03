@@ -25,6 +25,62 @@ const parseTimestamp = (value) => {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 };
 
+const REPEAT_MODES = new Set(['DAILY', 'WEEKDAYS', 'WEEKLY', 'CUSTOM']);
+
+const parseRepeatMode = (value) => {
+    const normalized = String(value || '').trim().toUpperCase();
+    return REPEAT_MODES.has(normalized) ? normalized : '';
+};
+
+const parseRepeatUntil = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return parseTimestamp(`${raw}T23:59:59`);
+    }
+    return parseTimestamp(raw);
+};
+
+const normalizeRepeatDays = (value, fallbackDay) => {
+    if (!Array.isArray(value)) return [fallbackDay];
+    const normalized = value
+        .map((entry) => Number.parseInt(entry, 10))
+        .filter((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 6);
+    return normalized.length > 0 ? Array.from(new Set(normalized)).sort((a, b) => a - b) : [fallbackDay];
+};
+
+const shouldIncludeRepeatDay = (date, mode, startDay, repeatDays) => {
+    const day = date.getDay();
+    if (mode === 'DAILY') return true;
+    if (mode === 'WEEKDAYS') return day >= 1 && day <= 5;
+    if (mode === 'WEEKLY') return day === startDay;
+    if (mode === 'CUSTOM') return repeatDays.includes(day);
+    return false;
+};
+
+const buildRecurringStarts = ({ startsAt, repeatMode, repeatUntil, repeatDays }) => {
+    const firstStart = new Date(startsAt);
+    const finalBoundary = new Date(repeatUntil);
+    if (Number.isNaN(firstStart.getTime()) || Number.isNaN(finalBoundary.getTime()) || finalBoundary < firstStart) {
+        return [startsAt];
+    }
+
+    const startDay = firstStart.getDay();
+    const normalizedRepeatDays = normalizeRepeatDays(repeatDays, startDay);
+    const occurrences = [new Date(firstStart)];
+    const cursor = new Date(firstStart);
+
+    for (let step = 0; step < 365 && occurrences.length < 60; step += 1) {
+        cursor.setDate(cursor.getDate() + 1);
+        if (cursor > finalBoundary) break;
+        if (shouldIncludeRepeatDay(cursor, repeatMode, startDay, normalizedRepeatDays)) {
+            occurrences.push(new Date(cursor));
+        }
+    }
+
+    return occurrences.map((item) => item.toISOString());
+};
+
 router.use(auth, saasMiddleware);
 
 router.get('/summary', requirePermission('attendance:read'), async (req, res) => {
@@ -263,6 +319,71 @@ router.post('/sessions', requirePermission('attendance:write'), async (req, res)
     } catch (err) {
         console.error('CLASS SESSION CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to create class session.' });
+    }
+});
+
+router.post('/sessions/recurring', requirePermission('attendance:write'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const classTypeId = parsePositiveInt(req.body?.class_type_id);
+        const startsAt = parseTimestamp(req.body?.starts_at);
+        const repeatMode = parseRepeatMode(req.body?.repeat_mode);
+        const repeatUntil = parseRepeatUntil(req.body?.repeat_until);
+        const status = String(req.body?.status || 'SCHEDULED').trim().toUpperCase() || 'SCHEDULED';
+        const notes = String(req.body?.notes || '').trim();
+
+        if (!classTypeId || !startsAt) {
+            return res.status(400).json({ error: 'class_type_id and starts_at are required.' });
+        }
+        if (!repeatMode || !repeatUntil) {
+            return res.status(400).json({ error: 'repeat_mode and repeat_until are required for recurring scheduling.' });
+        }
+
+        const classTypeRes = await pool.query(
+            'SELECT * FROM class_types WHERE id = $1 AND gym_id = $2 LIMIT 1',
+            [classTypeId, gymId]
+        );
+        if (classTypeRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Class type not found.' });
+        }
+
+        const classType = classTypeRes.rows[0];
+        const durationMinutes = parsePositiveInt(req.body?.duration_minutes, classType.duration_minutes || 60);
+        const capacity = parsePositiveInt(req.body?.capacity, classType.capacity || 20);
+        const trainerName = String(req.body?.trainer_name || classType.trainer_name || '').trim();
+        const starts = buildRecurringStarts({
+            startsAt,
+            repeatMode,
+            repeatUntil,
+            repeatDays: Array.isArray(req.body?.repeat_days) ? req.body.repeat_days : [],
+        });
+
+        await pool.query('BEGIN');
+        const createdSessions = [];
+        for (const occurrence of starts) {
+            const startDate = new Date(occurrence);
+            const endsAt = new Date(startDate.getTime() + (durationMinutes * 60 * 1000)).toISOString();
+            const insertRes = await pool.query(
+                `INSERT INTO class_sessions (
+                    gym_id, class_type_id, starts_at, ends_at, trainer_name, capacity, status, notes
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING *`,
+                [gymId, classTypeId, occurrence, endsAt, trainerName, capacity, status, notes]
+            );
+            createdSessions.push(insertRes.rows[0]);
+        }
+        await pool.query('COMMIT');
+
+        return res.status(201).json({
+            created_count: createdSessions.length,
+            sessions: createdSessions,
+            repeat_mode: repeatMode,
+            repeat_until: repeatUntil,
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error('CLASS SESSION RECURRING CREATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to create recurring sessions.' });
     }
 });
 

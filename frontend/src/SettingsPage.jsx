@@ -67,6 +67,48 @@ const STAFF_ROLE_OPTIONS = [
   'STAFF',
 ];
 
+const API_SCOPE_OPTIONS = [
+  'members:read',
+  'members:write',
+  'payments:read',
+  'payments:write',
+  'attendance:read',
+  'attendance:write',
+  'dashboard:read',
+];
+
+const WEBHOOK_EVENT_OPTIONS = [
+  'member.created',
+  'member.updated',
+  'payment.recorded',
+  'attendance.checked_in',
+  'class.booking.created',
+];
+
+const buildBranchDirectoryState = (count = 1, existing = []) => {
+  const normalizedCount = Math.max(1, Math.min(25, Number.parseInt(count, 10) || 1));
+  const next = Array.from({ length: normalizedCount }, (_, index) => {
+    const current = existing[index] || {};
+    return {
+      id: current.id || `branch-${index + 1}`,
+      name: current.name || (index === 0 ? 'Main Branch' : `Branch ${index + 1}`),
+      address: current.address || '',
+      phone: current.phone || '',
+    };
+  });
+  return next;
+};
+
+const createWebhookDraft = () => ({
+  id: null,
+  url: '',
+  events: ['payment.recorded'],
+  secret: '',
+  is_active: true,
+});
+
+const IMPORT_SAMPLE_CSV = 'full_name,email,phone\nAarav Singh,aarav@example.com,9876543210\nMeera Patel,meera@example.com,9123456780';
+
 const DEFAULT_MESSAGE_TEMPLATES = [
   { template_key: 'EXPIRING_SOON', title: 'Membership Expiring Soon', whatsapp_text: '', sms_text: '', is_active: true },
   { template_key: 'EXPIRED', title: 'Membership Expired', whatsapp_text: '', sms_text: '', is_active: true },
@@ -157,6 +199,25 @@ const loadRazorpayScript = () => {
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [integrationSaving, setIntegrationSaving] = useState(false);
   const [testSending, setTestSending] = useState(false);
+  const [platformLoading, setPlatformLoading] = useState(false);
+  const [platformSaving, setPlatformSaving] = useState(false);
+  const [platformData, setPlatformData] = useState({
+    city: '',
+    branches_count: 1,
+    branch_directory: buildBranchDirectoryState(1),
+    api_keys: [],
+    webhooks: [],
+  });
+  const [apiKeyForm, setApiKeyForm] = useState({ key_name: '', scopes: ['members:read'] });
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [revealedApiKey, setRevealedApiKey] = useState('');
+  const [copiedApiKey, setCopiedApiKey] = useState(false);
+  const [webhookForm, setWebhookForm] = useState(() => createWebhookDraft());
+  const [webhookSaving, setWebhookSaving] = useState(false);
+  const [webhookTestingId, setWebhookTestingId] = useState(null);
+  const [importForm, setImportForm] = useState({ csv_text: IMPORT_SAMPLE_CSV, dry_run: true });
+  const [importSubmitting, setImportSubmitting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [connectingGateway, setConnectingGateway] = useState(false);
   const [disconnectingGateway, setDisconnectingGateway] = useState(false);
   const [showLinkedAccountForm, setShowLinkedAccountForm] = useState(false);
@@ -351,11 +412,251 @@ const loadRazorpayScript = () => {
     }
   };
 
+  const loadPlatform = async () => {
+    if (!token) return;
+    setPlatformLoading(true);
+    try {
+      const res = await axios.get('/api/settings/platform', headers);
+      const payload = res.data || {};
+      const branchesCount = Math.max(1, Math.min(25, Number.parseInt(payload.branches_count, 10) || 1));
+      setPlatformData({
+        city: String(payload.city || ''),
+        branches_count: branchesCount,
+        branch_directory: buildBranchDirectoryState(branchesCount, Array.isArray(payload.branch_directory) ? payload.branch_directory : []),
+        api_keys: Array.isArray(payload.api_keys) ? payload.api_keys : [],
+        webhooks: Array.isArray(payload.webhooks) ? payload.webhooks : [],
+      });
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to load platform settings.', 'error');
+    } finally {
+      setPlatformLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'integrations') {
       loadIntegrations();
+      loadPlatform();
     }
   }, [activeTab, token]);
+
+  const updateBranchCount = (value) => {
+    const nextCount = Math.max(1, Math.min(25, Number.parseInt(value, 10) || 1));
+    setPlatformData((prev) => ({
+      ...prev,
+      branches_count: nextCount,
+      branch_directory: buildBranchDirectoryState(nextCount, prev.branch_directory),
+    }));
+  };
+
+  const updateBranchField = (branchIndex, field, value) => {
+    setPlatformData((prev) => ({
+      ...prev,
+      branch_directory: prev.branch_directory.map((branch, index) => index === branchIndex ? { ...branch, [field]: value } : branch),
+    }));
+  };
+
+  const saveBranchControls = async () => {
+    setPlatformSaving(true);
+    try {
+      const res = await axios.put('/api/settings/platform/branches', {
+        city: platformData.city,
+        branches_count: platformData.branches_count,
+        branch_directory: platformData.branch_directory,
+      }, headers);
+      const payload = res.data || {};
+      setPlatformData((prev) => ({
+        ...prev,
+        city: String(payload.city || ''),
+        branches_count: Math.max(1, Math.min(25, Number.parseInt(payload.branches_count, 10) || prev.branches_count)),
+        branch_directory: buildBranchDirectoryState(payload.branches_count || prev.branches_count, payload.branch_directory || prev.branch_directory),
+      }));
+      toast(payload.message || 'Branch controls saved successfully.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to save branch controls.', 'error');
+    } finally {
+      setPlatformSaving(false);
+    }
+  };
+
+  const toggleApiScope = (scope) => {
+    setApiKeyForm((prev) => ({
+      ...prev,
+      scopes: prev.scopes.includes(scope)
+        ? prev.scopes.filter((entry) => entry !== scope)
+        : [...prev.scopes, scope],
+    }));
+  };
+
+  const copyApiKeyToClipboard = async () => {
+    if (!revealedApiKey) return;
+    try {
+      await navigator.clipboard.writeText(revealedApiKey);
+      setCopiedApiKey(true);
+      window.setTimeout(() => setCopiedApiKey(false), 1500);
+      toast('API key copied to clipboard.', 'success');
+    } catch {
+      toast('Failed to copy API key. Copy it manually.', 'warning');
+    }
+  };
+
+  const createApiKey = async () => {
+    if (!apiKeyForm.key_name.trim()) {
+      toast('API key name is required.', 'warning');
+      return;
+    }
+    if (apiKeyForm.scopes.length === 0) {
+      toast('Select at least one API scope.', 'warning');
+      return;
+    }
+    setApiKeySaving(true);
+    try {
+      const res = await axios.post('/api/settings/platform/api-keys', apiKeyForm, headers);
+      setPlatformData((prev) => ({
+        ...prev,
+        api_keys: [res.data.api_key, ...prev.api_keys],
+      }));
+      setRevealedApiKey(String(res.data.plain_text_key || ''));
+      setCopiedApiKey(false);
+      setApiKeyForm({ key_name: '', scopes: ['members:read'] });
+      toast(res.data?.message || 'API key created.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to create API key.', 'error');
+    } finally {
+      setApiKeySaving(false);
+    }
+  };
+
+  const revokeApiKey = async (id) => {
+    if (!window.confirm('Revoke this API key? Existing clients using it will stop working.')) return;
+    try {
+      await axios.delete(`/api/settings/platform/api-keys/${id}`, headers);
+      setPlatformData((prev) => ({
+        ...prev,
+        api_keys: prev.api_keys.map((key) => key.id === id ? { ...key, is_active: false } : key),
+      }));
+      toast('API key revoked.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to revoke API key.', 'error');
+    }
+  };
+
+  const toggleWebhookEvent = (eventName) => {
+    setWebhookForm((prev) => ({
+      ...prev,
+      events: prev.events.includes(eventName)
+        ? prev.events.filter((entry) => entry !== eventName)
+        : [...prev.events, eventName],
+    }));
+  };
+
+  const editWebhook = (webhook) => {
+    setWebhookForm({
+      id: webhook.id,
+      url: webhook.url || '',
+      events: Array.isArray(webhook.events) ? webhook.events : [],
+      secret: '',
+      is_active: webhook.is_active !== false,
+    });
+  };
+
+  const resetWebhookForm = () => {
+    setWebhookForm(createWebhookDraft());
+  };
+
+  const saveWebhook = async () => {
+    if (!webhookForm.url.trim()) {
+      toast('Webhook URL is required.', 'warning');
+      return;
+    }
+    if (webhookForm.events.length === 0) {
+      toast('Select at least one webhook event.', 'warning');
+      return;
+    }
+    setWebhookSaving(true);
+    try {
+      const payload = {
+        url: webhookForm.url,
+        events: webhookForm.events,
+        secret: webhookForm.secret,
+        is_active: webhookForm.is_active,
+      };
+      if (webhookForm.id) {
+        const res = await axios.put(`/api/settings/platform/webhooks/${webhookForm.id}`, payload, headers);
+        setPlatformData((prev) => ({
+          ...prev,
+          webhooks: prev.webhooks.map((webhook) => webhook.id === webhookForm.id ? res.data.webhook : webhook),
+        }));
+        toast(res.data?.message || 'Webhook updated successfully.', 'success');
+      } else {
+        const res = await axios.post('/api/settings/platform/webhooks', payload, headers);
+        setPlatformData((prev) => ({
+          ...prev,
+          webhooks: [res.data.webhook, ...prev.webhooks],
+        }));
+        toast(res.data?.message || 'Webhook created successfully.', 'success');
+      }
+      resetWebhookForm();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to save webhook.', 'error');
+    } finally {
+      setWebhookSaving(false);
+    }
+  };
+
+  const deleteWebhook = async (id) => {
+    if (!window.confirm('Delete this webhook endpoint?')) return;
+    try {
+      await axios.delete(`/api/settings/platform/webhooks/${id}`, headers);
+      setPlatformData((prev) => ({
+        ...prev,
+        webhooks: prev.webhooks.filter((webhook) => webhook.id !== id),
+      }));
+      if (webhookForm.id === id) {
+        resetWebhookForm();
+      }
+      toast('Webhook deleted.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to delete webhook.', 'error');
+    }
+  };
+
+  const testWebhook = async (id) => {
+    setWebhookTestingId(id);
+    try {
+      const res = await axios.post(`/api/settings/platform/webhooks/${id}/test`, {}, headers);
+      toast(res.data?.message || 'Webhook test sent.', 'success');
+      loadPlatform();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to send webhook test.', 'error');
+    } finally {
+      setWebhookTestingId(null);
+    }
+  };
+
+  const importMembers = async (dryRun) => {
+    if (!String(importForm.csv_text || '').trim()) {
+      toast('Paste CSV data before importing.', 'warning');
+      return;
+    }
+    setImportSubmitting(true);
+    try {
+      const res = await axios.post('/api/settings/import/members', {
+        csv_text: importForm.csv_text,
+        dry_run: dryRun,
+      }, headers);
+      setImportForm((prev) => ({ ...prev, dry_run: dryRun }));
+      setImportResult(res.data || null);
+      if (!dryRun && Number(res.data?.imported_count || 0) > 0) {
+        fetchSettings();
+      }
+      toast(res.data?.message || (dryRun ? 'Import preview generated.' : 'Members imported.'), 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to process member import.', 'error');
+    } finally {
+      setImportSubmitting(false);
+    }
+  };
 
   const handleIntegrationSave = async (e) => {
     e.preventDefault();
@@ -1407,7 +1708,7 @@ const loadRazorpayScript = () => {
               <p className="text-sm font-medium text-slate-500 mb-6">Connect payment gateways, messaging services &amp; manage campaign templates.</p>
 
               {/* Sub-tab switcher */}
-              <div className="grid w-full max-w-2xl grid-cols-3 bg-slate-100 rounded-2xl p-1 mb-8 gap-1">
+              <div className="grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4 bg-slate-100 rounded-2xl p-1 mb-8 gap-1">
                 <button onClick={() => setIntegSubTab('payments')}
                   className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'payments' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <CreditCard size={14} /> Payments
@@ -1419,6 +1720,10 @@ const loadRazorpayScript = () => {
                 <button onClick={() => setIntegSubTab('campaigns')}
                   className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'campaigns' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <Zap size={14} /> Campaigns
+                </button>
+                <button onClick={() => setIntegSubTab('platform')}
+                  className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'platform' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                  <Blocks size={14} /> Platform
                 </button>
               </div>
 
@@ -1769,6 +2074,245 @@ const loadRazorpayScript = () => {
                     </div>
                   )}
 
+                  {integSubTab === 'platform' && (
+                    <div className="space-y-4 animate-in fade-in duration-200">
+                      {platformLoading ? (
+                        <div className="p-10 bg-white border border-slate-100 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading platform settings...</div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
+                            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
+                              <div>
+                                <h4 className="font-black text-slate-900 text-sm">Branch Controls</h4>
+                                <p className="text-xs text-slate-500 mt-0.5">Manage city, branch count, and front-desk contact details per location.</p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">City</label>
+                                  <input
+                                    value={platformData.city}
+                                    onChange={(e) => setPlatformData((prev) => ({ ...prev, city: e.target.value }))}
+                                    placeholder="Jaipur"
+                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-slate-300 focus:ring-2 focus:ring-slate-100 outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Branch Count</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="25"
+                                    value={platformData.branches_count}
+                                    onChange={(e) => updateBranchCount(e.target.value)}
+                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-slate-300 focus:ring-2 focus:ring-slate-100 outline-none"
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-3">
+                                {platformData.branch_directory.map((branch, index) => (
+                                  <div key={branch.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Branch {index + 1}</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                      <input
+                                        value={branch.name}
+                                        onChange={(e) => updateBranchField(index, 'name', e.target.value)}
+                                        placeholder="Branch name"
+                                        className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold outline-none"
+                                      />
+                                      <input
+                                        value={branch.phone}
+                                        onChange={(e) => updateBranchField(index, 'phone', e.target.value)}
+                                        placeholder="Branch phone"
+                                        className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold outline-none"
+                                      />
+                                      <textarea
+                                        value={branch.address}
+                                        onChange={(e) => updateBranchField(index, 'address', e.target.value)}
+                                        placeholder="Branch address"
+                                        rows={2}
+                                        className="sm:col-span-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold resize-none outline-none"
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex justify-end">
+                                <button type="button" onClick={saveBranchControls} disabled={platformSaving} className="px-6 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60 flex items-center gap-2">
+                                  <Save size={15} /> {platformSaving ? 'Saving...' : 'Save Branch Controls'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
+                              <div>
+                                <h4 className="font-black text-slate-900 text-sm">API Keys</h4>
+                                <p className="text-xs text-slate-500 mt-0.5">Generate scoped API keys for external apps and kiosks.</p>
+                              </div>
+                              <div className="space-y-3">
+                                <input
+                                  value={apiKeyForm.key_name}
+                                  onChange={(e) => setApiKeyForm((prev) => ({ ...prev, key_name: e.target.value }))}
+                                  placeholder="Front desk kiosk"
+                                  className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold outline-none"
+                                />
+                                <div className="flex flex-wrap gap-2">
+                                  {API_SCOPE_OPTIONS.map((scope) => {
+                                    const isActive = apiKeyForm.scopes.includes(scope);
+                                    return (
+                                      <button
+                                        type="button"
+                                        key={scope}
+                                        onClick={() => toggleApiScope(scope)}
+                                        className={`px-3 py-1.5 rounded-full text-xs font-black transition-all ${isActive ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                      >
+                                        {scope}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <button type="button" onClick={createApiKey} disabled={apiKeySaving} className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                                  <Plus size={15} /> {apiKeySaving ? 'Creating...' : 'Create API Key'}
+                                </button>
+                              </div>
+
+                              {revealedApiKey && (
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600/80">Copy This Now</p>
+                                  <p className="font-mono text-sm font-bold text-slate-900 break-all mt-2">{revealedApiKey}</p>
+                                  <button type="button" onClick={copyApiKeyToClipboard} className="mt-3 px-3 py-2 rounded-xl bg-white border border-emerald-200 text-emerald-700 text-xs font-black uppercase tracking-wider hover:bg-emerald-100 transition-all flex items-center gap-2">
+                                    {copiedApiKey ? <Check size={14} /> : <Download size={14} />} {copiedApiKey ? 'Copied' : 'Copy Key'}
+                                  </button>
+                                </div>
+                              )}
+
+                              <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                                {platformData.api_keys.length === 0 ? (
+                                  <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm font-medium">No API keys created yet.</div>
+                                ) : (
+                                  platformData.api_keys.map((key) => (
+                                    <div key={key.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <p className="text-sm font-black text-slate-900">{key.key_name}</p>
+                                          <p className="text-xs font-semibold text-slate-500 mt-1">{key.key_prefix}•••• • {new Date(key.created_at).toLocaleDateString('en-GB')}</p>
+                                          <div className="flex flex-wrap gap-1.5 mt-2">
+                                            {(key.scopes || []).map((scope) => (
+                                              <span key={scope} className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-500">{scope}</span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-col items-end gap-2">
+                                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${key.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{key.is_active ? 'Active' : 'Revoked'}</span>
+                                          {key.is_active && (
+                                            <button type="button" onClick={() => revokeApiKey(key.id)} className="text-[10px] font-black uppercase tracking-wider text-rose-600 hover:text-rose-700">Revoke</button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
+                            <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-4">
+                              <div className="space-y-4">
+                                <div>
+                                  <h4 className="font-black text-slate-900 text-sm">Webhook Router</h4>
+                                  <p className="text-xs text-slate-500 mt-0.5">Push member, payment, attendance, and class events into your external systems.</p>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Endpoint URL</label>
+                                  <input
+                                    value={webhookForm.url}
+                                    onChange={(e) => setWebhookForm((prev) => ({ ...prev, url: e.target.value }))}
+                                    placeholder="https://example.com/gymvault/webhooks"
+                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Events</label>
+                                  <div className="flex flex-wrap gap-2">
+                                    {WEBHOOK_EVENT_OPTIONS.map((eventName) => {
+                                      const isActive = webhookForm.events.includes(eventName);
+                                      return (
+                                        <button
+                                          type="button"
+                                          key={eventName}
+                                          onClick={() => toggleWebhookEvent(eventName)}
+                                          className={`px-3 py-1.5 rounded-full text-xs font-black transition-all ${isActive ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                        >
+                                          {eventName}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Signing Secret</label>
+                                  <input
+                                    value={webhookForm.secret}
+                                    onChange={(e) => setWebhookForm((prev) => ({ ...prev, secret: e.target.value }))}
+                                    placeholder={webhookForm.id ? 'Leave blank to keep current secret' : 'Optional HMAC secret'}
+                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold outline-none"
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                                  <div>
+                                    <p className="text-sm font-bold text-slate-800">Webhook Active</p>
+                                    <p className="text-xs text-slate-500 mt-1">Inactive endpoints stay saved but do not receive events.</p>
+                                  </div>
+                                  <button type="button" onClick={() => setWebhookForm((prev) => ({ ...prev, is_active: !prev.is_active }))} className={`relative w-11 h-6 rounded-full transition-colors ${webhookForm.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                    <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${webhookForm.is_active ? 'translate-x-5' : ''}`} />
+                                  </button>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                  <button type="button" onClick={saveWebhook} disabled={webhookSaving} className="flex-1 px-4 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60">
+                                    {webhookSaving ? 'Saving...' : webhookForm.id ? 'Update Webhook' : 'Create Webhook'}
+                                  </button>
+                                  <button type="button" onClick={resetWebhookForm} className="px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50 transition-all">
+                                    Reset
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3 max-h-[560px] overflow-y-auto pr-1">
+                                {platformData.webhooks.length === 0 ? (
+                                  <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm font-medium">No webhooks configured yet.</div>
+                                ) : (
+                                  platformData.webhooks.map((webhook) => (
+                                    <div key={webhook.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <p className="text-sm font-black text-slate-900 break-all">{webhook.url}</p>
+                                          <div className="flex flex-wrap gap-1.5 mt-2">
+                                            {(webhook.events || []).map((eventName) => (
+                                              <span key={eventName} className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-500">{eventName}</span>
+                                            ))}
+                                          </div>
+                                          <p className="text-xs font-semibold text-slate-500 mt-2">Last triggered: {webhook.last_triggered_at ? new Date(webhook.last_triggered_at).toLocaleString() : 'Never'} • {webhook.has_secret ? 'Signed' : 'Unsigned'}</p>
+                                        </div>
+                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase shrink-0 ${webhook.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{webhook.is_active ? 'Active' : 'Disabled'}</span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-2 mt-4">
+                                        <button type="button" onClick={() => editWebhook(webhook)} className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-black uppercase tracking-wider hover:bg-slate-100 transition-all">Edit</button>
+                                        <button type="button" onClick={() => testWebhook(webhook.id)} disabled={webhookTestingId === webhook.id} className="px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-black uppercase tracking-wider hover:bg-indigo-100 transition-all disabled:opacity-60 flex items-center gap-2">
+                                          <Send size={13} /> {webhookTestingId === webhook.id ? 'Testing...' : 'Send Test'}
+                                        </button>
+                                        <button type="button" onClick={() => deleteWebhook(webhook.id)} className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-black uppercase tracking-wider hover:bg-rose-100 transition-all">Delete</button>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                 </div>
               )}
             </div>
@@ -1780,6 +2324,66 @@ const loadRazorpayScript = () => {
               <p className="text-sm font-medium text-slate-500 mb-8">Export your data anytime. You own your data.</p>
               
               <div className="space-y-4">
+                <div className="border border-slate-200 rounded-2xl bg-white p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold text-slate-800">Bulk Member Import</h3>
+                      <p className="text-xs text-slate-500 mt-1">Paste CSV rows with <span className="font-bold">full_name,email,phone</span>. Preview first, then import live members in one step.</p>
+                    </div>
+                    <button type="button" onClick={() => setImportForm((prev) => ({ ...prev, csv_text: IMPORT_SAMPLE_CSV }))} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all">Load Sample</button>
+                  </div>
+                  <textarea
+                    rows={8}
+                    value={importForm.csv_text}
+                    onChange={(e) => setImportForm((prev) => ({ ...prev, csv_text: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-medium text-slate-700 resize-y outline-none"
+                    placeholder="full_name,email,phone"
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                    <button type="button" onClick={() => importMembers(true)} disabled={importSubmitting} className="flex-1 px-4 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 transition-all disabled:opacity-60">
+                      {importSubmitting && importForm.dry_run ? 'Previewing...' : 'Preview Import'}
+                    </button>
+                    <button type="button" onClick={() => importMembers(false)} disabled={importSubmitting} className="flex-1 px-4 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60">
+                      {importSubmitting && !importForm.dry_run ? 'Importing...' : 'Import Members'}
+                    </button>
+                  </div>
+
+                  {importResult && (
+                    <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="rounded-xl bg-white border border-slate-200 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rows</p>
+                          <p className="text-xl font-black text-slate-900 mt-1">{importResult.total_rows || 0}</p>
+                        </div>
+                        <div className="rounded-xl bg-white border border-slate-200 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Valid</p>
+                          <p className="text-xl font-black text-emerald-600 mt-1">{importResult.valid_rows || 0}</p>
+                        </div>
+                        <div className="rounded-xl bg-white border border-slate-200 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Imported</p>
+                          <p className="text-xl font-black text-indigo-600 mt-1">{importResult.imported_count || 0}</p>
+                        </div>
+                        <div className="rounded-xl bg-white border border-slate-200 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Errors</p>
+                          <p className="text-xl font-black text-rose-600 mt-1">{importResult.error_count || 0}</p>
+                        </div>
+                      </div>
+                      {Array.isArray(importResult.errors) && importResult.errors.length > 0 && (
+                        <div className="rounded-xl bg-white border border-rose-100 p-4">
+                          <p className="text-xs font-black uppercase tracking-widest text-rose-500 mb-3">Validation Errors</p>
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {importResult.errors.map((errorItem, index) => (
+                              <div key={`${errorItem.row}-${index}`} className="text-sm font-semibold text-slate-700 border border-slate-100 rounded-xl px-3 py-2">
+                                Row {errorItem.row}: {errorItem.error}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Members List</h3><p className="text-xs text-slate-500 mt-1">Download a full CSV of all active, expired, and unpaid members.</p></div>
                   <button onClick={() => { const a = document.createElement('a'); a.href = `/api/exports/members`; fetch(a.href, { headers: { 'x-auth-token': token } }).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); a.href = url; a.download = 'members-export.csv'; a.click(); URL.revokeObjectURL(url); }).catch(() => toast?.('Export failed', 'error')); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>

@@ -5,6 +5,40 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
 
+const toMoney = (value, fallback = 0) => {
+    if (value === '' || value === null || value === undefined) return fallback;
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toInt = (value, fallback = 0) => {
+    if (value === '' || value === null || value === undefined) return fallback;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) ? parsed : fallback;
+};
+
+const normalizePlanPayload = (body = {}) => ({
+    name: String(body.name || '').trim(),
+    price: toMoney(body.price, 0),
+    duration_days: toInt(body.duration_days, 30),
+    features: Array.isArray(body.features) ? body.features : [],
+    color_theme: String(body.color_theme || 'blue').trim() || 'blue',
+    is_popular: Boolean(body.is_popular),
+    description: String(body.description || '').trim(),
+    discount_percent: toInt(body.discount_percent, 0),
+    discount_valid_until: body.discount_valid_until || null,
+    joining_fee: toMoney(body.joining_fee, 0),
+    freeze_allowance_days: toInt(body.freeze_allowance_days, 0),
+    transfer_fee: toMoney(body.transfer_fee, 0),
+    access_hours: String(body.access_hours || '').trim(),
+    guest_passes: toInt(body.guest_passes, 0),
+    renewal_policy: String(body.renewal_policy || '').trim(),
+    class_eligibility: String(body.class_eligibility || '').trim(),
+    advanced_rules: body.advanced_rules && typeof body.advanced_rules === 'object' && !Array.isArray(body.advanced_rules)
+        ? body.advanced_rules
+        : {},
+});
+
 router.use(auth, saasMiddleware, requireOwner);
 
 // GET ALL PLANS
@@ -20,27 +54,35 @@ router.get('/', async (req, res) => {
 
 // CREATE A NEW PLAN
 router.post('/add', async (req, res) => {
-    const { name, price, duration_days, features, color_theme, is_popular, description, discount_percent, discount_valid_until } = req.body;
+    const payload = normalizePlanPayload(req.body);
     try {
         const gym_id = req.user.gym_id; 
-        const days = duration_days ? parseInt(duration_days) : 30;
 
         const newPlan = await pool.query(
             `INSERT INTO plans 
-            (gym_id, name, price, duration_days, features, color_theme, is_popular, description, discount_percent, discount_valid_until) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+            (gym_id, name, price, duration_days, features, color_theme, is_popular, description, discount_percent, discount_valid_until,
+             joining_fee, freeze_allowance_days, transfer_fee, access_hours, guest_passes, renewal_policy, class_eligibility, advanced_rules) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
             RETURNING *`,
             [
                 gym_id, 
-                name, 
-                parseFloat(price), 
-                days, 
-                features || [], 
-                color_theme || 'blue', 
-                is_popular || false, 
-                description || '',
-                parseInt(discount_percent) || 0,
-                discount_valid_until || null
+                payload.name,
+                payload.price,
+                payload.duration_days,
+                payload.features,
+                payload.color_theme,
+                payload.is_popular,
+                payload.description,
+                payload.discount_percent,
+                payload.discount_valid_until,
+                payload.joining_fee,
+                payload.freeze_allowance_days,
+                payload.transfer_fee,
+                payload.access_hours,
+                payload.guest_passes,
+                payload.renewal_policy,
+                payload.class_eligibility,
+                JSON.stringify(payload.advanced_rules)
             ]
         );
 
@@ -66,25 +108,47 @@ router.delete('/:id', async (req, res) => {
 // UPDATE PLAN
 router.put('/:id', async (req, res) => {
     const { id } = req.params;
-    const { name, price, duration_days, features, color_theme, is_popular, description, discount_percent, discount_valid_until } = req.body;
+    const payload = normalizePlanPayload(req.body);
 
     try {
-        const days = duration_days ? parseInt(duration_days) : 30;
-
         const updatePlan = await pool.query(
             `UPDATE plans 
-            SET name = $1, price = $2, duration_days = $3, features = $4, color_theme = $5, is_popular = $6, description = $7, discount_percent = $8, discount_valid_until = $9
-            WHERE id = $10 AND gym_id = $11 AND deleted_at IS NULL RETURNING *`,
+            SET name = $1,
+                price = $2,
+                duration_days = $3,
+                features = $4,
+                color_theme = $5,
+                is_popular = $6,
+                description = $7,
+                discount_percent = $8,
+                discount_valid_until = $9,
+                joining_fee = $10,
+                freeze_allowance_days = $11,
+                transfer_fee = $12,
+                access_hours = $13,
+                guest_passes = $14,
+                renewal_policy = $15,
+                class_eligibility = $16,
+                advanced_rules = $17
+            WHERE id = $18 AND gym_id = $19 AND deleted_at IS NULL RETURNING *`,
             [
-                name, 
-                parseFloat(price), 
-                days, 
-                features || [], 
-                color_theme || 'blue', 
-                is_popular || false, 
-                description || '',
-                parseInt(discount_percent) || 0,
-                discount_valid_until || null,
+                payload.name,
+                payload.price,
+                payload.duration_days,
+                payload.features,
+                payload.color_theme,
+                payload.is_popular,
+                payload.description,
+                payload.discount_percent,
+                payload.discount_valid_until,
+                payload.joining_fee,
+                payload.freeze_allowance_days,
+                payload.transfer_fee,
+                payload.access_hours,
+                payload.guest_passes,
+                payload.renewal_policy,
+                payload.class_eligibility,
+                JSON.stringify(payload.advanced_rules),
                 id,
                 req.user.gym_id
             ]

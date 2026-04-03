@@ -65,8 +65,21 @@ const SESSION_FORM = {
   trainer_name: '',
   capacity: '20',
   status: 'SCHEDULED',
+  repeat_mode: '',
+  repeat_until: '',
+  repeat_days: [],
   notes: '',
 };
+
+const REPEAT_DAY_OPTIONS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
 
 const SESSION_STATUS_STYLES = {
   SCHEDULED: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
@@ -348,6 +361,9 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
         trainer_name: String(session.trainer_name || session.default_trainer_name || ''),
         capacity: String(session.capacity || session.effective_capacity || 20),
         status: String(session.status || 'SCHEDULED'),
+        repeat_mode: '',
+        repeat_until: '',
+        repeat_days: [],
         notes: String(session.notes || ''),
       });
     } else {
@@ -360,6 +376,9 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
         trainer_name: String(linkedType?.trainer_name || ''),
         capacity: String(linkedType?.capacity || 20),
         status: 'SCHEDULED',
+        repeat_mode: '',
+        repeat_until: '',
+        repeat_days: [],
         notes: '',
       });
     }
@@ -436,6 +455,9 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
       trainer_name: sessionForm.trainer_name.trim(),
       capacity: Number.parseInt(sessionForm.capacity, 10) || 20,
       status: sessionForm.status || 'SCHEDULED',
+      repeat_mode: sessionForm.repeat_mode || '',
+      repeat_until: sessionForm.repeat_until || '',
+      repeat_days: Array.isArray(sessionForm.repeat_days) ? sessionForm.repeat_days : [],
       notes: sessionForm.notes.trim(),
     };
 
@@ -443,6 +465,10 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
       if (editingSession?.id) {
         await axios.put(`/api/classes/sessions/${editingSession.id}`, payload, { headers: { 'x-auth-token': token } });
         toast?.('Session updated.', 'success');
+      } else if (payload.repeat_mode && payload.repeat_until) {
+        const res = await axios.post('/api/classes/sessions/recurring', payload, { headers: { 'x-auth-token': token } });
+        const createdCount = Number(res.data?.created_count || 0);
+        toast?.(createdCount > 1 ? `Scheduled ${createdCount} recurring sessions.` : 'Recurring schedule created.', 'success');
       } else {
         await axios.post('/api/classes/sessions', payload, { headers: { 'x-auth-token': token } });
         toast?.('Session scheduled.', 'success');
@@ -855,6 +881,58 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
                   <option value="CANCELLED">Cancelled</option>
                 </select>
               </div>
+
+              {!editingSession && (
+                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 space-y-3">
+                  <div>
+                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.18em]">Recurring Builder</p>
+                    <p className="text-xs font-semibold text-slate-500 mt-1">Turn one session into a clean repeating series for the next few weeks.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Repeat Pattern</label>
+                      <select value={sessionForm.repeat_mode} onChange={(event) => setSessionForm((prev) => ({ ...prev, repeat_mode: event.target.value, repeat_days: event.target.value === 'CUSTOM' ? prev.repeat_days : [] }))} className="w-full px-4 py-2.5 bg-white border border-indigo-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all">
+                        <option value="">Do not repeat</option>
+                        <option value="DAILY">Daily</option>
+                        <option value="WEEKDAYS">Weekdays</option>
+                        <option value="WEEKLY">Weekly</option>
+                        <option value="CUSTOM">Custom Days</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Repeat Until</label>
+                      <input type="date" value={sessionForm.repeat_until} onChange={(event) => setSessionForm((prev) => ({ ...prev, repeat_until: event.target.value }))} className="w-full px-4 py-2.5 bg-white border border-indigo-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" disabled={!sessionForm.repeat_mode} />
+                    </div>
+                  </div>
+
+                  {sessionForm.repeat_mode === 'CUSTOM' && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-0.5">Custom Days</label>
+                      <div className="flex flex-wrap gap-2">
+                        {REPEAT_DAY_OPTIONS.map((option) => {
+                          const active = sessionForm.repeat_days.includes(option.value);
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => setSessionForm((prev) => ({
+                                ...prev,
+                                repeat_days: active
+                                  ? prev.repeat_days.filter((item) => item !== option.value)
+                                  : [...prev.repeat_days, option.value],
+                              }))}
+                              className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${active ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-indigo-200 hover:text-indigo-600'}`}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Notes</label>

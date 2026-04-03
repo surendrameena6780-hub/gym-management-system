@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const { requireOwner } = require('../middleware/rbac');
@@ -19,6 +20,7 @@ let ensureSupportProfileTablePromise;
 let ensureMessagingSchemaPromise;
 let ensureMemberPaymentsSchemaPromise;
 let ensurePreferenceSchemaPromise;
+let ensurePlatformSchemaPromise;
 
 const MESSAGE_TEMPLATE_DEFAULTS = [
     {
@@ -103,6 +105,116 @@ const maskKeyId = (value) => {
     if (raw.length <= 8) return `${raw.slice(0, 2)}****${raw.slice(-2)}`;
     return `${raw.slice(0, 4)}****${raw.slice(-4)}`;
 };
+
+const hashValue = (value) => crypto.createHash('sha256').update(String(value || '')).digest('hex');
+
+const generateApiToken = () => `gk_${crypto.randomBytes(24).toString('hex')}`;
+
+const normalizeMemberImportPhone = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+
+const buildDefaultBranches = (count) => Array.from({ length: Math.max(1, count) }, (_, index) => ({
+    id: `branch-${index + 1}`,
+    name: index === 0 ? 'Main Branch' : `Branch ${index + 1}`,
+    address: '',
+    phone: '',
+}));
+
+const normalizeBranchDirectory = (value, branchesCount = 1) => {
+    const requestedCount = Math.min(25, Math.max(1, toPositiveInt(branchesCount, 1)));
+    const items = Array.isArray(value) ? value : [];
+    const normalized = items
+        .map((item, index) => ({
+            id: String(item?.id || `branch-${index + 1}`).trim() || `branch-${index + 1}`,
+            name: String(item?.name || '').trim() || (index === 0 ? 'Main Branch' : `Branch ${index + 1}`),
+            address: String(item?.address || '').trim(),
+            phone: String(item?.phone || '').trim(),
+        }))
+        .slice(0, requestedCount);
+
+    if (normalized.length === 0) {
+        return buildDefaultBranches(requestedCount);
+    }
+
+    while (normalized.length < requestedCount) {
+        normalized.push({
+            id: `branch-${normalized.length + 1}`,
+            name: normalized.length === 0 ? 'Main Branch' : `Branch ${normalized.length + 1}`,
+            address: '',
+            phone: '',
+        });
+    }
+
+    return normalized;
+};
+
+const ALLOWED_API_SCOPES = new Set([
+    'members:read',
+    'members:write',
+    'payments:read',
+    'payments:write',
+    'attendance:read',
+    'attendance:write',
+    'dashboard:read',
+]);
+
+const normalizeApiScopes = (value) => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(
+        value
+            .map((entry) => String(entry || '').trim())
+            .filter((entry) => ALLOWED_API_SCOPES.has(entry))
+    ));
+};
+
+const ALLOWED_WEBHOOK_EVENTS = new Set([
+    'member.created',
+    'member.updated',
+    'payment.recorded',
+    'attendance.checked_in',
+    'class.booking.created',
+]);
+
+const normalizeWebhookEvents = (value) => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(
+        value
+            .map((entry) => String(entry || '').trim())
+            .filter((entry) => ALLOWED_WEBHOOK_EVENTS.has(entry))
+    ));
+};
+
+const parseCsvLine = (line) => {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i += 1) {
+        const char = line[i];
+        const next = line[i + 1];
+        if (char === '"') {
+            if (inQuotes && next === '"') {
+                current += '"';
+                i += 1;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+        if (char === ',' && !inQuotes) {
+            values.push(current.trim());
+            current = '';
+            continue;
+        }
+        current += char;
+    }
+    values.push(current.trim());
+    return values;
+};
+
+const parseCsvText = (value) => String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(parseCsvLine);
 
 const isSandboxWhatsAppSender = (value) => {
     const sender = String(value || '').trim().toLowerCase();
@@ -210,6 +322,47 @@ const ensurePreferenceSchema = async () => {
         })();
     }
     await ensurePreferenceSchemaPromise;
+};
+
+const ensurePlatformSchema = async () => {
+    if (!ensurePlatformSchemaPromise) {
+        ensurePlatformSchemaPromise = (async () => {
+            await pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS city VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS branches_count INTEGER DEFAULT 1,
+                ADD COLUMN IF NOT EXISTS branch_directory JSONB DEFAULT '[]'::jsonb;
+            `);
+
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id SERIAL PRIMARY KEY,
+                    gym_id INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                    key_name VARCHAR(120) NOT NULL DEFAULT '',
+                    key_hash TEXT NOT NULL,
+                    key_prefix VARCHAR(12) NOT NULL DEFAULT '',
+                    scopes TEXT[] DEFAULT '{}',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    last_used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            `);
+
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS webhooks (
+                    id SERIAL PRIMARY KEY,
+                    gym_id INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                    url TEXT NOT NULL,
+                    events TEXT[] DEFAULT '{}',
+                    secret_hash TEXT DEFAULT '',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    last_triggered_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            `);
+        })();
+    }
+    await ensurePlatformSchemaPromise;
 };
 
 const uploadProfilePic = createProfileUploadMiddleware({
@@ -560,6 +713,384 @@ router.post('/integrations/test-message', auth, async (req, res) => {
         return res.status(500).json({
             error: 'Failed to send test message.',
         });
+    }
+});
+
+router.get('/platform', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+
+        const gymId = req.user.gym_id;
+        const [gymRes, apiKeyRes, webhookRes] = await Promise.all([
+            pool.query(
+                `SELECT city, branches_count, branch_directory
+                 FROM gyms
+                 WHERE id = $1
+                 LIMIT 1`,
+                [gymId]
+            ),
+            pool.query(
+                `SELECT id, key_name, key_prefix, scopes, is_active, last_used_at, created_at
+                 FROM api_keys
+                 WHERE gym_id = $1
+                 ORDER BY created_at DESC`,
+                [gymId]
+            ),
+            pool.query(
+                `SELECT id, url, events, is_active, last_triggered_at, created_at,
+                        (COALESCE(secret_hash, '') <> '') AS has_secret
+                 FROM webhooks
+                 WHERE gym_id = $1
+                 ORDER BY created_at DESC`,
+                [gymId]
+            ),
+        ]);
+
+        const gym = gymRes.rows[0] || {};
+        const branchesCount = Math.min(25, Math.max(1, toPositiveInt(gym.branches_count, 1)));
+
+        return res.json({
+            city: String(gym.city || ''),
+            branches_count: branchesCount,
+            branch_directory: normalizeBranchDirectory(gym.branch_directory, branchesCount),
+            api_keys: apiKeyRes.rows,
+            webhooks: webhookRes.rows.map((item) => ({
+                ...item,
+                has_secret: Boolean(item.has_secret),
+            })),
+        });
+    } catch (err) {
+        console.error('PLATFORM FETCH ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.put('/platform/branches', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+
+        const city = String(req.body?.city || '').trim();
+        const branchesCount = Math.min(25, Math.max(1, toPositiveInt(req.body?.branches_count, 1)));
+        const branchDirectory = normalizeBranchDirectory(req.body?.branch_directory, branchesCount);
+
+        await pool.query(
+            `UPDATE gyms
+             SET city = $1,
+                 branches_count = $2,
+                 branch_directory = $3
+             WHERE id = $4`,
+            [city || null, branchesCount, JSON.stringify(branchDirectory), req.user.gym_id]
+        );
+
+        return res.json({
+            message: 'Branch controls saved successfully.',
+            city,
+            branches_count: branchesCount,
+            branch_directory: branchDirectory,
+        });
+    } catch (err) {
+        console.error('BRANCH SAVE ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.post('/platform/api-keys', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+
+        const keyName = String(req.body?.key_name || '').trim();
+        const scopes = normalizeApiScopes(req.body?.scopes);
+        if (!keyName) {
+            return res.status(400).json({ error: 'key_name is required.' });
+        }
+        if (scopes.length === 0) {
+            return res.status(400).json({ error: 'Select at least one scope.' });
+        }
+
+        const plainTextKey = generateApiToken();
+        const keyPrefix = plainTextKey.slice(0, 8);
+        const result = await pool.query(
+            `INSERT INTO api_keys (gym_id, key_name, key_hash, key_prefix, scopes)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, key_name, key_prefix, scopes, is_active, last_used_at, created_at`,
+            [req.user.gym_id, keyName, hashValue(plainTextKey), keyPrefix, scopes]
+        );
+
+        return res.status(201).json({
+            message: 'API key created. Copy it now because it will not be shown again.',
+            api_key: result.rows[0],
+            plain_text_key: plainTextKey,
+        });
+    } catch (err) {
+        console.error('API KEY CREATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.delete('/platform/api-keys/:id', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+        const result = await pool.query(
+            `UPDATE api_keys
+             SET is_active = FALSE
+             WHERE id = $1 AND gym_id = $2
+             RETURNING id`,
+            [req.params.id, req.user.gym_id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'API key not found.' });
+        }
+        return res.json({ message: 'API key revoked.' });
+    } catch (err) {
+        console.error('API KEY DELETE ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.post('/platform/webhooks', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+
+        const url = String(req.body?.url || '').trim();
+        const events = normalizeWebhookEvents(req.body?.events);
+        const secret = String(req.body?.secret || '').trim();
+        const isActive = req.body?.is_active !== false;
+
+        if (!/^https?:\/\//i.test(url)) {
+            return res.status(400).json({ error: 'A valid webhook URL is required.' });
+        }
+        if (events.length === 0) {
+            return res.status(400).json({ error: 'Select at least one webhook event.' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO webhooks (gym_id, url, events, secret_hash, is_active)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, url, events, is_active, last_triggered_at, created_at`,
+            [req.user.gym_id, url, events, secret ? encryptSecret(secret) : '', isActive]
+        );
+
+        return res.status(201).json({
+            message: 'Webhook created successfully.',
+            webhook: {
+                ...result.rows[0],
+                has_secret: Boolean(secret),
+            },
+        });
+    } catch (err) {
+        console.error('WEBHOOK CREATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.put('/platform/webhooks/:id', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+
+        const webhookRes = await pool.query(
+            'SELECT secret_hash FROM webhooks WHERE id = $1 AND gym_id = $2 LIMIT 1',
+            [req.params.id, req.user.gym_id]
+        );
+        if (webhookRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Webhook not found.' });
+        }
+
+        const url = String(req.body?.url || '').trim();
+        const events = normalizeWebhookEvents(req.body?.events);
+        const secret = String(req.body?.secret || '').trim();
+        const isActive = req.body?.is_active !== false;
+        if (!/^https?:\/\//i.test(url)) {
+            return res.status(400).json({ error: 'A valid webhook URL is required.' });
+        }
+        if (events.length === 0) {
+            return res.status(400).json({ error: 'Select at least one webhook event.' });
+        }
+
+        const secretToPersist = secret ? encryptSecret(secret) : String(webhookRes.rows[0].secret_hash || '');
+        const result = await pool.query(
+            `UPDATE webhooks
+             SET url = $1,
+                 events = $2,
+                 secret_hash = $3,
+                 is_active = $4
+             WHERE id = $5 AND gym_id = $6
+             RETURNING id, url, events, is_active, last_triggered_at, created_at, secret_hash`,
+            [url, events, secretToPersist, isActive, req.params.id, req.user.gym_id]
+        );
+
+        return res.json({
+            message: 'Webhook updated successfully.',
+            webhook: {
+                ...result.rows[0],
+                has_secret: Boolean(decryptSecret(result.rows[0].secret_hash || '')),
+            },
+        });
+    } catch (err) {
+        console.error('WEBHOOK UPDATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.delete('/platform/webhooks/:id', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+        const result = await pool.query(
+            'DELETE FROM webhooks WHERE id = $1 AND gym_id = $2 RETURNING id',
+            [req.params.id, req.user.gym_id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Webhook not found.' });
+        }
+        return res.json({ message: 'Webhook deleted.' });
+    } catch (err) {
+        console.error('WEBHOOK DELETE ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.post('/platform/webhooks/:id/test', auth, async (req, res) => {
+    try {
+        await ensurePlatformSchema();
+
+        const webhookRes = await pool.query(
+            'SELECT * FROM webhooks WHERE id = $1 AND gym_id = $2 LIMIT 1',
+            [req.params.id, req.user.gym_id]
+        );
+        if (webhookRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Webhook not found.' });
+        }
+
+        const webhook = webhookRes.rows[0];
+        const payload = {
+            event: 'gymvault.test',
+            gym_id: req.user.gym_id,
+            generated_at: new Date().toISOString(),
+            data: {
+                source: 'settings',
+                message: 'This is a GymVault webhook test event.',
+            },
+        };
+        const body = JSON.stringify(payload);
+        const secret = decryptSecret(webhook.secret_hash || '');
+        const signature = secret ? crypto.createHmac('sha256', secret).update(body).digest('hex') : '';
+        const response = await fetch(webhook.url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-gymvault-event': payload.event,
+                ...(signature ? { 'x-gymvault-signature': signature } : {}),
+            },
+            body,
+        });
+
+        await pool.query(
+            'UPDATE webhooks SET last_triggered_at = NOW() WHERE id = $1 AND gym_id = $2',
+            [req.params.id, req.user.gym_id]
+        );
+
+        return res.json({ message: `Test webhook sent successfully (${response.status}).`, status: response.status });
+    } catch (err) {
+        console.error('WEBHOOK TEST ERROR:', err.message);
+        return res.status(502).json({ error: 'Failed to deliver webhook test event.' });
+    }
+});
+
+router.post('/import/members', auth, async (req, res) => {
+    try {
+        const csvText = String(req.body?.csv_text || '').trim();
+        const dryRun = req.body?.dry_run === true;
+        if (!csvText) {
+            return res.status(400).json({ error: 'csv_text is required.' });
+        }
+
+        const rows = parseCsvText(csvText);
+        if (rows.length === 0) {
+            return res.status(400).json({ error: 'No rows found in the import payload.' });
+        }
+
+        const headerRow = rows[0].map((cell) => String(cell || '').trim().toLowerCase());
+        const hasHeader = headerRow.includes('full_name') || headerRow.includes('email') || headerRow.includes('phone');
+        const dataRows = hasHeader ? rows.slice(1) : rows;
+
+        const fullNameIndex = hasHeader ? headerRow.indexOf('full_name') : 0;
+        const emailIndex = hasHeader ? headerRow.indexOf('email') : 1;
+        const phoneIndex = hasHeader ? headerRow.indexOf('phone') : 2;
+
+        if (fullNameIndex === -1 || emailIndex === -1 || phoneIndex === -1) {
+            return res.status(400).json({ error: 'CSV must include full_name, email, and phone columns.' });
+        }
+
+        const existingMembersRes = await pool.query(
+            `SELECT LOWER(email) AS email, phone
+             FROM members
+             WHERE gym_id = $1 AND deleted_at IS NULL`,
+            [req.user.gym_id]
+        );
+        const existingEmails = new Set(existingMembersRes.rows.map((row) => String(row.email || '').trim().toLowerCase()).filter(Boolean));
+        const existingPhones = new Set(existingMembersRes.rows.map((row) => normalizeMemberImportPhone(row.phone)).filter(Boolean));
+        const batchEmails = new Set();
+        const batchPhones = new Set();
+        const validRows = [];
+        const errors = [];
+
+        dataRows.forEach((row, index) => {
+            const full_name = String(row[fullNameIndex] || '').trim();
+            const email = String(row[emailIndex] || '').trim().toLowerCase();
+            const phone = normalizeMemberImportPhone(row[phoneIndex]);
+            const rowNumber = hasHeader ? index + 2 : index + 1;
+
+            if (!full_name || !email || !phone) {
+                errors.push({ row: rowNumber, error: 'full_name, email, and phone are required.' });
+                return;
+            }
+            if (!/^\d{10}$/.test(phone)) {
+                errors.push({ row: rowNumber, error: 'Phone must contain exactly 10 digits.' });
+                return;
+            }
+            if (!/^\S+@\S+\.\S+$/.test(email)) {
+                errors.push({ row: rowNumber, error: 'Email format is invalid.' });
+                return;
+            }
+            if (existingEmails.has(email) || batchEmails.has(email)) {
+                errors.push({ row: rowNumber, error: 'Email already exists in this gym.' });
+                return;
+            }
+            if (existingPhones.has(phone) || batchPhones.has(phone)) {
+                errors.push({ row: rowNumber, error: 'Phone already exists in this gym.' });
+                return;
+            }
+
+            batchEmails.add(email);
+            batchPhones.add(phone);
+            validRows.push({ full_name, email, phone });
+        });
+
+        let importedCount = 0;
+        if (!dryRun && validRows.length > 0) {
+            await pool.query('BEGIN');
+            for (const row of validRows) {
+                await pool.query(
+                    `INSERT INTO members (full_name, email, phone, gym_id, joining_date, status)
+                     VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')`,
+                    [row.full_name, row.email, row.phone, req.user.gym_id]
+                );
+                importedCount += 1;
+            }
+            await pool.query('COMMIT');
+        }
+
+        return res.json({
+            message: dryRun ? 'Import preview generated.' : `Imported ${importedCount} member${importedCount === 1 ? '' : 's'}.`,
+            total_rows: dataRows.length,
+            valid_rows: validRows.length,
+            imported_count: importedCount,
+            error_count: errors.length,
+            errors: errors.slice(0, 20),
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('MEMBER IMPORT ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
     }
 });
 

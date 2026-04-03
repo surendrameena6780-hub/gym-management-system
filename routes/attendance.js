@@ -62,11 +62,12 @@ const getMemberSnapshot = async (gym_id, member_id) => {
             m.joining_date,
             m.status AS member_status,
             COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
+                ms_latest.plan_id,
             ms_latest.end_date,
             ms_latest.plan_name
          FROM members m
          LEFT JOIN LATERAL (
-            SELECT ms.status, ms.end_date, p.name AS plan_name
+                SELECT ms.status, ms.plan_id, ms.end_date, p.name AS plan_name
             FROM memberships ms
             LEFT JOIN plans p ON p.id = ms.plan_id
                 WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
@@ -163,6 +164,122 @@ const notifyGeoBlockedAttempt = async ({ gym, member, distance_meters, allowed_r
     await notifyStaffAccessAlert({ gym_id: gym.id, title, message });
 };
 
+const notifyAccessPolicyBlockedAttempt = async ({ gym, member, policyName, reason }) => {
+    const title = 'Access Policy Blocked';
+    const message = `${member.full_name} was blocked by ${policyName || 'an access policy'} at ${gym.name}. ${reason}`;
+    await notifyStaffAccessAlert({ gym_id: gym.id, title, message });
+};
+
+const DAY_CODE_MAP = {
+    SUN: 'SUN',
+    SUNDAY: 'SUN',
+    MON: 'MON',
+    MONDAY: 'MON',
+    TUE: 'TUE',
+    TUES: 'TUE',
+    TUESDAY: 'TUE',
+    WED: 'WED',
+    WEDNESDAY: 'WED',
+    THU: 'THU',
+    THUR: 'THU',
+    THURS: 'THU',
+    THURSDAY: 'THU',
+    FRI: 'FRI',
+    FRIDAY: 'FRI',
+    SAT: 'SAT',
+    SATURDAY: 'SAT',
+};
+
+const normalizeAllowedDays = (value) => String(value || '')
+    .split(/[\s,|]+/)
+    .map((item) => DAY_CODE_MAP[String(item || '').trim().toUpperCase()] || null)
+    .filter(Boolean);
+
+const isTimeWithinWindow = (currentTime, startTime, endTime) => {
+    const current = String(currentTime || '').slice(0, 5);
+    const start = String(startTime || '').slice(0, 5);
+    const end = String(endTime || '').slice(0, 5);
+    if (!current || !start || !end) return true;
+    if (start <= end) return current >= start && current <= end;
+    return current >= start || current <= end;
+};
+
+const getGymLocalTimeContext = async (gym_id) => {
+    const timezone = await getGymTimezone(pool, gym_id);
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: timezone,
+        weekday: 'short',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+    const parts = Object.fromEntries(formatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
+    return {
+        timezone,
+        dayCode: DAY_CODE_MAP[String(parts.weekday || '').trim().toUpperCase()] || 'MON',
+        currentTime: `${parts.hour || '00'}:${parts.minute || '00'}`,
+        localDate: `${parts.year || '1970'}-${parts.month || '01'}-${parts.day || '01'}`,
+    };
+};
+
+const getApplicableAccessPolicy = async ({ gym_id, plan_id }) => {
+    if (!plan_id) return null;
+    const result = await pool.query(
+        `SELECT *
+         FROM access_policies
+         WHERE gym_id = $1
+           AND is_active = TRUE
+           AND (plan_id = $2 OR plan_id IS NULL)
+         ORDER BY CASE WHEN plan_id = $2 THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 1`,
+        [gym_id, plan_id]
+    );
+    return result.rows[0] || null;
+};
+
+const evaluateAccessPolicy = async ({ gym_id, member, policy, allow_override }) => {
+    if (!policy) return null;
+
+    const localTime = await getGymLocalTimeContext(gym_id);
+    const allowedDays = normalizeAllowedDays(policy.allowed_days);
+    if (allowedDays.length > 0 && !allowedDays.includes(localTime.dayCode)) {
+        return { reason: `Allowed days are ${allowedDays.join(', ')}.`, policy };
+    }
+
+    if (!isTimeWithinWindow(localTime.currentTime, policy.allowed_from, policy.allowed_to)) {
+        return {
+            reason: `Access window is ${String(policy.allowed_from || '00:00').slice(0, 5)} to ${String(policy.allowed_to || '23:59').slice(0, 5)}.`,
+            policy,
+        };
+    }
+
+    if (Boolean(policy.enforce_freeze) && String(member.membership_status || '').toUpperCase() === 'FROZEN' && !allow_override) {
+        return { reason: 'Frozen memberships are blocked by this policy.', policy };
+    }
+
+    const maxDailyVisits = Number.parseInt(policy.max_daily_visits, 10) || 0;
+    if (maxDailyVisits > 0) {
+        const visitsRes = await pool.query(
+            `SELECT COUNT(*)::INTEGER AS count
+             FROM attendance
+             WHERE gym_id = $1
+               AND member_id = $2
+               AND deleted_at IS NULL
+               AND DATE(check_in_time AT TIME ZONE $3) = $4`,
+            [gym_id, member.id, localTime.timezone, localTime.localDate]
+        );
+        const todaysVisits = Number(visitsRes.rows[0]?.count || 0);
+        if (todaysVisits >= maxDailyVisits && !allow_override) {
+            return { reason: `Daily visit limit of ${maxDailyVisits} has already been reached.`, policy };
+        }
+    }
+
+    return null;
+};
+
 const notifyUnknownRfidAttempt = async ({ gym_id, reader_name, tag_id }) => {
     const safeTag = String(tag_id || '').slice(-6) || 'UNKNOWN';
     const title = 'Unknown RFID Tag';
@@ -234,6 +351,29 @@ const processAttendanceCheckin = async ({
             message: `Access Denied: Membership is ${membershipStatus}`,
             warning: 'Membership is not active. Override can be allowed by gym settings.',
             member,
+        });
+    }
+
+    const accessPolicy = await getApplicableAccessPolicy({ gym_id, plan_id: member.plan_id });
+    const accessPolicyViolation = await evaluateAccessPolicy({
+        gym_id,
+        member,
+        policy: accessPolicy,
+        allow_override: Boolean(allow_override),
+    });
+    if (accessPolicyViolation) {
+        await notifyAccessPolicyBlockedAttempt({
+            gym: gymConfig,
+            member,
+            policyName: accessPolicyViolation.policy?.name,
+            reason: accessPolicyViolation.reason,
+        });
+        throw createAttendanceError(403, {
+            code: 'ACCESS_POLICY_BLOCKED',
+            message: `Access blocked by ${accessPolicyViolation.policy?.name || 'policy'}`,
+            warning: accessPolicyViolation.reason,
+            member,
+            policy: accessPolicyViolation.policy,
         });
     }
 

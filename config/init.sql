@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS gyms (
     name            VARCHAR(100) NOT NULL,
     city            VARCHAR(100),
     branches_count  INTEGER DEFAULT 1,
+    branch_directory JSONB DEFAULT '[]'::jsonb,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -577,6 +578,7 @@ ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP
 -- =============================================================
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS city            VARCHAR(100);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branches_count  INTEGER DEFAULT 1;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS branch_directory JSONB DEFAULT '[]'::jsonb;
 
 -- Attendance platform configuration (supports STAFF/QR/SELF/RFID modes)
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS attendance_mode VARCHAR(20) DEFAULT 'STAFF';

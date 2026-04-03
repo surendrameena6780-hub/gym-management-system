@@ -69,6 +69,37 @@ const MODE_META = {
   },
 };
 
+const POLICY_DAY_OPTIONS = [
+  { value: 'MON', label: 'Mon' },
+  { value: 'TUE', label: 'Tue' },
+  { value: 'WED', label: 'Wed' },
+  { value: 'THU', label: 'Thu' },
+  { value: 'FRI', label: 'Fri' },
+  { value: 'SAT', label: 'Sat' },
+  { value: 'SUN', label: 'Sun' },
+];
+
+const POLICY_FORM_DEFAULT = {
+  plan_id: '',
+  name: '',
+  allowed_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'],
+  allowed_from: '',
+  allowed_to: '',
+  is_offpeak_only: false,
+  enforce_freeze: true,
+  max_daily_visits: '1',
+  is_active: true,
+};
+
+const normalizePolicyDays = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return String(value)
+    .split(/[\s,|]+/)
+    .map((item) => String(item || '').trim().toUpperCase())
+    .filter(Boolean);
+};
+
 const methodBadge = (method) => {
   const key = String(method || 'STAFF').toUpperCase();
   const styles = {
@@ -177,19 +208,121 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
   const [attendanceTab, setAttendanceTab] = useState('checkin');
   const [accessPolicies, setAccessPolicies] = useState([]);
   const [policiesLoading, setPoliciesLoading] = useState(false);
+  const [policyForm, setPolicyForm] = useState(POLICY_FORM_DEFAULT);
+  const [showPolicyModal, setShowPolicyModal] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
+  const [editingPolicyId, setEditingPolicyId] = useState(null);
+  const [planOptions, setPlanOptions] = useState([]);
 
   const fetchAccessPolicies = async () => {
     try {
       setPoliciesLoading(true);
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/finance/access-policies`, { headers: { Authorization: `Bearer ${token}`, 'x-auth-token': token } });
-      const data = await res.json();
-      setAccessPolicies(Array.isArray(data) ? data : []);
+      const res = await axios.get('/api/finance/access-policies', headers);
+      setAccessPolicies(Array.isArray(res.data) ? res.data : []);
     } catch { setAccessPolicies([]); } finally { setPoliciesLoading(false); }
   };
 
+  const fetchPlans = async () => {
+    try {
+      const res = await axios.get('/api/plans', headers);
+      setPlanOptions(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setPlanOptions([]);
+    }
+  };
+
   useEffect(() => {
-    if (attendanceTab === 'policies' && isOwner) fetchAccessPolicies();
-  }, [attendanceTab]);
+    if (attendanceTab === 'policies' && isOwner) {
+      fetchAccessPolicies();
+      fetchPlans();
+    }
+  }, [attendanceTab, isOwner, token]);
+
+  const closePolicyModal = () => {
+    setShowPolicyModal(false);
+    setEditingPolicyId(null);
+    setPolicyForm(POLICY_FORM_DEFAULT);
+  };
+
+  const openNewPolicyModal = () => {
+    setEditingPolicyId(null);
+    setPolicyForm(POLICY_FORM_DEFAULT);
+    setShowPolicyModal(true);
+  };
+
+  const openEditPolicyModal = (policy) => {
+    setEditingPolicyId(policy.id);
+    setPolicyForm({
+      plan_id: policy.plan_id ? String(policy.plan_id) : '',
+      name: String(policy.name || ''),
+      allowed_days: normalizePolicyDays(policy.allowed_days),
+      allowed_from: String(policy.allowed_from || '').slice(0, 5),
+      allowed_to: String(policy.allowed_to || '').slice(0, 5),
+      is_offpeak_only: Boolean(policy.is_offpeak_only),
+      enforce_freeze: policy.enforce_freeze !== false,
+      max_daily_visits: String(policy.max_daily_visits || 0),
+      is_active: policy.is_active !== false,
+    });
+    setShowPolicyModal(true);
+  };
+
+  const togglePolicyDay = (dayCode) => {
+    setPolicyForm((prev) => ({
+      ...prev,
+      allowed_days: prev.allowed_days.includes(dayCode)
+        ? prev.allowed_days.filter((item) => item !== dayCode)
+        : [...prev.allowed_days, dayCode],
+    }));
+  };
+
+  const savePolicy = async (event) => {
+    event.preventDefault();
+    if (!policyForm.name.trim()) {
+      toast?.('Policy name is required.', 'warning');
+      return;
+    }
+
+    setPolicySaving(true);
+    try {
+      const payload = {
+        plan_id: policyForm.plan_id ? Number.parseInt(policyForm.plan_id, 10) : null,
+        name: policyForm.name.trim(),
+        allowed_days: policyForm.allowed_days.join(','),
+        allowed_from: policyForm.allowed_from || null,
+        allowed_to: policyForm.allowed_to || null,
+        is_offpeak_only: Boolean(policyForm.is_offpeak_only),
+        enforce_freeze: Boolean(policyForm.enforce_freeze),
+        max_daily_visits: Number.parseInt(policyForm.max_daily_visits, 10) || 0,
+        is_active: Boolean(policyForm.is_active),
+      };
+
+      if (editingPolicyId) {
+        await axios.put(`/api/finance/access-policies/${editingPolicyId}`, payload, headers);
+        toast?.('Access policy updated.', 'success');
+      } else {
+        await axios.post('/api/finance/access-policies', payload, headers);
+        toast?.('Access policy created.', 'success');
+      }
+
+      closePolicyModal();
+      fetchAccessPolicies();
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to save access policy.', 'error');
+    } finally {
+      setPolicySaving(false);
+    }
+  };
+
+  const deletePolicy = async (policyId) => {
+    if (!window.confirm('Delete this access policy?')) return;
+    try {
+      await axios.delete(`/api/finance/access-policies/${policyId}`, headers);
+      toast?.('Access policy deleted.', 'success');
+      fetchAccessPolicies();
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to delete policy.', 'error');
+    }
+  };
 
   const peakHourLabel = overview.peak_hour_today === null
     ? '—'
@@ -326,7 +459,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
       handleCheckinSuccess(unwrapApiData(res.data), null, 'QR');
     } catch (err) {
       const errorBody = asObject(err?.response?.data, {});
-      if (errorBody.code === 'ATTENDANCE_BLOCKED') {
+      if (errorBody.code === 'ATTENDANCE_BLOCKED' || errorBody.code === 'ACCESS_POLICY_BLOCKED') {
         if (errorBody.member?.id) {
           setSelectedMember(errorBody.member);
           setSearchText(errorBody.member.full_name || '');
@@ -580,7 +713,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     } catch (err) {
       const errorBody = asObject(err?.response?.data, {});
       const code = errorBody.code;
-      if (code === 'ATTENDANCE_BLOCKED') {
+      if (code === 'ATTENDANCE_BLOCKED' || code === 'ACCESS_POLICY_BLOCKED') {
         setWarningState({
           message: errorBody.message || errorBody.error || 'Membership is not active.',
           warning: errorBody.warning || '',
@@ -1169,33 +1302,46 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
       {/* ═══════ ACCESS POLICIES TAB ═══════ */}
       {attendanceTab === 'policies' && isOwner && (
         <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Access Policies</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Define plan-based access windows and rules</p>
+              <p className="text-xs text-slate-400 mt-0.5">Define plan-level days, windows, and visit caps that the live check-in engine actually enforces.</p>
             </div>
+            <button onClick={openNewPolicyModal} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-all">
+              Add Policy
+            </button>
           </div>
           {policiesLoading ? (
             <div className="text-center py-8 text-slate-400">Loading...</div>
           ) : accessPolicies.length === 0 ? (
             <div className="text-center py-12 text-slate-400">
               <p className="text-lg font-bold">No access policies configured</p>
-              <p className="text-sm mt-1">Create policies from the API to define when members can check in based on their plan.</p>
+              <p className="text-sm mt-1">Create your first policy to restrict plan timings, freeze access, or daily visit limits.</p>
             </div>
           ) : (
             <div className="space-y-3">
               {accessPolicies.map(p => (
                 <div key={p.id} className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-bold text-slate-800">{p.policy_name}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{p.time_window_start || '00:00'} – {p.time_window_end || '23:59'} · {p.allowed_days || 'All days'}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-bold text-slate-800">{p.name}</p>
+                        {p.plan_name && <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-700">{p.plan_name}</span>}
+                        {p.is_offpeak_only && <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-700">Off-Peak</span>}
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">{String(p.allowed_from || '00:00').slice(0, 5)} - {String(p.allowed_to || '23:59').slice(0, 5)} · {p.allowed_days || 'All days'}</p>
+                      <p className="text-xs text-slate-500 mt-2">{Number(p.max_daily_visits || 0) > 0 ? `Max ${p.max_daily_visits} visit(s) per day` : 'Unlimited daily visits'} · {p.enforce_freeze ? 'Freeze enforced' : 'Freeze can be overridden'}</p>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                      {p.is_active ? 'Active' : 'Inactive'}
-                    </span>
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                        {p.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => openEditPolicyModal(p)} className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] font-black uppercase tracking-wide text-slate-600 hover:bg-slate-100 transition-all">Edit</button>
+                        <button onClick={() => deletePolicy(p.id)} className="px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-100 text-[11px] font-black uppercase tracking-wide text-rose-600 hover:bg-rose-100 transition-all">Delete</button>
+                      </div>
+                    </div>
                   </div>
-                  {p.max_daily_checkins && <p className="text-xs text-slate-500 mt-2">Max daily check-ins: {p.max_daily_checkins}</p>}
                 </div>
               ))}
             </div>
@@ -1233,6 +1379,91 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
             {onOpenRfidSetup && (
               <button onClick={onOpenRfidSetup} className="mt-3 px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700">Open RFID Setup</button>
             )}
+          </div>
+        </div>
+      )}
+
+      {showPolicyModal && (
+        <div className="app-modal-shell z-[205] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+            <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)' }}>
+              <div>
+                <h2 className="text-lg font-black">{editingPolicyId ? 'Edit Access Policy' : 'Create Access Policy'}</h2>
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Rule engine for member entry</p>
+              </div>
+              <button onClick={closePolicyModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={savePolicy} className="app-modal-scroll p-6 space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Policy Name</label>
+                  <input type="text" required value={policyForm.name} onChange={(event) => setPolicyForm((prev) => ({ ...prev, name: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="Morning Access" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Plan</label>
+                  <select value={policyForm.plan_id} onChange={(event) => setPolicyForm((prev) => ({ ...prev, plan_id: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all">
+                    <option value="">All plans</option>
+                    {planOptions.map((plan) => (
+                      <option key={plan.id} value={plan.id}>{plan.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-0.5">Allowed Days</label>
+                <div className="flex flex-wrap gap-2">
+                  {POLICY_DAY_OPTIONS.map((option) => {
+                    const active = policyForm.allowed_days.includes(option.value);
+                    return (
+                      <button key={option.value} type="button" onClick={() => togglePolicyDay(option.value)} className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${active ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-indigo-200 hover:text-indigo-600'}`}>
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Allowed From</label>
+                  <input type="time" value={policyForm.allowed_from} onChange={(event) => setPolicyForm((prev) => ({ ...prev, allowed_from: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Allowed To</label>
+                  <input type="time" value={policyForm.allowed_to} onChange={(event) => setPolicyForm((prev) => ({ ...prev, allowed_to: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Max Daily Visits</label>
+                  <input type="number" min="0" value={policyForm.max_daily_visits} onChange={(event) => setPolicyForm((prev) => ({ ...prev, max_daily_visits: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="0 = unlimited" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
+                  <span className="text-sm font-bold text-slate-700">Off-peak only</span>
+                  <input type="checkbox" checked={policyForm.is_offpeak_only} onChange={(event) => setPolicyForm((prev) => ({ ...prev, is_offpeak_only: event.target.checked }))} />
+                </label>
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
+                  <span className="text-sm font-bold text-slate-700">Enforce freeze</span>
+                  <input type="checkbox" checked={policyForm.enforce_freeze} onChange={(event) => setPolicyForm((prev) => ({ ...prev, enforce_freeze: event.target.checked }))} />
+                </label>
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
+                  <span className="text-sm font-bold text-slate-700">Policy active</span>
+                  <input type="checkbox" checked={policyForm.is_active} onChange={(event) => setPolicyForm((prev) => ({ ...prev, is_active: event.target.checked }))} />
+                </label>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button type="submit" disabled={policySaving} className="flex-1 py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg disabled:opacity-60" style={{ background: 'linear-gradient(135deg, #2563eb, #7c3aed)', boxShadow: '0 4px 16px rgba(37,99,235,0.28)' }}>
+                  {policySaving ? 'Saving...' : editingPolicyId ? 'Save Policy Changes' : 'Create Policy'}
+                </button>
+                <button type="button" onClick={closePolicyModal} className="sm:w-auto py-3 px-5 rounded-xl font-black text-sm text-slate-500 border border-slate-200 hover:bg-slate-50 transition-all">
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
