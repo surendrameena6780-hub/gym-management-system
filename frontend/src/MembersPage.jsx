@@ -648,7 +648,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
     const activationReference = latestPayment?.payment_date || member.joining_date;
     const today = new Date();
-    const lastVisit = member.last_visit ? new Date(member.last_visit) : null;
+    const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
+    const lastVisit = effectiveVisitSource ? new Date(effectiveVisitSource) : null;
     const activationDate = activationReference ? new Date(activationReference) : null;
     const diffDays = lastVisit
       ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24))
@@ -799,7 +800,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const filteredMembers = members.filter((m) => {
     const statusInfo = getStatusInfo(m);
-    const lastVisitDate = m.last_visit ? new Date(m.last_visit) : null;
+    const latestPayment = Array.isArray(m.payment_history) ? m.payment_history[0] : null;
+    const effectiveVisitSource = m.last_visit || latestPayment?.payment_date || null;
+    const lastVisitDate = effectiveVisitSource ? new Date(effectiveVisitSource) : null;
     const diffDays = lastVisitDate ? Math.ceil((new Date() - lastVisitDate) / (1000 * 60 * 60 * 24)) : 999;
     const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
     const searchLower = searchTerm.toLowerCase();
@@ -893,6 +896,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                     ) : (
                       filteredMembers.map((member, idx) => {
                         const statusInfo = getStatusInfo(member);
+                        const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
+                        const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
                         return (
                           <div
                             key={`member-mobile-${member.id}`}
@@ -975,7 +980,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <td className="py-4 px-2 text-center"><span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span></td>
                         <td className="py-4 px-2 text-center">{member.plan_name ? <span className="text-xs font-bold text-slate-700 truncate block">{member.plan_name}</span> : <span className="text-slate-300 font-bold text-sm">—</span>}</td>
                         <td className="py-4 px-2 text-center">{statusInfo.label === 'UNPAID' ? <span className="text-slate-300 font-bold text-sm">—</span> : member.days_left <= 0 ? <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[9px] font-black rounded-full uppercase">Exp'd</span> : member.days_left <= 7 ? <span className="px-2.5 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full">{displayDays}d</span> : <span className="text-sm font-bold text-slate-700">{displayDays}</span>}</td>
-                        <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600">{member.last_visit ? new Date(member.last_visit).toLocaleDateString('en-GB') : '—'}</span></td>
+                        <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600">{effectiveVisitSource ? new Date(effectiveVisitSource).toLocaleDateString('en-GB') : '—'}</span></td>
                         <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end items-center gap-1.5">
                             {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm"><Zap size={10} fill="currentColor" /> Initiate</button>}
@@ -1100,7 +1105,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <div className="flex items-center gap-1.5 text-slate-400 mb-1"><TrendingUp size={11} /><span className="text-[9px] font-bold uppercase tracking-tight">Last Check-In</span></div>
-                <p className="font-bold text-sm text-slate-700">{selectedMember.last_visit ? new Date(selectedMember.last_visit).toLocaleDateString('en-GB') : 'Never'}</p>
+                <p className="font-bold text-sm text-slate-700">{selectedMember.last_visit || selectedMember.payment_history?.[0]?.payment_date ? new Date(selectedMember.last_visit || selectedMember.payment_history?.[0]?.payment_date).toLocaleDateString('en-GB') : 'Never'}</p>
               </div>
             </div>
 

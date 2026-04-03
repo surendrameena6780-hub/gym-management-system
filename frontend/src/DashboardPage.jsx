@@ -807,7 +807,11 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       const activationReference = latestPayment?.payment_date || member.joining_date;
       return toDayAge(activationReference) <= 14;
     };
-    const getDaysAbsent = (member) => member.last_visit ? toDayAge(member.last_visit) : 999;
+    const getDaysAbsent = (member) => {
+      const latestPayment = getLatestPayment(member);
+      const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
+      return effectiveVisitSource ? toDayAge(effectiveVisitSource) : 999;
+    };
 
     const active   = members.filter(m => m.membership_status === 'ACTIVE');
     const pendingDueMembers = members.filter((member) => !!getLatestPendingDue(member));
