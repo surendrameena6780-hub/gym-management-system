@@ -5,6 +5,7 @@ import MembersPage from './MembersPage';
 import PlansPage from './PlansPage';
 import PaymentsPage from "./PaymentsPage";
 import AttendancePage from './AttendancePage';
+import RfidSetupPage from './RfidSetupPage';
 import InsightsPage from './InsightsPage';
 import SettingsPage from './SettingsPage';
 import HelpSupportPage from './HelpSupportPage';
@@ -42,6 +43,7 @@ const PAGE_PERMISSIONS = {
   Plans: 'plans:read',
   Payments: 'payments:read',
   Attendance: 'attendance:read',
+  'RFID Setup': 'owner:only',
   Insights: 'insights:read',
   Settings: 'owner:only',
   'Help & Support': 'support:read',
@@ -1185,7 +1187,25 @@ function App() {
             {/* Attendance */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPagesRef.current.has('Attendance') && (
-                <AttendancePage token={token} toast={toast} isActive={currentPage === 'Attendance'} currentUser={currentUser} />
+                <AttendancePage
+                  token={token}
+                  toast={toast}
+                  isActive={currentPage === 'Attendance'}
+                  currentUser={currentUser}
+                  onOpenRfidSetup={() => navigateTo('RFID Setup')}
+                />
+              )}
+            </div>
+
+            {/* RFID Setup */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPagesRef.current.has('RFID Setup') && (
+                <RfidSetupPage
+                  token={token}
+                  toast={toast}
+                  currentUser={currentUser}
+                  navigateBack={() => navigateTo('Attendance')}
+                />
               )}
             </div>
 
