@@ -890,7 +890,6 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               <button key={t.key} onClick={() => setFinanceTab(t.key)} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${financeTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
             ))}
           </div>
-          <p className="text-xs font-bold text-slate-400 mt-3 uppercase tracking-wider">{financeLoading ? 'Refreshing finance snapshot...' : 'Collections, payroll, expenses, and desk sales in one workspace.'}</p>
         </div>
         <div className="grid grid-cols-2 sm:flex gap-2.5 w-full sm:w-auto">
           {financeTab === 'collections' && <>

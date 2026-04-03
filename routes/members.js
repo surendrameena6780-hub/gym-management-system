@@ -41,6 +41,42 @@ const getStoredProfileValue = (file) => {
 const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
 const isValidPhone = (value) => /^\d{10}$/.test(value);
 
+const memberSchemaCache = new Map();
+
+const getTableColumns = async (tableName) => {
+    if (!memberSchemaCache.has(tableName)) {
+        const lookup = pool.query(
+            `SELECT column_name
+             FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = $1`,
+            [tableName]
+        ).then((result) => new Set(result.rows.map((row) => row.column_name)));
+        memberSchemaCache.set(tableName, lookup);
+    }
+
+    return memberSchemaCache.get(tableName);
+};
+
+const tableHasColumn = async (tableName, columnName) => {
+    const columns = await getTableColumns(tableName);
+    return columns.has(columnName);
+};
+
+const normalizeExternalUrl = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+
+    try {
+        const parsed = new URL(withProtocol);
+        if (!/^https?:$/i.test(parsed.protocol)) return '';
+        return parsed.toString();
+    } catch (_err) {
+        return '';
+    }
+};
+
 // --- 1. GET ALL MEMBERS ---
 router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
@@ -492,7 +528,19 @@ router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:wr
 router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        const result = await pool.query('SELECT * FROM member_documents WHERE member_id=$1 AND gym_id=$2 ORDER BY uploaded_at DESC', [req.params.id, gid]);
+        const [hasNotesColumn, hasUploadedAtColumn] = await Promise.all([
+            tableHasColumn('member_documents', 'notes'),
+            tableHasColumn('member_documents', 'uploaded_at'),
+        ]);
+        const notesSelect = hasNotesColumn ? 'md.notes' : "NULLIF(md.doc_name, '')";
+        const uploadedAtSelect = hasUploadedAtColumn ? 'md.uploaded_at' : 'md.created_at';
+        const result = await pool.query(
+            `SELECT md.*, ${notesSelect} AS notes, ${uploadedAtSelect} AS uploaded_at
+             FROM member_documents md
+             WHERE md.member_id = $1 AND md.gym_id = $2
+             ORDER BY ${uploadedAtSelect} DESC`,
+            [req.params.id, gid]
+        );
         res.json(result.rows);
     } catch(err) { console.error('GET DOCS:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
@@ -500,10 +548,35 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
     try {
         const gid = req.user.gym_id;
         const { doc_type, doc_url, notes } = req.body || {};
-        if (!doc_type || !doc_url) return res.status(400).json({ error: 'doc_type and doc_url required' });
+        const normalizedDocType = String(doc_type || '').trim();
+        const normalizedDocUrl = normalizeExternalUrl(doc_url);
+        const normalizedNotes = String(notes || '').trim();
+        if (!normalizedDocType || !normalizedDocUrl) {
+            return res.status(400).json({ error: 'doc_type and a valid doc_url are required' });
+        }
+        const [hasNotesColumn, hasDocNameColumn, hasUploadedByColumn] = await Promise.all([
+            tableHasColumn('member_documents', 'notes'),
+            tableHasColumn('member_documents', 'doc_name'),
+            tableHasColumn('member_documents', 'uploaded_by'),
+        ]);
+        const columns = ['gym_id', 'member_id', 'doc_type', 'doc_url'];
+        const values = [gid, req.params.id, normalizedDocType, normalizedDocUrl];
+        if (hasNotesColumn) {
+            columns.push('notes');
+            values.push(normalizedNotes || null);
+        } else if (hasDocNameColumn) {
+            columns.push('doc_name');
+            values.push(normalizedNotes);
+        }
+        if (hasUploadedByColumn) {
+            columns.push('uploaded_by');
+            values.push(req.user?.id || null);
+        }
+        const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
         const result = await pool.query(
-            'INSERT INTO member_documents (gym_id, member_id, doc_type, doc_url, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-            [gid, req.params.id, String(doc_type).trim(), String(doc_url).trim(), String(notes||'').trim() || null]);
+            `INSERT INTO member_documents (${columns.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+            values
+        );
         res.status(201).json(result.rows[0]);
     } catch(err) { console.error('ADD DOC:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
@@ -531,9 +604,18 @@ router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write
         const gid = req.user.gym_id;
         const { note, note_type } = req.body || {};
         if (!note) return res.status(400).json({ error: 'note is required' });
+        const hasNoteTypeColumn = await tableHasColumn('member_notes', 'note_type');
+        const columns = ['gym_id', 'member_id', 'created_by', 'note'];
+        const values = [gid, req.params.id, req.user.id, String(note).trim()];
+        if (hasNoteTypeColumn) {
+            columns.push('note_type');
+            values.push(String(note_type || 'general').trim());
+        }
+        const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
         const result = await pool.query(
-            'INSERT INTO member_notes (gym_id, member_id, created_by, note, note_type) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-            [gid, req.params.id, req.user.id, String(note).trim(), String(note_type || 'general').trim()]);
+            `INSERT INTO member_notes (${columns.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+            values
+        );
         res.status(201).json(result.rows[0]);
     } catch(err) { console.error('ADD NOTE:', err.message); res.status(500).json({ error: 'Server error' }); }
 });
@@ -547,17 +629,56 @@ router.delete('/:mid/notes/:nid', auth, saasMiddleware, requirePermission('membe
 
 // --- 11. MEMBER WAIVERS ---
 router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    let client;
     try {
+        client = await pool.connect();
         const gid = req.user.gym_id;
         const { waiver_type, waiver_text, signature_data } = req.body || {};
-        await pool.query('BEGIN');
-        await pool.query(
-            'INSERT INTO member_waivers (gym_id, member_id, waiver_type, waiver_text, signature_data, signed_at) VALUES ($1,$2,$3,$4,$5,NOW())',
-            [gid, req.params.id, String(waiver_type||'general').trim(), String(waiver_text||'').trim(), signature_data || null]);
-        await pool.query('UPDATE members SET waiver_signed_at=NOW() WHERE id=$1 AND gym_id=$2', [req.params.id, gid]);
-        await pool.query('COMMIT');
+        const [hasWaiverTypeColumn, hasSignatureColumn, hasIpAddressColumn] = await Promise.all([
+            tableHasColumn('member_waivers', 'waiver_type'),
+            tableHasColumn('member_waivers', 'signature_data'),
+            tableHasColumn('member_waivers', 'ip_address'),
+        ]);
+        const columns = ['gym_id', 'member_id', 'waiver_text'];
+        const values = [gid, req.params.id, String(waiver_text || 'Standard gym liability waiver').trim()];
+        const pushValue = (column, value) => {
+            columns.push(column);
+            values.push(value);
+        };
+        if (hasWaiverTypeColumn) {
+            pushValue('waiver_type', String(waiver_type || 'general').trim());
+        }
+        if (hasSignatureColumn) {
+            pushValue('signature_data', signature_data || null);
+        }
+        if (hasIpAddressColumn) {
+            pushValue('ip_address', String(req.ip || '').slice(0, 60));
+        }
+        const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
+
+        await client.query('BEGIN');
+        await client.query(
+            `INSERT INTO member_waivers (${columns.join(', ')}, signed_at) VALUES (${placeholders}, NOW())`,
+            values
+        );
+        await client.query('UPDATE members SET waiver_signed_at=NOW() WHERE id=$1 AND gym_id=$2', [req.params.id, gid]);
+        await client.query('COMMIT');
         res.json({ message: 'Waiver signed' });
-    } catch(err) { await pool.query('ROLLBACK'); console.error('WAIVER:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        try {
+            if (client) {
+                await client.query('ROLLBACK');
+            }
+        } catch (_rollbackErr) {
+            // ignore rollback errors after failed inserts
+        }
+        console.error('WAIVER:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
 });
 router.get('/:id/waivers', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {

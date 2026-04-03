@@ -76,6 +76,28 @@ const extractArray = (value, keys = []) => {
   return [];
 };
 
+const getApiErrorMessage = (error, fallback) => {
+  const payload = error?.response?.data;
+  if (payload && typeof payload === 'object') {
+    return String(payload.message || payload.error || fallback);
+  }
+  return fallback;
+};
+
+const normalizeExternalLink = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (!/^https?:$/i.test(parsed.protocol)) return '';
+    return parsed.toString();
+  } catch (_err) {
+    return '';
+  }
+};
+
 const normalizePhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
 const isValidPhoneInput = (value) => /^\d{10}$/.test(normalizePhoneInput(value));
 const toDateInputValue = (value) => {
@@ -395,19 +417,25 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     if (window.confirm('Delete this note?')) runDelete();
   };
   const handleAddDocument = async () => {
-    if (!selectedMember || !docForm.doc_type.trim() || !docForm.doc_url.trim()) return;
+    const normalizedDocType = String(docForm.doc_type || '').trim();
+    const normalizedDocUrl = normalizeExternalLink(docForm.doc_url);
+    if (!selectedMember) return;
+    if (!normalizedDocType || !normalizedDocUrl) {
+      toast?.('Enter a document type and a valid link.', 'warning');
+      return;
+    }
     setDocSaving(true);
     try {
       await axios.post(`/api/members/${selectedMember.id}/documents`, {
-        doc_type: docForm.doc_type.trim(),
-        doc_url: docForm.doc_url.trim(),
+        doc_type: normalizedDocType,
+        doc_url: normalizedDocUrl,
         notes: docForm.notes.trim(),
       }, { headers: { 'x-auth-token': token } });
       setDocForm({ doc_type: 'ID Proof', doc_url: '', notes: '' });
       fetchMemberDocs(selectedMember.id);
       toast?.('Document added', 'success');
-    } catch {
-      toast?.('Failed to add document', 'error');
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to add document'), 'error');
     } finally {
       setDocSaving(false);
     }
@@ -467,8 +495,70 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       await axios.post(`/api/members/${selectedMember.id}/waiver`, { waiver_type: 'general', waiver_text: 'Standard gym liability waiver' }, { headers: { 'x-auth-token': token } });
       toast?.('Waiver signed', 'success');
       fetchMemberWaivers(selectedMember.id);
-    } catch { toast?.('Failed', 'error'); }
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to sign waiver'), 'error');
+    }
   };
+
+  const renderOnboardingCard = () => (
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-indigo-500 mb-1">Onboarding</div>
+          <p className="text-sm font-black text-slate-900">Health, identity, and emergency details</p>
+        </div>
+        <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${onboardingForm.onboarding_complete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+          {onboardingForm.onboarding_complete ? 'Complete' : 'Pending'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="min-w-0">
+          <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Emergency Contact</label>
+          <input value={onboardingForm.emergency_contact} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, emergency_contact: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
+        </div>
+        <div className="min-w-0">
+          <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender</label>
+          <select value={onboardingForm.gender} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, gender: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers}>
+            <option value="">Select</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Other">Other</option>
+            <option value="Prefer not to say">Prefer not to say</option>
+          </select>
+        </div>
+        <div className="min-w-0">
+          <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Date of Birth</label>
+          <input type="date" value={onboardingForm.date_of_birth} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, date_of_birth: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
+        </div>
+        <div className="min-w-0">
+          <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Blood Group</label>
+          <input value={onboardingForm.blood_group} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, blood_group: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} placeholder="A+, O-, B+..." />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Address</label>
+        <textarea value={onboardingForm.address} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, address: event.target.value }))} rows={2} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700 resize-none" disabled={!canWriteMembers} />
+      </div>
+
+      <div>
+        <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Medical Notes</label>
+        <textarea value={onboardingForm.medical_notes} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, medical_notes: event.target.value }))} rows={3} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700 resize-none" disabled={!canWriteMembers} placeholder="Injury history, movement restrictions, medications..." />
+      </div>
+
+      <label className="flex items-center justify-between rounded-xl border border-indigo-100 bg-white px-3 py-2.5 gap-3">
+        <span className="text-sm font-bold text-slate-700">Mark onboarding complete</span>
+        <input type="checkbox" checked={onboardingForm.onboarding_complete} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, onboarding_complete: event.target.checked }))} disabled={!canWriteMembers} />
+      </label>
+
+      {canWriteMembers && (
+        <button onClick={handleSaveOnboarding} disabled={savingOnboarding} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider hover:bg-indigo-700 transition-all disabled:opacity-60">
+          {savingOnboarding ? 'Saving...' : 'Save Onboarding'}
+        </button>
+      )}
+    </div>
+  );
 
   // Load lifecycle data when drawer opens
   useEffect(() => {
@@ -1431,64 +1521,6 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
             </div>
 
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-indigo-500 mb-1">Onboarding</div>
-                  <p className="text-sm font-black text-slate-900">Health, identity, and emergency details</p>
-                </div>
-                <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${onboardingForm.onboarding_complete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {onboardingForm.onboarding_complete ? 'Complete' : 'Pending'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Emergency Contact</label>
-                  <input value={onboardingForm.emergency_contact} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, emergency_contact: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
-                </div>
-                <div>
-                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender</label>
-                  <select value={onboardingForm.gender} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, gender: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers}>
-                    <option value="">Select</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                    <option value="Prefer not to say">Prefer not to say</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Date of Birth</label>
-                  <input type="date" value={onboardingForm.date_of_birth} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, date_of_birth: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} />
-                </div>
-                <div>
-                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Blood Group</label>
-                  <input value={onboardingForm.blood_group} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, blood_group: event.target.value }))} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700" disabled={!canWriteMembers} placeholder="A+, O-, B+..." />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Address</label>
-                <textarea value={onboardingForm.address} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, address: event.target.value }))} rows={2} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700 resize-none" disabled={!canWriteMembers} />
-              </div>
-
-              <div>
-                <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Medical Notes</label>
-                <textarea value={onboardingForm.medical_notes} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, medical_notes: event.target.value }))} rows={3} className="w-full px-3 py-2 rounded-xl border border-indigo-100 bg-white text-sm font-semibold text-slate-700 resize-none" disabled={!canWriteMembers} placeholder="Injury history, movement restrictions, medications..." />
-              </div>
-
-              <label className="flex items-center justify-between rounded-xl border border-indigo-100 bg-white px-3 py-2.5">
-                <span className="text-sm font-bold text-slate-700">Mark onboarding complete</span>
-                <input type="checkbox" checked={onboardingForm.onboarding_complete} onChange={(event) => setOnboardingForm((prev) => ({ ...prev, onboarding_complete: event.target.checked }))} disabled={!canWriteMembers} />
-              </label>
-
-              {canWriteMembers && (
-                <button onClick={handleSaveOnboarding} disabled={savingOnboarding} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider hover:bg-indigo-700 transition-all disabled:opacity-60">
-                  {savingOnboarding ? 'Saving...' : 'Save Onboarding'}
-                </button>
-              )}
-            </div>
-
             {/* payment history */}
             {selectedMember.payment_history?.length > 0 && (
               <div>
@@ -1524,10 +1556,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             {/* ── Notes Tab ── */}
             {drawerTab === 'notes' && (
               <div className="space-y-3">
+                {renderOnboardingCard()}
                 {canWriteMembers && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Add a note..." className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" onKeyDown={e => e.key === 'Enter' && handleAddNote()} />
-                    <button onClick={handleAddNote} className="px-3 py-2 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700">Add</button>
+                    <button onClick={handleAddNote} className="px-3 py-2 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 sm:w-auto">Add</button>
                   </div>
                 )}
                 {memberNotes.length === 0 ? (
@@ -1553,7 +1586,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 {canWriteMembers && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
                     <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Add Document Link</p>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input value={docForm.doc_type} onChange={(event) => setDocForm((prev) => ({ ...prev, doc_type: event.target.value }))} className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700" placeholder="ID Proof" />
                       <input value={docForm.doc_url} onChange={(event) => setDocForm((prev) => ({ ...prev, doc_url: event.target.value }))} className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700" placeholder="Drive / cloud link" />
                     </div>
@@ -1566,13 +1599,13 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 {memberDocs.length === 0 ? (
                   <p className="text-sm text-slate-400 text-center py-6">No documents uploaded</p>
                 ) : memberDocs.map(d => (
-                  <div key={d.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
-                    <div>
+                  <div key={d.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="min-w-0">
                       <p className="text-sm font-bold text-slate-700">{d.doc_type}</p>
                       {d.notes && <p className="text-xs text-slate-400 mt-0.5">{d.notes}</p>}
                       <p className="text-[10px] text-slate-400 mt-1">{d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('en-GB') : ''}</p>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-3 shrink-0 w-full sm:w-auto justify-between sm:justify-start">
                       {d.doc_url && <a href={d.doc_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 text-xs font-bold hover:underline">View</a>}
                       {canWriteMembers && <button onClick={() => handleDeleteDocument(d.id)} className="text-rose-500 text-xs font-black hover:text-rose-700 uppercase tracking-wider">Delete</button>}
                     </div>

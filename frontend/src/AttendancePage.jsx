@@ -138,6 +138,11 @@ const asObject = (value, fallback = {}) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
 );
 
+const getApiErrorMessage = (error, fallback) => {
+  const payload = asObject(error?.response?.data, {});
+  return String(payload.message || payload.error || fallback);
+};
+
 const hasPermission = (user, permission) => {
   if (!permission) return true;
   if (!user) return false;
@@ -419,8 +424,8 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
         accent: 'emerald',
         meta: payload.member || selectedMember,
       });
-    } catch (_err) {
-      toast?.('Failed to generate member QR.', 'error');
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to generate member QR.'), 'error');
     } finally {
       setBusyQrAction(false);
     }
@@ -441,8 +446,8 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
         accent: 'indigo',
         meta: payload.gym || {},
       });
-    } catch (_err) {
-      toast?.('Failed to generate gym QR.', 'error');
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to generate gym QR.'), 'error');
     } finally {
       setBusyQrAction(false);
     }
@@ -974,13 +979,15 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
+              type="button"
               onClick={openGymQr}
-              disabled={busyQrAction}
+              disabled={busyQrAction || !canWriteAttendance}
               className="px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black hover:bg-indigo-100 disabled:opacity-60 transition-all active:scale-95"
             >
               {busyQrAction && qrModalState?.type === 'gym' ? 'Loading...' : 'Show Gym QR'}
             </button>
             <button
+              type="button"
               onClick={() => {
                 setCheckinMethod('QR');
                 setQrScannerOpen(true);

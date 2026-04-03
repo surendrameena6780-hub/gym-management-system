@@ -546,7 +546,7 @@ router.post('/checkin', auth, saasMiddleware, requirePermission('attendance:writ
     }
 });
 
-router.get('/qr/member/:member_id', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
+router.get('/qr/member/:member_id', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
         const member = await getMemberSnapshot(gym_id, req.params.member_id);
@@ -565,7 +565,7 @@ router.get('/qr/member/:member_id', auth, saasMiddleware, requirePermission('att
     }
 });
 
-router.get('/qr/gym', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
+router.get('/qr/gym', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     try {
         const gym = await getGymAttendanceConfig(req.user.gym_id);
         if (!gym) {
