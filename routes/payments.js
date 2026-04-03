@@ -126,8 +126,20 @@ router.post('/record', async (req, res) => {
         );
 
         await pool.query(
-            `UPDATE members SET status = 'ACTIVE', joining_date = COALESCE(joining_date, CURRENT_DATE) WHERE id = $1 AND gym_id = $2`,
+            `UPDATE members
+             SET status = 'ACTIVE',
+                 joining_date = COALESCE(joining_date, CURRENT_DATE),
+                 last_visit = NOW()
+             WHERE id = $1 AND gym_id = $2`,
             [user_id, gym_id]
+        );
+
+        // Mirror the Members-page activation flow: payment activation counts as a same-day check-in.
+        // This keeps today's attendance accurate and prevents a freshly-activated member from looking inactive.
+        await pool.query(
+            `INSERT INTO attendance (gym_id, member_id, check_in_time)
+             VALUES ($1, $2, NOW())`,
+            [gym_id, user_id]
         );
 
         await pool.query('COMMIT');
