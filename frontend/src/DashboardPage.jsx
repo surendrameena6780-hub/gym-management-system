@@ -795,22 +795,22 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const expiringIn3Days = active.filter(m => m.days_left > 0 && m.days_left <= 3);
     const expiringIn7Days = active.filter(m => m.days_left > 0 && m.days_left <= 7);
 
-    // Escalated leads defined first so ghosts can exclude them (no double-counting)
+    // Inactive / ghost members: ACTIVE in DB, not expiring soon, absent 14+ days
+    // Threshold matches getStatusInfo in MembersPage so the Inactive filter shows the same people
+    const ghosts = active.filter(m => {
+      if (m.days_left <= 7) return false; // expiring soon — separate action
+      const daysAbsent = m.last_visit ? Math.floor((today - new Date(m.last_visit)) / 86400000) : 999;
+      return daysAbsent > 14;
+    });
+
+    // Escalated leads: worst cases — ACTIVE absent 30+ days OR long-expired (5+ days past expiry)
+    // Shown in the call panel below the action cards, NOT as a duplicate action card
     const escalatedLeads = members.filter(m => {
       if (m.membership_status === 'UNPAID') return false;
       const daysAbsent = m.last_visit ? Math.floor((today - new Date(m.last_visit)) / 86400000) : 999;
       const isLongExpired = m.membership_status === 'EXPIRED' && m.days_left < -5;
       const isDeepGhost = m.membership_status === 'ACTIVE' && daysAbsent > 30;
       return isLongExpired || isDeepGhost;
-    });
-    const escalatedIds = new Set(escalatedLeads.map(m => m.id));
-
-    // Ghosts: ACTIVE members absent 14-30 days — escalated members (>30d) excluded to avoid duplicate actions
-    const ghosts = active.filter(m => {
-      if (escalatedIds.has(m.id)) return false;
-      if (!m.last_visit) return true;
-      const days = Math.floor((today - new Date(m.last_visit)) / 86400000);
-      return days > 14;
     });
 
     const revenueAtRisk = expiringIn7Days.reduce((sum, m) => {
@@ -987,8 +987,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       }),
       buildRecommendation({
         id: 'GHOST_REACTIVATION',
-        title: 'Reactivate inactive active-members',
-        reason: `${ghosts.length} active members have not visited recently`,
+        title: 'Reactivate members who stopped visiting',
+        reason: `${ghosts.length} active member${ghosts.length === 1 ? '' : 's'} absent 14+ days`,
         count: ghosts.length,
         impact: ghostRiskAmount,
         confidence: Math.min(88, 60 + Math.floor(ghosts.length * 0.8)),
@@ -1011,19 +1011,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         sub: 'Convert pending dues',
         action: () => navigateTo('Members', 'Unpaid'),
       }),
-      buildRecommendation({
-        id: 'ESCALATED_CALLS',
-        title: 'Call escalated leads manually',
-        reason: `${escalatedLeads.length} members are deeply unresponsive`,
-        count: escalatedLeads.length,
-        impact: Math.round(escalatedLeads.length * avgPlanPrice * 0.4),
-        confidence: Math.min(84, 55 + escalatedLeads.length * 3),
-        urgency: 'Today',
-        priority: 'P0',
-        cta: 'Open Escalations',
-        sub: 'Human intervention required',
-        action: () => navigateTo('Members', 'Inactive'),
-      }),
+      // Note: ESCALATED_CALLS is intentionally omitted here — the "Escalated Leads (Call Now)"
+      // panel below the action cards already surfaces these members with direct call buttons.
+      // Adding a duplicate action card would cause confusion and double-count the same people.
     ].filter((candidate) => candidate.count > 0)
       .sort((a, b) => b.score - a.score);
 

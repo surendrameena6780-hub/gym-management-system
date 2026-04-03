@@ -642,14 +642,16 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const getStatusInfo = (member) => {
     if (member.membership_status === 'UNPAID' || !member.plan_name) return { label: 'UNPAID', color: 'bg-slate-300', text: 'text-slate-400' };
     if (member.days_left <= 0) return { label: 'EXPIRED', color: 'bg-rose-500', text: 'text-rose-500' };
-    // Expiring soon: 7-day window matches Critical Renewals in Insights
+    // Expiring soon: 7-day window — highest priority, checked before inactivity
     if (member.days_left <= 7) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
-    // Inactivity: only flag if DB membership_status is NOT 'ACTIVE'
-    // A member whose payment was just recorded (ACTIVE in DB) should never show INACTIVE
+    // Ghost / inactive: any member (including DB-ACTIVE) absent 14+ days is operationally inactive.
+    // We use 14 days so a freshly-paid member has a grace period before being flagged.
     const today = new Date();
     const lastVisit = member.last_visit ? new Date(member.last_visit) : null;
-    const diffDays = lastVisit ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24)) : 999;
-    if (diffDays > 4 && member.membership_status !== 'ACTIVE') return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
+    const diffDays = lastVisit
+      ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24))
+      : 999;
+    if (diffDays > 14) return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
     return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
   };
 
