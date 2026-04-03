@@ -44,6 +44,9 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
+const LOCKED_ATTENDANCE_MODE = 'STAFF';
+const DEFAULT_GYM_RADIUS_METERS = 200;
+
 const MODE_META = {
   STAFF: {
     label: 'Staff Check-In',
@@ -172,23 +175,24 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     peak_hour_count: 0,
   });
   const [modeSettings, setModeSettings] = useState({
-    attendance_mode: 'STAFF',
+    attendance_mode: LOCKED_ATTENDANCE_MODE,
     attendance_geo_enabled: false,
     gym_latitude: '',
     gym_longitude: '',
-    gym_radius_meters: 200,
+    gym_radius_meters: DEFAULT_GYM_RADIUS_METERS,
     allow_expired_checkin: false,
   });
 
   const [loading, setLoading] = useState(true);
   const [busyCheckin, setBusyCheckin] = useState(false);
   const [busySaveMode, setBusySaveMode] = useState(false);
+  const [busyGeoSync, setBusyGeoSync] = useState(false);
 
   const [searchText, setSearchText] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedMember, setSelectedMember] = useState(null);
 
-  const [checkinMethod, setCheckinMethod] = useState('STAFF');
+  const checkinMethod = LOCKED_ATTENDANCE_MODE;
   const [checkinNote, setCheckinNote] = useState('');
 
   const [feed, setFeed] = useState([]);
@@ -406,6 +410,107 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     copyText(qrModalState.token, 'QR token copied.', 'Could not copy QR token.');
   };
 
+  const readCurrentPosition = () => new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('Location access is not available on this device.'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    });
+  });
+
+  const persistModeSettings = async (
+    nextSettings,
+    successMessage = 'Attendance mode settings saved.',
+    errorMessage = 'Failed to save attendance mode settings.'
+  ) => {
+    setBusySaveMode(true);
+    try {
+      await axios.put('/api/attendance/mode', {
+        ...nextSettings,
+        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        gym_radius_meters: nextSettings.attendance_geo_enabled
+          ? nextSettings.gym_radius_meters || DEFAULT_GYM_RADIUS_METERS
+          : DEFAULT_GYM_RADIUS_METERS,
+      }, headers);
+      toast?.(successMessage, 'success');
+      await loadOverviewBundle();
+      return true;
+    } catch (_err) {
+      toast?.(errorMessage, 'error');
+      await loadOverviewBundle().catch(() => {});
+      return false;
+    } finally {
+      setBusySaveMode(false);
+    }
+  };
+
+  const handleGeoToggle = async (enabled) => {
+    if (!isOwner) {
+      toast?.('Only the gym owner can change attendance mode settings.', 'warning');
+      return;
+    }
+
+    if (!enabled) {
+      const nextSettings = {
+        ...modeSettings,
+        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        attendance_geo_enabled: false,
+        gym_latitude: '',
+        gym_longitude: '',
+        gym_radius_meters: DEFAULT_GYM_RADIUS_METERS,
+      };
+      setModeSettings(nextSettings);
+      await persistModeSettings(nextSettings, 'App location check-in disabled.', 'Failed to disable app location check-in.');
+      return;
+    }
+
+    setBusyGeoSync(true);
+    setModeSettings((prev) => ({
+      ...prev,
+      attendance_mode: LOCKED_ATTENDANCE_MODE,
+      attendance_geo_enabled: true,
+    }));
+
+    try {
+      const position = await readCurrentPosition();
+      const nextSettings = {
+        ...modeSettings,
+        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        attendance_geo_enabled: true,
+        gym_latitude: Number(position.coords.latitude).toFixed(6),
+        gym_longitude: Number(position.coords.longitude).toFixed(6),
+        gym_radius_meters: DEFAULT_GYM_RADIUS_METERS,
+      };
+
+      setModeSettings(nextSettings);
+      await persistModeSettings(nextSettings, 'Gym location captured and saved.', 'Failed to save gym location.');
+    } catch (err) {
+      setModeSettings((prev) => ({
+        ...prev,
+        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        attendance_geo_enabled: false,
+        gym_latitude: '',
+        gym_longitude: '',
+        gym_radius_meters: DEFAULT_GYM_RADIUS_METERS,
+      }));
+
+      const permissionDenied = err?.code === 1;
+      toast?.(
+        permissionDenied
+          ? 'Location permission was denied. Allow location access and try again.'
+          : err?.message || 'Unable to capture the gym location.',
+        'error'
+      );
+    } finally {
+      setBusyGeoSync(false);
+    }
+  };
+
   const openMemberQr = async () => {
     if (!selectedMember?.id) {
       toast?.('Select a member first.', 'warning');
@@ -413,7 +518,6 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     }
 
     setBusyQrAction(true);
-    setCheckinMethod('QR');
     try {
       const res = await axios.get(`/api/attendance/qr/member/${selectedMember.id}`, headers);
       const payload = asObject(unwrapApiData(res.data), {});
@@ -435,7 +539,6 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
 
   const openGymQr = async () => {
     setBusyQrAction(true);
-    setCheckinMethod('QR');
     try {
       const res = await axios.get('/api/attendance/qr/gym', headers);
       const payload = asObject(unwrapApiData(res.data), {});
@@ -457,7 +560,6 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
 
   const submitScannedQr = async (decodedText) => {
     setBusyQrAction(true);
-    setCheckinMethod('QR');
     try {
       const res = await axios.post('/api/attendance/checkin/qr', {
         token: decodedText,
@@ -500,15 +602,13 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     const modeData = asObject(unwrapApiData(modeRes.data), {});
     setModeSettings((prev) => ({
       ...prev,
-      attendance_mode: modeData.attendance_mode || 'STAFF',
+      attendance_mode: LOCKED_ATTENDANCE_MODE,
       attendance_geo_enabled: Boolean(modeData.attendance_geo_enabled),
       gym_latitude: modeData.gym_latitude ?? '',
       gym_longitude: modeData.gym_longitude ?? '',
-      gym_radius_meters: modeData.gym_radius_meters || 200,
+      gym_radius_meters: modeData.gym_radius_meters || DEFAULT_GYM_RADIUS_METERS,
       allow_expired_checkin: Boolean(modeData.allow_expired_checkin),
     }));
-
-    setCheckinMethod(modeData.attendance_mode || 'STAFF');
   };
 
   const loadPeakHours = async (period) => {
@@ -671,16 +771,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
       return;
     }
 
-    setBusySaveMode(true);
-    try {
-      await axios.put('/api/attendance/mode', modeSettings, headers);
-      toast?.('Attendance mode settings saved.', 'success');
-      await loadOverviewBundle();
-    } catch (_err) {
-      toast?.('Failed to save attendance mode settings.', 'error');
-    } finally {
-      setBusySaveMode(false);
-    }
+    await persistModeSettings(modeSettings);
   };
 
   const submitCheckin = async (allowOverride = false) => {
@@ -698,25 +789,13 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     try {
       const checkinPayload = {
         member_id: selectedMember.id,
-        method: checkinMethod,
+        method: LOCKED_ATTENDANCE_MODE,
         notes: checkinNote,
         allow_override: allowOverride,
       };
 
-      if (checkinMethod === 'SELF' && navigator.geolocation) {
-        try {
-          const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
-          });
-          checkinPayload.latitude = position.coords.latitude;
-          checkinPayload.longitude = position.coords.longitude;
-        } catch (_geoErr) {
-          // Do not block submission if geo read fails; backend will decide by settings.
-        }
-      }
-
       const res = await axios.post('/api/attendance/checkin', checkinPayload, headers);
-      handleCheckinSuccess(unwrapApiData(res.data), selectedMember, checkinMethod);
+      handleCheckinSuccess(unwrapApiData(res.data), selectedMember, LOCKED_ATTENDANCE_MODE);
     } catch (err) {
       const errorBody = asObject(err?.response?.data, {});
       const code = errorBody.code;
@@ -822,24 +901,18 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {Object.entries(MODE_META).map(([key, item]) => {
             const Icon = item.icon;
-            const active = modeSettings.attendance_mode === key;
+            const active = key === LOCKED_ATTENDANCE_MODE;
             return (
-              <button
+              <div
                 key={key}
-                disabled={!isOwner}
-                onClick={() => {
-                  setModeSettings((prev) => ({ ...prev, attendance_mode: key }));
-                  setCheckinMethod(key);
-                  if (key === 'RFID') onOpenRfidSetup?.();
-                }}
-                className={`text-left p-4 rounded-2xl border transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
+                className={`text-left p-4 rounded-2xl border ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 bg-white'}`}
               >
                 <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${item.color} text-white flex items-center justify-center mb-3`}>
                   <Icon size={17} />
                 </div>
                 <p className="text-sm font-black text-slate-900">{item.label}</p>
                 <p className="text-xs text-slate-500 font-medium mt-1">{item.desc}</p>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -855,57 +928,25 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
             />
           </label>
           <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white">
-            <span className="text-sm font-bold text-slate-700">Enable geo radius for SELF mode</span>
+            <span className="text-sm font-bold text-slate-700">Enable app location check-in</span>
             <input
               type="checkbox"
               checked={modeSettings.attendance_geo_enabled}
-              disabled={!isOwner}
-              onChange={(e) => setModeSettings((prev) => ({ ...prev, attendance_geo_enabled: e.target.checked }))}
+              disabled={!isOwner || busyGeoSync}
+              onChange={(e) => handleGeoToggle(e.target.checked)}
             />
           </label>
         </div>
-
-        {modeSettings.attendance_geo_enabled && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-            <input
-              type="number"
-              step="0.000001"
-              placeholder="Gym latitude"
-              value={modeSettings.gym_latitude}
-              disabled={!isOwner}
-              onChange={(e) => setModeSettings((prev) => ({ ...prev, gym_latitude: e.target.value }))}
-              className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-            />
-            <input
-              type="number"
-              step="0.000001"
-              placeholder="Gym longitude"
-              value={modeSettings.gym_longitude}
-              disabled={!isOwner}
-              onChange={(e) => setModeSettings((prev) => ({ ...prev, gym_longitude: e.target.value }))}
-              className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-            />
-            <input
-              type="number"
-              min="50"
-              placeholder="Radius meters"
-              value={modeSettings.gym_radius_meters}
-              disabled={!isOwner}
-              onChange={(e) => setModeSettings((prev) => ({ ...prev, gym_radius_meters: e.target.value }))}
-              className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-            />
-          </div>
-        )}
 
         <div className="mt-4">
           {!isOwner && <p className="mb-2 text-xs font-semibold text-slate-500">Attendance mode settings are view-only for staff accounts.</p>}
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={saveModeSettings}
-              disabled={busySaveMode || !isOwner}
+              disabled={busySaveMode || busyGeoSync || !isOwner}
               className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 active:scale-95 transition-all disabled:opacity-60"
             >
-              {busySaveMode ? 'Saving...' : 'Save Mode Settings'}
+              {busyGeoSync ? 'Capturing location...' : busySaveMode ? 'Saving...' : 'Save Mode Settings'}
             </button>
             {modeSettings.attendance_mode === 'RFID' && isOwner && (
               <button
@@ -959,16 +1000,9 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
 
           <div className="mb-3">
             <label className="text-xs font-bold text-slate-500">Method</label>
-            <select
-              value={checkinMethod}
-              onChange={(e) => setCheckinMethod(e.target.value)}
-              className="w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-            >
-              <option value="STAFF">Staff</option>
-              <option value="QR">QR</option>
-              <option value="SELF">Self (Mobile)</option>
-              <option value="RFID">RFID/Biometric</option>
-            </select>
+            <div className="w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900">
+              Staff
+            </div>
           </div>
 
           <textarea
@@ -991,7 +1025,6 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
             <button
               type="button"
               onClick={() => {
-                setCheckinMethod('QR');
                 setQrScannerOpen(true);
               }}
               disabled={busyQrAction || !canWriteAttendance}

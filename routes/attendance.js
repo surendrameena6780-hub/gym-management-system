@@ -17,6 +17,8 @@ const GYM_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_GYM_QR_TTL_MS || `$
 const RFID_DUPLICATE_WINDOW_SECONDS = Number.parseInt(process.env.RFID_DUPLICATE_WINDOW_SECONDS || '10', 10);
 const ACCESS_ALERT_DEDUP_SECONDS = Number.parseInt(process.env.ATTENDANCE_ALERT_DEDUP_SECONDS || '120', 10);
 const ACCESS_ALERT_ROLES = ['OWNER', 'STAFF'];
+const LOCKED_ATTENDANCE_MODE = 'STAFF';
+const DEFAULT_GYM_RADIUS_METERS = 200;
 
 const METHOD_LABELS = {
     STAFF: 'staff desk',
@@ -486,7 +488,11 @@ router.get('/mode', auth, saasMiddleware, requirePermission('attendance:read'), 
         );
 
         if (gym.rows.length === 0) return res.status(404).json({ error: 'Gym not found' });
-        res.json(gym.rows[0]);
+        res.json({
+            ...gym.rows[0],
+            attendance_mode: LOCKED_ATTENDANCE_MODE,
+            gym_radius_meters: Number.parseInt(gym.rows[0].gym_radius_meters || `${DEFAULT_GYM_RADIUS_METERS}`, 10) || DEFAULT_GYM_RADIUS_METERS,
+        });
     } catch (err) {
         console.error('ATTENDANCE MODE GET ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });
@@ -495,12 +501,22 @@ router.get('/mode', auth, saasMiddleware, requirePermission('attendance:read'), 
 
 router.put('/mode', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
-        const attendance_mode = normalizeMethod(req.body.attendance_mode || 'STAFF');
+        const attendance_mode = LOCKED_ATTENDANCE_MODE;
         const attendance_geo_enabled = asBool(req.body.attendance_geo_enabled);
         const allow_expired_checkin = asBool(req.body.allow_expired_checkin);
-        const gym_latitude = req.body.gym_latitude ? parseFloat(req.body.gym_latitude) : null;
-        const gym_longitude = req.body.gym_longitude ? parseFloat(req.body.gym_longitude) : null;
-        const gym_radius_meters = req.body.gym_radius_meters ? parseInt(req.body.gym_radius_meters, 10) : 200;
+        let gym_latitude = null;
+        let gym_longitude = null;
+        let gym_radius_meters = DEFAULT_GYM_RADIUS_METERS;
+
+        if (attendance_geo_enabled) {
+            gym_latitude = Number.parseFloat(req.body.gym_latitude);
+            gym_longitude = Number.parseFloat(req.body.gym_longitude);
+            gym_radius_meters = Number.parseInt(req.body.gym_radius_meters || `${DEFAULT_GYM_RADIUS_METERS}`, 10) || DEFAULT_GYM_RADIUS_METERS;
+
+            if (!Number.isFinite(gym_latitude) || !Number.isFinite(gym_longitude)) {
+                return res.status(400).json({ error: 'Gym latitude and longitude are required when geo check-in is enabled.' });
+            }
+        }
 
         await pool.query(
             `UPDATE gyms
@@ -600,9 +616,9 @@ router.get('/member/options', memberAuth, saasMiddleware, async (req, res) => {
                 id: gym.id,
                 name: gym.name,
             },
-            attendance_mode: gym.attendance_mode || 'STAFF',
+            attendance_mode: LOCKED_ATTENDANCE_MODE,
             attendance_geo_enabled: Boolean(gym.attendance_geo_enabled),
-            gym_radius_meters: Number.parseInt(gym.gym_radius_meters || '200', 10),
+            gym_radius_meters: Number.parseInt(gym.gym_radius_meters || `${DEFAULT_GYM_RADIUS_METERS}`, 10) || DEFAULT_GYM_RADIUS_METERS,
             self_checkin_available: selfCheckinAvailable,
             member_qr_available: true,
             gym_qr_available: true,
