@@ -793,7 +793,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     const statusInfo = getStatusInfo(m);
     const lastVisitDate = m.last_visit ? new Date(m.last_visit) : null;
     const diffDays = lastVisitDate ? Math.ceil((new Date() - lastVisitDate) / (1000 * 60 * 60 * 24)) : 999;
-    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label !== 'UNPAID' && diffDays > 4);
+    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
     const searchLower = searchTerm.toLowerCase();
     return matchesFilter && (m.full_name?.toLowerCase().includes(searchLower) || m.email?.toLowerCase().includes(searchLower) || m.phone?.includes(searchTerm));
   });

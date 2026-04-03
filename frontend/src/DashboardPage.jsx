@@ -794,18 +794,23 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     
     const expiringIn3Days = active.filter(m => m.days_left > 0 && m.days_left <= 3);
     const expiringIn7Days = active.filter(m => m.days_left > 0 && m.days_left <= 7);
-    
-    const ghosts = active.filter(m => {
-      if (!m.last_visit) return true;
-      return Math.floor((today - new Date(m.last_visit)) / 86400000) > 20;
-    });
 
+    // Escalated leads defined first so ghosts can exclude them (no double-counting)
     const escalatedLeads = members.filter(m => {
-      if (m.membership_status === 'UNPAID') return false; // UNPAID goes to UNPAID_ACTIVATION, not escalated
+      if (m.membership_status === 'UNPAID') return false;
       const daysAbsent = m.last_visit ? Math.floor((today - new Date(m.last_visit)) / 86400000) : 999;
       const isLongExpired = m.membership_status === 'EXPIRED' && m.days_left < -5;
       const isDeepGhost = m.membership_status === 'ACTIVE' && daysAbsent > 30;
       return isLongExpired || isDeepGhost;
+    });
+    const escalatedIds = new Set(escalatedLeads.map(m => m.id));
+
+    // Ghosts: ACTIVE members absent 14-30 days — escalated members (>30d) excluded to avoid duplicate actions
+    const ghosts = active.filter(m => {
+      if (escalatedIds.has(m.id)) return false;
+      if (!m.last_visit) return true;
+      const days = Math.floor((today - new Date(m.last_visit)) / 86400000);
+      return days > 14;
     });
 
     const revenueAtRisk = expiringIn7Days.reduce((sum, m) => {
@@ -1193,12 +1198,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       });
     })();
 
-    // ── Action Required: urgent member-specific tasks ONLY (expired, unpaid, ghosts, escalated) ──
+    // ── Action Required: show ALL P0 + P1 items (no artificial cap) ──
     const actionCandidates = [subscriptionWarning, ...aiCandidates].filter(Boolean);
     const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
     const mergedActionRows = actionRequiredRows.length > 0
-      ? actionRequiredRows.slice(0, 3)
-      : actionCandidates.slice(0, 3); // show best P2 tasks when nothing critical
+      ? actionRequiredRows  // show all urgent items — no slice cap
+      : actionCandidates.slice(0, 3);
     const urgentCount = actionRequiredRows.length;
 
     return {
