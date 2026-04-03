@@ -43,6 +43,28 @@ const statusClass = (status) => {
   return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
 };
 
+const DEFAULT_AUTOMATION_SETTINGS = {
+  owner_staff_enabled: true,
+  member_push_enabled: true,
+  owner_staff_slots: {
+    MORNING: true,
+    AFTERNOON: true,
+    EVENING: true,
+  },
+  member_slots: {
+    MORNING: true,
+    AFTERNOON: false,
+    EVENING: true,
+  },
+  member_max_per_slot: 25,
+};
+
+const SLOT_LABELS = {
+  MORNING: 'Morning',
+  AFTERNOON: 'Afternoon',
+  EVENING: 'Evening',
+};
+
 function SuperAdminDashboard({ token, onLogout }) {
   const headers = useMemo(() => ({ headers: { 'x-super-token': token } }), [token]);
 
@@ -64,6 +86,7 @@ function SuperAdminDashboard({ token, onLogout }) {
     maintenance_mode: false,
     maintenance_message: '',
     feature_flags: {},
+    automation_settings: DEFAULT_AUTOMATION_SETTINGS,
     support_profile: {
       phone: '',
       email: '',
@@ -203,6 +226,19 @@ function SuperAdminDashboard({ token, onLogout }) {
         maintenance_mode: typeof payload.maintenance_mode === 'boolean' ? payload.maintenance_mode : (prev.maintenance_mode || false),
         maintenance_message: payload.maintenance_message ?? prev.maintenance_message ?? '',
         feature_flags: payload.feature_flags || prev.feature_flags || {},
+        automation_settings: {
+          ...DEFAULT_AUTOMATION_SETTINGS,
+          ...(payload.automation_settings || {}),
+          owner_staff_slots: {
+            ...DEFAULT_AUTOMATION_SETTINGS.owner_staff_slots,
+            ...(payload.automation_settings?.owner_staff_slots || {}),
+          },
+          member_slots: {
+            ...DEFAULT_AUTOMATION_SETTINGS.member_slots,
+            ...(payload.automation_settings?.member_slots || {}),
+          },
+          member_max_per_slot: Math.min(100, Math.max(1, Number(payload.automation_settings?.member_max_per_slot) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
+        },
         support_profile: {
           phone: payload.support_profile?.phone ?? prev.support_profile?.phone ?? '',
           email: payload.support_profile?.email ?? prev.support_profile?.email ?? '',
@@ -852,6 +888,117 @@ function SuperAdminDashboard({ token, onLogout }) {
 
         {activeTab === 'system' && (
           <div className="space-y-4">
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-indigo-400" />
+                <p className="text-xs uppercase tracking-widest font-black text-slate-400">Global Notification Automation</p>
+              </div>
+
+              <p className="text-sm text-slate-400 max-w-2xl">
+                HQ-only control for app-wide notification automation. Owner and staff get business nudges, and members get a separate push stream with its own caps.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <label className="flex items-center justify-between p-3 rounded-xl bg-black/30 border border-white/10">
+                  <span className="font-bold text-slate-200">Owner / Staff automations</span>
+                  <input
+                    type="checkbox"
+                    checked={!!system.automation_settings?.owner_staff_enabled}
+                    onChange={(e) => setSystem((p) => ({
+                      ...p,
+                      automation_settings: {
+                        ...(p.automation_settings || DEFAULT_AUTOMATION_SETTINGS),
+                        owner_staff_enabled: e.target.checked,
+                      },
+                    }))}
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl bg-black/30 border border-white/10">
+                  <span className="font-bold text-slate-200">Member push automations</span>
+                  <input
+                    type="checkbox"
+                    checked={!!system.automation_settings?.member_push_enabled}
+                    onChange={(e) => setSystem((p) => ({
+                      ...p,
+                      automation_settings: {
+                        ...(p.automation_settings || DEFAULT_AUTOMATION_SETTINGS),
+                        member_push_enabled: e.target.checked,
+                      },
+                    }))}
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500">Owner / Staff Slots</p>
+                  {Object.entries(SLOT_LABELS).map(([slotKey, label]) => (
+                    <label key={`owner-${slotKey}`} className="flex items-center justify-between p-2.5 rounded-lg bg-black/20 border border-white/5">
+                      <span className="font-bold text-slate-300">{label}</span>
+                      <input
+                        type="checkbox"
+                        checked={!!system.automation_settings?.owner_staff_slots?.[slotKey]}
+                        onChange={(e) => setSystem((p) => ({
+                          ...p,
+                          automation_settings: {
+                            ...(p.automation_settings || DEFAULT_AUTOMATION_SETTINGS),
+                            owner_staff_slots: {
+                              ...(p.automation_settings?.owner_staff_slots || DEFAULT_AUTOMATION_SETTINGS.owner_staff_slots),
+                              [slotKey]: e.target.checked,
+                            },
+                          },
+                        }))}
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div className="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500">Member Push Slots</p>
+                  {Object.entries(SLOT_LABELS).map(([slotKey, label]) => (
+                    <label key={`member-${slotKey}`} className="flex items-center justify-between p-2.5 rounded-lg bg-black/20 border border-white/5">
+                      <span className="font-bold text-slate-300">{label}</span>
+                      <input
+                        type="checkbox"
+                        checked={!!system.automation_settings?.member_slots?.[slotKey]}
+                        onChange={(e) => setSystem((p) => ({
+                          ...p,
+                          automation_settings: {
+                            ...(p.automation_settings || DEFAULT_AUTOMATION_SETTINGS),
+                            member_slots: {
+                              ...(p.automation_settings?.member_slots || DEFAULT_AUTOMATION_SETTINGS.member_slots),
+                              [slotKey]: e.target.checked,
+                            },
+                          },
+                        }))}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="max-w-xs">
+                <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Member Push Cap Per Slot</p>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                  value={system.automation_settings?.member_max_per_slot || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot}
+                  onChange={(e) => setSystem((p) => ({
+                    ...p,
+                    automation_settings: {
+                      ...(p.automation_settings || DEFAULT_AUTOMATION_SETTINGS),
+                      member_max_per_slot: Math.min(100, Math.max(1, Number(e.target.value) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
+                    },
+                  }))}
+                />
+              </div>
+
+              <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Automation Settings</button>
+            </div>
+
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <p className="text-xs uppercase tracking-widest font-black text-slate-400">Global Controls</p>
               <label className="flex items-center justify-between p-3 rounded-xl bg-black/30 border border-white/10">

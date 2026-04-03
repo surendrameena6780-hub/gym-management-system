@@ -546,6 +546,16 @@ function App() {
     fetchNotifications();
   }, [fetchNotifications]);
 
+  useEffect(() => {
+    if (!token || isHQ || isSuspended) return undefined;
+
+    const intervalId = setInterval(() => {
+      fetchNotifications();
+    }, 90000);
+
+    return () => clearInterval(intervalId);
+  }, [fetchNotifications, token, isHQ, isSuspended]);
+
   // ── Web Push Subscribe ─────────────────────────────────────────────────────
   useEffect(() => {
     if (isHQ || !token || isSuspended) return;

@@ -10,6 +10,7 @@ const { PROFILE_UPLOAD_DIR, allowedProfileImageExtensions } = require('./utils/p
 
 // Import Jobs and Middleware
 const checkExpirations = require('./jobs/expiryCheck');
+const { runAutomatedNotificationNudges } = require('./jobs/notificationAutomation');
 const auth = require('./middleware/authMiddleware');
 
 // Import Routes
@@ -247,3 +248,15 @@ setInterval(() => {
 }, 1000 * 60 * 60); 
 
 checkExpirations();
+
+const automatedNudgeIntervalMs = 1000 * 60 * 30;
+
+setInterval(() => {
+    runAutomatedNotificationNudges().catch((err) => {
+        console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
+    });
+}, automatedNudgeIntervalMs);
+
+runAutomatedNotificationNudges().catch((err) => {
+    console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
+});

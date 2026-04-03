@@ -346,6 +346,35 @@ CREATE TABLE IF NOT EXISTS broadcast_logs (
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS notification_automation_log (
+    id               SERIAL PRIMARY KEY,
+    gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    local_date       DATE NOT NULL,
+    slot_key         VARCHAR(30) NOT NULL,
+    automation_key   VARCHAR(60) NOT NULL,
+    notification_id  INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+    title            VARCHAR(200) NOT NULL,
+    message          TEXT NOT NULL,
+    context_snapshot JSONB DEFAULT '{}'::jsonb,
+    push_sent_count  INTEGER DEFAULT 0,
+    created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (gym_id, local_date, slot_key)
+);
+
+CREATE TABLE IF NOT EXISTS member_notification_automation_log (
+    id               SERIAL PRIMARY KEY,
+    gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    member_id        INTEGER REFERENCES members(id) ON DELETE CASCADE,
+    local_date       DATE NOT NULL,
+    slot_key         VARCHAR(30) NOT NULL,
+    automation_key   VARCHAR(60) NOT NULL,
+    title            VARCHAR(200) NOT NULL,
+    message          TEXT NOT NULL,
+    push_sent_count  INTEGER DEFAULT 0,
+    created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (gym_id, member_id, local_date)
+);
+
 -- =============================================================
 -- SAFE MIGRATIONS: Add missing columns to existing tables.
 -- ADD COLUMN IF NOT EXISTS is idempotent — safe to run repeatedly.
@@ -698,10 +727,12 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     maintenance_mode BOOLEAN DEFAULT FALSE,
     maintenance_message TEXT DEFAULT '',
     feature_flags JSONB DEFAULT '{"support": true, "attendance": true, "billing": true}'::jsonb,
+    automation_settings JSONB DEFAULT '{"owner_staff_enabled": true, "member_push_enabled": true, "owner_staff_slots": {"MORNING": true, "AFTERNOON": true, "EVENING": true}, "member_slots": {"MORNING": true, "AFTERNOON": false, "EVENING": true}, "member_max_per_slot": 25}'::jsonb,
     support_profile JSONB DEFAULT '{"phone":"+91 00000 00000","email":"support@gymvault.com","whatsapp":"+91 00000 00000","about":"GymVault helps gym owners run operations with fast, reliable support.","address":"Head Office, India","timings":"Mon-Sat · 9:00 AM to 7:00 PM IST"}'::jsonb,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS automation_settings JSONB DEFAULT '{"owner_staff_enabled": true, "member_push_enabled": true, "owner_staff_slots": {"MORNING": true, "AFTERNOON": true, "EVENING": true}, "member_slots": {"MORNING": true, "AFTERNOON": false, "EVENING": true}, "member_max_per_slot": 25}'::jsonb;
 ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS support_profile JSONB DEFAULT '{"phone":"+91 00000 00000","email":"support@gymvault.com","whatsapp":"+91 00000 00000","about":"GymVault helps gym owners run operations with fast, reliable support.","address":"Head Office, India","timings":"Mon-Sat · 9:00 AM to 7:00 PM IST"}'::jsonb;
 
 INSERT INTO platform_settings (id)
@@ -733,6 +764,10 @@ CREATE INDEX IF NOT EXISTS idx_notifications_is_read    ON notifications(is_read
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
 CREATE INDEX IF NOT EXISTS idx_broadcast_logs_gym_id    ON broadcast_logs(gym_id);
 CREATE INDEX IF NOT EXISTS idx_broadcast_logs_created   ON broadcast_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_automation_log_gym_date ON notification_automation_log(gym_id, local_date DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_automation_log_created_at ON notification_automation_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_member_notification_automation_log_gym_date ON member_notification_automation_log(gym_id, local_date DESC);
+CREATE INDEX IF NOT EXISTS idx_member_notification_automation_log_member_date ON member_notification_automation_log(member_id, local_date DESC);
 
 CREATE INDEX IF NOT EXISTS idx_attendance_method       ON attendance(checkin_method);
 CREATE INDEX IF NOT EXISTS idx_attendance_staff_user   ON attendance(staff_user_id);

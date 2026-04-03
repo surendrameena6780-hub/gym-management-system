@@ -64,6 +64,18 @@ const ensurePlatformSupportProfileColumn = async () => {
     await ensurePlatformSupportProfileColumnPromise;
 };
 
+let ensurePlatformAutomationSettingsPromise;
+const ensurePlatformAutomationSettings = async () => {
+    if (!ensurePlatformAutomationSettingsPromise) {
+        ensurePlatformAutomationSettingsPromise = pool.query(`
+            ALTER TABLE platform_settings
+            ADD COLUMN IF NOT EXISTS automation_settings JSONB
+            DEFAULT '{"owner_staff_enabled": true, "member_push_enabled": true, "owner_staff_slots": {"MORNING": true, "AFTERNOON": true, "EVENING": true}, "member_slots": {"MORNING": true, "AFTERNOON": false, "EVENING": true}, "member_max_per_slot": 25}'::jsonb;
+        `);
+    }
+    await ensurePlatformAutomationSettingsPromise;
+};
+
 const defaultSupportProfile = {
     phone: '+91 00000 00000',
     email: 'support@gymvault.com',
@@ -71,6 +83,39 @@ const defaultSupportProfile = {
     about: 'GymVault helps gym owners run operations with fast, reliable support.',
     address: 'Head Office, India',
     timings: 'Mon-Sat · 9:00 AM to 7:00 PM IST',
+};
+
+const defaultAutomationSettings = {
+    owner_staff_enabled: true,
+    member_push_enabled: true,
+    owner_staff_slots: {
+        MORNING: true,
+        AFTERNOON: true,
+        EVENING: true,
+    },
+    member_slots: {
+        MORNING: true,
+        AFTERNOON: false,
+        EVENING: true,
+    },
+    member_max_per_slot: 25,
+};
+
+const normalizeAutomationSettings = (value) => {
+    const raw = value && typeof value === 'object' ? value : {};
+    return {
+        owner_staff_enabled: raw.owner_staff_enabled !== false,
+        member_push_enabled: raw.member_push_enabled !== false,
+        owner_staff_slots: {
+            ...defaultAutomationSettings.owner_staff_slots,
+            ...(raw.owner_staff_slots && typeof raw.owner_staff_slots === 'object' ? raw.owner_staff_slots : {}),
+        },
+        member_slots: {
+            ...defaultAutomationSettings.member_slots,
+            ...(raw.member_slots && typeof raw.member_slots === 'object' ? raw.member_slots : {}),
+        },
+        member_max_per_slot: Math.min(100, Math.max(1, Number.parseInt(raw.member_max_per_slot, 10) || defaultAutomationSettings.member_max_per_slot)),
+    };
 };
 
 const logAudit = async ({ action, targetType, targetId, targetLabel, details = {}, actorId = 'SUPER_ADMIN' }) => {
@@ -792,10 +837,12 @@ router.get('/reports/light', superAuth, async (_req, res) => {
 router.get('/system', superAuth, async (_req, res) => {
     try {
         await ensurePlatformSupportProfileColumn();
+        await ensurePlatformAutomationSettings();
         const row = await pool.query('SELECT * FROM platform_settings WHERE id = 1');
         const base = row.rows[0] || { maintenance_mode: false, maintenance_message: '', feature_flags: {} };
         return res.json({
             ...base,
+            automation_settings: normalizeAutomationSettings(base.automation_settings),
             support_profile: {
                 ...defaultSupportProfile,
                 ...(base.support_profile || {}),
@@ -812,9 +859,13 @@ router.put('/system', superAuth, async (req, res) => {
     const maintenanceMessage = req.body.maintenance_message == null ? null : String(req.body.maintenance_message);
     const featureFlags = req.body.feature_flags && typeof req.body.feature_flags === 'object' ? req.body.feature_flags : null;
     const supportProfile = req.body.support_profile && typeof req.body.support_profile === 'object' ? req.body.support_profile : null;
+    const automationSettings = req.body.automation_settings && typeof req.body.automation_settings === 'object'
+        ? normalizeAutomationSettings(req.body.automation_settings)
+        : null;
 
     try {
         await ensurePlatformSupportProfileColumn();
+        await ensurePlatformAutomationSettings();
 
         const updated = await pool.query(
             `UPDATE platform_settings
@@ -822,6 +873,7 @@ router.put('/system', superAuth, async (req, res) => {
                  maintenance_message = COALESCE($2, maintenance_message),
                  feature_flags = COALESCE($3::jsonb, feature_flags),
                  support_profile = COALESCE($4::jsonb, support_profile),
+                 automation_settings = COALESCE($5::jsonb, automation_settings),
                  updated_at = NOW()
              WHERE id = 1
              RETURNING *`,
@@ -830,6 +882,7 @@ router.put('/system', superAuth, async (req, res) => {
                 maintenanceMessage,
                 featureFlags ? JSON.stringify(featureFlags) : null,
                 supportProfile ? JSON.stringify(supportProfile) : null,
+                automationSettings ? JSON.stringify(automationSettings) : null,
             ]
         );
 
@@ -838,7 +891,7 @@ router.put('/system', superAuth, async (req, res) => {
             targetType: 'SYSTEM',
             targetId: '1',
             targetLabel: 'platform_settings',
-            details: { maintenanceMode, maintenanceMessage, featureFlags, supportProfile },
+            details: { maintenanceMode, maintenanceMessage, featureFlags, supportProfile, automationSettings },
         });
 
         return res.json(updated.rows[0]);
@@ -863,11 +916,19 @@ router.post('/system/broadcast', superAuth, async (req, res) => {
 
     try {
         // Insert in-app notifications for all gyms
-        await pool.query(
-            `INSERT INTO notifications (gym_id, title, message)
-             SELECT id, $1, $2 FROM gyms`,
-            [title, message]
-        );
+        if (target_gym_id) {
+            await pool.query(
+                `INSERT INTO notifications (gym_id, title, message)
+                 SELECT id, $1, $2 FROM gyms WHERE id = $3`,
+                [title, message, target_gym_id]
+            );
+        } else {
+            await pool.query(
+                `INSERT INTO notifications (gym_id, title, message)
+                 SELECT id, $1, $2 FROM gyms`,
+                [title, message]
+            );
+        }
 
         // Send web push if VAPID is configured
         let pushSent = 0;
@@ -906,7 +967,7 @@ router.post('/system/broadcast', superAuth, async (req, res) => {
             details: { message, pushSent, roles, target_gym_id },
         });
 
-        return res.json({ message: 'Broadcast sent to all gyms.', pushSent });
+        return res.json({ message: target_gym_id ? 'Broadcast sent to selected gym.' : 'Broadcast sent to all gyms.', pushSent });
     } catch (err) {
         console.error('SUPERADMIN BROADCAST ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });

@@ -320,6 +320,52 @@ const connectDB = async () => {
                 last_triggered_at TIMESTAMPTZ,
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id         SERIAL PRIMARY KEY,
+                gym_id     INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                title      VARCHAR(200) NOT NULL,
+                message    TEXT NOT NULL,
+                is_read    BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS broadcast_logs (
+                id             SERIAL PRIMARY KEY,
+                gym_id         INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                segment        VARCHAR(50) NOT NULL,
+                channel        VARCHAR(30) NOT NULL DEFAULT 'WHATSAPP',
+                message        TEXT NOT NULL,
+                sent_to_count  INTEGER DEFAULT 0,
+                status         VARCHAR(20) DEFAULT 'SENT',
+                created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at     TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS notification_automation_log (
+                id               SERIAL PRIMARY KEY,
+                gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                local_date       DATE NOT NULL,
+                slot_key         VARCHAR(30) NOT NULL,
+                automation_key   VARCHAR(60) NOT NULL,
+                notification_id  INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+                title            VARCHAR(200) NOT NULL,
+                message          TEXT NOT NULL,
+                context_snapshot JSONB DEFAULT '{}'::jsonb,
+                push_sent_count  INTEGER DEFAULT 0,
+                created_at       TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (gym_id, local_date, slot_key)
+            );
+            CREATE TABLE IF NOT EXISTS member_notification_automation_log (
+                id               SERIAL PRIMARY KEY,
+                gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id        INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                local_date       DATE NOT NULL,
+                slot_key         VARCHAR(30) NOT NULL,
+                automation_key   VARCHAR(60) NOT NULL,
+                title            VARCHAR(200) NOT NULL,
+                message          TEXT NOT NULL,
+                push_sent_count  INTEGER DEFAULT 0,
+                created_at       TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (gym_id, member_id, local_date)
+            );
         `);
         await pool.query(`
             CREATE INDEX IF NOT EXISTS idx_member_documents_member ON member_documents(member_id);
@@ -337,6 +383,15 @@ const connectDB = async () => {
             CREATE INDEX IF NOT EXISTS idx_saved_reports_gym_id ON saved_reports(gym_id);
             CREATE INDEX IF NOT EXISTS idx_api_keys_gym_id ON api_keys(gym_id);
             CREATE INDEX IF NOT EXISTS idx_webhooks_gym_id ON webhooks(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_notifications_gym_id ON notifications(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+            CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_broadcast_logs_gym_id ON broadcast_logs(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_broadcast_logs_created_at ON broadcast_logs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_notification_automation_log_gym_date ON notification_automation_log(gym_id, local_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_notification_automation_log_created_at ON notification_automation_log(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_member_notification_automation_log_gym_date ON member_notification_automation_log(gym_id, local_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_member_notification_automation_log_member_date ON member_notification_automation_log(member_id, local_date DESC);
         `);
         await pool.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_members_rfid_tag_unique

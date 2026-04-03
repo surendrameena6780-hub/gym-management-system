@@ -239,6 +239,68 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
   }, [loadAttendance, loadAttendanceOptions, loadMemberQr]);
 
   useEffect(() => {
+    const gymId = attendanceOptions?.gym?.id || member?.gym_id || null;
+    if (!gymId || !member?.id) return undefined;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return undefined;
+    if (Notification.permission === 'denied') return undefined;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const keyRes = await axios.get('/api/push/vapid-public-key');
+        const vapidPublicKey = keyRes.data?.publicKey;
+        if (!vapidPublicKey || cancelled) return;
+
+        const registration = await navigator.serviceWorker.ready;
+        const existing = await registration.pushManager.getSubscription();
+
+        if (existing) {
+          await axios.post('/api/push/subscribe-member', {
+            ...existing.toJSON(),
+            member_id: member.id,
+            gym_id: gymId,
+          }).catch(() => {});
+          return;
+        }
+
+        let permission = Notification.permission;
+        if (permission === 'default') {
+          permission = await Notification.requestPermission();
+        }
+        if (permission !== 'granted' || cancelled) return;
+
+        const padding = '='.repeat((4 - vapidPublicKey.length % 4) % 4);
+        const base64 = (vapidPublicKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = window.atob(base64);
+        const outputArray = new Uint8Array(raw.length);
+        for (let index = 0; index < raw.length; index += 1) {
+          outputArray[index] = raw.charCodeAt(index);
+        }
+
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: outputArray,
+        });
+
+        if (!cancelled) {
+          await axios.post('/api/push/subscribe-member', {
+            ...subscription.toJSON(),
+            member_id: member.id,
+            gym_id: gymId,
+          }).catch(() => {});
+        }
+      } catch (_err) {
+        // Member push subscription should never block the portal.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attendanceOptions?.gym?.id, member?.gym_id, member?.id]);
+
+  useEffect(() => {
     if (!navigator?.geolocation) {
       setGeoPermissionState('unsupported');
       return undefined;
