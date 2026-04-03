@@ -87,14 +87,17 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
                     FROM payments pay WHERE pay.user_id = m.id AND gym_id = $1 AND pay.deleted_at IS NULL
                 ), '[]') AS payment_history,
                 ms_latest.plan_name,
-                ms_latest.end_date AS expiry_date
+                ms_latest.end_date AS expiry_date,
+                ms_latest.freeze_start_date,
+                ms_latest.freeze_end_date,
+                ms_latest.freeze_reason
             FROM members m
             LEFT JOIN LATERAL (
-                SELECT ms.status, ms.end_date, p.name AS plan_name
+                SELECT ms.status, ms.end_date, p.name AS plan_name, ms.freeze_start_date, ms.freeze_end_date, ms.freeze_reason
                 FROM memberships ms
                 LEFT JOIN plans p ON ms.plan_id = p.id
                 WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
-                ORDER BY ms.end_date DESC
+                ORDER BY ms.end_date DESC, ms.id DESC
                 LIMIT 1
             ) ms_latest ON true
             ${whereClause}
@@ -178,11 +181,11 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
                 ), '[]') AS payment_history
             FROM members m
             LEFT JOIN LATERAL (
-                SELECT ms.status, ms.end_date, p.name AS plan_name
+                SELECT ms.status, ms.end_date, p.name AS plan_name, ms.freeze_start_date, ms.freeze_end_date, ms.freeze_reason
                 FROM memberships ms
                 LEFT JOIN plans p ON ms.plan_id = p.id
                 WHERE ms.member_id = m.id AND ms.gym_id = $2 AND ms.deleted_at IS NULL
-                ORDER BY ms.end_date DESC
+                ORDER BY ms.end_date DESC, ms.id DESC
                 LIMIT 1
             ) ms_latest ON true
             WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL
@@ -365,8 +368,27 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
 router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     const gym_id = req.user.gym_id;
     try {
-        const member = await pool.query("SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL", [req.params.id, gym_id]);
+        const member = await pool.query(
+            `SELECT
+                m.id,
+                COALESCE(ms_latest.status, 'UNPAID') AS membership_status
+             FROM members m
+             LEFT JOIN LATERAL (
+                SELECT ms.status
+                FROM memberships ms
+                WHERE ms.member_id = m.id AND ms.gym_id = m.gym_id AND ms.deleted_at IS NULL
+                ORDER BY ms.end_date DESC, ms.id DESC
+                LIMIT 1
+             ) ms_latest ON TRUE
+             WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL`,
+            [req.params.id, gym_id]
+        );
         if(member.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+
+        const membershipStatus = String(member.rows[0].membership_status || 'UNPAID').toUpperCase();
+        if (membershipStatus !== 'ACTIVE') {
+            return res.status(403).json({ error: `Access Denied: Membership is ${membershipStatus}` });
+        }
 
         await pool.query(
             "INSERT INTO attendance (gym_id, member_id, check_in_time) VALUES ($1, $2, NOW())",

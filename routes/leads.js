@@ -1,0 +1,332 @@
+const express = require('express');
+const router = express.Router();
+const { pool } = require('../config/db');
+const auth = require('../middleware/authMiddleware');
+const saasMiddleware = require('../middleware/saasMiddleware');
+const { requirePermission } = require('../middleware/rbac');
+
+const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
+const isValidPhone = (value) => /^\d{10}$/.test(value);
+
+const getGymIdFromRequest = (req) => {
+    const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
+    const gymId = Number.parseInt(rawGymId, 10);
+    return Number.isInteger(gymId) ? gymId : null;
+};
+
+const parseOptionalTimestamp = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
+const normalizeLeadPayload = (payload = {}) => {
+    const normalizedPhone = normalizePhone(payload.phone);
+    return {
+        full_name: String(payload.full_name || '').trim(),
+        phone: normalizedPhone,
+        email: String(payload.email || '').trim().toLowerCase(),
+        source: String(payload.source || 'Walk-in').trim() || 'Walk-in',
+        status: String(payload.status || 'NEW').trim().toUpperCase(),
+        priority: String(payload.priority || 'MEDIUM').trim().toUpperCase(),
+        notes: String(payload.notes || '').trim(),
+        lost_reason: String(payload.lost_reason || '').trim(),
+        next_follow_up_at: parseOptionalTimestamp(payload.next_follow_up_at),
+        trial_date: parseOptionalTimestamp(payload.trial_date),
+        mark_contacted: Boolean(payload.mark_contacted),
+    };
+};
+
+router.use(auth, saasMiddleware);
+
+router.get('/summary', requirePermission('members:read'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const result = await pool.query(
+            `SELECT
+                COUNT(*)::INTEGER AS total,
+                COUNT(*) FILTER (WHERE status NOT IN ('WON', 'LOST'))::INTEGER AS open_leads,
+                COUNT(*) FILTER (WHERE status = 'NEW')::INTEGER AS new_leads,
+                COUNT(*) FILTER (
+                    WHERE status IN ('NEW', 'CONTACTED', 'FOLLOW_UP', 'TRIAL_BOOKED')
+                      AND next_follow_up_at IS NOT NULL
+                      AND next_follow_up_at::date <= CURRENT_DATE
+                )::INTEGER AS follow_ups_due,
+                COUNT(*) FILTER (WHERE trial_date IS NOT NULL AND trial_date::date = CURRENT_DATE)::INTEGER AS trials_today,
+                COUNT(*) FILTER (WHERE status = 'TRIAL_BOOKED')::INTEGER AS trial_booked,
+                COUNT(*) FILTER (
+                    WHERE status = 'WON'
+                      AND DATE_TRUNC('month', updated_at) = DATE_TRUNC('month', CURRENT_DATE)
+                )::INTEGER AS converted_this_month,
+                COUNT(*) FILTER (WHERE status = 'LOST')::INTEGER AS lost_leads
+             FROM leads
+             WHERE gym_id = $1`,
+            [gymId]
+        );
+
+        return res.json(result.rows[0] || {});
+    } catch (err) {
+        console.error('LEADS SUMMARY ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load leads summary.' });
+    }
+});
+
+router.get('/', requirePermission('members:read'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const search = String(req.query.search || '').trim();
+        const status = String(req.query.status || '').trim().toUpperCase();
+        const queryParams = [gymId];
+        let whereClause = 'WHERE l.gym_id = $1';
+
+        if (search) {
+            queryParams.push(`%${search}%`);
+            whereClause += ` AND (l.full_name ILIKE $${queryParams.length} OR l.phone ILIKE $${queryParams.length} OR l.email ILIKE $${queryParams.length})`;
+        }
+
+        if (status && status !== 'ALL') {
+            queryParams.push(status);
+            whereClause += ` AND l.status = $${queryParams.length}`;
+        }
+
+        const result = await pool.query(
+            `SELECT
+                l.*,
+                u.full_name AS assigned_to_name,
+                m.full_name AS converted_member_name
+             FROM leads l
+             LEFT JOIN users u ON u.id = l.assigned_to
+             LEFT JOIN members m ON m.id = l.converted_member_id
+             ${whereClause}
+             ORDER BY
+                CASE WHEN l.status IN ('WON', 'LOST') THEN 1 ELSE 0 END ASC,
+                CASE
+                    WHEN l.next_follow_up_at IS NOT NULL AND l.next_follow_up_at::date <= CURRENT_DATE THEN 0
+                    ELSE 1
+                END ASC,
+                l.next_follow_up_at ASC NULLS LAST,
+                l.created_at DESC`,
+            queryParams
+        );
+
+        return res.json(result.rows);
+    } catch (err) {
+        console.error('LEADS LIST ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load leads.' });
+    }
+});
+
+router.post('/', requirePermission('members:write'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const payload = normalizeLeadPayload(req.body || {});
+
+        if (!payload.full_name || !payload.phone) {
+            return res.status(400).json({ error: 'full_name and phone are required.' });
+        }
+        if (!isValidPhone(payload.phone)) {
+            return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO leads (
+                gym_id, full_name, phone, email, source, status, priority,
+                notes, next_follow_up_at, trial_date, last_contacted_at, lost_reason
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             RETURNING *`,
+            [
+                gymId,
+                payload.full_name,
+                payload.phone,
+                payload.email,
+                payload.source,
+                payload.status,
+                payload.priority,
+                payload.notes,
+                payload.next_follow_up_at,
+                payload.trial_date,
+                payload.mark_contacted ? new Date().toISOString() : null,
+                payload.lost_reason,
+            ]
+        );
+
+        return res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('LEAD CREATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to create lead.' });
+    }
+});
+
+router.put('/:id', requirePermission('members:write'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const leadId = Number.parseInt(req.params.id, 10);
+        const payload = normalizeLeadPayload(req.body || {});
+
+        if (!Number.isInteger(leadId)) {
+            return res.status(400).json({ error: 'Invalid lead id.' });
+        }
+        if (!payload.full_name || !payload.phone) {
+            return res.status(400).json({ error: 'full_name and phone are required.' });
+        }
+        if (!isValidPhone(payload.phone)) {
+            return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
+        }
+
+        const result = await pool.query(
+            `UPDATE leads
+             SET full_name = $1,
+                 phone = $2,
+                 email = $3,
+                 source = $4,
+                 status = $5,
+                 priority = $6,
+                 notes = $7,
+                 next_follow_up_at = $8,
+                 trial_date = $9,
+                 last_contacted_at = CASE WHEN $10 THEN NOW() ELSE last_contacted_at END,
+                 lost_reason = $11,
+                 updated_at = NOW()
+             WHERE id = $12 AND gym_id = $13
+             RETURNING *`,
+            [
+                payload.full_name,
+                payload.phone,
+                payload.email,
+                payload.source,
+                payload.status,
+                payload.priority,
+                payload.notes,
+                payload.next_follow_up_at,
+                payload.trial_date,
+                payload.mark_contacted,
+                payload.lost_reason,
+                leadId,
+                gymId,
+            ]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Lead not found.' });
+        }
+
+        return res.json(result.rows[0]);
+    } catch (err) {
+        console.error('LEAD UPDATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to update lead.' });
+    }
+});
+
+router.post('/:id/convert', requirePermission('members:write'), async (req, res) => {
+    const gymId = getGymIdFromRequest(req);
+    const leadId = Number.parseInt(req.params.id, 10);
+
+    if (!Number.isInteger(leadId)) {
+        return res.status(400).json({ error: 'Invalid lead id.' });
+    }
+
+    try {
+        await pool.query('BEGIN');
+
+        const leadResult = await pool.query(
+            `SELECT *
+             FROM leads
+             WHERE id = $1 AND gym_id = $2
+             FOR UPDATE`,
+            [leadId, gymId]
+        );
+
+        if (leadResult.rows.length === 0) {
+            await pool.query('ROLLBACK');
+            return res.status(404).json({ error: 'Lead not found.' });
+        }
+
+        const lead = leadResult.rows[0];
+
+        if (lead.converted_member_id) {
+            const existingMember = await pool.query(
+                'SELECT * FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                [lead.converted_member_id, gymId]
+            );
+            await pool.query('COMMIT');
+            return res.json({
+                lead,
+                member: existingMember.rows[0] || null,
+                created_new_member: false,
+            });
+        }
+
+        const memberLookup = await pool.query(
+            `SELECT *
+             FROM members
+             WHERE gym_id = $1
+               AND deleted_at IS NULL
+               AND (phone = $2 OR ($3 <> '' AND lower(email) = $3))
+             ORDER BY id DESC
+             LIMIT 1`,
+            [gymId, lead.phone, String(lead.email || '').trim().toLowerCase()]
+        );
+
+        let member = memberLookup.rows[0] || null;
+        let createdNewMember = false;
+
+        if (!member) {
+            const createdMember = await pool.query(
+                `INSERT INTO members (gym_id, full_name, phone, email, joining_date, status)
+                 VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')
+                 RETURNING *`,
+                [gymId, lead.full_name, lead.phone, lead.email || null]
+            );
+            member = createdMember.rows[0];
+            createdNewMember = true;
+        }
+
+        const updatedLead = await pool.query(
+            `UPDATE leads
+             SET status = 'WON',
+                 converted_member_id = $1,
+                 last_contacted_at = NOW(),
+                 updated_at = NOW()
+             WHERE id = $2 AND gym_id = $3
+             RETURNING *`,
+            [member.id, leadId, gymId]
+        );
+
+        await pool.query('COMMIT');
+        return res.json({
+            lead: updatedLead.rows[0],
+            member,
+            created_new_member: createdNewMember,
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error('LEAD CONVERT ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to convert lead.' });
+    }
+});
+
+router.delete('/:id', requirePermission('members:write'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const leadId = Number.parseInt(req.params.id, 10);
+        if (!Number.isInteger(leadId)) {
+            return res.status(400).json({ error: 'Invalid lead id.' });
+        }
+
+        const result = await pool.query(
+            'DELETE FROM leads WHERE id = $1 AND gym_id = $2 RETURNING id',
+            [leadId, gymId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Lead not found.' });
+        }
+
+        return res.json({ message: 'Lead deleted.' });
+    } catch (err) {
+        console.error('LEAD DELETE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to delete lead.' });
+    }
+});
+
+module.exports = router;

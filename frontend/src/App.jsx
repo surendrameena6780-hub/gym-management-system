@@ -2,9 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
 import DashboardPage from './DashboardPage';
 import MembersPage from './MembersPage';
+import LeadsPage from './LeadsPage';
 import PlansPage from './PlansPage';
 import PaymentsPage from "./PaymentsPage";
 import AttendancePage from './AttendancePage';
+import ClassesPage from './ClassesPage';
 import RfidSetupPage from './RfidSetupPage';
 import InsightsPage from './InsightsPage';
 import SettingsPage from './SettingsPage';
@@ -20,7 +22,7 @@ import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
   ClipboardCheck, BarChart3, Settings, LogOut, Dumbbell, Lock, Bell, User, LifeBuoy,
-  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal // <-- 🚨 ADDED TOUR ICONS
+  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- 🚨 ADDED TOUR ICONS
 } from 'lucide-react';
 
 // ─── Navigation Config ────────────────────────────────────────────────────────
@@ -28,9 +30,11 @@ import {
 const NAV_ITEMS = [
   { name: 'Dashboard',  icon: LayoutDashboard },
   { name: 'Members',    icon: Users           },
+  { name: 'Leads',      icon: Target          },
   { name: 'Plans',      icon: Layers          },
   { name: 'Payments',   icon: CreditCard      },
   { name: 'Attendance', icon: ClipboardCheck  },
+  { name: 'Classes',    icon: CalendarDays    },
   { name: 'Insights',   icon: BarChart3       },
   { name: 'Settings',   icon: Settings        },
 ];
@@ -40,9 +44,11 @@ const MOBILE_PRIMARY_NAV = ['Dashboard', 'Members', 'Plans', 'Payments'];
 const PAGE_PERMISSIONS = {
   Dashboard: null,
   Members: 'members:read',
+  Leads: 'members:read',
   Plans: 'plans:read',
   Payments: 'payments:read',
   Attendance: 'attendance:read',
+  Classes: 'attendance:read',
   'RFID Setup': 'owner:only',
   Insights: 'insights:read',
   Settings: 'owner:only',
@@ -320,13 +326,20 @@ function App() {
   const toastRef = useRef(toast);
   const dashboardFallbackNotifiedRef = useRef(false);
   const mainRef = useRef(null);
-  // Tracks every page ever visited so we keep its component alive in the DOM.
-  // Using a ref (not state) so it mutates without triggering re-renders.
-  const visitedPagesRef = useRef(new Set(['Dashboard']));
+  const [visitedPages, setVisitedPages] = useState(() => new Set(['Dashboard']));
 
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
+
+  useEffect(() => {
+    setVisitedPages((prev) => {
+      if (prev.has(currentPage)) return prev;
+      const next = new Set(prev);
+      next.add(currentPage);
+      return next;
+    });
+  }, [currentPage]);
 
   // Handle ?token= query param from Google / Apple OAuth redirect
   useEffect(() => {
@@ -855,9 +868,6 @@ function App() {
     return <LoginPage setToken={storeToken} onShowSignup={() => setShowSignup(true)} />;
   }
 
-  // Stamp current page into visitedPagesRef every render (ref mutation is safe during render)
-  visitedPagesRef.current.add(currentPage);
-
   return (
     <>
       {isSuspended && <SuspensionOverlay onLogout={handleLogout} onRenew={() => setIsSuspended(false)} />}
@@ -1148,7 +1158,7 @@ function App() {
 
             {/* Dashboard */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Dashboard') && (
+              {visitedPages.has('Dashboard') && (
                 currentUser?.role === 'OWNER'
                   ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} isActive={currentPage === 'Dashboard'} />
                   : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} />
@@ -1157,21 +1167,28 @@ function App() {
 
             {/* Members */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Members') && (
+              {visitedPages.has('Members') && (
                 <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} />
+              )}
+            </div>
+
+            {/* Leads */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Leads' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPages.has('Leads') && (
+                <LeadsPage token={token} toast={toast} showConfirm={showConfirm} navigateTo={navigateTo} canManage={hasPermission('members:write')} />
               )}
             </div>
 
             {/* Plans */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Plans') && (
+              {visitedPages.has('Plans') && (
                 <PlansPage token={token} toast={toast} showConfirm={showConfirm} />
               )}
             </div>
 
             {/* Payments */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Payments') && (
+              {visitedPages.has('Payments') && (
                 <PaymentsPage
                   token={token}
                   toast={toast}
@@ -1186,7 +1203,7 @@ function App() {
 
             {/* Attendance */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Attendance') && (
+              {visitedPages.has('Attendance') && (
                 <AttendancePage
                   token={token}
                   toast={toast}
@@ -1197,9 +1214,16 @@ function App() {
               )}
             </div>
 
+            {/* Classes */}
+            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Classes' ? 'gv-page-fade' : 'hidden'}`}>
+              {visitedPages.has('Classes') && (
+                <ClassesPage token={token} toast={toast} showConfirm={showConfirm} canManage={hasPermission('attendance:write')} />
+              )}
+            </div>
+
             {/* RFID Setup */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('RFID Setup') && (
+              {visitedPages.has('RFID Setup') && (
                 <RfidSetupPage
                   token={token}
                   toast={toast}
@@ -1211,21 +1235,21 @@ function App() {
 
             {/* Insights */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Insights') && (
+              {visitedPages.has('Insights') && (
                 <InsightsPage token={token} toast={toast} currentUser={currentUser} isActive={currentPage === 'Insights'} />
               )}
             </div>
 
             {/* Settings */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Settings') && (
+              {visitedPages.has('Settings') && (
                 <SettingsPage toast={toast} token={token} defaultTab={settingsTab} />
               )}
             </div>
 
             {/* Help & Support */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
-              {visitedPagesRef.current.has('Help & Support') && (
+              {visitedPages.has('Help & Support') && (
                 <HelpSupportPage token={token} toast={toast} />
               )}
             </div>

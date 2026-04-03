@@ -880,6 +880,116 @@ router.post('/renew', auth, saasMiddleware, requirePermission('payments:write'),
     }
 });
 
+router.post('/freeze', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
+    const gym_id = req.user.gym_id;
+    const memberId = Number.parseInt(req.body?.member_id, 10);
+    const freezeReason = String(req.body?.freeze_reason || '').trim();
+    const freezeEndDate = String(req.body?.freeze_end_date || '').trim();
+
+    if (!Number.isInteger(memberId)) {
+        return res.status(400).json({ error: 'member_id is required.' });
+    }
+
+    if (freezeEndDate) {
+        const parsedFreezeEnd = new Date(`${freezeEndDate}T00:00:00`);
+        if (Number.isNaN(parsedFreezeEnd.getTime())) {
+            return res.status(400).json({ error: 'freeze_end_date is invalid.' });
+        }
+    }
+
+    try {
+        const membershipRes = await pool.query(
+            `SELECT id, status
+             FROM memberships
+             WHERE gym_id = $1 AND member_id = $2 AND deleted_at IS NULL
+             ORDER BY end_date DESC, id DESC
+             LIMIT 1`,
+            [gym_id, memberId]
+        );
+
+        if (membershipRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Active membership not found.' });
+        }
+
+        const membership = membershipRes.rows[0];
+        if (membership.status === 'FROZEN') {
+            return res.status(400).json({ error: 'Membership is already frozen.' });
+        }
+        if (membership.status !== 'ACTIVE') {
+            return res.status(400).json({ error: 'Only active memberships can be frozen.' });
+        }
+
+        const result = await pool.query(
+            `UPDATE memberships
+             SET status = 'FROZEN',
+                 freeze_start_date = CURRENT_DATE,
+                 freeze_end_date = CASE WHEN $1 <> '' THEN $1::date ELSE freeze_end_date END,
+                 freeze_reason = $2,
+                 frozen_at = NOW()
+             WHERE id = $3 AND gym_id = $4
+             RETURNING *`,
+            [freezeEndDate, freezeReason, membership.id, gym_id]
+        );
+
+        return res.json({ message: 'Membership frozen successfully.', membership: result.rows[0] });
+    } catch (err) {
+        console.error('FREEZE MEMBERSHIP ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to freeze membership.' });
+    }
+});
+
+router.post('/unfreeze', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
+    const gym_id = req.user.gym_id;
+    const memberId = Number.parseInt(req.body?.member_id, 10);
+
+    if (!Number.isInteger(memberId)) {
+        return res.status(400).json({ error: 'member_id is required.' });
+    }
+
+    try {
+        const membershipRes = await pool.query(
+            `SELECT id, end_date, freeze_start_date
+             FROM memberships
+             WHERE gym_id = $1 AND member_id = $2 AND deleted_at IS NULL AND status = 'FROZEN'
+             ORDER BY end_date DESC, id DESC
+             LIMIT 1`,
+            [gym_id, memberId]
+        );
+
+        if (membershipRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Frozen membership not found.' });
+        }
+
+        const membership = membershipRes.rows[0];
+        const freezeStartDate = membership.freeze_start_date ? new Date(membership.freeze_start_date) : new Date();
+        const today = new Date();
+        const extensionDays = Math.max(
+            0,
+            Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(freezeStartDate.getFullYear(), freezeStartDate.getMonth(), freezeStartDate.getDate())) / (1000 * 60 * 60 * 24))
+        );
+
+        const result = await pool.query(
+            `UPDATE memberships
+             SET status = 'ACTIVE',
+                 end_date = end_date + ($1 || ' day')::interval,
+                 freeze_end_date = CURRENT_DATE,
+                 unfrozen_at = NOW()
+             WHERE id = $2 AND gym_id = $3
+             RETURNING *`,
+            [extensionDays, membership.id, gym_id]
+        );
+
+        return res.json({
+            message: 'Membership resumed successfully.',
+            extended_by_days: extensionDays,
+            membership: result.rows[0],
+        });
+    } catch (err) {
+        console.error('UNFREEZE MEMBERSHIP ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to resume membership.' });
+    }
+});
+
 // --- 7. QUICK EXTEND ---
 router.post('/extend', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
     const { member_id, days } = req.body;

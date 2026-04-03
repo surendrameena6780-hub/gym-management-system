@@ -1,0 +1,642 @@
+import React, { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
+import {
+  Search, Plus, X, Phone, MessageSquare, Target, Clock3, CalendarDays,
+  Pencil, Trash2, ArrowRight, CheckCircle2, Sparkles,
+} from 'lucide-react';
+import { openWhatsAppConversation } from './utils/externalNavigation';
+import PageLoader from './PageLoader';
+
+const STATUS_OPTIONS = [
+  { key: 'ALL', label: 'All', pill: 'bg-slate-900 text-white', subtle: 'bg-slate-100 text-slate-600' },
+  { key: 'NEW', label: 'New', pill: 'bg-sky-500 text-white', subtle: 'bg-sky-50 text-sky-700' },
+  { key: 'CONTACTED', label: 'Contacted', pill: 'bg-indigo-500 text-white', subtle: 'bg-indigo-50 text-indigo-700' },
+  { key: 'FOLLOW_UP', label: 'Follow Up', pill: 'bg-amber-500 text-white', subtle: 'bg-amber-50 text-amber-700' },
+  { key: 'TRIAL_BOOKED', label: 'Trial Booked', pill: 'bg-emerald-500 text-white', subtle: 'bg-emerald-50 text-emerald-700' },
+  { key: 'WON', label: 'Won', pill: 'bg-violet-500 text-white', subtle: 'bg-violet-50 text-violet-700' },
+  { key: 'LOST', label: 'Lost', pill: 'bg-rose-500 text-white', subtle: 'bg-rose-50 text-rose-700' },
+];
+
+const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH'];
+
+const STATUS_STYLES = {
+  NEW: 'bg-sky-100 text-sky-700 border border-sky-200',
+  CONTACTED: 'bg-indigo-100 text-indigo-700 border border-indigo-200',
+  FOLLOW_UP: 'bg-amber-100 text-amber-700 border border-amber-200',
+  TRIAL_BOOKED: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  WON: 'bg-violet-100 text-violet-700 border border-violet-200',
+  LOST: 'bg-rose-100 text-rose-700 border border-rose-200',
+};
+
+const PRIORITY_STYLES = {
+  LOW: 'bg-slate-100 text-slate-600 border border-slate-200',
+  MEDIUM: 'bg-amber-50 text-amber-700 border border-amber-200',
+  HIGH: 'bg-rose-50 text-rose-700 border border-rose-200',
+};
+
+const INITIAL_FORM = {
+  full_name: '',
+  phone: '',
+  email: '',
+  source: 'Walk-in',
+  status: 'NEW',
+  priority: 'MEDIUM',
+  next_follow_up_at: '',
+  trial_date: '',
+  notes: '',
+  lost_reason: '',
+  mark_contacted: false,
+};
+
+const normalizePhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+
+const toDateTimeLocal = (value) => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const hours = String(parsed.getHours()).padStart(2, '0');
+  const minutes = String(parsed.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const formatDateTimeLabel = (value) => {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const buildLeadForm = (lead = null) => ({
+  full_name: String(lead?.full_name || ''),
+  phone: normalizePhoneInput(lead?.phone || ''),
+  email: String(lead?.email || ''),
+  source: String(lead?.source || 'Walk-in'),
+  status: String(lead?.status || 'NEW').toUpperCase(),
+  priority: String(lead?.priority || 'MEDIUM').toUpperCase(),
+  next_follow_up_at: toDateTimeLocal(lead?.next_follow_up_at),
+  trial_date: toDateTimeLocal(lead?.trial_date),
+  notes: String(lead?.notes || ''),
+  lost_reason: String(lead?.lost_reason || ''),
+  mark_contacted: false,
+});
+
+const isDueLead = (lead) => {
+  if (!lead?.next_follow_up_at) return false;
+  const parsed = new Date(lead.next_follow_up_at);
+  if (Number.isNaN(parsed.getTime())) return false;
+  if (['WON', 'LOST'].includes(String(lead.status || '').toUpperCase())) return false;
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  return parsed <= endOfToday;
+};
+
+const requestDataRefresh = (source) => {
+  window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+    detail: { source, at: Date.now() },
+  }));
+};
+
+const LeadsPage = ({ token, toast, showConfirm, navigateTo, canManage = false }) => {
+  const [summary, setSummary] = useState(null);
+  const [leads, setLeads] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [showFormModal, setShowFormModal] = useState(false);
+  const [editingLead, setEditingLead] = useState(null);
+  const [formState, setFormState] = useState(INITIAL_FORM);
+  const loadCompletedRef = useRef(false);
+
+  const fetchLeadsData = async ({ soft = false } = {}) => {
+    if (!token) return;
+
+    if (soft) setRefreshing(true);
+    else setLoading(true);
+
+    try {
+      const [summaryRes, leadsRes] = await Promise.all([
+        axios.get('/api/leads/summary', { headers: { 'x-auth-token': token } }),
+        axios.get('/api/leads', {
+          headers: { 'x-auth-token': token },
+          params: {
+            search: searchTerm || undefined,
+            status: statusFilter,
+          },
+        }),
+      ]);
+
+      setSummary(summaryRes.data || {});
+      setLeads(Array.isArray(leadsRes.data) ? leadsRes.data : []);
+      loadCompletedRef.current = true;
+    } catch (_err) {
+      toast?.('Unable to load leads right now.', 'error');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token) return undefined;
+    const soft = loadCompletedRef.current;
+    const timer = window.setTimeout(() => {
+      fetchLeadsData({ soft });
+    }, soft ? 180 : 0);
+
+    return () => window.clearTimeout(timer);
+  }, [token, searchTerm, statusFilter]);
+
+  const closeFormModal = () => {
+    setShowFormModal(false);
+    setEditingLead(null);
+    setFormState(INITIAL_FORM);
+  };
+
+  const openCreateModal = () => {
+    if (!canManage) {
+      toast?.('You do not have permission to manage leads.', 'warning');
+      return;
+    }
+    setEditingLead(null);
+    setFormState(INITIAL_FORM);
+    setShowFormModal(true);
+  };
+
+  const openEditModal = (lead) => {
+    if (!canManage) {
+      toast?.('You do not have permission to manage leads.', 'warning');
+      return;
+    }
+    setEditingLead(lead);
+    setFormState(buildLeadForm(lead));
+    setShowFormModal(true);
+  };
+
+  const handleSaveLead = async (event) => {
+    event.preventDefault();
+    if (!canManage) {
+      toast?.('You do not have permission to manage leads.', 'warning');
+      return;
+    }
+
+    const normalizedPhone = normalizePhoneInput(formState.phone);
+    if (!formState.full_name.trim() || normalizedPhone.length !== 10) {
+      toast?.('Lead name and a valid 10 digit phone are required.', 'warning');
+      return;
+    }
+
+    const payload = {
+      ...formState,
+      phone: normalizedPhone,
+      full_name: formState.full_name.trim(),
+      email: formState.email.trim(),
+      source: formState.source.trim() || 'Walk-in',
+      next_follow_up_at: formState.next_follow_up_at || null,
+      trial_date: formState.trial_date || null,
+      lost_reason: formState.status === 'LOST' ? formState.lost_reason.trim() : '',
+      notes: formState.notes.trim(),
+    };
+
+    try {
+      if (editingLead?.id) {
+        await axios.put(`/api/leads/${editingLead.id}`, payload, { headers: { 'x-auth-token': token } });
+        toast?.('Lead updated successfully.', 'success');
+      } else {
+        await axios.post('/api/leads', payload, { headers: { 'x-auth-token': token } });
+        toast?.('Lead added successfully.', 'success');
+      }
+
+      closeFormModal();
+      requestDataRefresh('leads');
+      await fetchLeadsData({ soft: true });
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Unable to save lead.', 'error');
+    }
+  };
+
+  const handleDeleteLead = (lead) => {
+    if (!canManage) {
+      toast?.('You do not have permission to manage leads.', 'warning');
+      return;
+    }
+
+    showConfirm?.({
+      title: 'Delete Lead',
+      message: `Remove ${lead.full_name} from the leads pipeline?`,
+      confirmLabel: 'Delete Lead',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await axios.delete(`/api/leads/${lead.id}`, { headers: { 'x-auth-token': token } });
+          toast?.('Lead deleted.', 'success');
+          requestDataRefresh('leads');
+          await fetchLeadsData({ soft: true });
+        } catch (err) {
+          toast?.(err?.response?.data?.error || 'Unable to delete lead.', 'error');
+        }
+      },
+    });
+  };
+
+  const handleConvertLead = (lead) => {
+    if (!canManage) {
+      toast?.('You do not have permission to convert leads.', 'warning');
+      return;
+    }
+
+    showConfirm?.({
+      title: 'Convert Lead',
+      message: `Convert ${lead.full_name} into a member record now?`,
+      confirmLabel: 'Convert Now',
+      variant: 'warning',
+      onConfirm: async () => {
+        try {
+          const res = await axios.post(`/api/leads/${lead.id}/convert`, {}, { headers: { 'x-auth-token': token } });
+          const memberId = res.data?.member?.id;
+          toast?.(res.data?.created_new_member ? 'Lead converted and member created.' : 'Lead linked to an existing member.', 'success');
+          requestDataRefresh('lead-conversion');
+          await fetchLeadsData({ soft: true });
+
+          if (memberId) {
+            navigateTo?.('Members', 'All', { memberId });
+          }
+        } catch (err) {
+          toast?.(err?.response?.data?.error || 'Unable to convert lead.', 'error');
+        }
+      },
+    });
+  };
+
+  const handleCall = (phone) => {
+    if (!phone) return;
+    window.open(`tel:${phone}`, '_self');
+  };
+
+  const handleWhatsApp = (lead) => {
+    openWhatsAppConversation({
+      phone: lead.phone,
+      message: `Hi ${lead.full_name}, this is a quick follow-up from the gym. Let us know if you want to book a visit or start your membership.`,
+    });
+  };
+
+  const metrics = [
+    {
+      label: 'Open Leads',
+      value: summary?.open_leads || 0,
+      icon: Target,
+      box: 'bg-indigo-50 text-indigo-600',
+    },
+    {
+      label: 'Follow-Ups Due',
+      value: summary?.follow_ups_due || 0,
+      icon: Clock3,
+      box: 'bg-amber-50 text-amber-600',
+    },
+    {
+      label: 'Trials Today',
+      value: summary?.trials_today || 0,
+      icon: CalendarDays,
+      box: 'bg-emerald-50 text-emerald-600',
+    },
+    {
+      label: 'Converted This Month',
+      value: summary?.converted_this_month || 0,
+      icon: CheckCircle2,
+      box: 'bg-violet-50 text-violet-600',
+    },
+    {
+      label: 'Lost Leads',
+      value: summary?.lost_leads || 0,
+      icon: Sparkles,
+      box: 'bg-rose-50 text-rose-600',
+    },
+  ];
+
+  if (loading && leads.length === 0) {
+    return <PageLoader className="min-h-[56vh]" />;
+  }
+
+  return (
+    <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+        {metrics.map(({ label, value, icon: Icon, box }) => (
+          <div key={label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${box}`}>
+              <Icon size={18} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{label}</p>
+              <p className="text-2xl font-black text-slate-900 leading-none">{value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-slate-900">Leads</h1>
+              {refreshing && <span className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-500">Refreshing</span>}
+            </div>
+            <p className="text-slate-500 text-sm mt-0.5">Track enquiries, follow-ups, trials, and conversions without clutter.</p>
+          </div>
+
+          {canManage && (
+            <button onClick={openCreateModal} className="text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-95 text-sm w-full lg:w-auto" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>
+              <Plus size={16} /> Add Lead
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+          <div className="relative w-full xl:max-w-sm">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search lead, phone, email..."
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-sm font-medium transition-all"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-wrap gap-2 w-full">
+            {STATUS_OPTIONS.map((option) => {
+              const isActive = statusFilter === option.key;
+              return (
+                <button
+                  key={option.key}
+                  onClick={() => setStatusFilter(option.key)}
+                  className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wide transition-all border ${isActive ? `${option.pill} border-transparent shadow-sm` : `${option.subtle} border-transparent hover:border-slate-200`}`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {leads.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 bg-slate-50/60 rounded-[28px] border-2 border-dashed border-slate-200 text-center">
+            <div className="w-20 h-20 rounded-3xl bg-white shadow-lg text-slate-300 flex items-center justify-center mb-6">
+              <Target size={36} />
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 mb-2">Pipeline starts here</h2>
+            <p className="text-slate-500 font-bold max-w-sm mb-8">Capture walk-ins, missed calls, and trial interest here so the front desk never loses momentum.</p>
+            {canManage && (
+              <button onClick={openCreateModal} className="text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 transition-all active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 32px rgba(99,102,241,0.35)' }}>
+                <Plus size={18} /> Add First Lead
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="md:hidden space-y-3">
+              {leads.map((lead) => {
+                const due = isDueLead(lead);
+                const statusLabel = String(lead.status || 'NEW').toUpperCase();
+                const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
+                return (
+                  <div key={lead.id} className={`rounded-2xl border p-4 space-y-3 ${due ? 'border-amber-200 bg-amber-50/40' : 'border-slate-100 bg-white'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-black text-slate-900 truncate">{lead.full_name}</p>
+                        <p className="text-xs text-slate-500 truncate">{lead.phone}{lead.email ? ` • ${lead.email}` : ''}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span>
+                        <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${PRIORITY_STYLES[priorityLabel] || PRIORITY_STYLES.MEDIUM}`}>{priorityLabel}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Source</p>
+                        <p className="font-bold text-slate-700">{lead.source || 'Walk-in'}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Follow-Up</p>
+                        <p className={`font-bold ${due ? 'text-amber-700' : 'text-slate-700'}`}>{formatDateTimeLabel(lead.next_follow_up_at)}</p>
+                      </div>
+                    </div>
+
+                    {(lead.notes || lead.lost_reason || lead.trial_date) && (
+                      <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 space-y-1">
+                        {lead.trial_date && <p className="text-xs font-semibold text-slate-600"><span className="text-slate-400">Trial:</span> {formatDateTimeLabel(lead.trial_date)}</p>}
+                        {lead.notes && <p className="text-xs text-slate-600 line-clamp-2">{lead.notes}</p>}
+                        {lead.lost_reason && <p className="text-xs text-rose-600 line-clamp-2">Lost reason: {lead.lost_reason}</p>}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => handleCall(lead.phone)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                        <Phone size={12} /> Call
+                      </button>
+                      <button onClick={() => handleWhatsApp(lead)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                        <MessageSquare size={12} /> WhatsApp
+                      </button>
+                      {lead.converted_member_id ? (
+                        <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                          <ArrowRight size={12} /> Open Member
+                        </button>
+                      ) : (
+                        canManage && (
+                          <button onClick={() => handleConvertLead(lead)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-sm">
+                            <ArrowRight size={12} /> Convert
+                          </button>
+                        )
+                      )}
+                      {canManage && (
+                        <button onClick={() => openEditModal(lead)} className="w-11 h-11 rounded-xl bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center">
+                          <Pencil size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden md:block overflow-auto">
+              <table className="w-full text-left border-collapse table-fixed min-w-[1100px]">
+                <thead>
+                  <tr className="text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-100">
+                    <th className="py-4 w-[21%] pr-2">Lead</th>
+                    <th className="py-4 w-[12%] px-2">Source</th>
+                    <th className="py-4 w-[14%] px-2">Follow-Up</th>
+                    <th className="py-4 w-[14%] px-2">Trial</th>
+                    <th className="py-4 w-[12%] px-2">Priority</th>
+                    <th className="py-4 w-[11%] px-2">Status</th>
+                    <th className="py-4 w-[16%] text-right px-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {leads.map((lead) => {
+                    const due = isDueLead(lead);
+                    const statusLabel = String(lead.status || 'NEW').toUpperCase();
+                    const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
+                    return (
+                      <tr key={lead.id} className={`transition-colors ${due ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-slate-50/70'}`}>
+                        <td className="py-4 pr-2 align-top">
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-900 truncate">{lead.full_name}</span>
+                              {lead.converted_member_id && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-50 text-violet-700 border border-violet-100">Member Linked</span>}
+                              {due && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200">Due Today</span>}
+                            </div>
+                            <p className="text-xs text-slate-500 truncate">{lead.phone}{lead.email ? ` • ${lead.email}` : ''}</p>
+                            {(lead.notes || lead.lost_reason) && (
+                              <p className={`text-xs line-clamp-2 ${lead.lost_reason ? 'text-rose-500' : 'text-slate-500'}`}>
+                                {lead.lost_reason ? `Lost: ${lead.lost_reason}` : lead.notes}
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-4 px-2 text-sm font-semibold text-slate-600 align-top">{lead.source || 'Walk-in'}</td>
+                        <td className="py-4 px-2 text-sm font-semibold align-top"><span className={due ? 'text-amber-700' : 'text-slate-600'}>{formatDateTimeLabel(lead.next_follow_up_at)}</span></td>
+                        <td className="py-4 px-2 text-sm font-semibold text-slate-600 align-top">{formatDateTimeLabel(lead.trial_date)}</td>
+                        <td className="py-4 px-2 align-top"><span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${PRIORITY_STYLES[priorityLabel] || PRIORITY_STYLES.MEDIUM}`}>{priorityLabel}</span></td>
+                        <td className="py-4 px-2 align-top"><span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span></td>
+                        <td className="py-4 px-2 align-top">
+                          <div className="flex justify-end items-center gap-1.5 flex-wrap">
+                            <button onClick={() => handleCall(lead.phone)} className="p-2 text-blue-500 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-500 hover:text-white transition-all">
+                              <Phone size={13} />
+                            </button>
+                            <button onClick={() => handleWhatsApp(lead)} className="p-2 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all">
+                              <MessageSquare size={13} />
+                            </button>
+                            {lead.converted_member_id ? (
+                              <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="inline-flex items-center gap-1 bg-violet-50 text-violet-600 px-2.5 py-1.5 rounded-lg border border-violet-100 text-[10px] font-black uppercase hover:bg-violet-600 hover:text-white transition-all shadow-sm">
+                                <ArrowRight size={11} /> Open Member
+                              </button>
+                            ) : (
+                              canManage && (
+                                <button onClick={() => handleConvertLead(lead)} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1.5 rounded-lg border border-indigo-100 text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
+                                  <ArrowRight size={11} /> Convert
+                                </button>
+                              )
+                            )}
+                            {canManage && (
+                              <button onClick={() => openEditModal(lead)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all">
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                            {canManage && (
+                              <button onClick={() => handleDeleteLead(lead)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+
+      {showFormModal && (
+        <div className="app-modal-shell z-[140] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+            <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #312e81 100%)' }}>
+              <div>
+                <h2 className="text-lg font-black">{editingLead ? 'Update Lead' : 'Add Lead'}</h2>
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Capture demand without slowing down the desk</p>
+              </div>
+              <button onClick={closeFormModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleSaveLead} className="app-modal-scroll p-6 space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name *</label>
+                  <input type="text" required value={formState.full_name} onChange={(event) => setFormState((prev) => ({ ...prev, full_name: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="e.g. Rahul Sharma" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone *</label>
+                  <input type="text" required inputMode="numeric" maxLength={10} value={formState.phone} onChange={(event) => setFormState((prev) => ({ ...prev, phone: normalizePhoneInput(event.target.value) }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="9876543210" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email</label>
+                  <input type="email" value={formState.email} onChange={(event) => setFormState((prev) => ({ ...prev, email: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="optional@email.com" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Source</label>
+                  <input type="text" value={formState.source} onChange={(event) => setFormState((prev) => ({ ...prev, source: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="Walk-in, Instagram, Referral..." />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Status</label>
+                  <select value={formState.status} onChange={(event) => setFormState((prev) => ({ ...prev, status: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all">
+                    {STATUS_OPTIONS.filter((option) => option.key !== 'ALL').map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Priority</label>
+                  <select value={formState.priority} onChange={(event) => setFormState((prev) => ({ ...prev, priority: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all">
+                    {PRIORITY_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Next Follow-Up</label>
+                  <input type="datetime-local" value={formState.next_follow_up_at} onChange={(event) => setFormState((prev) => ({ ...prev, next_follow_up_at: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Trial Date</label>
+                  <input type="datetime-local" value={formState.trial_date} onChange={(event) => setFormState((prev) => ({ ...prev, trial_date: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Notes</label>
+                <textarea value={formState.notes} onChange={(event) => setFormState((prev) => ({ ...prev, notes: event.target.value }))} rows={4} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all resize-none" placeholder="Context, objections, preferences, trainer request..." />
+              </div>
+
+              {formState.status === 'LOST' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Lost Reason</label>
+                  <textarea value={formState.lost_reason} onChange={(event) => setFormState((prev) => ({ ...prev, lost_reason: event.target.value }))} rows={3} className="w-full px-4 py-3 bg-rose-50 border border-rose-100 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-400 font-semibold text-slate-900 text-sm transition-all resize-none" placeholder="Budget, timing, no response, joined elsewhere..." />
+                </div>
+              )}
+
+              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                <input type="checkbox" checked={formState.mark_contacted} onChange={(event) => setFormState((prev) => ({ ...prev, mark_contacted: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                <div>
+                  <p className="text-sm font-black text-slate-900">Mark as contacted</p>
+                  <p className="text-xs font-semibold text-slate-500">Update last contact timestamp while saving this lead.</p>
+                </div>
+              </label>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button type="submit" className="flex-1 py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>
+                  {editingLead ? 'Save Lead Changes' : 'Create Lead'}
+                </button>
+                <button type="button" onClick={closeFormModal} className="sm:w-auto py-3 px-5 rounded-xl font-black text-sm text-slate-500 border border-slate-200 hover:bg-slate-50 transition-all">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default LeadsPage;

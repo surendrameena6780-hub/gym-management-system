@@ -68,8 +68,76 @@ CREATE TABLE IF NOT EXISTS memberships (
     start_date DATE NOT NULL,
     end_date   DATE NOT NULL,
     status     VARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE, EXPIRED, FROZEN
+    freeze_start_date DATE,
+    freeze_end_date   DATE,
+    freeze_reason     TEXT DEFAULT '',
+    frozen_at         TIMESTAMPTZ,
+    unfrozen_at       TIMESTAMPTZ,
     deleted_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS leads (
+    id                  SERIAL PRIMARY KEY,
+    gym_id              INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    full_name           VARCHAR(120) NOT NULL,
+    phone               VARCHAR(20) NOT NULL,
+    email               VARCHAR(120) DEFAULT '',
+    source              VARCHAR(60) DEFAULT 'Walk-in',
+    status              VARCHAR(30) DEFAULT 'NEW',
+    priority            VARCHAR(20) DEFAULT 'MEDIUM',
+    assigned_to         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    notes               TEXT DEFAULT '',
+    last_contacted_at   TIMESTAMPTZ,
+    next_follow_up_at   TIMESTAMPTZ,
+    trial_date          TIMESTAMPTZ,
+    converted_member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    lost_reason         TEXT DEFAULT '',
+    created_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS class_types (
+    id               SERIAL PRIMARY KEY,
+    gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    title            VARCHAR(120) NOT NULL,
+    category         VARCHAR(60) DEFAULT '',
+    description      TEXT DEFAULT '',
+    trainer_name     VARCHAR(120) DEFAULT '',
+    capacity         INTEGER DEFAULT 20,
+    duration_minutes INTEGER DEFAULT 60,
+    location         VARCHAR(120) DEFAULT '',
+    color_theme      VARCHAR(30) DEFAULT 'indigo',
+    is_active        BOOLEAN DEFAULT TRUE,
+    created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS class_sessions (
+    id            SERIAL PRIMARY KEY,
+    gym_id        INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    class_type_id INTEGER REFERENCES class_types(id) ON DELETE CASCADE,
+    starts_at     TIMESTAMPTZ NOT NULL,
+    ends_at       TIMESTAMPTZ NOT NULL,
+    trainer_name  VARCHAR(120) DEFAULT '',
+    capacity      INTEGER,
+    status        VARCHAR(20) DEFAULT 'SCHEDULED',
+    notes         TEXT DEFAULT '',
+    created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS class_bookings (
+    id               SERIAL PRIMARY KEY,
+    gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    class_session_id INTEGER REFERENCES class_sessions(id) ON DELETE CASCADE,
+    member_id        INTEGER REFERENCES members(id) ON DELETE CASCADE,
+    status           VARCHAR(20) DEFAULT 'BOOKED',
+    booked_at        TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    check_in_time    TIMESTAMPTZ,
+    notes            TEXT DEFAULT '',
+    created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (class_session_id, member_id)
 );
 
 -- 6. PAYMENTS: The financial ledger — the most critical table
@@ -168,6 +236,11 @@ ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_date   TIMESTAMPTZ DEFAULT
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS deleted_at     TIMESTAMP;
 
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMP;
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS freeze_start_date DATE;
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS freeze_end_date   DATE;
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS freeze_reason     TEXT DEFAULT '';
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS frozen_at         TIMESTAMPTZ;
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS unfrozen_at       TIMESTAMPTZ;
 ALTER TABLE attendance  ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMP;
 ALTER TABLE plans       ADD COLUMN IF NOT EXISTS deleted_at  TIMESTAMP;
 ALTER TABLE members    ALTER COLUMN last_visit TYPE TIMESTAMPTZ USING last_visit AT TIME ZONE current_setting('TIMEZONE');
@@ -184,6 +257,18 @@ CREATE INDEX IF NOT EXISTS idx_memberships_status    ON memberships(status);
 CREATE INDEX IF NOT EXISTS idx_memberships_end_date  ON memberships(end_date);
 CREATE INDEX IF NOT EXISTS idx_memberships_gym_id    ON memberships(gym_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_deleted   ON memberships(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_leads_gym_id          ON leads(gym_id);
+CREATE INDEX IF NOT EXISTS idx_leads_status          ON leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_follow_up       ON leads(next_follow_up_at);
+CREATE INDEX IF NOT EXISTS idx_leads_created_at      ON leads(created_at);
+CREATE INDEX IF NOT EXISTS idx_class_types_gym_id    ON class_types(gym_id);
+CREATE INDEX IF NOT EXISTS idx_class_types_active    ON class_types(is_active);
+CREATE INDEX IF NOT EXISTS idx_class_sessions_gym_id ON class_sessions(gym_id);
+CREATE INDEX IF NOT EXISTS idx_class_sessions_status ON class_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_class_sessions_starts ON class_sessions(starts_at);
+CREATE INDEX IF NOT EXISTS idx_class_bookings_session ON class_bookings(class_session_id);
+CREATE INDEX IF NOT EXISTS idx_class_bookings_member  ON class_bookings(member_id);
+CREATE INDEX IF NOT EXISTS idx_class_bookings_status  ON class_bookings(status);
 
 -- Payments: fast lookup by member and gym
 CREATE INDEX IF NOT EXISTS idx_payments_user_id      ON payments(user_id);

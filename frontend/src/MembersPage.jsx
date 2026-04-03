@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
   Search, Edit2, Plus, X, Zap, RefreshCw, Trash2, Ban, Calendar,
   CreditCard, Clock, AlertTriangle, CheckCircle, Flame, TrendingUp,
-  MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail,
+  MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail, Snowflake,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
@@ -59,13 +59,14 @@ const SkeletonRow = () => (
 const FILTER_TABS = [
   { key: 'All', label: 'All', active: 'bg-slate-800 text-white shadow-md', inactive: 'text-slate-500 hover:bg-slate-50 hover:text-slate-700', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-slate-100 text-slate-500' },
   { key: 'Active', label: 'Active', active: 'bg-emerald-500 text-white shadow-md shadow-emerald-200', inactive: 'text-emerald-600 hover:bg-emerald-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-emerald-50 text-emerald-600' },
+  { key: 'Frozen', label: 'Frozen', active: 'bg-cyan-500 text-white shadow-md shadow-cyan-200', inactive: 'text-cyan-600 hover:bg-cyan-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-cyan-50 text-cyan-600' },
   { key: 'Unpaid', label: 'Unpaid', active: 'bg-slate-700 text-white shadow-md shadow-slate-200', inactive: 'text-slate-600 hover:bg-slate-100', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-slate-100 text-slate-600' },
   { key: 'Inactive', label: 'Inactive', active: 'bg-amber-500 text-white shadow-md shadow-amber-200', inactive: 'text-amber-600 hover:bg-amber-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-amber-50 text-amber-600' },
   { key: 'Expired', label: 'Expired', active: 'bg-rose-500 text-white shadow-md shadow-rose-200', inactive: 'text-rose-600 hover:bg-rose-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-rose-50 text-rose-600' },
   { key: 'Expiring Soon', label: 'Expiring Soon', active: 'bg-orange-500 text-white shadow-md shadow-orange-200', inactive: 'text-orange-600 hover:bg-orange-50', badgeActive: 'bg-white/20 text-white', badgeInactive: 'bg-orange-50 text-orange-600' },
 ];
 
-const STATUS_PILLS = { ACTIVE: 'bg-emerald-100 text-emerald-700', INACTIVE: 'bg-amber-100 text-amber-700', 'EXPIRING SOON': 'bg-orange-100 text-orange-700', EXPIRED: 'bg-rose-100 text-rose-700', UNPAID: 'bg-slate-100 text-slate-500' };
+const STATUS_PILLS = { ACTIVE: 'bg-emerald-100 text-emerald-700', INACTIVE: 'bg-amber-100 text-amber-700', FROZEN: 'bg-cyan-100 text-cyan-700', 'EXPIRING SOON': 'bg-orange-100 text-orange-700', EXPIRED: 'bg-rose-100 text-rose-700', UNPAID: 'bg-slate-100 text-slate-500' };
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -78,6 +79,15 @@ const extractArray = (value, keys = []) => {
 
 const normalizePhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
 const isValidPhoneInput = (value) => /^\d{10}$/.test(normalizePhoneInput(value));
+const toDateInputValue = (value) => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 const MAX_PROFILE_IMAGE_BYTES = 2 * 1024 * 1024;
 const PROFILE_IMAGE_MAX_DIMENSION = 1600;
 const allowedProfileImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/jpg', 'image/webp']);
@@ -266,12 +276,14 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [showActivateModal, setShowActivateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showFreezeModal, setShowFreezeModal] = useState(false);
 
   const [selectedMember, setSelectedMember] = useState(null);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [addSelectedPlanId, setAddSelectedPlanId] = useState('');
   const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
   const [editFormData, setEditFormData] = useState({ id: '', full_name: '', email: '', phone: '' });
+  const [freezeFormData, setFreezeFormData] = useState({ freeze_end_date: '', freeze_reason: '' });
 
   const membersListRef = useRef(null);
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
@@ -307,6 +319,26 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
     setSelectedMember(member);
     setShowActivateModal(true);
+  };
+
+  const openFreezeModalForMember = (member) => {
+    if (!canWritePayments) {
+      toast?.('You do not have permission to pause memberships.', 'warning');
+      return;
+    }
+
+    const membershipStatus = String(member?.membership_status || '').toUpperCase();
+    if (membershipStatus !== 'ACTIVE') {
+      toast?.('Only active memberships can be frozen.', 'warning');
+      return;
+    }
+
+    setSelectedMember(member);
+    setFreezeFormData({
+      freeze_end_date: toDateInputValue(member?.freeze_end_date),
+      freeze_reason: String(member?.freeze_reason || ''),
+    });
+    setShowFreezeModal(true);
   };
 
   const handleProfileImageSelect = async (file, target) => {
@@ -644,7 +676,64 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     } catch (err) { toast?.('Extension failed.', 'error'); }
   };
 
+  const handleFreezeMembership = async (event) => {
+    event.preventDefault();
+    if (!selectedMember?.id) {
+      toast?.('Select a member first.', 'warning');
+      return;
+    }
+    if (!canWritePayments) {
+      toast?.('You do not have permission to pause memberships.', 'warning');
+      return;
+    }
+
+    try {
+      await axios.post('/api/memberships/freeze', {
+        member_id: selectedMember.id,
+        freeze_end_date: freezeFormData.freeze_end_date || null,
+        freeze_reason: freezeFormData.freeze_reason.trim(),
+      }, { headers: { 'x-auth-token': token } });
+      setShowFreezeModal(false);
+      setFreezeFormData({ freeze_end_date: '', freeze_reason: '' });
+      await fetchMembers();
+      notifyDashboardDataChanged();
+      toast?.('Membership frozen successfully.', 'success');
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Unable to freeze membership.', 'error');
+    }
+  };
+
+  const handleUnfreezeMembership = (member = selectedMember) => {
+    if (!member?.id) {
+      toast?.('Select a member first.', 'warning');
+      return;
+    }
+    if (!canWritePayments) {
+      toast?.('You do not have permission to resume memberships.', 'warning');
+      return;
+    }
+
+    showConfirm?.({
+      title: 'Resume Membership',
+      message: `Resume ${member.full_name}'s membership and extend it by the frozen days?`,
+      confirmLabel: 'Resume Now',
+      variant: 'warning',
+      onConfirm: async () => {
+        try {
+          const res = await axios.post('/api/memberships/unfreeze', { member_id: member.id }, { headers: { 'x-auth-token': token } });
+          await fetchMembers();
+          notifyDashboardDataChanged();
+          const extension = Number(res?.data?.extended_by_days || 0);
+          toast?.(extension > 0 ? `Membership resumed and extended by ${extension} days.` : 'Membership resumed successfully.', 'success');
+        } catch (err) {
+          toast?.(err?.response?.data?.error || 'Unable to resume membership.', 'error');
+        }
+      },
+    });
+  };
+
   const getStatusInfo = (member) => {
+    if (String(member?.membership_status || '').toUpperCase() === 'FROZEN') return { label: 'FROZEN', color: 'bg-cyan-400', text: 'text-cyan-500' };
     if (member.membership_status === 'UNPAID' || !member.plan_name) return { label: 'UNPAID', color: 'bg-slate-300', text: 'text-slate-400' };
     if (member.days_left <= 0) return { label: 'EXPIRED', color: 'bg-rose-500', text: 'text-rose-500' };
     // Expiring soon: 7-day window — highest priority, checked before inactivity
@@ -665,6 +754,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     if (activationAgeDays <= 14) return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
     if (diffDays > 14) return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
     return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
+  };
+
+  const canCheckMemberIn = (member) => {
+    const label = getStatusInfo(member).label;
+    return ['ACTIVE', 'INACTIVE', 'EXPIRING SOON'].includes(label);
   };
 
   const handleManualCheckIn = async (e, memberId) => {
@@ -809,12 +903,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     const effectiveVisitSource = m.last_visit || latestPayment?.payment_date || null;
     const lastVisitDate = effectiveVisitSource ? new Date(effectiveVisitSource) : null;
     const diffDays = lastVisitDate ? Math.ceil((new Date() - lastVisitDate) / (1000 * 60 * 60 * 24)) : 999;
-    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
+    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Frozen' && statusInfo.label === 'FROZEN') || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
     const searchLower = searchTerm.toLowerCase();
     return matchesFilter && (m.full_name?.toLowerCase().includes(searchLower) || m.email?.toLowerCase().includes(searchLower) || m.phone?.includes(searchTerm));
   });
 
-  const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
+  const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Frozen: members.filter((m) => getStatusInfo(m).label === 'FROZEN').length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
 
   if (loading && members.length === 0) return <PageLoader className="min-h-[56vh]" />;
 
@@ -993,7 +1087,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                             {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm"><Zap size={10} fill="currentColor" /> Initiate</button>}
                             {canWritePayments && statusInfo.label === 'EXPIRED' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm"><RefreshCw size={10} /> Renew</button>}
                             {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => sendWhatsApp(member, statusInfo.label === 'INACTIVE' ? 'followup' : 'reminder')} className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm"><MessageSquare size={10} fill="currentColor" /> Remind</button>}
-                            {canWriteAttendance && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
+                            {canWriteAttendance && canCheckMemberIn(member) && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
                             {canWriteMembers && <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
                           </div>
                         </td>
@@ -1113,6 +1207,41 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <div className="flex items-center gap-1.5 text-slate-400 mb-1"><TrendingUp size={11} /><span className="text-[9px] font-bold uppercase tracking-tight">Last Check-In</span></div>
                 <p className="font-bold text-sm text-slate-700">{selectedMember.last_visit || selectedMember.payment_history?.[0]?.payment_date ? new Date(selectedMember.last_visit || selectedMember.payment_history?.[0]?.payment_date).toLocaleDateString('en-GB') : 'Never'}</p>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border p-3 ${String(selectedMember.membership_status || '').toUpperCase() === 'FROZEN' ? 'bg-cyan-50 border-cyan-100' : 'bg-slate-50 border-slate-100'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-slate-400 mb-1"><Snowflake size={11} /><span className="text-[9px] font-bold uppercase tracking-tight">Membership Hold</span></div>
+                  {String(selectedMember.membership_status || '').toUpperCase() === 'FROZEN' ? (
+                    <>
+                      <p className="font-black text-sm text-cyan-700">Frozen from {selectedMember.freeze_start_date ? new Date(selectedMember.freeze_start_date).toLocaleDateString('en-GB') : 'today'}</p>
+                      <p className="text-xs font-semibold text-cyan-700/80 mt-1">{selectedMember.freeze_end_date ? `Planned resume: ${new Date(selectedMember.freeze_end_date).toLocaleDateString('en-GB')}` : 'No planned resume date yet'}</p>
+                      {selectedMember.freeze_reason && <p className="text-xs font-semibold text-cyan-800 mt-2 line-clamp-2">Reason: {selectedMember.freeze_reason}</p>}
+                    </>
+                  ) : String(selectedMember.membership_status || '').toUpperCase() === 'ACTIVE' ? (
+                    <>
+                      <p className="font-black text-sm text-slate-800">Pause this membership without removing the plan.</p>
+                      <p className="text-xs font-semibold text-slate-500 mt-1">Useful for travel, injury, or temporary breaks while preserving paid days.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-black text-sm text-slate-800">Hold controls unlock on active memberships.</p>
+                      <p className="text-xs font-semibold text-slate-500 mt-1">Unpaid or expired members should be reactivated instead of paused.</p>
+                    </>
+                  )}
+                </div>
+                {canWritePayments && String(selectedMember.membership_status || '').toUpperCase() === 'FROZEN' && (
+                  <button onClick={() => handleUnfreezeMembership(selectedMember)} className="px-3 py-2 rounded-xl bg-cyan-600 text-white text-[11px] font-black uppercase tracking-wide hover:bg-cyan-700 transition-all shrink-0">
+                    Resume
+                  </button>
+                )}
+                {canWritePayments && String(selectedMember.membership_status || '').toUpperCase() === 'ACTIVE' && (
+                  <button onClick={() => openFreezeModalForMember(selectedMember)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[11px] font-black uppercase tracking-wide hover:bg-slate-800 transition-all shrink-0">
+                    Freeze
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1237,6 +1366,47 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
               <button onClick={() => setShowActivateModal(false)} className="w-full text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors pt-1">Cancel Transaction</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showFreezeModal && (
+        <div className="app-modal-shell z-[120] bg-slate-900/70 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+            <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #155e75 100%)' }}>
+              <div>
+                <h2 className="text-lg font-black">Freeze Membership</h2>
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Pause access without cancelling the plan</p>
+              </div>
+              <button onClick={() => setShowFreezeModal(false)} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleFreezeMembership} className="app-modal-scroll p-6 space-y-5">
+              <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-600 mb-1">Member</p>
+                <p className="text-base font-black text-slate-900">{selectedMember?.full_name}</p>
+                <p className="text-xs font-semibold text-slate-500 mt-1">The plan stays attached and days resume when you unfreeze.</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Planned Resume Date</label>
+                <input type="date" value={freezeFormData.freeze_end_date} onChange={(event) => setFreezeFormData((prev) => ({ ...prev, freeze_end_date: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-cyan-300 focus:border-cyan-400 font-semibold text-slate-900 text-sm transition-all" />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Reason</label>
+                <textarea value={freezeFormData.freeze_reason} onChange={(event) => setFreezeFormData((prev) => ({ ...prev, freeze_reason: event.target.value }))} rows={4} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-cyan-300 focus:border-cyan-400 font-semibold text-slate-900 text-sm transition-all resize-none" placeholder="Travel, injury, medical break, family emergency..." />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button type="submit" className="flex-1 py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #0891b2, #155e75)', boxShadow: '0 4px 16px rgba(8,145,178,0.3)' }}>
+                  Freeze Membership
+                </button>
+                <button type="button" onClick={() => setShowFreezeModal(false)} className="sm:w-auto py-3 px-5 rounded-xl font-black text-sm text-slate-500 border border-slate-200 hover:bg-slate-50 transition-all">
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
