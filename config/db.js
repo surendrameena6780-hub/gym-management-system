@@ -37,6 +37,51 @@ const connectDB = async () => {
                 created_at  TIMESTAMP DEFAULT NOW()
             )
         `);
+        await pool.query(`
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS rfid_tag_id VARCHAR(120);
+
+            CREATE TABLE IF NOT EXISTS rfid_devices (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                reader_name     VARCHAR(120) NOT NULL,
+                reader_serial   VARCHAR(120) NOT NULL UNIQUE,
+                reader_location VARCHAR(200) DEFAULT '',
+                shared_secret   TEXT NOT NULL,
+                status          VARCHAR(20) DEFAULT 'ACTIVE',
+                last_heartbeat  TIMESTAMPTZ,
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS rfid_events (
+                id                   SERIAL PRIMARY KEY,
+                gym_id               INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                reader_id            INTEGER REFERENCES rfid_devices(id) ON DELETE SET NULL,
+                member_id            INTEGER REFERENCES members(id) ON DELETE SET NULL,
+                tag_id               VARCHAR(120) NOT NULL,
+                event_timestamp      TIMESTAMPTZ DEFAULT NOW(),
+                processed            BOOLEAN DEFAULT FALSE,
+                event_status         VARCHAR(30) DEFAULT 'RECEIVED',
+                response_message     TEXT DEFAULT '',
+                payload              JSONB DEFAULT '{}'::jsonb,
+                attendance_record_id INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
+                created_at           TIMESTAMPTZ DEFAULT NOW()
+            );
+        `);
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_members_rfid_tag_unique
+            ON members(gym_id, rfid_tag_id)
+            WHERE rfid_tag_id IS NOT NULL;
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_rfid_devices_gym_id ON rfid_devices(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_rfid_devices_status ON rfid_devices(status);
+            CREATE INDEX IF NOT EXISTS idx_rfid_events_gym_id ON rfid_events(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_rfid_events_reader_id ON rfid_events(reader_id);
+            CREATE INDEX IF NOT EXISTS idx_rfid_events_member_id ON rfid_events(member_id);
+            CREATE INDEX IF NOT EXISTS idx_rfid_events_tag_id ON rfid_events(tag_id);
+            CREATE INDEX IF NOT EXISTS idx_rfid_events_created_at ON rfid_events(created_at);
+        `);
         // Fix gyms that got saas_status='ACTIVE' from the old DB default but have never paid
         // (saas_valid_until is within 14 days of creation = still in trial window, no razorpay customer)
         await pool.query(`

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PageLoader from './PageLoader';
+import { QRCodeCanvas } from 'qrcode.react';
 
 function useCountUp(target, duration = 800) {
   const [display, setDisplay] = useState(0);
@@ -28,13 +29,17 @@ import {
   Activity,
   AlertTriangle,
   CalendarDays,
+  Copy,
   Fingerprint,
   QrCode,
+  RefreshCw,
+  ScanLine,
   Search,
   Shield,
   Smartphone,
   Users,
   MessageSquare,
+  X,
 } from 'lucide-react';
 import { BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -119,6 +124,8 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
+  const qrScannerRef = useRef(null);
+  const qrScannerBusyRef = useRef(false);
 
   const [overview, setOverview] = useState({
     today_checkins: 0,
@@ -162,10 +169,153 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
   const [leaderboard, setLeaderboard] = useState([]);
 
   const [warningState, setWarningState] = useState(null);
+  const [qrModalState, setQrModalState] = useState(null);
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [qrScannerBooting, setQrScannerBooting] = useState(false);
+  const [busyQrAction, setBusyQrAction] = useState(false);
 
   const peakHourLabel = overview.peak_hour_today === null
     ? '—'
     : `${String(overview.peak_hour_today).padStart(2, '0')}:00`;
+
+  const refreshAttendanceViews = () => Promise.all([
+    loadOverviewBundle(),
+    loadPeakHours(peakHoursDays),
+    loadRecords(),
+    loadInactive(),
+    loadLeaderboard(),
+  ]);
+
+  const handleCheckinSuccess = (payload, fallbackMember = null, fallbackMethod = null) => {
+    const body = asObject(payload, {});
+    const detail = asObject(body.details, {});
+    const member = asObject(body.member, fallbackMember || {});
+    const methodUsed = detail.checkin_method || fallbackMethod || checkinMethod;
+
+    if (body.warning) {
+      toast?.(body.warning, 'warning');
+    } else {
+      toast?.(body.message || 'Check-in successful!', 'success');
+    }
+
+    setWarningState(null);
+    setCheckinNote('');
+
+    if (member?.id) {
+      setSelectedMember(member);
+      setSearchText(member.full_name || '');
+      setSearchResults([]);
+    }
+
+    if (member?.full_name) {
+      setFeed((prev) => [{
+        id: detail.id || `opt-${Date.now()}`,
+        full_name: member.full_name,
+        check_in_time: detail.check_in_time || new Date().toISOString(),
+        checkin_method: methodUsed,
+        staff_name: detail.staff_name || currentUser?.full_name || currentUser?.name || null,
+        was_override: Boolean(detail.was_override),
+      }, ...prev].slice(0, 25));
+    }
+
+    setOverview((prev) => ({
+      ...prev,
+      today_checkins: (Number(prev.today_checkins) || 0) + 1,
+      active_members_today: (Number(prev.active_members_today) || 0) + 1,
+    }));
+
+    refreshAttendanceViews().catch(() => {});
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'attendance' } }));
+  };
+
+  const copyQrToken = async () => {
+    if (!qrModalState?.token) return;
+    try {
+      await navigator.clipboard.writeText(qrModalState.token);
+      toast?.('QR token copied.', 'success');
+    } catch (_err) {
+      toast?.('Could not copy QR token.', 'warning');
+    }
+  };
+
+  const openMemberQr = async () => {
+    if (!selectedMember?.id) {
+      toast?.('Select a member first.', 'warning');
+      return;
+    }
+
+    setBusyQrAction(true);
+    setCheckinMethod('QR');
+    try {
+      const res = await axios.get(`/api/attendance/qr/member/${selectedMember.id}`, headers);
+      const payload = asObject(unwrapApiData(res.data), {});
+      setQrModalState({
+        type: 'member',
+        title: 'Member QR Pass',
+        subtitle: 'Show this at reception so staff can scan and verify your membership instantly.',
+        token: payload.token || '',
+        expiresAt: payload.expires_at,
+        accent: 'emerald',
+        meta: payload.member || selectedMember,
+      });
+    } catch (_err) {
+      toast?.('Failed to generate member QR.', 'error');
+    } finally {
+      setBusyQrAction(false);
+    }
+  };
+
+  const openGymQr = async () => {
+    setBusyQrAction(true);
+    setCheckinMethod('QR');
+    try {
+      const res = await axios.get('/api/attendance/qr/gym', headers);
+      const payload = asObject(unwrapApiData(res.data), {});
+      setQrModalState({
+        type: 'gym',
+        title: 'Gym Self Check-In QR',
+        subtitle: 'Members can scan this from the member portal to check in without reception help.',
+        token: payload.token || '',
+        expiresAt: payload.expires_at,
+        accent: 'indigo',
+        meta: payload.gym || {},
+      });
+    } catch (_err) {
+      toast?.('Failed to generate gym QR.', 'error');
+    } finally {
+      setBusyQrAction(false);
+    }
+  };
+
+  const submitScannedQr = async (decodedText) => {
+    setBusyQrAction(true);
+    setCheckinMethod('QR');
+    try {
+      const res = await axios.post('/api/attendance/checkin/qr', {
+        token: decodedText,
+        notes: checkinNote,
+      }, headers);
+      handleCheckinSuccess(unwrapApiData(res.data), null, 'QR');
+    } catch (err) {
+      const errorBody = asObject(err?.response?.data, {});
+      if (errorBody.code === 'ATTENDANCE_BLOCKED') {
+        if (errorBody.member?.id) {
+          setSelectedMember(errorBody.member);
+          setSearchText(errorBody.member.full_name || '');
+          setSearchResults([]);
+        }
+        setWarningState({
+          message: errorBody.message || errorBody.error || 'Membership is not active.',
+          warning: errorBody.warning || '',
+          member: errorBody.member || selectedMember,
+        });
+      } else {
+        toast?.(errorBody.message || errorBody.error || 'QR check-in failed.', 'error');
+      }
+    } finally {
+      setBusyQrAction(false);
+    }
+  };
 
   const loadOverviewBundle = async () => {
     const [overviewRes, feedRes, heatmapRes, modeRes] = await Promise.all([
@@ -257,6 +407,77 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
   }, [inactiveDays]);
 
   useEffect(() => {
+    if (!qrScannerOpen) return undefined;
+
+    let cancelled = false;
+    let scanner = null;
+
+    const stopScanner = async () => {
+      const activeScanner = scanner || qrScannerRef.current;
+      qrScannerRef.current = null;
+      if (!activeScanner) return;
+      try {
+        await activeScanner.stop();
+      } catch (_err) {
+        // ignore stop errors during teardown
+      }
+      try {
+        await activeScanner.clear();
+      } catch (_err) {
+        // ignore clear errors during teardown
+      }
+    };
+
+    const bootScanner = async () => {
+      setQrScannerBooting(true);
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        if (cancelled) return;
+
+        scanner = new Html5Qrcode('attendance-staff-qr-reader');
+        qrScannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1 },
+          async (decodedText) => {
+            if (qrScannerBusyRef.current) return;
+            qrScannerBusyRef.current = true;
+            await stopScanner();
+            if (!cancelled) {
+              setQrScannerBooting(false);
+              setQrScannerOpen(false);
+            }
+            await submitScannedQr(decodedText);
+            qrScannerBusyRef.current = false;
+          },
+          () => {}
+        );
+
+        if (!cancelled) {
+          setQrScannerBooting(false);
+        }
+      } catch (_err) {
+        await stopScanner();
+        if (!cancelled) {
+          setQrScannerBooting(false);
+          setQrScannerOpen(false);
+          toast?.('Unable to start QR scanner. Check camera permission and try again.', 'error');
+        }
+      }
+    };
+
+    bootScanner();
+
+    return () => {
+      cancelled = true;
+      qrScannerBusyRef.current = false;
+      setQrScannerBooting(false);
+      stopScanner();
+    };
+  }, [qrScannerOpen, token]);
+
+  useEffect(() => {
     if (!token) return;
     const q = searchText.trim();
     if (q.length < 2) {
@@ -274,7 +495,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
     }, 220);
 
     return () => clearTimeout(timer);
-  }, [searchText, token]);
+  }, [searchText, headers]);
 
   const saveModeSettings = async () => {
     if (!isOwner) {
@@ -327,30 +548,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
       }
 
       const res = await axios.post('/api/attendance/checkin', checkinPayload, headers);
-      const payload = asObject(unwrapApiData(res.data), {});
-      if (payload.warning) {
-        toast?.(payload.warning, 'warning');
-      } else {
-        toast?.(payload.message || 'Check-in successful!', 'success');
-      }
-
-      setWarningState(null);
-      setCheckinNote('');
-
-      // Optimistic instant UI update
-      setOverview((prev) => ({ ...prev, today_checkins: (Number(prev.today_checkins) || 0) + 1 }));
-      setFeed((prev) => [{
-        id: `opt-${Date.now()}`,
-        full_name: selectedMember.full_name,
-        check_in_time: new Date().toISOString(),
-        checkin_method: checkinMethod,
-        staff_name: null,
-        was_override: false,
-      }, ...prev]);
-
-      // Fire full refresh in background (non-blocking so UI already feels snappy)
-      Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDays), loadRecords(), loadInactive(), loadLeaderboard()]);
-      window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'attendance' } }));
+      handleCheckinSuccess(unwrapApiData(res.data), selectedMember, checkinMethod);
     } catch (err) {
       const errorBody = asObject(err?.response?.data, {});
       const code = errorBody.code;
@@ -587,10 +785,41 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
             className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold resize-none"
           />
 
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button
+              onClick={openMemberQr}
+              disabled={!selectedMember || busyQrAction}
+              className="px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-black hover:bg-emerald-100 disabled:opacity-60"
+            >
+              {busyQrAction && qrModalState?.type !== 'gym' ? 'Loading...' : 'Show Member QR'}
+            </button>
+            <button
+              onClick={openGymQr}
+              disabled={busyQrAction}
+              className="px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-black hover:bg-indigo-100 disabled:opacity-60"
+            >
+              {busyQrAction && qrModalState?.type === 'gym' ? 'Loading...' : 'Show Gym QR'}
+            </button>
+            <button
+              onClick={() => {
+                setCheckinMethod('QR');
+                setQrScannerOpen(true);
+              }}
+              disabled={busyQrAction || !canWriteAttendance}
+              className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black hover:bg-slate-50 disabled:opacity-60"
+            >
+              Scan Member QR
+            </button>
+          </div>
+
+          <p className="mt-2 text-[11px] font-semibold text-slate-500">
+            Staff can scan a member QR here. Members can also self check-in by scanning the gym QR from the member portal.
+          </p>
+
           <div className="mt-4">
             <button
               onClick={() => submitCheckin(false)}
-              disabled={!selectedMember || busyCheckin || !canWriteAttendance}
+              disabled={!selectedMember || busyCheckin || busyQrAction || !canWriteAttendance}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-sm font-black disabled:opacity-60"
             >
               {busyCheckin ? 'Checking in...' : 'Check In Member'}
@@ -912,6 +1141,108 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null }) {
                 Override Check-In
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {qrModalState && (
+        <div className="app-modal-shell z-[220] bg-slate-900/70 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] max-w-md w-full p-6 border border-slate-200 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Attendance QR</p>
+                <h3 className="text-xl font-black text-slate-900 mt-1">{qrModalState.title}</h3>
+                <p className="text-sm font-semibold text-slate-500 mt-1">{qrModalState.subtitle}</p>
+              </div>
+              <button
+                onClick={() => setQrModalState(null)}
+                className="w-9 h-9 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className={`mt-5 rounded-[24px] border p-4 ${qrModalState.accent === 'emerald' ? 'border-emerald-200 bg-emerald-50/80' : 'border-indigo-200 bg-indigo-50/80'}`}>
+              <div className="rounded-[20px] bg-white p-4 border border-white/80 flex items-center justify-center">
+                <QRCodeCanvas value={qrModalState.token || 'gymvault'} size={220} includeMargin level="H" />
+              </div>
+              <div className="mt-4 space-y-1.5 text-xs font-semibold text-slate-600">
+                {qrModalState.type === 'member' ? (
+                  <>
+                    <p><span className="text-slate-400">Member:</span> {qrModalState.meta?.full_name || 'Member'}</p>
+                    <p><span className="text-slate-400">Plan:</span> {qrModalState.meta?.plan_name || 'No active plan'}</p>
+                    <p><span className="text-slate-400">Membership:</span> {qrModalState.meta?.membership_status || 'UNPAID'}</p>
+                  </>
+                ) : (
+                  <>
+                    <p><span className="text-slate-400">Gym:</span> {qrModalState.meta?.name || 'Your gym'}</p>
+                    <p><span className="text-slate-400">Use:</span> Member app self check-in</p>
+                    <p><span className="text-slate-400">Gate rule:</span> Expired or unpaid members are still blocked by backend validation.</p>
+                  </>
+                )}
+                <p><span className="text-slate-400">Expires:</span> {formatDateTime(qrModalState.expiresAt)}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <button
+                onClick={() => {
+                  if (qrModalState.type === 'member') {
+                    openMemberQr();
+                  } else {
+                    openGymQr();
+                  }
+                }}
+                disabled={busyQrAction}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-black hover:bg-slate-50 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                <RefreshCw size={14} /> Refresh
+              </button>
+              <button
+                onClick={copyQrToken}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 flex items-center justify-center gap-2"
+              >
+                <Copy size={14} /> Copy Token
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {qrScannerOpen && (
+        <div className="app-modal-shell z-[220] bg-slate-900/70 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] max-w-lg w-full p-6 border border-slate-200 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Reception Scan</p>
+                <h3 className="text-xl font-black text-slate-900 mt-1">Scan Member QR</h3>
+                <p className="text-sm font-semibold text-slate-500 mt-1">Open the member portal QR on the customer phone and point the camera here.</p>
+              </div>
+              <button
+                onClick={() => setQrScannerOpen(false)}
+                className="w-9 h-9 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div id="attendance-staff-qr-reader" className="overflow-hidden rounded-[18px] bg-black min-h-[320px]" />
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3 flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                <ScanLine size={18} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-black text-slate-900">What happens after scan?</p>
+                <p className="text-xs font-semibold text-slate-600 mt-1">The backend validates membership, duplicate timing, and override rules before recording attendance. Expired and unpaid members are still blocked unless override is explicitly allowed.</p>
+              </div>
+            </div>
+
+            {qrScannerBooting ? (
+              <p className="mt-3 text-xs font-bold text-slate-500">Starting camera...</p>
+            ) : null}
           </div>
         </div>
       )}
