@@ -1444,7 +1444,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     return {
       active: active.length, unpaid: unpaid.length, expired: expired.length,
       expiring7: expiringIn7Days.length, expiring3: expiringIn3Days.length, ghosts: ghosts.length,
-      escalated: escalatedLeads,
+      ghostMembers: ghosts,
+      escalated: escalatedLeads, escalatedLeads,
+      pendingDuePayments,
       monthlyRevenue, revenueAtRisk, healthScore,
       pendingDueAction: pendingDuePayments.length > 0 ? pendingDueCta.action : () => navigateTo('Payments'),
       topPlan: topPlanEntry ? { name: topPlanEntry[0], count: topPlanEntry[1], pct: topPlanPct } : null,
@@ -1666,6 +1668,32 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             tag={dashboardData.expiring7 > 0 ? 'Action needed' : undefined}
           />
         </div>
+
+        {/* Ops Strip */}
+        {(() => {
+          const opsItems = [
+            dashboardData.expiring7 > 0 && { label: 'Renewals Due', value: dashboardData.expiring7, color: 'text-amber-600 bg-amber-50', icon: Clock, onClick: () => navigateTo('Members', 'Expiring Soon') },
+            (dashboardData.pendingDuePayments?.length || 0) > 0 && { label: 'Pending Dues', value: dashboardData.pendingDuePayments.length, color: 'text-red-600 bg-red-50', icon: DollarSign, onClick: () => navigateTo('Payments') },
+            dashboardData.ghosts > 0 && { label: 'Ghost Members', value: dashboardData.ghosts, color: 'text-slate-600 bg-slate-100', icon: UserMinus, onClick: () => navigateTo('Members', 'Inactive') },
+            todayCheckins > 0 && { label: 'Today Check-ins', value: todayCheckins, color: 'text-sky-600 bg-sky-50', icon: Activity },
+            (dashboardData.escalatedLeads?.length || 0) > 0 && { label: 'Escalated', value: dashboardData.escalatedLeads.length, color: 'text-orange-600 bg-orange-50', icon: ShieldAlert, onClick: () => navigateTo('Members', 'All') },
+          ].filter(Boolean);
+          return opsItems.length > 0 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin" style={{ opacity: 0, animation: 'cardCascade 0.5s ease-out 280ms forwards' }}>
+              {opsItems.map((item, i) => (
+                <button key={i} onClick={item.onClick} className={`flex items-center gap-2 px-3 py-2 rounded-xl border border-white/70 bg-white/80 backdrop-blur-sm hover:shadow-sm transition-all shrink-0 ${item.onClick ? 'cursor-pointer' : 'cursor-default'}`}>
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${item.color}`}>
+                    <item.icon size={14} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-black text-slate-900 leading-none">{item.value}</p>
+                    <p className="text-[10px] font-semibold text-slate-400 leading-tight">{item.label}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : null;
+        })()}
 
         <div className="grid grid-cols-12 gap-5">
           <Card

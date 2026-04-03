@@ -1013,4 +1013,45 @@ router.post('/extend', auth, saasMiddleware, requirePermission('payments:write')
     }
 });
 
+// --- 8. ACTIVATE GRACE PERIOD ---
+router.post('/:id/grace', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const msId = req.params.id;
+        const { grace_days } = req.body || {};
+        const days = Number.parseInt(grace_days, 10) || 7;
+        const result = await pool.query(
+            `UPDATE memberships SET status='GRACE', grace_end_date = end_date + ($3 || ' day')::interval
+             WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL AND status IN ('ACTIVE','EXPIRED')
+             RETURNING *`,
+            [msId, gym_id, days]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Membership not found' });
+        res.json({ message: 'Grace period activated', membership: result.rows[0] });
+    } catch (err) {
+        console.error('GRACE ERROR:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 9. CANCEL MEMBERSHIP ---
+router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const msId = req.params.id;
+        const { cancellation_reason } = req.body || {};
+        const result = await pool.query(
+            `UPDATE memberships SET status='CANCELLED', cancellation_reason=$3, cancelled_at=NOW()
+             WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL AND status IN ('ACTIVE','FROZEN','GRACE')
+             RETURNING *`,
+            [msId, gym_id, String(cancellation_reason || '').trim() || null]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Membership not found or already cancelled' });
+        res.json({ message: 'Membership cancelled', membership: result.rows[0] });
+    } catch (err) {
+        console.error('CANCEL MS ERROR:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

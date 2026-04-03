@@ -453,12 +453,22 @@ function App() {
   }, [hasPermission]);
 
   const availableNavItems = NAV_ITEMS.filter((item) => canAccessPage(item.name));
-  const mobilePrimaryNavItems = availableNavItems.filter((item) => MOBILE_PRIMARY_NAV.includes(item.name));
+
+  // Role-aware mobile primary nav — staff sees their most relevant 4 pages
+  const staffRole = String(currentUser?.staff_role || '').toUpperCase();
+  const isOwner = currentUser?.role === 'OWNER';
+  const mobilePrimary = isOwner ? MOBILE_PRIMARY_NAV : (() => {
+    if (['RECEPTION', 'MANAGER'].includes(staffRole)) return ['Dashboard', 'Members', 'Leads', 'Payments'];
+    if (staffRole === 'TRAINER') return ['Dashboard', 'Attendance', 'Classes', 'Members'];
+    if (staffRole === 'ACCOUNTANT') return ['Dashboard', 'Payments', 'Members', 'Plans'];
+    return MOBILE_PRIMARY_NAV;
+  })();
+  const mobilePrimaryNavItems = availableNavItems.filter((item) => mobilePrimary.includes(item.name));
   const mobileMoreNavItems = [
-    ...availableNavItems.filter((item) => !MOBILE_PRIMARY_NAV.includes(item.name)),
+    ...availableNavItems.filter((item) => !mobilePrimary.includes(item.name)),
     ...(canAccessPage('Help & Support') ? [{ name: 'Help & Support', icon: LifeBuoy }] : []),
   ].filter((item, index, list) => list.findIndex((candidate) => candidate.name === item.name) === index);
-  const isMoreActive = !MOBILE_PRIMARY_NAV.includes(currentPage);
+  const isMoreActive = !mobilePrimary.includes(currentPage);
 
   useEffect(() => {
     if (isHQ) return;
@@ -965,7 +975,7 @@ function App() {
             <div>
               <div className="text-[15px] font-extrabold tracking-tight leading-none text-white">GymVault</div>
               <div className="text-[9px] font-bold tracking-[0.18em] uppercase mt-0.5" style={{ color: 'rgba(148,163,184,0.6)' }}>
-                Pro Dashboard
+                {currentUser?.role === 'OWNER' ? 'Pro Dashboard' : (currentUser?.staff_role || currentUser?.role || 'Staff').replace(/(^\w|\s\w)/g, m => m.toUpperCase()) + ' View'}
               </div>
             </div>
           </div>
@@ -1161,7 +1171,7 @@ function App() {
               {visitedPages.has('Dashboard') && (
                 currentUser?.role === 'OWNER'
                   ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} isActive={currentPage === 'Dashboard'} />
-                  : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} />
+                  : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} />
               )}
             </div>
 

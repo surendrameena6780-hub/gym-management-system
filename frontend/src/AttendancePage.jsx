@@ -173,6 +173,24 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
   const [qrScannerBooting, setQrScannerBooting] = useState(false);
   const [busyQrAction, setBusyQrAction] = useState(false);
 
+  // ── Attendance Hub Tabs ──
+  const [attendanceTab, setAttendanceTab] = useState('checkin');
+  const [accessPolicies, setAccessPolicies] = useState([]);
+  const [policiesLoading, setPoliciesLoading] = useState(false);
+
+  const fetchAccessPolicies = async () => {
+    try {
+      setPoliciesLoading(true);
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/finance/access-policies`, { headers: { Authorization: `Bearer ${token}`, 'x-auth-token': token } });
+      const data = await res.json();
+      setAccessPolicies(Array.isArray(data) ? data : []);
+    } catch { setAccessPolicies([]); } finally { setPoliciesLoading(false); }
+  };
+
+  useEffect(() => {
+    if (attendanceTab === 'policies' && isOwner) fetchAccessPolicies();
+  }, [attendanceTab]);
+
   const peakHourLabel = overview.peak_hour_today === null
     ? '—'
     : `${String(overview.peak_hour_today).padStart(2, '0')}:00`;
@@ -645,6 +663,16 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
           <p className="text-xs font-bold text-slate-400 mt-1">{animatedPeakHourCount} check-ins</p>
         </div>
       </div>
+
+      {/* ── Attendance Hub Tab Bar ── */}
+      <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5 w-fit">
+        <button onClick={() => setAttendanceTab('checkin')} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${attendanceTab === 'checkin' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Check-in Ops</button>
+        {isOwner && <button onClick={() => setAttendanceTab('policies')} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${attendanceTab === 'policies' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Access Policies</button>}
+        {isOwner && <button onClick={() => setAttendanceTab('health')} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${attendanceTab === 'health' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Reader Health</button>}
+      </div>
+
+      {/* ═══════ CHECK-IN OPS TAB ═══════ */}
+      {attendanceTab === 'checkin' && (<>
 
       <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
         <div className="flex items-center gap-2 mb-4">
@@ -1135,6 +1163,79 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
           </div>
         )}
       </div>
+
+      </>)}
+
+      {/* ═══════ ACCESS POLICIES TAB ═══════ */}
+      {attendanceTab === 'policies' && isOwner && (
+        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Access Policies</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Define plan-based access windows and rules</p>
+            </div>
+          </div>
+          {policiesLoading ? (
+            <div className="text-center py-8 text-slate-400">Loading...</div>
+          ) : accessPolicies.length === 0 ? (
+            <div className="text-center py-12 text-slate-400">
+              <p className="text-lg font-bold">No access policies configured</p>
+              <p className="text-sm mt-1">Create policies from the API to define when members can check in based on their plan.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {accessPolicies.map(p => (
+                <div key={p.id} className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-800">{p.policy_name}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{p.time_window_start || '00:00'} – {p.time_window_end || '23:59'} · {p.allowed_days || 'All days'}</p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                      {p.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  {p.max_daily_checkins && <p className="text-xs text-slate-500 mt-2">Max daily check-ins: {p.max_daily_checkins}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ READER HEALTH TAB ═══════ */}
+      {attendanceTab === 'health' && isOwner && (
+        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 space-y-4">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Reader Health & Diagnostics</h3>
+            <p className="text-xs text-slate-400 mt-0.5">RFID reader status, unknown tags, and system diagnostics</p>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100 text-center">
+              <p className="text-2xl font-black text-emerald-700">●</p>
+              <p className="text-xs font-bold text-emerald-600 mt-1">Reader Online</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 text-center">
+              <p className="text-2xl font-black text-slate-700">{overview.today_checkins || 0}</p>
+              <p className="text-xs font-bold text-slate-500 mt-1">Scans Today</p>
+            </div>
+            <div className="bg-amber-50 rounded-xl p-4 border border-amber-100 text-center">
+              <p className="text-2xl font-black text-amber-700">0</p>
+              <p className="text-xs font-bold text-amber-600 mt-1">Unknown Tags</p>
+            </div>
+            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 text-center">
+              <p className="text-2xl font-black text-blue-700">—</p>
+              <p className="text-xs font-bold text-blue-600 mt-1">Last Heartbeat</p>
+            </div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+            <p className="text-sm text-slate-500">Reader diagnostics will update in real-time when an RFID reader is connected.</p>
+            {onOpenRfidSetup && (
+              <button onClick={onOpenRfidSetup} className="mt-3 px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700">Open RFID Setup</button>
+            )}
+          </div>
+        </div>
+      )}
 
       {warningState && (
         <div className="app-modal-shell z-[220] bg-slate-900/60 backdrop-blur-sm">

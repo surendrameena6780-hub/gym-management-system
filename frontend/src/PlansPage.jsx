@@ -38,7 +38,15 @@ const PlansPage = ({ token, toast, showConfirm }) => {
     color_theme: 'blue',
     is_popular: false,
     discount_percent: 0,
-    discount_valid_until: ''
+    discount_valid_until: '',
+    // Advanced rules
+    joining_fee: '',
+    freeze_allowance_days: '',
+    transfer_fee: '',
+    access_hours: '',
+    guest_passes: '',
+    renewal_policy: '',
+    class_eligibility: '',
   });
 
   const fetchPlans = async () => {
@@ -88,7 +96,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
   // --- HANDLERS ---
   const openAddModal = () => {
     setIsEditing(false);
-    setFormData({ id: null, name: '', price: '', duration_days: 30, features: [], color_theme: 'blue', is_popular: false, discount_percent: 0, discount_valid_until: '' });
+    setFormData({ id: null, name: '', price: '', duration_days: 30, features: [], color_theme: 'blue', is_popular: false, discount_percent: 0, discount_valid_until: '', joining_fee: '', freeze_allowance_days: '', transfer_fee: '', access_hours: '', guest_passes: '', renewal_policy: '', class_eligibility: '' });
     setShowModal(true);
   };
 
@@ -111,7 +119,14 @@ const PlansPage = ({ token, toast, showConfirm }) => {
       color_theme: plan.color_theme || 'blue',
       is_popular: plan.is_popular || false,
       discount_percent: plan.discount_percent || 0,
-      discount_valid_until: validDate
+      discount_valid_until: validDate,
+      joining_fee: plan.joining_fee || '',
+      freeze_allowance_days: plan.freeze_allowance_days || '',
+      transfer_fee: plan.transfer_fee || '',
+      access_hours: plan.access_hours || '',
+      guest_passes: plan.guest_passes || '',
+      renewal_policy: plan.renewal_policy || '',
+      class_eligibility: plan.class_eligibility || '',
     });
     setShowModal(true);
   };
@@ -273,6 +288,15 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                     ))
                 ) : (
                     <div className="text-slate-300 text-sm font-medium italic">No features listed</div>
+                )}
+                {/* Advanced rule badges */}
+                {(plan.joining_fee > 0 || plan.freeze_allowance_days > 0 || plan.access_hours || plan.guest_passes > 0) && (
+                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-50">
+                    {plan.joining_fee > 0 && <span className="text-[9px] font-bold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">₹{plan.joining_fee} joining</span>}
+                    {plan.freeze_allowance_days > 0 && <span className="text-[9px] font-bold bg-sky-50 text-sky-600 px-2 py-0.5 rounded-full">{plan.freeze_allowance_days}d freeze</span>}
+                    {plan.access_hours && <span className="text-[9px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">{plan.access_hours}</span>}
+                    {plan.guest_passes > 0 && <span className="text-[9px] font-bold bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full">{plan.guest_passes} guest passes</span>}
+                  </div>
                 )}
               </div>
 
@@ -448,6 +472,54 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                              <button type="button" onClick={() => setFormData({...formData, is_popular: !formData.is_popular})} className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.is_popular ? 'bg-orange-500' : 'bg-slate-200'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${formData.is_popular ? 'translate-x-6' : 'translate-x-0'}`} /></button>
                         </div>
                     </div>
+
+                    {/* ── Advanced Rules ── */}
+                    <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 space-y-3">
+                      <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Advanced Rules</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Joining Fee (₹)</label>
+                          <input type="number" value={formData.joining_fee} onChange={e => setFormData({...formData, joining_fee: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm" placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Transfer Fee (₹)</label>
+                          <input type="number" value={formData.transfer_fee} onChange={e => setFormData({...formData, transfer_fee: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm" placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Freeze Allowance (days)</label>
+                          <input type="number" value={formData.freeze_allowance_days} onChange={e => setFormData({...formData, freeze_allowance_days: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm" placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Guest Passes</label>
+                          <input type="number" value={formData.guest_passes} onChange={e => setFormData({...formData, guest_passes: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm" placeholder="0" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Access Hours</label>
+                        <input value={formData.access_hours} onChange={e => setFormData({...formData, access_hours: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm" placeholder="e.g. 6:00 AM - 10:00 PM" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Renewal Policy</label>
+                          <select value={formData.renewal_policy} onChange={e => setFormData({...formData, renewal_policy: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm">
+                            <option value="">None</option>
+                            <option value="manual">Manual</option>
+                            <option value="auto_remind">Auto Remind</option>
+                            <option value="auto_renew">Auto Renew</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Class Eligibility</label>
+                          <select value={formData.class_eligibility} onChange={e => setFormData({...formData, class_eligibility: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm">
+                            <option value="">All Classes</option>
+                            <option value="group_only">Group Only</option>
+                            <option value="personal_only">Personal Only</option>
+                            <option value="none">No Classes</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
                     <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-wider hover:bg-slate-800 shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-2"><Save size={18} /> {isEditing ? 'Update Plan' : 'Create Plan'}</button>
                 </form>
             </div>

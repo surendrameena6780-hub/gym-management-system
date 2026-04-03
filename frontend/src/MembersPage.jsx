@@ -285,6 +285,17 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [editFormData, setEditFormData] = useState({ id: '', full_name: '', email: '', phone: '' });
   const [freezeFormData, setFreezeFormData] = useState({ freeze_end_date: '', freeze_reason: '' });
 
+  // Lifecycle drawer state
+  const [drawerTab, setDrawerTab] = useState('profile');
+  const [memberNotes, setMemberNotes] = useState([]);
+  const [memberDocs, setMemberDocs] = useState([]);
+  const [memberWaivers, setMemberWaivers] = useState([]);
+  const [newNote, setNewNote] = useState('');
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferTargetId, setTransferTargetId] = useState('');
+
   const membersListRef = useRef(null);
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
 
@@ -303,6 +314,76 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       },
     }));
   };
+
+  // ── Lifecycle data fetchers ──
+  const fetchMemberNotes = async (memberId) => {
+    try {
+      const res = await axios.get(`/api/members/${memberId}/notes`, { headers: { 'x-auth-token': token } });
+      setMemberNotes(Array.isArray(res.data) ? res.data : []);
+    } catch { setMemberNotes([]); }
+  };
+  const fetchMemberDocs = async (memberId) => {
+    try {
+      const res = await axios.get(`/api/members/${memberId}/documents`, { headers: { 'x-auth-token': token } });
+      setMemberDocs(Array.isArray(res.data) ? res.data : []);
+    } catch { setMemberDocs([]); }
+  };
+  const fetchMemberWaivers = async (memberId) => {
+    try {
+      const res = await axios.get(`/api/members/${memberId}/waivers`, { headers: { 'x-auth-token': token } });
+      setMemberWaivers(Array.isArray(res.data) ? res.data : []);
+    } catch { setMemberWaivers([]); }
+  };
+  const handleAddNote = async () => {
+    if (!newNote.trim() || !selectedMember) return;
+    try {
+      await axios.post(`/api/members/${selectedMember.id}/notes`, { note: newNote.trim(), note_type: 'general' }, { headers: { 'x-auth-token': token } });
+      setNewNote('');
+      fetchMemberNotes(selectedMember.id);
+    } catch { toast?.('Failed to add note', 'error'); }
+  };
+  const handleCancelMember = async () => {
+    if (!selectedMember) return;
+    try {
+      await axios.post(`/api/members/${selectedMember.id}/cancel`, { cancellation_reason: cancelReason }, { headers: { 'x-auth-token': token } });
+      toast?.('Member cancelled', 'success');
+      setShowCancelModal(false);
+      setCancelReason('');
+      setShowDetailsModal(false);
+      fetchMembers();
+      notifyDashboardDataChanged();
+    } catch { toast?.('Failed to cancel member', 'error'); }
+  };
+  const handleTransferMember = async () => {
+    if (!selectedMember || !transferTargetId) return;
+    try {
+      await axios.post(`/api/members/${selectedMember.id}/transfer`, { transfer_to_member_id: transferTargetId }, { headers: { 'x-auth-token': token } });
+      toast?.('Membership transferred', 'success');
+      setShowTransferModal(false);
+      setTransferTargetId('');
+      setShowDetailsModal(false);
+      fetchMembers();
+      notifyDashboardDataChanged();
+    } catch { toast?.('Transfer failed', 'error'); }
+  };
+  const handleSignWaiver = async () => {
+    if (!selectedMember) return;
+    try {
+      await axios.post(`/api/members/${selectedMember.id}/waiver`, { waiver_type: 'general', waiver_text: 'Standard gym liability waiver' }, { headers: { 'x-auth-token': token } });
+      toast?.('Waiver signed', 'success');
+      fetchMemberWaivers(selectedMember.id);
+    } catch { toast?.('Failed', 'error'); }
+  };
+
+  // Load lifecycle data when drawer opens
+  useEffect(() => {
+    if (showDetailsModal && selectedMember?.id) {
+      setDrawerTab('profile');
+      fetchMemberNotes(selectedMember.id);
+      fetchMemberDocs(selectedMember.id);
+      fetchMemberWaivers(selectedMember.id);
+    }
+  }, [showDetailsModal, selectedMember?.id]);
 
   const openAddMemberModal = () => {
     if (!canWriteMembers) {
@@ -1149,7 +1230,14 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           </div>
           {/* scrollable body */}
           <div className="flex-1 overflow-y-auto px-5 space-y-3 pt-2 pb-1 no-scrollbar">
-            {/* contact row */}
+            {/* drawer tabs */}
+            <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5">
+              {[{ key: 'profile', label: 'Profile' }, { key: 'notes', label: 'Notes' }, { key: 'docs', label: 'Documents' }, { key: 'waivers', label: 'Waivers' }].map(t => (
+                <button key={t.key} onClick={() => setDrawerTab(t.key)} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${drawerTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
+              ))}
+            </div>
+
+            {drawerTab === 'profile' && (<>
             <div className="grid grid-cols-2 gap-2.5">
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
@@ -1275,10 +1363,74 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 </div>
               </div>
             )}
+            </>)}
+
+            {/* ── Notes Tab ── */}
+            {drawerTab === 'notes' && (
+              <div className="space-y-3">
+                {canWriteMembers && (
+                  <div className="flex gap-2">
+                    <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Add a note..." className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" onKeyDown={e => e.key === 'Enter' && handleAddNote()} />
+                    <button onClick={handleAddNote} className="px-3 py-2 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700">Add</button>
+                  </div>
+                )}
+                {memberNotes.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-6">No notes yet</p>
+                ) : memberNotes.map(n => (
+                  <div key={n.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                    <p className="text-sm text-slate-700">{n.note}</p>
+                    <div className="flex justify-between mt-2">
+                      <p className="text-[10px] text-slate-400">{n.author_name || 'Staff'}</p>
+                      <p className="text-[10px] text-slate-400">{n.created_at ? new Date(n.created_at).toLocaleDateString('en-GB') : ''}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Documents Tab ── */}
+            {drawerTab === 'docs' && (
+              <div className="space-y-3">
+                {memberDocs.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-6">No documents uploaded</p>
+                ) : memberDocs.map(d => (
+                  <div key={d.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-slate-700">{d.doc_type}</p>
+                      {d.notes && <p className="text-xs text-slate-400 mt-0.5">{d.notes}</p>}
+                      <p className="text-[10px] text-slate-400 mt-1">{d.uploaded_at ? new Date(d.uploaded_at).toLocaleDateString('en-GB') : ''}</p>
+                    </div>
+                    {d.doc_url && <a href={d.doc_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 text-xs font-bold hover:underline">View</a>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Waivers Tab ── */}
+            {drawerTab === 'waivers' && (
+              <div className="space-y-3">
+                {canWriteMembers && !memberWaivers.length && (
+                  <button onClick={handleSignWaiver} className="w-full py-3 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">
+                    Sign Standard Waiver
+                  </button>
+                )}
+                {memberWaivers.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4">No waivers signed yet</p>
+                ) : memberWaivers.map(w => (
+                  <div key={w.id} className="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <CheckCircle size={12} className="text-emerald-600" />
+                      <p className="text-sm font-bold text-emerald-700">{w.waiver_type || 'General'} Waiver</p>
+                    </div>
+                    <p className="text-xs text-emerald-600">Signed: {w.signed_at ? new Date(w.signed_at).toLocaleDateString('en-GB') : 'N/A'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* action bar — no extra bottom padding needed, drawer sits above nav */}
-          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60">
+          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-slate-50/60 flex-wrap">
             {canWritePayments && (getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
               <button onClick={() => { setShowDetailsModal(false); openActivateModalForMember(selectedMember); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
                 <Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
@@ -1290,6 +1442,16 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
               <Edit2 size={13} /> Edit
             </button>}
+            {canWriteMembers && String(selectedMember.membership_status || '').toUpperCase() === 'ACTIVE' && (
+              <button onClick={() => setShowTransferModal(true)} className="py-2.5 px-3 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 transition-all active:scale-95">
+                Transfer
+              </button>
+            )}
+            {canWriteMembers && ['ACTIVE', 'FROZEN'].includes(String(selectedMember.membership_status || '').toUpperCase()) && (
+              <button onClick={() => setShowCancelModal(true)} className="py-2.5 px-3 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all active:scale-95">
+                Cancel
+              </button>
+            )}
           </div>
         </>)}
       </div>
@@ -1416,6 +1578,50 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           <div className="relative animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <button className="absolute -top-16 left-1/2 -translate-x-1/2 text-white/40 hover:text-white flex flex-col items-center" onClick={() => setPreviewImage(null)}><X size={32} strokeWidth={1.5} /><span className="text-[9px] font-bold tracking-[0.2em] mt-1 uppercase">Close</span></button>
             <div className="w-[300px] h-[300px] md:w-[380px] md:h-[380px] rounded-full border-[6px] border-white shadow-2xl overflow-hidden bg-slate-800"><img src={previewImage} alt="Profile" className="w-full h-full object-cover select-none" /></div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Cancel Member Modal ── */}
+      {showCancelModal && selectedMember && (
+        <div className="app-modal-shell z-[70] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden border border-slate-100">
+            <div className="p-6 text-white" style={{ background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)' }}>
+              <h2 className="text-lg font-black">Cancel Membership</h2>
+              <p className="text-white/60 text-xs mt-1">{selectedMember.full_name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Reason for Cancellation</label>
+                <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-rose-200 focus:border-rose-400 outline-none" placeholder="Relocating, unhappy with service, etc." />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowCancelModal(false); setCancelReason(''); }} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Back</button>
+                <button onClick={handleCancelMember} className="flex-1 py-2.5 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all">Confirm Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Transfer Member Modal ── */}
+      {showTransferModal && selectedMember && (
+        <div className="app-modal-shell z-[70] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden border border-slate-100">
+            <div className="p-6 text-white" style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' }}>
+              <h2 className="text-lg font-black">Transfer Membership</h2>
+              <p className="text-white/60 text-xs mt-1">From: {selectedMember.full_name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Transfer to (Member ID)</label>
+                <input type="number" value={transferTargetId} onChange={e => setTransferTargetId(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none" placeholder="Enter destination member ID" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowTransferModal(false); setTransferTargetId(''); }} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Back</button>
+                <button onClick={handleTransferMember} disabled={!transferTargetId} className="flex-1 py-2.5 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50">Confirm Transfer</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

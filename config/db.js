@@ -151,6 +151,192 @@ const connectDB = async () => {
                 UNIQUE (class_session_id, member_id)
             );
         `);
+        // ── Phase 2-8: New tables for lifecycle, finance, access, scale ──
+        await pool.query(`
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT '';
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(20);
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN DEFAULT FALSE;
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS waiver_signed_at TIMESTAMPTZ;
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(120) DEFAULT '';
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS gender VARCHAR(20) DEFAULT '';
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10) DEFAULT '';
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS medical_notes TEXT DEFAULT '';
+
+            ALTER TABLE memberships ADD COLUMN IF NOT EXISTS grace_end_date DATE;
+            ALTER TABLE memberships ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT '';
+            ALTER TABLE memberships ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+            ALTER TABLE memberships ADD COLUMN IF NOT EXISTS transfer_id INTEGER;
+
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS joining_fee DECIMAL(10,2) DEFAULT 0;
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS freeze_allowance_days INTEGER DEFAULT 0;
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS transfer_fee DECIMAL(10,2) DEFAULT 0;
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS access_hours VARCHAR(60) DEFAULT '';
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS guest_passes INTEGER DEFAULT 0;
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS renewal_policy VARCHAR(40) DEFAULT 'MANUAL';
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS class_eligibility TEXT DEFAULT '';
+            ALTER TABLE plans ADD COLUMN IF NOT EXISTS advanced_rules JSONB DEFAULT '{}'::jsonb;
+
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS grace_period_days INTEGER DEFAULT 3;
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS member_documents (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id   INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                doc_type    VARCHAR(60) NOT NULL DEFAULT 'ID',
+                doc_name    VARCHAR(200) NOT NULL DEFAULT '',
+                doc_url     TEXT DEFAULT '',
+                uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS member_notes (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id   INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                note        TEXT NOT NULL DEFAULT '',
+                created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS member_waivers (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id   INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                waiver_text TEXT DEFAULT '',
+                signed_at   TIMESTAMPTZ,
+                ip_address  VARCHAR(60) DEFAULT '',
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS expenses (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                category        VARCHAR(60) NOT NULL DEFAULT 'General',
+                vendor          VARCHAR(120) DEFAULT '',
+                description     TEXT DEFAULT '',
+                amount          DECIMAL(10,2) NOT NULL DEFAULT 0,
+                bill_date       DATE NOT NULL DEFAULT CURRENT_DATE,
+                payment_mode    VARCHAR(50) DEFAULT 'Cash',
+                is_recurring    BOOLEAN DEFAULT FALSE,
+                recurrence_rule VARCHAR(30) DEFAULT '',
+                receipt_url     TEXT DEFAULT '',
+                created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                deleted_at      TIMESTAMPTZ,
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS payroll_entries (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                pay_period      VARCHAR(30) NOT NULL DEFAULT '',
+                base_pay        DECIMAL(10,2) DEFAULT 0,
+                commission      DECIMAL(10,2) DEFAULT 0,
+                deductions      DECIMAL(10,2) DEFAULT 0,
+                net_pay         DECIMAL(10,2) DEFAULT 0,
+                status          VARCHAR(20) DEFAULT 'PENDING',
+                paid_at         TIMESTAMPTZ,
+                notes           TEXT DEFAULT '',
+                created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS pos_products (
+                id           SERIAL PRIMARY KEY,
+                gym_id       INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                name         VARCHAR(120) NOT NULL,
+                category     VARCHAR(60) DEFAULT 'General',
+                price        DECIMAL(10,2) NOT NULL DEFAULT 0,
+                cost_price   DECIMAL(10,2) DEFAULT 0,
+                stock_qty    INTEGER DEFAULT 0,
+                low_stock_threshold INTEGER DEFAULT 5,
+                sku          VARCHAR(60) DEFAULT '',
+                is_active    BOOLEAN DEFAULT TRUE,
+                deleted_at   TIMESTAMPTZ,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS pos_sales (
+                id           SERIAL PRIMARY KEY,
+                gym_id       INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id    INTEGER REFERENCES members(id) ON DELETE SET NULL,
+                total_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+                payment_mode VARCHAR(50) DEFAULT 'Cash',
+                notes        TEXT DEFAULT '',
+                sold_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS pos_sale_items (
+                id          SERIAL PRIMARY KEY,
+                sale_id     INTEGER REFERENCES pos_sales(id) ON DELETE CASCADE,
+                product_id  INTEGER REFERENCES pos_products(id) ON DELETE SET NULL,
+                product_name VARCHAR(120) NOT NULL DEFAULT '',
+                quantity    INTEGER NOT NULL DEFAULT 1,
+                unit_price  DECIMAL(10,2) NOT NULL DEFAULT 0,
+                total_price DECIMAL(10,2) NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS access_policies (
+                id               SERIAL PRIMARY KEY,
+                gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                plan_id          INTEGER REFERENCES plans(id) ON DELETE CASCADE,
+                name             VARCHAR(120) NOT NULL DEFAULT '',
+                allowed_days     TEXT DEFAULT '',
+                allowed_from     TIME,
+                allowed_to       TIME,
+                is_offpeak_only  BOOLEAN DEFAULT FALSE,
+                enforce_freeze   BOOLEAN DEFAULT TRUE,
+                max_daily_visits INTEGER DEFAULT 0,
+                is_active        BOOLEAN DEFAULT TRUE,
+                created_at       TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS saved_reports (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                name        VARCHAR(200) NOT NULL DEFAULT '',
+                report_type VARCHAR(60) NOT NULL DEFAULT 'members',
+                filters     JSONB DEFAULT '{}'::jsonb,
+                schedule    VARCHAR(30) DEFAULT '',
+                last_run_at TIMESTAMPTZ,
+                created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                key_name    VARCHAR(120) NOT NULL DEFAULT '',
+                key_hash    TEXT NOT NULL,
+                key_prefix  VARCHAR(12) NOT NULL DEFAULT '',
+                scopes      TEXT[] DEFAULT '{}',
+                is_active   BOOLEAN DEFAULT TRUE,
+                last_used_at TIMESTAMPTZ,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                url         TEXT NOT NULL,
+                events      TEXT[] DEFAULT '{}',
+                secret_hash TEXT DEFAULT '',
+                is_active   BOOLEAN DEFAULT TRUE,
+                last_triggered_at TIMESTAMPTZ,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_member_documents_member ON member_documents(member_id);
+            CREATE INDEX IF NOT EXISTS idx_member_notes_member ON member_notes(member_id);
+            CREATE INDEX IF NOT EXISTS idx_member_waivers_member ON member_waivers(member_id);
+            CREATE INDEX IF NOT EXISTS idx_expenses_gym_id ON expenses(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_expenses_bill_date ON expenses(bill_date);
+            CREATE INDEX IF NOT EXISTS idx_payroll_entries_gym_id ON payroll_entries(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_payroll_entries_user_id ON payroll_entries(user_id);
+            CREATE INDEX IF NOT EXISTS idx_pos_products_gym_id ON pos_products(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_pos_sales_gym_id ON pos_sales(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_pos_sales_member_id ON pos_sales(member_id);
+            CREATE INDEX IF NOT EXISTS idx_access_policies_gym_id ON access_policies(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_access_policies_plan_id ON access_policies(plan_id);
+            CREATE INDEX IF NOT EXISTS idx_saved_reports_gym_id ON saved_reports(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_gym_id ON api_keys(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_webhooks_gym_id ON webhooks(gym_id);
+        `);
         await pool.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_members_rfid_tag_unique
             ON members(gym_id, rfid_tag_id)

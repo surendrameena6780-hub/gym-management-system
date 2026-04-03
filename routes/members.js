@@ -427,4 +427,169 @@ router.delete('/:id', auth, saasMiddleware, requirePermission('members:write'), 
     }
 });
 
+// --- 7. CANCEL MEMBER ---
+router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    const memberId = req.params.id;
+    const gym_id = req.user.gym_id;
+    const { cancellation_reason } = req.body || {};
+    try {
+        const check = await pool.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Member not found' });
+        await pool.query('BEGIN');
+        await pool.query(
+            `UPDATE members SET status='CANCELLED', cancellation_reason=$3, cancelled_at=NOW() WHERE id=$1 AND gym_id=$2`,
+            [memberId, gym_id, String(cancellation_reason || '').trim() || null]
+        );
+        await pool.query(
+            `UPDATE memberships SET status='CANCELLED', cancellation_reason=$3, cancelled_at=NOW() WHERE member_id=$1 AND gym_id=$2 AND deleted_at IS NULL AND status IN ('ACTIVE','FROZEN')`,
+            [memberId, gym_id, String(cancellation_reason || '').trim() || null]
+        );
+        await pool.query('COMMIT');
+        res.json({ message: 'Member cancelled' });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error('CANCEL MEMBER ERROR:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 8. TRANSFER MEMBER ---
+router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    const memberId = req.params.id;
+    const gym_id = req.user.gym_id;
+    const { transfer_to_member_id, notes } = req.body || {};
+    if (!transfer_to_member_id) return res.status(400).json({ error: 'transfer_to_member_id required' });
+    try {
+        const [src, dst] = await Promise.all([
+            pool.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]),
+            pool.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [transfer_to_member_id, gym_id]),
+        ]);
+        if (!src.rows.length) return res.status(404).json({ error: 'Source member not found' });
+        if (!dst.rows.length) return res.status(404).json({ error: 'Destination member not found' });
+        await pool.query('BEGIN');
+        const ms = await pool.query(
+            `SELECT id, plan_id, start_date, end_date FROM memberships
+             WHERE member_id=$1 AND gym_id=$2 AND deleted_at IS NULL AND status IN ('ACTIVE','FROZEN')
+             ORDER BY end_date DESC LIMIT 1`, [memberId, gym_id]);
+        if (!ms.rows.length) { await pool.query('ROLLBACK'); return res.status(400).json({ error: 'No active membership to transfer' }); }
+        const old = ms.rows[0];
+        await pool.query(`UPDATE memberships SET status='TRANSFERRED', cancelled_at=NOW(), transfer_id=$3 WHERE id=$1 AND gym_id=$2`, [old.id, gym_id, transfer_to_member_id]);
+        await pool.query(
+            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, amount_paid, total_amount)
+             SELECT $1, $2, plan_id, NOW(), end_date, 'ACTIVE', amount_paid, total_amount FROM memberships WHERE id=$3`,
+            [gym_id, transfer_to_member_id, old.id]);
+        await pool.query(`UPDATE members SET transfer_status='TRANSFERRED' WHERE id=$1 AND gym_id=$2`, [memberId, gym_id]);
+        await pool.query('COMMIT');
+        res.json({ message: 'Membership transferred', notes });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error('TRANSFER MEMBER ERROR:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- 9. MEMBER DOCUMENTS ---
+router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const result = await pool.query('SELECT * FROM member_documents WHERE member_id=$1 AND gym_id=$2 ORDER BY uploaded_at DESC', [req.params.id, gid]);
+        res.json(result.rows);
+    } catch(err) { console.error('GET DOCS:', err.message); res.status(500).json({ error: err.message }); }
+});
+router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const { doc_type, doc_url, notes } = req.body || {};
+        if (!doc_type || !doc_url) return res.status(400).json({ error: 'doc_type and doc_url required' });
+        const result = await pool.query(
+            'INSERT INTO member_documents (gym_id, member_id, doc_type, doc_url, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+            [gid, req.params.id, String(doc_type).trim(), String(doc_url).trim(), String(notes||'').trim() || null]);
+        res.status(201).json(result.rows[0]);
+    } catch(err) { console.error('ADD DOC:', err.message); res.status(500).json({ error: err.message }); }
+});
+router.delete('/:mid/documents/:did', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        await pool.query('DELETE FROM member_documents WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.did, req.params.mid, gid]);
+        res.json({ message: 'Document deleted' });
+    } catch(err) { console.error('DEL DOC:', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// --- 10. MEMBER NOTES ---
+router.get('/:id/notes', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const result = await pool.query(
+            `SELECT mn.*, u.full_name as author_name FROM member_notes mn
+             LEFT JOIN users u ON u.id = mn.created_by
+             WHERE mn.member_id=$1 AND mn.gym_id=$2 ORDER BY mn.created_at DESC`, [req.params.id, gid]);
+        res.json(result.rows);
+    } catch(err) { console.error('GET NOTES:', err.message); res.status(500).json({ error: err.message }); }
+});
+router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const { note, note_type } = req.body || {};
+        if (!note) return res.status(400).json({ error: 'note is required' });
+        const result = await pool.query(
+            'INSERT INTO member_notes (gym_id, member_id, created_by, note, note_type) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+            [gid, req.params.id, req.user.id, String(note).trim(), String(note_type || 'general').trim()]);
+        res.status(201).json(result.rows[0]);
+    } catch(err) { console.error('ADD NOTE:', err.message); res.status(500).json({ error: err.message }); }
+});
+router.delete('/:mid/notes/:nid', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        await pool.query('DELETE FROM member_notes WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.nid, req.params.mid, gid]);
+        res.json({ message: 'Note deleted' });
+    } catch(err) { console.error('DEL NOTE:', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// --- 11. MEMBER WAIVERS ---
+router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const { waiver_type, waiver_text, signature_data } = req.body || {};
+        await pool.query('BEGIN');
+        await pool.query(
+            'INSERT INTO member_waivers (gym_id, member_id, waiver_type, waiver_text, signature_data, signed_at) VALUES ($1,$2,$3,$4,$5,NOW())',
+            [gid, req.params.id, String(waiver_type||'general').trim(), String(waiver_text||'').trim(), signature_data || null]);
+        await pool.query('UPDATE members SET waiver_signed_at=NOW() WHERE id=$1 AND gym_id=$2', [req.params.id, gid]);
+        await pool.query('COMMIT');
+        res.json({ message: 'Waiver signed' });
+    } catch(err) { await pool.query('ROLLBACK'); console.error('WAIVER:', err.message); res.status(500).json({ error: err.message }); }
+});
+router.get('/:id/waivers', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const result = await pool.query('SELECT * FROM member_waivers WHERE member_id=$1 AND gym_id=$2 ORDER BY signed_at DESC', [req.params.id, gid]);
+        res.json(result.rows);
+    } catch(err) { console.error('GET WAIVERS:', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// --- 12. UPDATE ONBOARDING ---
+router.patch('/:id/onboarding', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const { onboarding_complete, emergency_contact, gender, date_of_birth, address, blood_group, medical_notes } = req.body || {};
+        const updates = [];
+        const vals = [];
+        let idx = 3;
+        if (onboarding_complete !== undefined) { updates.push(`onboarding_complete=$${idx++}`); vals.push(!!onboarding_complete); }
+        if (emergency_contact !== undefined) { updates.push(`emergency_contact=$${idx++}`); vals.push(String(emergency_contact).trim()); }
+        if (gender !== undefined) { updates.push(`gender=$${idx++}`); vals.push(String(gender).trim()); }
+        if (date_of_birth !== undefined) { updates.push(`date_of_birth=$${idx++}`); vals.push(date_of_birth || null); }
+        if (address !== undefined) { updates.push(`address=$${idx++}`); vals.push(String(address).trim()); }
+        if (blood_group !== undefined) { updates.push(`blood_group=$${idx++}`); vals.push(String(blood_group).trim()); }
+        if (medical_notes !== undefined) { updates.push(`medical_notes=$${idx++}`); vals.push(String(medical_notes).trim()); }
+        if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
+        const result = await pool.query(
+            `UPDATE members SET ${updates.join(', ')} WHERE id=$1 AND gym_id=$2 RETURNING *`,
+            [req.params.id, gid, ...vals]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Member not found' });
+        res.json(result.rows[0]);
+    } catch(err) { console.error('ONBOARDING:', err.message); res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

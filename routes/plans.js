@@ -155,4 +155,35 @@ router.get('/:id/analytics', async (req, res) => {
     }
 });
 
+// --- ADVANCED RULES ---
+router.put('/:id/advanced-rules', auth, saasMiddleware, requirePermission('plans:read'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        if (req.user.role !== 'owner') return res.status(403).json({ error: 'Only owner can edit plan rules' });
+        const planId = req.params.id;
+        const { joining_fee, freeze_allowance_days, transfer_fee, access_hours, guest_passes, renewal_policy, class_eligibility, advanced_rules } = req.body || {};
+        const updates = [];
+        const vals = [];
+        let idx = 3;
+        if (joining_fee !== undefined)        { updates.push(`joining_fee=$${idx++}`);        vals.push(joining_fee); }
+        if (freeze_allowance_days !== undefined) { updates.push(`freeze_allowance_days=$${idx++}`); vals.push(freeze_allowance_days); }
+        if (transfer_fee !== undefined)       { updates.push(`transfer_fee=$${idx++}`);       vals.push(transfer_fee); }
+        if (access_hours !== undefined)       { updates.push(`access_hours=$${idx++}`);       vals.push(String(access_hours).trim()); }
+        if (guest_passes !== undefined)       { updates.push(`guest_passes=$${idx++}`);       vals.push(guest_passes); }
+        if (renewal_policy !== undefined)     { updates.push(`renewal_policy=$${idx++}`);     vals.push(String(renewal_policy).trim()); }
+        if (class_eligibility !== undefined)  { updates.push(`class_eligibility=$${idx++}`);  vals.push(String(class_eligibility).trim()); }
+        if (advanced_rules !== undefined)     { updates.push(`advanced_rules=$${idx++}`);     vals.push(JSON.stringify(advanced_rules)); }
+        if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
+        const result = await pool.query(
+            `UPDATE plans SET ${updates.join(', ')} WHERE id=$1 AND gym_id=$2 RETURNING *`,
+            [planId, gym_id, ...vals]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Plan not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('PLAN RULES:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

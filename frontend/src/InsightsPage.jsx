@@ -251,6 +251,46 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
         <KPICard title="Revenue At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={analytics.risk.inactiveCount > 0 ? `${analytics.risk.inactiveCount} inactive` : null} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
       </div>
 
+      {/* ── Business Narrative Summary ── */}
+      <div className="bg-white/80 backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
+        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Executive Summary</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
+          <div className="space-y-2">
+            <p>
+              <span className="font-bold text-slate-900">Revenue & Growth:</span>{' '}
+              {analytics.revenue.arpu > 0
+                ? `Your ARPU stands at ₹${analytics.revenue.arpu.toLocaleString()}, with ₹${analytics.revenue.lostRevenue.toLocaleString()} in lost value from expired memberships. `
+                : 'No revenue data available yet for this period. '}
+              {analytics.health.active > 0 && `Monthly baseline from ${analytics.health.active} active members is ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()}.`}
+            </p>
+            <p>
+              <span className="font-bold text-slate-900">Retention:</span>{' '}
+              {Number(analytics.health.retention) >= 80
+                ? `At ${analytics.health.retention}%, retention is healthy. `
+                : Number(analytics.health.retention) >= 50
+                  ? `Retention at ${analytics.health.retention}% needs attention. `
+                  : `Retention at ${analytics.health.retention}% is critical — focus on re-engagement. `}
+              {analytics.health.expired > 0 && `${analytics.health.expired} memberships expired in this window.`}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p>
+              <span className="font-bold text-slate-900">Risk:</span>{' '}
+              {analytics.risk.expiringCount > 0
+                ? `${analytics.risk.expiringCount} renewals are due soon — ₹${analytics.risk.revenueAtRisk.toLocaleString()} revenue at risk. `
+                : 'No imminent renewal risk. '}
+              {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members are inactive and may churn.`}
+            </p>
+            <p>
+              <span className="font-bold text-slate-900">Engagement:</span>{' '}
+              {hasPeakHourData
+                ? `Peak activity observed in attendance data. Use the Attendance tab below for hourly breakdown.`
+                : 'Attendance data is still building up — check back after a few days of check-ins.'}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="border-b border-slate-200 flex gap-8 overflow-x-auto">
         {[
           { id: 'revenue', label: 'Revenue & Finance', icon: TrendingUp },
