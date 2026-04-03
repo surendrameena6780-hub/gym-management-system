@@ -356,7 +356,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                       <div key={idx} className="flex flex-col items-center justify-end gap-1.5 flex-1 h-full group">
                         <div className="relative w-full bg-slate-100 rounded-xl overflow-hidden flex-1 flex items-end justify-center px-1 pb-0">
                           <div
-                            style={{ height: `${Math.max(8, Math.round((Number(item.revenue || 0) / analyticsGraphMax) * 100))}%` }}
+                            style={{ height: `${Number(item.revenue) > 0 ? Math.max(8, Math.round((Number(item.revenue) / analyticsGraphMax) * 100)) : 0}%` }}
                             className="w-full bg-slate-900 rounded-t-lg transition-all duration-500 group-hover:bg-purple-600 relative"
                           >
                             <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">₹{item.revenue}</div>
@@ -434,7 +434,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                         </div>
                     </div>
 
-                    <div className="flex flex-col gap-4">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-4">
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Card Theme</label>
                             <div className="flex gap-3">
@@ -443,7 +443,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                                 ))}
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 bg-orange-50 px-4 py-3 rounded-xl border border-orange-100 self-start w-full">
+                        <div className="flex items-center gap-3 bg-orange-50 px-4 py-3 rounded-xl border border-orange-100">
                              <div className="flex flex-col flex-1"><span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">Mark Popular</span><span className="text-xs font-bold text-orange-700">Best Value Badge</span></div>
                              <button type="button" onClick={() => setFormData({...formData, is_popular: !formData.is_popular})} className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.is_popular ? 'bg-orange-500' : 'bg-slate-200'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${formData.is_popular ? 'translate-x-6' : 'translate-x-0'}`} /></button>
                         </div>

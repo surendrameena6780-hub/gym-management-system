@@ -642,15 +642,14 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const getStatusInfo = (member) => {
     if (member.membership_status === 'UNPAID' || !member.plan_name) return { label: 'UNPAID', color: 'bg-slate-300', text: 'text-slate-400' };
     if (member.days_left <= 0) return { label: 'EXPIRED', color: 'bg-rose-500', text: 'text-rose-500' };
-    // Expiring soon takes priority — always show regardless of last visit
-    if (member.days_left <= 5) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
-    // Inactivity only applies to members NOT expiring imminently AND who have a valid paid membership
+    // Expiring soon: 7-day window matches Critical Renewals in Insights
+    if (member.days_left <= 7) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
+    // Inactivity: only flag if DB membership_status is NOT 'ACTIVE'
+    // A member whose payment was just recorded (ACTIVE in DB) should never show INACTIVE
     const today = new Date();
     const lastVisit = member.last_visit ? new Date(member.last_visit) : null;
     const diffDays = lastVisit ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24)) : 999;
-    // Only mark inactive if membership_status isn't freshly set to ACTIVE (DB level) and last_visit is stale
     if (diffDays > 4 && member.membership_status !== 'ACTIVE') return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
-    if (diffDays > 7) return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
     return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
   };
 
@@ -967,7 +966,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <td className="py-4 px-2 text-slate-500 text-xs truncate">{member.email}</td>
                         <td className="py-4 px-2 text-center"><span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span></td>
                         <td className="py-4 px-2 text-center">{member.plan_name ? <span className="text-xs font-bold text-slate-700 truncate block">{member.plan_name}</span> : <span className="text-slate-300 font-bold text-sm">—</span>}</td>
-                        <td className="py-4 px-2 text-center">{statusInfo.label === 'UNPAID' ? <span className="text-slate-300 font-bold text-sm">—</span> : member.days_left <= 0 ? <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[9px] font-black rounded-full uppercase">Exp'd</span> : member.days_left <= 5 ? <span className="px-2.5 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full">{displayDays}d</span> : <span className="text-sm font-bold text-slate-700">{displayDays}</span>}</td>
+                        <td className="py-4 px-2 text-center">{statusInfo.label === 'UNPAID' ? <span className="text-slate-300 font-bold text-sm">—</span> : member.days_left <= 0 ? <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[9px] font-black rounded-full uppercase">Exp'd</span> : member.days_left <= 7 ? <span className="px-2.5 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full">{displayDays}d</span> : <span className="text-sm font-bold text-slate-700">{displayDays}</span>}</td>
                         <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600">{member.last_visit ? new Date(member.last_visit).toLocaleDateString('en-GB') : '—'}</span></td>
                         <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end items-center gap-1.5">
