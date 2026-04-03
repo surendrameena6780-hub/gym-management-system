@@ -965,7 +965,26 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               <p className="text-[clamp(1.375rem,5vw,2rem)] font-black leading-none tracking-tight text-indigo-600">{collectionIntelligence.onlineShare}%</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:hidden">
+            {collectionIntelligence.actions.filter((item) => item.id === 'recover-dues').slice(0, 1).map((item) => {
+              const tone = INSIGHT_TONE_STYLES[item.tone] || INSIGHT_TONE_STYLES.slate;
+              const Icon = item.icon;
+              return (
+                <div key={item.id} className={`rounded-2xl border p-4 ${tone.wrapper}`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${tone.icon}`}>
+                      <Icon size={18} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-black ${tone.title}`}>{item.title}</p>
+                      <p className={`text-xs font-semibold mt-1 leading-relaxed ${tone.detail}`}>{item.detail}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden sm:grid sm:grid-cols-2 gap-3">
             {collectionIntelligence.actions.map((item) => {
               const tone = INSIGHT_TONE_STYLES[item.tone] || INSIGHT_TONE_STYLES.slate;
               const Icon = item.icon;
