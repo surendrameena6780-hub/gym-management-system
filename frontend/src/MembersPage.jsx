@@ -964,6 +964,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   filteredMembers.map((member) => {
                     const statusInfo = getStatusInfo(member);
                     const displayDays = member.days_left < 0 ? 0 : (member.days_left || 0);
+                    const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
+                    const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
                     return (
                       <tr key={member.id} onClick={() => (isBulkMode ? toggleSelection(member.id) : handleViewDetails(member))} className={`group cursor-pointer transition-colors ${selectedIds.includes(member.id) ? 'bg-indigo-50/40' : 'hover:bg-slate-50/70'}`}>
                         <td className="py-4 px-2" onClick={(e) => e.stopPropagation()}>
