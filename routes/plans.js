@@ -156,10 +156,9 @@ router.get('/:id/analytics', async (req, res) => {
 });
 
 // --- ADVANCED RULES ---
-router.put('/:id/advanced-rules', auth, saasMiddleware, requirePermission('plans:read'), async (req, res) => {
+router.put('/:id/advanced-rules', async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
-        if (req.user.role !== 'owner') return res.status(403).json({ error: 'Only owner can edit plan rules' });
         const planId = req.params.id;
         const { joining_fee, freeze_allowance_days, transfer_fee, access_hours, guest_passes, renewal_policy, class_eligibility, advanced_rules } = req.body || {};
         const updates = [];
