@@ -4,6 +4,16 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
+const webpush = require('web-push');
+
+// Configure VAPID (shared config)
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+        process.env.VAPID_EMAIL || 'mailto:admin@gymvault.app',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+    );
+}
 
 const masterPassword = String(process.env.MASTER_PASSWORD || process.env.SUPERADMIN_PASSWORD || '').trim();
 const superadminEnabled = masterPassword.length >= 8;
@@ -841,27 +851,62 @@ router.put('/system', superAuth, async (req, res) => {
 router.post('/system/broadcast', superAuth, async (req, res) => {
     const title = String(req.body.title || '').trim();
     const message = String(req.body.message || '').trim();
+    const url = String(req.body.url || '/').trim();
+    // roles: array of roles to push to, default owners+staff
+    const roles = Array.isArray(req.body.roles) ? req.body.roles : ['OWNER', 'STAFF'];
+    // Optional: target a single gym
+    const target_gym_id = req.body.target_gym_id ? Number(req.body.target_gym_id) : null;
 
     if (!title || !message) {
         return res.status(400).json({ error: 'title and message are required' });
     }
 
     try {
+        // Insert in-app notifications for all gyms
         await pool.query(
             `INSERT INTO notifications (gym_id, title, message)
              SELECT id, $1, $2 FROM gyms`,
             [title, message]
         );
 
+        // Send web push if VAPID is configured
+        let pushSent = 0;
+        if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+            const payload = JSON.stringify({ title, body: message, icon: '/vite.svg', badge: '/vite.svg', url });
+            let subsQuery;
+            if (target_gym_id) {
+                subsQuery = await pool.query(
+                    'SELECT * FROM push_subscriptions WHERE gym_id = $1 AND role = ANY($2)',
+                    [target_gym_id, roles]
+                );
+            } else {
+                subsQuery = await pool.query(
+                    'SELECT * FROM push_subscriptions WHERE role = ANY($1)',
+                    [roles]
+                );
+            }
+            await Promise.all(subsQuery.rows.map((sub) =>
+                webpush.sendNotification(
+                    { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+                    payload
+                ).catch((err) => {
+                    if (err.statusCode === 410) {
+                        pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [sub.endpoint]).catch(() => {});
+                    }
+                })
+            ));
+            pushSent = subsQuery.rows.length;
+        }
+
         await logAudit({
             action: 'SYSTEM_BROADCAST_SENT',
             targetType: 'SYSTEM',
             targetId: 'broadcast',
             targetLabel: title,
-            details: { message },
+            details: { message, pushSent, roles, target_gym_id },
         });
 
-        return res.json({ message: 'Broadcast sent to all gyms.' });
+        return res.json({ message: 'Broadcast sent to all gyms.', pushSent });
     } catch (err) {
         console.error('SUPERADMIN BROADCAST ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });

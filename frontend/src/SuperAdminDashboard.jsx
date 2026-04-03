@@ -23,6 +23,7 @@ import {
   Send,
   KeyRound,
   RefreshCw,
+  Bell,
 } from 'lucide-react';
 
 const TABS = [
@@ -79,7 +80,8 @@ function SuperAdminDashboard({ token, onLogout }) {
   const [ticketFilters, setTicketFilters] = useState({ q: '', status: '', priority: '' });
 
   const [ticketReply, setTicketReply] = useState('');
-  const [broadcast, setBroadcast] = useState({ title: '', message: '' });
+  const [broadcast, setBroadcast] = useState({ title: '', message: '', url: '/', roles: ['OWNER', 'STAFF'], target_gym_id: '' });
+  const [broadcastResult, setBroadcastResult] = useState(null);
 
   const [dangerGym, setDangerGym] = useState({ gymId: '', confirmName: '' });
   const [dangerUser, setDangerUser] = useState({ userId: '', confirmText: '' });
@@ -484,10 +486,18 @@ function SuperAdminDashboard({ token, onLogout }) {
   const sendBroadcast = async () => {
     if (!broadcast.title.trim() || !broadcast.message.trim()) return;
     try {
-      await axios.post('/api/superadmin/system/broadcast', broadcast, headers);
-      setBroadcast({ title: '', message: '' });
+      const payload = {
+        title: broadcast.title,
+        message: broadcast.message,
+        url: broadcast.url || '/',
+        roles: broadcast.roles,
+      };
+      if (broadcast.target_gym_id) payload.target_gym_id = broadcast.target_gym_id;
+      const res = await axios.post('/api/superadmin/system/broadcast', payload, headers);
+      setBroadcast({ title: '', message: '', url: '/', roles: ['OWNER', 'STAFF'], target_gym_id: '' });
+      setBroadcastResult(res.data);
       loadLogs();
-      alert('Broadcast sent to all gyms');
+      setTimeout(() => setBroadcastResult(null), 5000);
     } catch (err) {
       handleApiError(err);
       alert('Failed to send broadcast');
@@ -879,10 +889,92 @@ function SuperAdminDashboard({ token, onLogout }) {
             </div>
 
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
-              <p className="text-xs uppercase tracking-widest font-black text-slate-400">Notification Broadcast</p>
-              <input className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" placeholder="Broadcast title" value={broadcast.title} onChange={(e) => setBroadcast((p) => ({ ...p, title: e.target.value }))} />
-              <textarea className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm min-h-[100px]" placeholder="Broadcast message" value={broadcast.message} onChange={(e) => setBroadcast((p) => ({ ...p, message: e.target.value }))} />
-              <button onClick={sendBroadcast} className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">Send to all gyms</button>
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-indigo-400" />
+                <p className="text-xs uppercase tracking-widest font-black text-slate-400">Push &amp; In-App Broadcast</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input
+                  className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                  placeholder="Notification title *"
+                  value={broadcast.title}
+                  onChange={(e) => setBroadcast((p) => ({ ...p, title: e.target.value }))}
+                />
+                <input
+                  className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                  placeholder="Deep-link URL (e.g. /members)"
+                  value={broadcast.url}
+                  onChange={(e) => setBroadcast((p) => ({ ...p, url: e.target.value }))}
+                />
+              </div>
+
+              <textarea
+                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm min-h-[100px]"
+                placeholder="Broadcast message *"
+                value={broadcast.message}
+                onChange={(e) => setBroadcast((p) => ({ ...p, message: e.target.value }))}
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {/* Audience selector */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500">Audience (push)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {['OWNER', 'STAFF', 'MEMBER'].map((role) => {
+                      const selected = broadcast.roles.includes(role);
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          onClick={() => setBroadcast((p) => ({
+                            ...p,
+                            roles: selected
+                              ? p.roles.filter((r) => r !== role)
+                              : [...p.roles, role],
+                          }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-black border transition-all ${
+                            selected
+                              ? 'bg-indigo-600 border-indigo-500 text-white'
+                              : 'bg-black/30 border-white/10 text-slate-400 hover:border-white/30'
+                          }`}
+                        >
+                          {role}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Target gym (optional) */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500">Target Gym (leave blank = all gyms)</p>
+                  <select
+                    className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                    value={broadcast.target_gym_id}
+                    onChange={(e) => setBroadcast((p) => ({ ...p, target_gym_id: e.target.value }))}
+                  >
+                    <option value="">All Gyms</option>
+                    {gyms.map((g) => (
+                      <option key={g.id} value={g.id}>{g.gym_name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {broadcastResult && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm font-bold">
+                  ✓ Sent! Push delivered to {broadcastResult.pushSent ?? 0} device(s).
+                </div>
+              )}
+
+              <button
+                onClick={sendBroadcast}
+                disabled={!broadcast.title.trim() || !broadcast.message.trim()}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2"
+              >
+                <Send size={14} /> Send to {broadcast.target_gym_id ? 'selected gym' : 'all gyms'}
+              </button>
             </div>
           </div>
         )}

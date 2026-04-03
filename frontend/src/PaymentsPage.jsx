@@ -126,6 +126,8 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
   const [activeFilter, setActiveFilter] = useState('All');
 
   const [showModal, setShowModal] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [memberHistory, setMemberHistory] = useState([]);
@@ -205,6 +207,8 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
       };
       await axios.post('/api/payments/record', finalPayload, { headers: { 'x-auth-token': token } });
       setShowModal(false);
+      setMemberSearch('');
+      setShowMemberDropdown(false);
       setFormData({ user_id: '', plan_id: '', amount_paid: '', total_amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
       await fetchData();
       window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
@@ -649,14 +653,51 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
 
       {/* RECORD PAYMENT MODAL */}
       {showModal && (
-        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowMemberDropdown(false)}>
           <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div><h2 className="text-xl font-black text-slate-900">Record Transaction</h2><p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Log a manual payment</p></div>
-              <button onClick={() => setShowModal(false)} className="bg-white p-2 rounded-full text-slate-400 hover:text-slate-900 shadow-sm transition-all"><X size={20} /></button>
+              <button onClick={() => { setShowModal(false); setMemberSearch(''); setShowMemberDropdown(false); }} className="bg-white p-2 rounded-full text-slate-400 hover:text-slate-900 shadow-sm transition-all"><X size={20} /></button>
             </div>
             <form onSubmit={handleRecordPayment} className="app-modal-scroll p-6 space-y-5">
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Select Member</label><div className="relative"><select required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none appearance-none" value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})}><option value="">-- Choose Member --</option>{members.map(m => (<option key={m.id} value={m.id}>{m.full_name} ({m.email})</option>))}</select><ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} /></div></div>
+              {/* Member searchable combobox */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Select Member</label>
+                <div className="relative">
+                  <div className="flex items-center gap-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus-within:ring-2 focus-within:ring-slate-900/10">
+                    <Search size={14} className="text-slate-400 shrink-0" />
+                    <input
+                      type="text"
+                      placeholder="Search member by name or phone..."
+                      className="flex-1 bg-transparent font-bold text-slate-900 outline-none text-sm placeholder:font-normal placeholder:text-slate-400"
+                      value={memberSearch}
+                      onFocus={() => setShowMemberDropdown(true)}
+                      onChange={e => { setMemberSearch(e.target.value); setShowMemberDropdown(true); if (!e.target.value) setFormData(f => ({...f, user_id: ''})); }}
+                    />
+                    {formData.user_id && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg shrink-0">Selected</span>}
+                  </div>
+                  {showMemberDropdown && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                      {members.filter(m => {
+                        const q = memberSearch.toLowerCase();
+                        return !q || m.full_name?.toLowerCase().includes(q) || m.phone?.includes(q) || m.email?.toLowerCase().includes(q);
+                      }).slice(0, 20).map(m => (
+                        <button key={m.id} type="button"
+                          className={`w-full text-left px-4 py-3 text-sm hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 ${formData.user_id === m.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-900'}`}
+                          onClick={() => { setFormData(f => ({...f, user_id: m.id})); setMemberSearch(m.full_name); setShowMemberDropdown(false); }}>
+                          <span className="font-bold">{m.full_name}</span>
+                          <span className="text-slate-400 text-xs ml-2">{m.phone || m.email}</span>
+                        </button>
+                      ))}
+                      {members.filter(m => { const q = memberSearch.toLowerCase(); return !q || m.full_name?.toLowerCase().includes(q) || m.phone?.includes(q); }).length === 0 && (
+                        <div className="px-4 py-3 text-sm text-slate-400 font-bold">No members found</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {/* Hidden native required validation */}
+                <input type="text" required className="sr-only" readOnly value={formData.user_id} />
+              </div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Select Plan</label><div className="relative"><select required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none appearance-none" value={formData.plan_id} onChange={handlePlanSelect}><option value="">-- Choose Plan --</option>{plans.map(p => (<option key={p.id} value={p.id}>{p.name} - ₹{p.price}</option>))}</select><ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} /></div></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Total Amount (₹)</label><input type="number" readOnly className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none cursor-not-allowed" value={formData.total_amount} /></div>

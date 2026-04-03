@@ -642,11 +642,15 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const getStatusInfo = (member) => {
     if (member.membership_status === 'UNPAID' || !member.plan_name) return { label: 'UNPAID', color: 'bg-slate-300', text: 'text-slate-400' };
     if (member.days_left <= 0) return { label: 'EXPIRED', color: 'bg-rose-500', text: 'text-rose-500' };
+    // Expiring soon takes priority — always show regardless of last visit
+    if (member.days_left <= 5) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
+    // Inactivity only applies to members NOT expiring imminently AND who have a valid paid membership
     const today = new Date();
     const lastVisit = member.last_visit ? new Date(member.last_visit) : null;
-    let diffDays = lastVisit ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24)) : 999;
-    if (diffDays > 4) return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
-    if (member.days_left <= 5) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
+    const diffDays = lastVisit ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24)) : 999;
+    // Only mark inactive if membership_status isn't freshly set to ACTIVE (DB level) and last_visit is stale
+    if (diffDays > 4 && member.membership_status !== 'ACTIVE') return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
+    if (diffDays > 7) return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
     return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
   };
 

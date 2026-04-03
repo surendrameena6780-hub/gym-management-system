@@ -25,6 +25,7 @@ const superAdminRoutes = require('./routes/superadmin');
 const settingsRoutes = require('./routes/settings');
 const billingRoutes = require('./routes/billing');
 const notificationRoutes = require('./routes/notifications');
+const pushRoutes = require('./routes/push');
 const supportRoutes = require('./routes/support');
 
 dotenv.config();
@@ -178,6 +179,7 @@ app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/push', pushRoutes);
 app.use('/api/support', supportRoutes);
 
 // Auth Status Check

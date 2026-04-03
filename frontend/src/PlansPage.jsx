@@ -344,6 +344,12 @@ const PlansPage = ({ token, toast, showConfirm }) => {
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 relative" style={{ minHeight: '180px' }}>
                 {loadingAnalytics ? (
                   <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold animate-pulse">Calculating Data...</div>
+                ) : (analyticsData?.graphData || []).every(d => !(d.revenue > 0)) ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-300">
+                    <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.5l5-5 4 4 5-6 4 3" /></svg>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No revenue data yet</p>
+                    <p className="text-[10px] font-semibold text-slate-300">Data will appear once payments are recorded for this plan.</p>
+                  </div>
                 ) : (
                   <div className="flex items-end gap-2 h-[160px]" style={{ width: '100%' }}>
                     {(analyticsData?.graphData || []).map((item, idx) => (
@@ -428,7 +434,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                         </div>
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-4">
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Card Theme</label>
                             <div className="flex gap-3">
@@ -437,8 +443,8 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                                 ))}
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 bg-orange-50 px-4 py-2 rounded-xl border border-orange-100">
-                             <div className="flex flex-col"><span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">Mark Popular</span><span className="text-xs font-bold text-orange-700">Best Value Badge</span></div>
+                        <div className="flex items-center gap-3 bg-orange-50 px-4 py-3 rounded-xl border border-orange-100 self-start w-full">
+                             <div className="flex flex-col flex-1"><span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">Mark Popular</span><span className="text-xs font-bold text-orange-700">Best Value Badge</span></div>
                              <button type="button" onClick={() => setFormData({...formData, is_popular: !formData.is_popular})} className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.is_popular ? 'bg-orange-500' : 'bg-slate-200'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${formData.is_popular ? 'translate-x-6' : 'translate-x-0'}`} /></button>
                         </div>
                     </div>

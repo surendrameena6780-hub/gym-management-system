@@ -801,6 +801,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     });
 
     const escalatedLeads = members.filter(m => {
+      if (m.membership_status === 'UNPAID') return false; // UNPAID goes to UNPAID_ACTIVATION, not escalated
       const daysAbsent = m.last_visit ? Math.floor((today - new Date(m.last_visit)) / 86400000) : 999;
       const isLongExpired = m.membership_status === 'EXPIRED' && m.days_left < -5;
       const isDeepGhost = m.membership_status === 'ACTIVE' && daysAbsent > 30;
@@ -952,6 +953,19 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         cta: 'Draft Renewal Broadcast',
         sub: 'Immediate revenue protection',
         action: () => openBroadcastDraft('Expiring', 'Hi from GymVault! Your membership expires very soon. Renew today to keep your progress on track.'),
+      }),
+      buildRecommendation({
+        id: 'EXPIRING_7D',
+        title: 'Follow up on memberships expiring this week',
+        reason: `${expiringIn7Days.filter(m => m.days_left > 3).length} memberships expire within 7 days`,
+        count: expiringIn7Days.filter(m => m.days_left > 3).length,
+        impact: revenueAtRisk,
+        confidence: Math.min(90, 66 + expiringIn7Days.length * 2),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: 'Open Expiring Soon',
+        sub: 'Prevent upcoming churn',
+        action: () => navigateTo('Members', 'Expiring Soon'),
       }),
       buildRecommendation({
         id: 'EXPIRED_WINBACK',
@@ -1137,12 +1151,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const aiSummaryLines = recommendations.length > 0
       ? [
           { label: 'Active coverage', value: `${active.length} of ${members.length || 0} members currently hold active plans (${activeCoveragePct}%)` },
-          { label: 'Revenue signal', value: `₹${monthlyRevenue.toLocaleString()} collected across the last 30 days` },
+          { label: 'Revenue signal', value: (() => { const earliest = chart30.find(d => (d.revenue || 0) > 0); const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null; return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} — no revenue in the last 30 days`; })() },
           { label: 'What to watch', value: nextWatchline },
         ]
       : [
           { label: 'Active coverage', value: `${active.length} of ${members.length || 0} members currently hold active plans (${activeCoveragePct}%)` },
-          { label: 'Revenue signal', value: `₹${monthlyRevenue.toLocaleString()} collected across the last 30 days` },
+          { label: 'Revenue signal', value: (() => { const earliest = chart30.find(d => (d.revenue || 0) > 0); const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null; return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} — no revenue in the last 30 days`; })() },
           { label: 'What to watch', value: nextWatchline },
         ];
 

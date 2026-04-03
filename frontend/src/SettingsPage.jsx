@@ -113,7 +113,11 @@ const loadRazorpayScript = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [localInvoice, setLocalInvoice] = useState(null); 
+  const invoiceStorageKey = `gv_invoice_${token?.slice(-12) || 'default'}`;
+  const [localInvoice, setLocalInvoiceState] = useState(() => {
+    try { const s = localStorage.getItem(invoiceStorageKey); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  const setLocalInvoice = (inv) => { setLocalInvoiceState(inv); try { if (inv) localStorage.setItem(invoiceStorageKey, JSON.stringify(inv)); else localStorage.removeItem(invoiceStorageKey); } catch {} };
   
   const [billingCycle, setBillingCycle] = useState('monthly');
   const [autoRenew, setAutoRenew] = useState(true);

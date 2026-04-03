@@ -519,6 +519,61 @@ function App() {
     fetchNotifications();
   }, [fetchNotifications]);
 
+  // ── Web Push Subscribe ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isHQ || !token || isSuspended) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (Notification.permission === 'denied') return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const keyRes = await axios.get('/api/push/vapid-public-key');
+        const vapidPublicKey = keyRes.data?.publicKey;
+        if (!vapidPublicKey || cancelled) return;
+
+        const registration = await navigator.serviceWorker.ready;
+
+        // Check if already subscribed
+        const existing = await registration.pushManager.getSubscription();
+        if (existing) {
+          // Re-register in case it was lost on the server
+          await axios.post('/api/push/subscribe', existing.toJSON(), { headers: { 'x-auth-token': token } }).catch(() => {});
+          return;
+        }
+
+        // Request permission only if not already granted
+        let permission = Notification.permission;
+        if (permission === 'default') {
+          permission = await Notification.requestPermission();
+        }
+        if (permission !== 'granted' || cancelled) return;
+
+        // Convert VAPID key
+        const urlB64 = vapidPublicKey;
+        const padding = '='.repeat((4 - urlB64.length % 4) % 4);
+        const base64 = (urlB64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = window.atob(base64);
+        const outputArray = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) outputArray[i] = raw.charCodeAt(i);
+
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: outputArray,
+        });
+
+        if (!cancelled) {
+          await axios.post('/api/push/subscribe', subscription.toJSON(), { headers: { 'x-auth-token': token } }).catch(() => {});
+        }
+      } catch (_err) {
+        // Push setup failure should never block the app
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token, isHQ, isSuspended]);
+
   const handleMarkAsRead = async (id) => {
     try {
       await axios.put(`/api/notifications/${id}/read`, {}, {

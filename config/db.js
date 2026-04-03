@@ -25,6 +25,18 @@ const connectDB = async () => {
             ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_code        VARCHAR(6);
             ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_expires_at  TIMESTAMP;
         `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id          SERIAL PRIMARY KEY,
+                gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                user_id     INTEGER,
+                role        VARCHAR(20) DEFAULT 'OWNER',
+                endpoint    TEXT NOT NULL UNIQUE,
+                p256dh      TEXT NOT NULL,
+                auth        TEXT NOT NULL,
+                created_at  TIMESTAMP DEFAULT NOW()
+            )
+        `);
         // Fix gyms that got saas_status='ACTIVE' from the old DB default but have never paid
         // (saas_valid_until is within 14 days of creation = still in trial window, no razorpay customer)
         await pool.query(`
