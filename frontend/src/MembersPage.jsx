@@ -644,13 +644,19 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     if (member.days_left <= 0) return { label: 'EXPIRED', color: 'bg-rose-500', text: 'text-rose-500' };
     // Expiring soon: 7-day window — highest priority, checked before inactivity
     if (member.days_left <= 7) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
-    // Ghost / inactive: any member (including DB-ACTIVE) absent 14+ days is operationally inactive.
-    // We use 14 days so a freshly-paid member has a grace period before being flagged.
+    // Fresh activations should not immediately look inactive just because no visit happened yet.
+    const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
+    const activationReference = latestPayment?.payment_date || member.joining_date;
     const today = new Date();
     const lastVisit = member.last_visit ? new Date(member.last_visit) : null;
+    const activationDate = activationReference ? new Date(activationReference) : null;
     const diffDays = lastVisit
       ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(lastVisit.getFullYear(), lastVisit.getMonth(), lastVisit.getDate())) / (1000 * 60 * 60 * 24))
       : 999;
+    const activationAgeDays = activationDate
+      ? Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(activationDate.getFullYear(), activationDate.getMonth(), activationDate.getDate())) / (1000 * 60 * 60 * 24))
+      : 999;
+    if (activationAgeDays <= 14) return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
     if (diffDays > 14) return { label: 'INACTIVE', color: 'bg-amber-400', text: 'text-amber-500' };
     return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
   };

@@ -788,8 +788,31 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   const dashboardData = useMemo(() => {
     const today = new Date();
+    const toDayAge = (value) => {
+      if (!value) return 999;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return 999;
+      return Math.floor((today - date) / 86400000);
+    };
+    const getLatestPayment = (member) => Array.isArray(member.payment_history) ? member.payment_history[0] : null;
+    const getLatestPendingDue = (member) => {
+      const latestPayment = getLatestPayment(member);
+      if (!latestPayment) return null;
+      return String(latestPayment.status || '').toLowerCase() === 'pending' && Number(latestPayment.amount_due || 0) > 0
+        ? latestPayment
+        : null;
+    };
+    const hasRecentActivation = (member) => {
+      const latestPayment = getLatestPayment(member);
+      const activationReference = latestPayment?.payment_date || member.joining_date;
+      return toDayAge(activationReference) <= 14;
+    };
+    const getDaysAbsent = (member) => member.last_visit ? toDayAge(member.last_visit) : 999;
+
     const active   = members.filter(m => m.membership_status === 'ACTIVE');
-    const unpaid   = members.filter(m => m.membership_status === 'UNPAID');
+    const pendingDueMembers = members.filter((member) => !!getLatestPendingDue(member));
+    const pendingDueMemberIds = new Set(pendingDueMembers.map((member) => member.id));
+    const unpaid   = members.filter(m => m.membership_status === 'UNPAID' && !pendingDueMemberIds.has(m.id));
     const expired  = members.filter(m => m.membership_status === 'EXPIRED');
     
     const expiringIn3Days = active.filter(m => m.days_left > 0 && m.days_left <= 3);
@@ -797,21 +820,25 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
     // Inactive / ghost members: ACTIVE in DB, not expiring soon, absent 14+ days
     // Threshold matches getStatusInfo in MembersPage so the Inactive filter shows the same people
-    const ghosts = active.filter(m => {
-      if (m.days_left <= 7) return false; // expiring soon — separate action
-      const daysAbsent = m.last_visit ? Math.floor((today - new Date(m.last_visit)) / 86400000) : 999;
-      return daysAbsent > 14;
-    });
-
-    // Escalated leads: worst cases — ACTIVE absent 30+ days OR long-expired (5+ days past expiry)
-    // Shown in the call panel below the action cards, NOT as a duplicate action card
     const escalatedLeads = members.filter(m => {
-      if (m.membership_status === 'UNPAID') return false;
-      const daysAbsent = m.last_visit ? Math.floor((today - new Date(m.last_visit)) / 86400000) : 999;
-      const isLongExpired = m.membership_status === 'EXPIRED' && m.days_left < -5;
-      const isDeepGhost = m.membership_status === 'ACTIVE' && daysAbsent > 30;
+      if (m.membership_status === 'UNPAID' || hasRecentActivation(m)) return false;
+      const daysAbsent = getDaysAbsent(m);
+      const expiredAgeDays = m.expiry_date ? toDayAge(m.expiry_date) : -1;
+      const isLongExpired = m.membership_status === 'EXPIRED' && expiredAgeDays > 5;
+      const isDeepGhost = m.membership_status === 'ACTIVE' && m.days_left > 7 && daysAbsent > 30;
       return isLongExpired || isDeepGhost;
     });
+    const escalatedIds = new Set(escalatedLeads.map(m => m.id));
+
+    const ghosts = active.filter(m => {
+      if (m.days_left <= 7 || hasRecentActivation(m) || escalatedIds.has(m.id)) return false;
+      return getDaysAbsent(m) > 14;
+    });
+
+    const pendingDueValue = pendingDueMembers.reduce((sum, member) => {
+      const latestPayment = getLatestPendingDue(member);
+      return sum + Number(latestPayment?.amount_due || 0);
+    }, 0);
 
     const revenueAtRisk = expiringIn7Days.reduce((sum, m) => {
       const plan = plans.find(p => p.name === m.plan_name);
@@ -1003,13 +1030,29 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         title: 'Activate unpaid profiles',
         reason: `${unpaid.length} unpaid members are waiting for activation`,
         count: unpaid.length,
-        impact: pendingDues,
+        impact: Math.round(unpaid.length * avgPlanPrice * 0.5),
         confidence: Math.min(86, 58 + unpaid.length),
         urgency: 'This week',
         priority: 'P1',
         cta: 'Activate Memberships',
         sub: 'Convert pending dues',
         action: () => navigateTo('Members', 'Unpaid'),
+      }),
+      buildRecommendation({
+        id: 'PENDING_DUES',
+        title: 'Collect pending dues from recent payments',
+        reason: `${pendingDueMembers.length} member${pendingDueMembers.length === 1 ? '' : 's'} still have an outstanding balance`,
+        count: pendingDueMembers.length,
+        impact: pendingDueValue,
+        confidence: Math.min(92, 62 + pendingDueMembers.length * 4),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: 'Open Pending Payments',
+        sub: 'Recover outstanding balance',
+        action: () => {
+          window.dispatchEvent(new CustomEvent('gymvault:payments-filter', { detail: { filter: 'Pending' } }));
+          navigateTo('Payments');
+        },
       }),
       // Note: ESCALATED_CALLS is intentionally omitted here — the "Escalated Leads (Call Now)"
       // panel below the action cards already surfaces these members with direct call buttons.

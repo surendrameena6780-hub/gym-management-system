@@ -198,6 +198,17 @@ const PaymentsPage = ({ token, toast, showConfirm }) => {
     setFilteredPayments(data);
   }, [activeFilter, payments]);
 
+  useEffect(() => {
+    const handleDashboardFilter = (event) => {
+      const nextFilter = String(event?.detail?.filter || '').trim();
+      if (!nextFilter) return;
+      setActiveFilter(nextFilter);
+    };
+
+    window.addEventListener('gymvault:payments-filter', handleDashboardFilter);
+    return () => window.removeEventListener('gymvault:payments-filter', handleDashboardFilter);
+  }, []);
+
   const handleRecordPayment = async (e) => {
     if (e) e.preventDefault();
     try {
