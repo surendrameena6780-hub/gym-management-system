@@ -11,6 +11,7 @@ const { signAttendanceToken, verifyAttendanceToken } = require('../utils/attenda
 const { sendPushToGym } = require('./push');
 
 const CHECKIN_METHODS = new Set(['STAFF', 'QR', 'SELF', 'RFID']);
+const RFID_DEVICE_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DISABLED']);
 const MEMBER_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_MEMBER_QR_TTL_MS || `${12 * 60 * 60 * 1000}`, 10);
 const GYM_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_GYM_QR_TTL_MS || `${5 * 60 * 1000}`, 10);
 const RFID_DUPLICATE_WINDOW_SECONDS = Number.parseInt(process.env.RFID_DUPLICATE_WINDOW_SECONDS || '10', 10);
@@ -27,6 +28,11 @@ const METHOD_LABELS = {
 const normalizeMethod = (value) => {
     const method = String(value || 'STAFF').toUpperCase().trim();
     return CHECKIN_METHODS.has(method) ? method : 'STAFF';
+};
+
+const normalizeRfidDeviceStatus = (value) => {
+    const status = String(value || 'ACTIVE').toUpperCase().trim();
+    return RFID_DEVICE_STATUSES.has(status) ? status : null;
 };
 
 const asBool = (value) => value === true || value === 'true' || value === 1 || value === '1';
@@ -582,6 +588,55 @@ router.get('/rfid/devices', auth, saasMiddleware, requireOwner, async (req, res)
     }
 });
 
+router.get('/rfid/events', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 15, 1), 100);
+        const requestedStatus = String(req.query.status || '').trim().toUpperCase();
+        const hasStatusFilter = requestedStatus.length > 0;
+
+        const events = await pool.query(
+            `SELECT
+                e.id,
+                e.tag_id,
+                e.event_timestamp,
+                e.processed,
+                e.event_status,
+                e.response_message,
+                e.created_at,
+                d.id AS reader_id,
+                d.reader_name,
+                d.reader_serial,
+                d.status AS reader_status,
+                m.id AS member_id,
+                m.full_name AS member_name,
+                m.rfid_tag_id,
+                COALESCE(ms_latest.status, 'UNPAID') AS membership_status
+             FROM rfid_events e
+             LEFT JOIN rfid_devices d ON d.id = e.reader_id
+             LEFT JOIN members m ON m.id = e.member_id
+             LEFT JOIN LATERAL (
+                SELECT ms.status
+                FROM memberships ms
+                WHERE ms.member_id = e.member_id
+                  AND ms.gym_id = e.gym_id
+                  AND ms.deleted_at IS NULL
+                ORDER BY ms.end_date DESC NULLS LAST
+                LIMIT 1
+             ) ms_latest ON true
+             WHERE e.gym_id = $1
+               AND ($2::text = '' OR UPPER(COALESCE(e.event_status, '')) = $2)
+             ORDER BY e.event_timestamp DESC, e.id DESC
+             LIMIT $3`,
+            [gym_id, hasStatusFilter ? requestedStatus : '', limit]
+        );
+
+        res.json(events.rows);
+    } catch (err) {
+        sendAttendanceError(res, err);
+    }
+});
+
 router.post('/rfid/devices', auth, saasMiddleware, requireOwner, async (req, res) => {
     const reader_name = String(req.body?.reader_name || '').trim();
     const reader_serial = String(req.body?.reader_serial || '').trim();
@@ -612,6 +667,95 @@ router.post('/rfid/devices', auth, saasMiddleware, requireOwner, async (req, res
     }
 });
 
+router.put('/rfid/devices/:id', auth, saasMiddleware, requireOwner, async (req, res) => {
+    const deviceId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(deviceId)) {
+        return res.status(400).json({ error: 'Valid device id is required.' });
+    }
+
+    const reader_name = typeof req.body?.reader_name === 'string' ? req.body.reader_name.trim() : null;
+    const reader_location = typeof req.body?.reader_location === 'string' ? req.body.reader_location.trim() : null;
+    const rawStatus = req.body?.status;
+    const nextStatus = rawStatus === undefined || rawStatus === null || rawStatus === ''
+        ? null
+        : normalizeRfidDeviceStatus(rawStatus);
+
+    if (rawStatus !== undefined && rawStatus !== null && rawStatus !== '' && !nextStatus) {
+        return res.status(400).json({ error: 'status must be ACTIVE, PAUSED, or DISABLED.' });
+    }
+
+    try {
+        const current = await pool.query(
+            `SELECT id, reader_name, reader_serial, reader_location, status, last_heartbeat, created_at, updated_at
+             FROM rfid_devices
+             WHERE id = $1 AND gym_id = $2
+             LIMIT 1`,
+            [deviceId, req.user.gym_id]
+        );
+        if (current.rows.length === 0) {
+            return res.status(404).json({ error: 'RFID reader not found.' });
+        }
+
+        const device = current.rows[0];
+        const finalName = reader_name || device.reader_name;
+        if (!finalName) {
+            return res.status(400).json({ error: 'reader_name cannot be empty.' });
+        }
+
+        const updated = await pool.query(
+            `UPDATE rfid_devices
+             SET reader_name = $1,
+                 reader_location = $2,
+                 status = $3,
+                 updated_at = NOW()
+             WHERE id = $4 AND gym_id = $5
+             RETURNING id, reader_name, reader_serial, reader_location, status, last_heartbeat, created_at, updated_at`,
+            [
+                finalName,
+                reader_location !== null ? reader_location : device.reader_location,
+                nextStatus || device.status,
+                deviceId,
+                req.user.gym_id,
+            ]
+        );
+
+        res.json({ message: 'RFID reader updated successfully.', device: updated.rows[0] });
+    } catch (err) {
+        sendAttendanceError(res, err);
+    }
+});
+
+router.post('/rfid/devices/:id/rotate-secret', auth, saasMiddleware, requireOwner, async (req, res) => {
+    const deviceId = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(deviceId)) {
+        return res.status(400).json({ error: 'Valid device id is required.' });
+    }
+
+    try {
+        const sharedSecret = crypto.randomBytes(24).toString('hex');
+        const updated = await pool.query(
+            `UPDATE rfid_devices
+             SET shared_secret = $1,
+                 updated_at = NOW()
+             WHERE id = $2 AND gym_id = $3
+             RETURNING id, reader_name, reader_serial, reader_location, status, last_heartbeat, created_at, updated_at`,
+            [sharedSecret, deviceId, req.user.gym_id]
+        );
+
+        if (updated.rows.length === 0) {
+            return res.status(404).json({ error: 'RFID reader not found.' });
+        }
+
+        res.json({
+            message: 'RFID reader key rotated successfully.',
+            device: updated.rows[0],
+            shared_secret: sharedSecret,
+        });
+    } catch (err) {
+        sendAttendanceError(res, err);
+    }
+});
+
 router.post('/rfid/pair-member', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     const member_id = Number.parseInt(req.body?.member_id, 10);
     const tag_id = String(req.body?.tag_id || '').trim();
@@ -638,6 +782,46 @@ router.post('/rfid/pair-member', auth, saasMiddleware, requirePermission('member
         if (err.code === '23505') {
             return res.status(409).json({ error: 'That RFID tag is already paired to another member in this gym.' });
         }
+        sendAttendanceError(res, err);
+    }
+});
+
+router.post('/rfid/unpair-member', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    const member_id = Number.parseInt(req.body?.member_id, 10);
+
+    if (!Number.isInteger(member_id)) {
+        return res.status(400).json({ error: 'member_id is required.' });
+    }
+
+    try {
+        const member = await pool.query(
+            `SELECT id, full_name, rfid_tag_id
+             FROM members
+             WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL
+             LIMIT 1`,
+            [member_id, req.user.gym_id]
+        );
+        if (member.rows.length === 0) {
+            return res.status(404).json({ error: 'Member not found.' });
+        }
+
+        await pool.query(
+            'UPDATE members SET rfid_tag_id = NULL WHERE id = $1 AND gym_id = $2',
+            [member_id, req.user.gym_id]
+        );
+
+        res.json({
+            message: member.rows[0].rfid_tag_id
+                ? 'RFID tag removed from member successfully.'
+                : 'Member did not have an RFID tag paired.',
+            member: {
+                id: member.rows[0].id,
+                full_name: member.rows[0].full_name,
+                rfid_tag_id: null,
+            },
+            previous_tag_id: member.rows[0].rfid_tag_id || null,
+        });
+    } catch (err) {
         sendAttendanceError(res, err);
     }
 });
@@ -766,6 +950,7 @@ router.get('/search', auth, saasMiddleware, requirePermission('attendance:read')
                 m.full_name,
                 m.phone,
                 m.email,
+                m.rfid_tag_id,
                 m.last_visit,
                 COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
                 ms_latest.end_date,
