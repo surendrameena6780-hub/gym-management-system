@@ -220,6 +220,11 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
 .app-mobile-nav > div {
   margin-bottom: calc(-1 * var(--safe-area-bottom));
+  background: #eef0ff;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .app-keyboard-open .app-mobile-nav,
@@ -778,6 +783,11 @@ html.gv-dark-mode .app-header-safe span.text-slate-800 { color: var(--dm-t1) !im
 html.gv-dark-mode .app-mobile-nav {
   background: var(--dm-bg) !important;
   border-top: none !important;
+}
+html.gv-dark-mode .app-mobile-nav > div {
+  background: var(--dm-bg) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 html.gv-dark-mode .gv-dashboard-hero {
   background: linear-gradient(
