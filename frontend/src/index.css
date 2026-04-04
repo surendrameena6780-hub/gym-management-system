@@ -623,8 +623,13 @@ html.gv-compact-ui main.app-scroll-shell > div {
   touch-action: pan-y;
 }
 
+.dashboard-escalated-row--swipable .dashboard-escalated-surface {
+  cursor: grab;
+}
+
 .dashboard-escalated-row--dragging .dashboard-escalated-surface {
   transition: none;
+  cursor: grabbing;
 }
 
 .dashboard-escalated-row:hover .dashboard-escalated-surface {
@@ -634,36 +639,37 @@ html.gv-compact-ui main.app-scroll-shell > div {
 .dashboard-escalated-delete-rail {
   position: absolute;
   inset: 0 0 0 auto;
-  width: 6rem;
+  width: 5.6rem;
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
-  padding: 0.3rem 0.3rem 0.3rem 0;
-  background: linear-gradient(90deg, rgba(244, 63, 94, 0) 0%, rgba(244, 63, 94, 0.14) 30%, rgba(244, 63, 94, 0.24) 100%);
+  padding: 0.45rem 0.45rem 0.45rem 0;
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0) 0%, rgba(244, 63, 94, 0.08) 36%, rgba(244, 63, 94, 0.18) 100%);
+  transition: opacity 0.2s ease;
 }
 
 .dashboard-escalated-delete-btn {
   width: 100%;
   border: 0;
-  border-radius: 0.85rem;
+  border-radius: 1rem;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 0.28rem;
-  background: linear-gradient(180deg, #fb7185 0%, #e11d48 100%);
+  background: linear-gradient(180deg, #fb7185 0%, #f43f5e 52%, #e11d48 100%);
   color: #ffffff;
   font-size: 0.62rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  box-shadow: 0 14px 28px rgba(244, 63, 94, 0.22);
-  transition: transform 0.24s ease, box-shadow 0.24s ease, opacity 0.24s ease;
+  box-shadow: 0 10px 24px rgba(244, 63, 94, 0.18);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, opacity 0.2s ease;
 }
 
 .dashboard-escalated-delete-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 18px 34px rgba(244, 63, 94, 0.26);
+  box-shadow: 0 14px 28px rgba(244, 63, 94, 0.22);
 }
 
 .dashboard-escalated-delete-btn:disabled {
@@ -908,11 +914,11 @@ html.gv-dark-mode .dashboard-escalated-call:hover {
   color: #ffffff;
 }
 html.gv-dark-mode .dashboard-escalated-delete-rail {
-  background: linear-gradient(90deg, rgba(244, 63, 94, 0) 0%, rgba(244, 63, 94, 0.12) 30%, rgba(225, 29, 72, 0.24) 100%);
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0) 0%, rgba(244, 63, 94, 0.08) 36%, rgba(225, 29, 72, 0.18) 100%);
 }
 html.gv-dark-mode .dashboard-escalated-delete-btn {
-  background: linear-gradient(180deg, #fb7185 0%, #be123c 100%);
-  box-shadow: 0 16px 30px rgba(225, 29, 72, 0.24);
+  background: linear-gradient(180deg, #fb7185 0%, #e11d48 52%, #be123c 100%);
+  box-shadow: 0 12px 24px rgba(225, 29, 72, 0.18);
 }
 html.gv-dark-mode .drawer-sheet,
 html.gv-dark-mode .app-bottom-sheet {

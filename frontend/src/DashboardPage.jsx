@@ -90,6 +90,8 @@ const EscalatedLeadRow = ({
   const offsetRef = useRef(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
   const [dragOffset, setDragOffset] = useState(offsetRef.current);
   const [isDragging, setIsDragging] = useState(false);
+  const revealProgress = Math.max(0, Math.min(1, Math.abs(dragOffset) / ESCALATED_LEAD_DELETE_WIDTH));
+  const showDeleteAction = canDelete && (isOpen || isDragging || revealProgress > 0.04);
 
   const setOffset = useCallback((nextOffset) => {
     offsetRef.current = nextOffset;
@@ -191,13 +193,23 @@ const EscalatedLeadRow = ({
     <div
       className={`dashboard-escalated-row${canDelete ? ' dashboard-escalated-row--swipable' : ''}${isDragging ? ' dashboard-escalated-row--dragging' : ''}${isOpen ? ' dashboard-escalated-row--open' : ''}${isDeleting ? ' dashboard-escalated-row--busy' : ''}`}
     >
-      {canDelete && (
-        <div className="dashboard-escalated-delete-rail" aria-hidden={!isOpen && !isDragging}>
+      {showDeleteAction && (
+        <div
+          className="dashboard-escalated-delete-rail"
+          aria-hidden={!isOpen && !isDragging}
+          style={{
+            opacity: revealProgress,
+          }}
+        >
           <button
             type="button"
             onClick={() => onDelete(lead)}
             className="dashboard-escalated-delete-btn"
             disabled={isDeleting}
+            style={{
+              opacity: Math.max(0.82, revealProgress),
+              transform: `translate3d(${(1 - revealProgress) * 12}px, 0, 0) scale(${0.94 + revealProgress * 0.06})`,
+            }}
           >
             <Trash2 size={15} />
             <span>{isDeleting ? 'Deleting' : 'Delete'}</span>
