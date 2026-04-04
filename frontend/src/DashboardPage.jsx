@@ -49,6 +49,17 @@ const loadRazorpayScript = () => {
   });
 };
 
+const DEFAULT_BROADCAST_MESSAGES = {
+  All: 'Hi {{name}}, here is an update from {{gym_name}}. Reply if you need any help with your membership.',
+  Active: 'Hi {{name}}, thanks for training with {{gym_name}}. Reply if you need help with your current plan or goals.',
+  Expiring: 'Hi {{name}}, your membership at {{gym_name}} expires this week. Renew in time to keep your plan active.',
+  Expired: 'Hi {{name}}, your membership at {{gym_name}} has expired. Reply if you want help restarting with the best plan for you.',
+  Ghosts: 'Hi {{name}}, we have missed you at {{gym_name}}. Reply if you want help getting back into your routine.',
+  HighChurn: 'Hi {{name}}, we noticed your routine at {{gym_name}} has slowed down. Reply and we will help you with the right plan to get back on track.',
+};
+
+const resolveBroadcastAudienceMessage = (audience) => DEFAULT_BROADCAST_MESSAGES[audience] || DEFAULT_BROADCAST_MESSAGES.All;
+
 
 // ─── Animation Keyframes ──────────────────────────────────────────────────────
 const animationStyles = (
@@ -747,6 +758,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     if (gymName) resolved = resolved.replace(/\{\{gym_name\}\}/gi, gymName);
     setBroadcastMessage(resolved);
   }, [broadcastTemplateKey, broadcastChannel, broadcastTemplates]);
+
+  useEffect(() => {
+    if (!showBroadcastModal || broadcastTemplateKey || broadcastCustomIds.length > 0) return;
+    if (String(broadcastMessage || '').trim()) return;
+    setBroadcastMessage(resolveBroadcastAudienceMessage(broadcastAudience));
+  }, [showBroadcastModal, broadcastAudience, broadcastTemplateKey, broadcastCustomIds.length, broadcastMessage]);
 
   // If gym name loads after template was already selected, resolve {{gym_name}} in-place
   useEffect(() => {
@@ -1635,7 +1652,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         className="gv-dashboard-hero relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 md:p-8 mb-5 sm:mb-6"
         style={{
           boxShadow: '0 20px 60px rgba(7,10,24,0.34)',
-          opacity: 0, animation: 'cardCascade 0.7s cubic-bezier(0.16,1,0.3,1) 0ms forwards'
+          opacity: 0, animation: 'cardCascade 0.7s cubic-bezier(0.16,1,0.3,1) 0ms forwards, gv-hero-gradient-drift 15s ease-in-out 700ms infinite alternate'
         }}
       >
         <div className="gv-dashboard-hero-sheen" />
@@ -1918,21 +1935,21 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 })}
 
                 {dashboardData.escalated.length > 0 && (
-                  <div className="bg-rose-50/30">
-                    <div className="px-5 py-2 bg-rose-50 border-y border-rose-100">
-                      <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <div className="dashboard-escalated-leads">
+                    <div className="dashboard-escalated-header">
+                      <p className="dashboard-escalated-title">
                         <Flame size={12} fill="currentColor" /> Escalated Leads (Call Now)
                       </p>
                     </div>
                     {dashboardData.escalated.slice(0, 3).map(lead => (
-                      <div key={lead.id} className="px-5 py-3 flex items-center justify-between border-b border-rose-50 last:border-0 hover:bg-rose-50/50">
+                      <div key={lead.id} className="dashboard-escalated-row">
                         <div className="min-w-0">
-                          <p className="text-xs font-bold text-slate-900 truncate">{lead.full_name}</p>
-                          <p className="text-[10px] text-rose-400 font-semibold mt-0.5">Unresponsive • {lead.phone}</p>
+                          <p className="dashboard-escalated-name">{lead.full_name}</p>
+                          <p className="dashboard-escalated-meta">Unresponsive • {lead.phone}</p>
                         </div>
                         <button
                           onClick={() => window.open(`tel:${lead.phone}`, '_self')}
-                          className="w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-colors"
+                          className="dashboard-escalated-call"
                         >
                           <Activity size={14} />
                         </button>
@@ -2356,7 +2373,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               </button>
             </div>
             <form onSubmit={handleBroadcast} className="flex min-h-0 flex-1 flex-col">
-              <div className="app-modal-scroll min-h-0 px-4 pb-3 pt-4 space-y-3">
+              <div className="app-modal-scroll dashboard-broadcast-scroll min-h-0 px-4 pb-3 pt-4 space-y-3">
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
                 <input
@@ -2420,7 +2437,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     <button
                       key={value}
                       type="button"
-                      onClick={() => setBroadcastAudience(value)}
+                      onClick={() => {
+                        setBroadcastAudience(value)
+                        if (broadcastSelectedMembers.length === 0 && !broadcastTemplateKey) {
+                          setBroadcastMessage(resolveBroadcastAudienceMessage(value))
+                        }
+                      }}
                       className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-150 ${
                         broadcastSelectedMembers.length === 0 && broadcastAudience === value
                           ? 'bg-emerald-500 text-white shadow shadow-emerald-200'
@@ -2470,7 +2492,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <p className="text-[10px] text-slate-400 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name &middot; {'{{gym_name}}'} fills your gym name.</p>
               </div>
               </div>
-              <div className="shrink-0 border-t border-slate-100 bg-white px-4 pb-[calc(var(--safe-area-bottom)+0.75rem)] pt-3">
+              <div className="dashboard-broadcast-footer shrink-0 border-t border-slate-100 bg-white px-4 pt-3">
                 <button type="submit"
                   className="w-full py-3 rounded-xl font-black text-sm text-white transition-all hover:opacity-90 active:scale-98"
                   style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>

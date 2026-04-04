@@ -27,6 +27,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
   // ANALYTICS DATA STATE
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [activeAnalyticsBarIndex, setActiveAnalyticsBarIndex] = useState(-1);
 
   // FORM DATA
   const [formData, setFormData] = useState({
@@ -70,6 +71,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
   const openAnalytics = async (planId) => {
     setShowAnalyticsModal(true);
     setLoadingAnalytics(true);
+    setActiveAnalyticsBarIndex(-1);
     try {
         const res = await axios.get(`/api/plans/${planId}/analytics`, {
             headers: { 'x-auth-token': token }
@@ -376,19 +378,38 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                   </div>
                 ) : (
                   <div className="flex items-end gap-2 h-[160px]" style={{ width: '100%' }}>
-                    {(analyticsData?.graphData || []).map((item, idx) => (
-                      <div key={idx} className="flex flex-col items-center justify-end gap-1.5 flex-1 h-full group">
-                        <div className="relative w-full bg-slate-100 rounded-xl overflow-hidden flex-1 flex items-end justify-center px-1 pb-0">
-                          <div
-                            style={{ height: `${Number(item.revenue) > 0 ? Math.max(8, Math.round((Number(item.revenue) / analyticsGraphMax) * 100)) : 0}%` }}
-                            className="w-full bg-slate-900 rounded-t-lg transition-all duration-500 group-hover:bg-purple-600 relative"
-                          >
-                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">₹{item.revenue}</div>
+                    {(analyticsData?.graphData || []).map((item, idx) => {
+                      const revenue = Number(item.revenue || 0)
+                      const hasRevenue = revenue > 0
+                      const isActive = activeAnalyticsBarIndex === idx
+                      const barHeight = hasRevenue ? Math.max(10, Math.round((revenue / analyticsGraphMax) * 100)) : 0
+
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setActiveAnalyticsBarIndex((prev) => prev === idx ? -1 : idx)}
+                          className="group relative flex flex-1 h-full flex-col items-center justify-end gap-1.5 bg-transparent p-0 text-left"
+                        >
+                          <div className="relative flex w-full flex-1 items-end justify-center">
+                            {hasRevenue ? (
+                              <>
+                                <div className={`absolute -top-7 left-1/2 -translate-x-1/2 rounded bg-slate-900 px-1.5 py-0.5 text-[9px] font-bold whitespace-nowrap text-white transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                  ₹{revenue.toLocaleString()}
+                                </div>
+                                <div
+                                  style={{ height: `${barHeight}%` }}
+                                  className="w-full max-w-[42px] rounded-[14px] bg-slate-900 transition-all duration-500 group-hover:bg-purple-600"
+                                />
+                              </>
+                            ) : (
+                              <div className="w-full max-w-[42px] h-0 rounded-[14px]" />
+                            )}
                           </div>
-                        </div>
-                        <span className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-full">{item.month}</span>
-                      </div>
-                    ))}
+                          <span className="text-[9px] font-bold text-slate-400 uppercase truncate max-w-full">{item.month}</span>
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
               </div>
