@@ -52,8 +52,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: var(--app-viewport-height);
-  /* Body stays dark to avoid white flash on load — must match SPLASH_BG #161d4f */
-  background: #161d4f;
+  /* Dark bottom-edge colour matches the mobile nav gradient so no gap is visible
+     on Safari / PWA home-screen.  Splash override keeps #161d4f while active. */
+  background: #080b14;
   overflow-x: hidden;
   color: #0f172a;
 }
@@ -196,19 +197,15 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-mobile-nav {
-  padding: 0.5rem 0.75rem 0;
+  padding: 0.5rem 0.75rem calc(var(--safe-area-bottom) + 0.18rem);
   background:
     linear-gradient(
       to top,
-      rgba(8, 11, 20, 0.96) 0%,
-      rgba(8, 11, 20, 0.86) calc(var(--safe-area-bottom) + 0.95rem),
+      #080b14 0%,
+      rgba(8, 11, 20, 0.92) calc(var(--safe-area-bottom) + 0.95rem),
       rgba(8, 11, 20, 0.28) calc(var(--safe-area-bottom) + 2.5rem),
       rgba(8, 11, 20, 0) calc(var(--safe-area-bottom) + 5.5rem)
     );
-}
-
-.app-mobile-nav > div {
-  padding-bottom: calc(var(--safe-area-bottom) + 0.18rem) !important;
 }
 
 .app-keyboard-open .app-mobile-nav,

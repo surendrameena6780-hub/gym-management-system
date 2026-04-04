@@ -90,57 +90,39 @@ applyInterfacePreferences(loadInterfacePreferencesLocal())
 if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   window.__gymvaultViewportSyncInstalled = true
 
-  const getFallbackViewportHeight = () => Math.max(
+  const getLayoutViewportHeight = () => Math.max(
     Math.round(window.innerHeight || 0),
     Math.round(document.documentElement.clientHeight || 0),
   )
 
-  const getCurrentVisualViewportHeight = () => {
-    const viewport = window.visualViewport
-    if (!viewport) return getFallbackViewportHeight()
-
-    const visibleViewportHeight = Math.round(viewport.height || 0)
-    const viewportOffsetTop = Math.round(viewport.offsetTop || 0)
-    return Math.max(0, visibleViewportHeight + viewportOffsetTop)
-  }
-
-  const getCurrentViewportWidth = () => Math.round(
-    window.visualViewport?.width
-    || window.innerWidth
-    || document.documentElement.clientWidth
-    || 0,
+  let stableViewportHeight = getLayoutViewportHeight()
+  let lastViewportWidth = Math.round(
+    window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0,
   )
-
-  let stableViewportHeight = getCurrentVisualViewportHeight() || getFallbackViewportHeight()
-  let lastViewportWidth = getCurrentViewportWidth()
   const KEYBOARD_OPEN_THRESHOLD_PX = 120
 
   const syncViewportVariables = () => {
-    const currentViewportWidth = getCurrentViewportWidth()
-    const widthChanged = Math.abs(currentViewportWidth - lastViewportWidth) > 48
-    const currentVisualViewportHeight = getCurrentVisualViewportHeight() || getFallbackViewportHeight()
+    const layoutHeight = getLayoutViewportHeight()
+    const viewport = window.visualViewport
+    const visibleHeight = viewport ? Math.round(viewport.height || 0) : layoutHeight
+    const currentWidth = Math.round(
+      viewport?.width || window.innerWidth || document.documentElement.clientWidth || 0,
+    )
+    const widthChanged = Math.abs(currentWidth - lastViewportWidth) > 48
+    if (currentWidth > 0) lastViewportWidth = currentWidth
 
-    if (widthChanged && currentVisualViewportHeight > 0) {
-      stableViewportHeight = currentVisualViewportHeight
-    }
-
-    if (currentViewportWidth > 0) {
-      lastViewportWidth = currentViewportWidth
-    }
-
-    const inferredKeyboardInset = Math.max(0, stableViewportHeight - currentVisualViewportHeight)
+    const inferredKeyboardInset = Math.max(0, layoutHeight - visibleHeight)
     const isKeyboardOpen = !widthChanged && inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
 
-    if (!isKeyboardOpen && currentVisualViewportHeight > 0) {
-      stableViewportHeight = currentVisualViewportHeight
-    } else if (stableViewportHeight <= 0 && currentVisualViewportHeight > 0) {
-      stableViewportHeight = currentVisualViewportHeight
+    // Track the layout viewport height (innerHeight) — NOT the visual viewport.
+    // On Safari, visualViewport.height is smaller when the toolbar is visible,
+    // but innerHeight matches the CSS layout viewport that fixed elements use.
+    if (!isKeyboardOpen && layoutHeight > 0) {
+      stableViewportHeight = layoutHeight
     }
 
-    const appliedViewportHeight = isKeyboardOpen ? stableViewportHeight : currentVisualViewportHeight
-
-    if (appliedViewportHeight > 0) {
-      document.documentElement.style.setProperty('--app-viewport-height', `${appliedViewportHeight}px`)
+    if (stableViewportHeight > 0) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${stableViewportHeight}px`)
     }
 
     document.documentElement.style.setProperty('--app-keyboard-inset', `${isKeyboardOpen ? inferredKeyboardInset : 0}px`)
