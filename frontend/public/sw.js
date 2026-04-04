@@ -1,5 +1,5 @@
-const CACHE_NAME = 'gymvault-v3';
-const PRECACHE_URLS = ['/', '/index.html', '/manifest.webmanifest', '/vite.svg'];
+const CACHE_NAME = 'gymvault-v4';
+const PRECACHE_URLS = ['/', '/index.html', '/manifest.webmanifest', '/gymvault-app-icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -53,8 +53,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'GymVault', {
       body: data.body || '',
-      icon: data.icon || '/vite.svg',
-      badge: data.badge || '/vite.svg',
+      icon: data.icon || '/gymvault-app-icon.svg',
+      badge: data.badge || '/gymvault-app-icon.svg',
       tag: data.tag || 'gymvault-push',
       data: { url: data.url || '/' },
     })

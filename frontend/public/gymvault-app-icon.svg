@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="bgGradient" x1="96" x2="416" y1="64" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#25222e" />
+      <stop offset="0.55" stop-color="#211f2a" />
+      <stop offset="1" stop-color="#1a1823" />
+    </linearGradient>
+    <radialGradient id="bgGlowTop" cx="0" cy="0" r="1" gradientTransform="translate(180 138) rotate(41.2) scale(232 218)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7d5cff" stop-opacity="0.18" />
+      <stop offset="1" stop-color="#7d5cff" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="bgGlowBottom" cx="0" cy="0" r="1" gradientTransform="translate(330 356) rotate(122.6) scale(214 210)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d9ff" stop-opacity="0.14" />
+      <stop offset="1" stop-color="#22d9ff" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="brandGradient" x1="136" x2="386" y1="372" y2="132" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#21ddff" />
+      <stop offset="0.46" stop-color="#6c9fff" />
+      <stop offset="1" stop-color="#a55cff" />
+    </linearGradient>
+    <filter id="brandGlow" x="74" y="58" width="364" height="392" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#8a63ff" flood-opacity="0.48" />
+      <feDropShadow dx="0" dy="0" stdDeviation="34" flood-color="#25d8ff" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bgGradient)" />
+  <rect width="512" height="512" fill="url(#bgGlowTop)" />
+  <rect width="512" height="512" fill="url(#bgGlowBottom)" />
+
+  <g filter="url(#brandGlow)" transform="translate(0 4)">
+    <path
+      fill="url(#brandGradient)"
+      stroke="#24202c"
+      stroke-linejoin="round"
+      stroke-width="9"
+      d="M256 104 371 168 338 336 256 392 174 336 141 168Z"
+    />
+    <path
+      fill="#211e29"
+      stroke="#24202c"
+      stroke-linejoin="round"
+      stroke-width="9"
+      d="M256 143 325 181 302 296 256 327 210 296 187 181Z"
+    />
+
+    <g fill="url(#brandGradient)" stroke="#24202c" stroke-linejoin="round" stroke-width="9">
+      <path d="M121 296 152 279 172 316 140 333Z" />
+      <path d="M159 274 191 257 213 297 181 314Z" />
+      <path d="M177 180 209 163 244 227 212 244Z" />
+      <path d="M297 343 359 204 391 219 329 358Z" />
+    </g>
+
+    <g fill="url(#brandGradient)" stroke="#24202c" stroke-linejoin="round" stroke-width="9" transform="rotate(24 378 175)">
+      <rect x="348" y="121" width="61" height="17" rx="5" />
+      <rect x="341" y="146" width="75" height="17" rx="5" />
+      <rect x="334" y="171" width="89" height="17" rx="5" />
+    </g>
+
+    <circle cx="256" cy="219" r="22" fill="#201d28" />
+    <path fill="#201d28" d="M243 239c0-9 6-17 13-17s13 8 13 17v41h-26Z" />
+  </g>
+
+  <ellipse cx="256" cy="430" rx="76" ry="10" fill="#0f0d16" opacity="0.42" />
+</svg>

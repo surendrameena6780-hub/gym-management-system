@@ -668,8 +668,8 @@ const buildMemberRenewalCampaign = async ({ gym, timezone, localDate, limit, set
                 title: message.title,
                 body: message.body,
                 url: MEMBER_APP_URL,
-                icon: '/vite.svg',
-                badge: '/vite.svg',
+                icon: '/gymvault-app-icon.svg',
+                badge: '/gymvault-app-icon.svg',
                 tag: `gymvault-member-renewal-${gym.id}`,
             };
         },
@@ -705,8 +705,8 @@ const buildMemberDueCampaign = async ({ gym, timezone, localDate, limit, setting
                 title: message.title,
                 body: message.body,
                 url: MEMBER_APP_URL,
-                icon: '/vite.svg',
-                badge: '/vite.svg',
+                icon: '/gymvault-app-icon.svg',
+                badge: '/gymvault-app-icon.svg',
                 tag: `gymvault-member-due-${gym.id}`,
             };
         },
@@ -742,8 +742,8 @@ const buildMemberComebackCampaign = async ({ gym, timezone, localDate, limit, se
                 title: message.title,
                 body: message.body,
                 url: MEMBER_APP_URL,
-                icon: '/vite.svg',
-                badge: '/vite.svg',
+                icon: '/gymvault-app-icon.svg',
+                badge: '/gymvault-app-icon.svg',
                 tag: `gymvault-member-comeback-${gym.id}`,
             };
         },
@@ -877,8 +877,8 @@ const runAutomatedNotificationNudges = async ({ dryRun = false, forceSlot = null
                                         {
                                             title: internalCandidate.title,
                                             body: internalCandidate.body,
-                                            icon: '/vite.svg',
-                                            badge: '/vite.svg',
+                                            icon: '/gymvault-app-icon.svg',
+                                            badge: '/gymvault-app-icon.svg',
                                             url: internalCandidate.url || '/dashboard',
                                             tag: `gymvault-auto-${slot.key.toLowerCase()}-${internalCandidate.key.toLowerCase()}`,
                                         },
