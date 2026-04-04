@@ -562,7 +562,7 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
 
   return (
     <div className="app-min-shell-height font-['Inter'] overflow-y-auto"
-      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)', paddingTop: 'var(--safe-area-top)' }}>
+      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)' }}>
 
       {/* Ambient blobs */}
       <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none"
@@ -571,8 +571,8 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
         style={{ background: 'radial-gradient(circle, rgba(168,85,247,0.15) 0%, transparent 70%)', filter: 'blur(90px)' }} />
 
       {/* ── Sticky header ── */}
-      <div className="sticky top-0 z-10 px-5 py-4 flex items-center justify-between"
-        style={{ background: 'rgba(6,11,20,0.88)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="sticky top-0 z-10 px-5 pb-4 flex items-center justify-between"
+        style={{ paddingTop: 'calc(var(--safe-area-top) + 1rem)', background: 'rgba(6,11,20,0.88)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center"
             style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
@@ -1193,7 +1193,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="app-min-shell-height flex font-['Inter'] overflow-hidden" style={{ background: '#060b14', paddingTop: 'var(--safe-area-top)' }}>
+    <div className="app-min-shell-height flex font-['Inter'] overflow-hidden" style={{ background: '#060b14' }}>
 
       {/* ════════════════════ LEFT PANEL — desktop only ═══════════════════════ */}
       <div
@@ -1277,8 +1277,12 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
       {/* ════════════════════ RIGHT PANEL — Form ════════════════════════════════ */}
       <div
-        className="flex-1 flex flex-col items-center justify-center p-5 md:p-12 overflow-y-auto"
-        style={{ background: 'linear-gradient(170deg, #0c1120 0%, #090c18 100%)' }}
+        className="flex-1 flex flex-col items-center justify-start lg:justify-center p-5 md:p-12 overflow-y-auto"
+        style={{
+          background: 'linear-gradient(170deg, #0c1120 0%, #090c18 100%)',
+          paddingTop: 'max(1rem, var(--safe-area-top))',
+          paddingBottom: 'max(1rem, var(--safe-area-bottom))',
+        }}
       >
         {/* Mobile logo */}
         <div className="lg:hidden flex items-center gap-2.5 mb-8">
@@ -1289,7 +1293,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
           <span className="text-white font-black text-lg tracking-tight">GymVault</span>
         </div>
 
-        <div className="w-full max-w-[390px]">
+        <div className="w-full max-w-[390px] flex min-h-full flex-col">
 
           {/* Page title */}
           <div className="mb-7">
@@ -1470,7 +1474,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
           </div>{/* end animated tab content */}
 
-          <p className="text-center text-slate-700 text-[10px] font-medium mt-8">
+          <p className="text-center text-slate-700 text-[10px] font-medium mt-auto pt-8">
             Authorized Personnel Only &nbsp;·&nbsp; GymVault v2.0
           </p>
         </div>
