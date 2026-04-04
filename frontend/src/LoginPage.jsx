@@ -562,7 +562,7 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
 
   return (
     <div className="app-min-shell-height font-['Inter'] overflow-y-auto"
-      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)' }}>
+      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)', paddingTop: 'var(--safe-area-top)' }}>
 
       {/* Ambient blobs */}
       <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none"
@@ -1193,7 +1193,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="app-min-shell-height flex font-['Inter'] overflow-hidden" style={{ background: '#060b14' }}>
+    <div className="app-min-shell-height flex font-['Inter'] overflow-hidden" style={{ background: '#060b14', paddingTop: 'var(--safe-area-top)' }}>
 
       {/* ════════════════════ LEFT PANEL — desktop only ═══════════════════════ */}
       <div

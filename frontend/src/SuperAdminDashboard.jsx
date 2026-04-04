@@ -651,7 +651,7 @@ function SuperAdminDashboard({ token, onLogout }) {
   };
 
   if (loading) {
-    return <div className="app-min-shell-height flex items-center justify-center bg-[#050505] text-rose-500 font-black tracking-widest">LOADING HQ...</div>;
+    return <div className="app-min-shell-height flex items-center justify-center bg-[#050505] text-rose-500 font-black tracking-widest" style={{ paddingTop: 'var(--safe-area-top)' }}>LOADING HQ...</div>;
   }
 
   const stats = overview.stats || {};
@@ -717,7 +717,7 @@ function SuperAdminDashboard({ token, onLogout }) {
   );
 
   return (
-    <div className="app-min-shell-height bg-[#050505] text-slate-200 font-['Inter'] p-6 lg:p-8">
+    <div className="app-min-shell-height bg-[#050505] text-slate-200 font-['Inter'] p-6 lg:p-8" style={{ paddingTop: 'max(1.5rem, var(--safe-area-top))' }}>
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>

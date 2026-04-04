@@ -30,7 +30,7 @@ function SuperAdminLogin({ setSuperToken }) {
   };
 
   return (
-    <div className="app-min-shell-height flex items-center justify-center font-['Inter'] bg-[#050505] relative overflow-hidden">
+    <div className="app-min-shell-height flex items-center justify-center font-['Inter'] bg-[#050505] relative overflow-hidden" style={{ paddingTop: 'var(--safe-area-top)' }}>
       {/* Red/Gold HQ ambient glow */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full pointer-events-none"
         style={{ background: 'radial-gradient(circle, rgba(225,29,72,0.15) 0%, transparent 70%)', filter: 'blur(40px)' }} />

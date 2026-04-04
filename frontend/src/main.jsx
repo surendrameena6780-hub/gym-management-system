@@ -90,35 +90,28 @@ applyInterfacePreferences(loadInterfacePreferencesLocal())
 if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   window.__gymvaultViewportSyncInstalled = true
 
-  const getLayoutViewportHeight = () => Math.max(
+  let stableViewportHeight = Math.max(
     Math.round(window.innerHeight || 0),
     Math.round(document.documentElement.clientHeight || 0),
-  )
-
-  let stableViewportHeight = getLayoutViewportHeight()
-  let lastViewportWidth = Math.round(
-    window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0,
   )
   const KEYBOARD_OPEN_THRESHOLD_PX = 120
 
   const syncViewportVariables = () => {
-    const layoutHeight = getLayoutViewportHeight()
     const viewport = window.visualViewport
-    const visibleHeight = viewport ? Math.round(viewport.height || 0) : layoutHeight
-    const currentWidth = Math.round(
-      viewport?.width || window.innerWidth || document.documentElement.clientWidth || 0,
+    const layoutViewportHeight = Math.max(
+      Math.round(window.innerHeight || 0),
+      Math.round(document.documentElement.clientHeight || 0),
+      stableViewportHeight || 0,
     )
-    const widthChanged = Math.abs(currentWidth - lastViewportWidth) > 48
-    if (currentWidth > 0) lastViewportWidth = currentWidth
+    const visibleViewportHeight = Math.round(viewport?.height || layoutViewportHeight || 0)
+    const viewportOffsetTop = Math.round(viewport?.offsetTop || 0)
+    const inferredKeyboardInset = Math.max(0, layoutViewportHeight - visibleViewportHeight - viewportOffsetTop)
+    const isKeyboardOpen = inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
 
-    const inferredKeyboardInset = Math.max(0, layoutHeight - visibleHeight)
-    const isKeyboardOpen = !widthChanged && inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
-
-    // Track the layout viewport height (innerHeight) — NOT the visual viewport.
-    // On Safari, visualViewport.height is smaller when the toolbar is visible,
-    // but innerHeight matches the CSS layout viewport that fixed elements use.
-    if (!isKeyboardOpen && layoutHeight > 0) {
-      stableViewportHeight = layoutHeight
+    if (!isKeyboardOpen && layoutViewportHeight > 0) {
+      stableViewportHeight = layoutViewportHeight
+    } else if (layoutViewportHeight > stableViewportHeight) {
+      stableViewportHeight = layoutViewportHeight
     }
 
     if (stableViewportHeight > 0) {

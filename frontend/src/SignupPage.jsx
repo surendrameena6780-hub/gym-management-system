@@ -285,7 +285,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
   return (
     <div
       className="app-min-shell-height flex items-center justify-center font-['Inter'] p-4 py-10 overflow-y-auto"
-      style={{ background: T.page, transition: 'background 0.4s ease' }}
+      style={{ background: T.page, transition: 'background 0.4s ease', paddingTop: 'max(2.5rem, var(--safe-area-top))' }}
     >
       {/* Ambient blobs */}
       <div className="fixed -top-32 -left-32 w-96 h-96 rounded-full pointer-events-none"
