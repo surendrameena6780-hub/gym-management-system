@@ -225,7 +225,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-mobile-nav > div {
-  margin-bottom: calc(-1 * var(--safe-area-bottom));
+  margin-bottom: calc(0.45rem - var(--safe-area-bottom));
 }
 
 .app-keyboard-open .app-mobile-nav,
