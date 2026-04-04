@@ -65,28 +65,100 @@ const buildPaymentLinkCustomer = (member = {}) => {
     };
 };
 
-const buildPaidPaymentLinkResult = (paymentLink) => {
-    const status = String(paymentLink?.status || '').trim().toLowerCase();
-    const payment = paymentLink?.payments && typeof paymentLink.payments === 'object' && !Array.isArray(paymentLink.payments)
-        ? paymentLink.payments
-        : null;
-
-    if (status !== 'paid' || !payment) {
-        return null;
-    }
-
-    const paymentId = String(payment.payment_id || '').trim();
-    const paymentStatus = String(payment.status || '').trim().toLowerCase();
+const normalizeSettledPaymentEntity = (payment, fallbackAmountPaise = 0) => {
+    const paymentId = String(payment?.payment_id || payment?.id || '').trim();
+    const paymentStatus = String(payment?.status || '').trim().toLowerCase();
     if (!paymentId || paymentStatus === 'failed') {
         return null;
     }
 
-    const paidAmountPaise = Number(payment.amount || paymentLink?.amount_paid || 0);
+    const rawAmount = Number(payment?.amount || fallbackAmountPaise || 0);
     return {
         paymentId,
-        amount: Number.isFinite(paidAmountPaise) ? Math.round(paidAmountPaise) / 100 : 0,
-        method: String(payment.method || '').trim(),
+        amount: Number.isFinite(rawAmount) ? Math.round(rawAmount) / 100 : 0,
+        method: String(payment?.method || '').trim(),
     };
+};
+
+const buildPaidPaymentLinkResult = (paymentLink) => {
+    const status = String(paymentLink?.status || '').trim().toLowerCase();
+    if (status !== 'paid') {
+        return null;
+    }
+
+    const paidAmountPaise = Number(paymentLink?.amount_paid || paymentLink?.amount || 0);
+    const paymentCandidates = [];
+
+    if (paymentLink?.payment_id) {
+        paymentCandidates.push({
+            id: paymentLink.payment_id,
+            amount: paidAmountPaise,
+            method: paymentLink.method,
+            status: paymentLink.payment_status || paymentLink.status,
+        });
+    }
+
+    if (Array.isArray(paymentLink?.payments)) {
+        paymentCandidates.push(...paymentLink.payments);
+    } else if (paymentLink?.payments && typeof paymentLink.payments === 'object') {
+        if (Array.isArray(paymentLink.payments.items)) {
+            paymentCandidates.push(...paymentLink.payments.items);
+        }
+        paymentCandidates.push(paymentLink.payments);
+    }
+
+    const settledPayment = paymentCandidates
+        .map((payment) => normalizeSettledPaymentEntity(payment, paidAmountPaise))
+        .find(Boolean);
+
+    return {
+        paymentId: settledPayment?.paymentId || '',
+        linkId: String(paymentLink?.id || '').trim(),
+        amount: Number.isFinite(paidAmountPaise) ? Math.round(paidAmountPaise) / 100 : 0,
+        method: settledPayment?.method || String(paymentLink?.method || '').trim(),
+    };
+};
+
+const resolvePaidPaymentLinkResult = async (razorpayClient, paymentLink) => {
+    const settledPayment = buildPaidPaymentLinkResult(paymentLink);
+    if (!settledPayment) {
+        return null;
+    }
+    if (settledPayment.paymentId) {
+        return settledPayment;
+    }
+
+    const linkId = String(paymentLink?.id || '').trim();
+    if (!linkId || !razorpayClient?.api?.get) {
+        return settledPayment;
+    }
+
+    try {
+        const paymentList = await razorpayClient.api.get({
+            url: '/payments',
+            data: {
+                payment_link_id: linkId,
+                count: 10,
+            },
+        });
+        const paidAmountPaise = Number(paymentLink?.amount_paid || paymentLink?.amount || 0);
+        const fetchedPayment = (Array.isArray(paymentList?.items) ? paymentList.items : [])
+            .map((payment) => normalizeSettledPaymentEntity(payment, paidAmountPaise))
+            .find(Boolean);
+
+        if (!fetchedPayment) {
+            return settledPayment;
+        }
+
+        return {
+            ...settledPayment,
+            paymentId: fetchedPayment.paymentId,
+            method: fetchedPayment.method || settledPayment.method,
+            amount: fetchedPayment.amount || settledPayment.amount,
+        };
+    } catch (_err) {
+        return settledPayment;
+    }
 };
 
 const createCollectionPaymentLink = async ({
@@ -524,7 +596,7 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
             key_secret: collectionSetup.data.razorpay.keySecret,
         });
         const paymentLink = await razorpayClient.paymentLink.fetch(payment_link_id);
-        const settledPayment = buildPaidPaymentLinkResult(paymentLink);
+        const settledPayment = await resolvePaidPaymentLinkResult(razorpayClient, paymentLink);
 
         if (!settledPayment) {
             return res.json({
@@ -538,21 +610,26 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
             });
         }
 
+        const settledTransactionIds = Array.from(new Set([
+            settledPayment.paymentId,
+            settledPayment.linkId,
+        ].map((value) => String(value || '').trim()).filter(Boolean)));
+
         const existingPayment = await pool.query(
             `SELECT id
              FROM payments
              WHERE gym_id = $1
-               AND transaction_id = $2
+               AND transaction_id = ANY($2::text[])
                AND deleted_at IS NULL
              LIMIT 1`,
-            [gym_id, settledPayment.paymentId]
+            [gym_id, settledTransactionIds]
         );
         if (existingPayment.rows.length > 0) {
             return res.json({
                 paid: true,
                 already_processed: true,
                 status: 'PAID',
-                payment_id: settledPayment.paymentId,
+                payment_id: settledPayment.paymentId || settledPayment.linkId,
                 payment_method: settledPayment.method || null,
             });
         }
@@ -562,7 +639,7 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
             memberId: member_id,
             planId: plan_id,
             paymentMode: 'Online',
-            paymentId: settledPayment.paymentId,
+            paymentId: settledPayment.paymentId || settledPayment.linkId,
         });
         if (!result.ok) {
             return res.status(result.status).json({ error: result.error });
@@ -572,7 +649,7 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
             ...result.data,
             paid: true,
             status: 'PAID',
-            payment_id: settledPayment.paymentId,
+            payment_id: settledPayment.paymentId || settledPayment.linkId,
             payment_method: settledPayment.method || null,
         });
     } catch (err) {
