@@ -9,7 +9,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
-import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount, maskCollectionContact } from './utils/memberCollection';
+import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -1776,7 +1776,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Razorpay now sends a hosted payment link to the member and also gives you a QR on this screen.' : 'Record a smooth cash settlement right from the ledger.'}</p>
+                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Razorpay now sends the member a hosted payment link and also shows a QR on this screen.' : 'Record a smooth cash settlement right from the ledger.'}</p>
                 </div>
               </div>
 
@@ -1810,8 +1810,8 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
               {dueFormData.payment_mode === 'Online' && dueOnlineMode === 'RAZORPAY' && dueRazorpayContext?.payment_link && (
                 <div className="rounded-[26px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-4 py-4 shadow-sm space-y-4">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                    <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
                       <QRCodeCanvas
                         value={dueRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
                         size={156}
@@ -1826,11 +1826,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-500/70">Razorpay Payment Link</p>
                         <p className="text-lg font-black text-slate-900 mt-1">₹{formatCollectionAmount(dueRazorpayContext.payment_link.amount)}</p>
                         <p className="text-sm font-semibold text-slate-600 mt-1">
-                          {dueRazorpayContext.payment_link.notify?.sms && dueRazorpayContext.payment_link.customer_contact
-                            ? `A Razorpay link has been sent to ${maskCollectionContact(dueRazorpayContext.payment_link.customer_contact)}. Keep this screen open or let the member scan the QR.`
-                            : dueRazorpayContext.payment_link.notify?.email && dueRazorpayContext.payment_link.customer_email
-                              ? `A Razorpay link has been sent to ${dueRazorpayContext.payment_link.customer_email}. Keep this screen open or let the member scan the QR.`
-                              : 'No member phone or email is saved, so show this QR or copy the payment link manually.'}
+                          {describeCollectionLinkDelivery(dueRazorpayContext.payment_link).message}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-white/80 bg-white/90 px-3 py-3 space-y-2">
@@ -1841,16 +1837,13 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivery</p>
                           <p className="text-sm font-bold text-slate-700">
-                            {dueRazorpayContext.payment_link.notify?.sms && dueRazorpayContext.payment_link.customer_contact
-                              ? `SMS to ${maskCollectionContact(dueRazorpayContext.payment_link.customer_contact)}`
-                              : dueRazorpayContext.payment_link.notify?.email && dueRazorpayContext.payment_link.customer_email
-                                ? `Email to ${dueRazorpayContext.payment_link.customer_email}`
-                                : 'Manual share required'}
+                            {describeCollectionLinkDelivery(dueRazorpayContext.payment_link).label}
                           </p>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => handleCopyDueCollectionDetail(dueRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-orange-600 border border-orange-200 hover:bg-orange-50 transition-colors">Copy Link</button>
+                        <button type="button" onClick={() => openCollectionLink(dueRazorpayContext.payment_link.short_url)} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Open Link</button>
                         <button type="button" onClick={() => checkDueRazorpayStatus({ manual: true })} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Check Status</button>
                       </div>
                     </div>
@@ -1861,8 +1854,8 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
               {dueFormData.payment_mode === 'Online' && dueOnlineMode === 'UPI' && dueCollectionContext && (
                 <div className="rounded-[26px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-4 py-4 shadow-sm">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                    <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
                       <QRCodeCanvas
                         value={buildUpiCollectionUri({
                           upiId: dueCollectionContext.upi_id,

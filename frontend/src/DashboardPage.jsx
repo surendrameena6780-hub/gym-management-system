@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
-import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount, maskCollectionContact } from './utils/memberCollection';
+import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import PageLoader from './PageLoader';
 
 // ─── Count-Up Hook ─────────────────────────────────────────────────────────────
@@ -2624,8 +2624,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               )}
               {paymentMode === 'Online' && paymentOnlineMode === 'RAZORPAY' && paymentRazorpayContext?.payment_link && (
                 <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 px-4 py-4 shadow-sm space-y-4">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                    <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
                       <QRCodeCanvas
                         value={paymentRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
                         size={150}
@@ -2640,11 +2640,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500/70">Razorpay Payment Link</p>
                         <p className="text-lg font-black text-slate-900 mt-1">₹{formatCollectionAmount(paymentRazorpayContext.payment_link.amount)}</p>
                         <p className="text-sm font-semibold text-slate-600 mt-1">
-                          {paymentRazorpayContext.payment_link.notify?.sms && paymentRazorpayContext.payment_link.customer_contact
-                            ? `A Razorpay link has been sent to ${maskCollectionContact(paymentRazorpayContext.payment_link.customer_contact)}. Keep this screen open or let the member scan the QR.`
-                            : paymentRazorpayContext.payment_link.notify?.email && paymentRazorpayContext.payment_link.customer_email
-                              ? `A Razorpay link has been sent to ${paymentRazorpayContext.payment_link.customer_email}. Keep this screen open or let the member scan the QR.`
-                              : 'No member phone or email is saved, so show this QR or copy the payment link manually.'}
+                          {describeCollectionLinkDelivery(paymentRazorpayContext.payment_link).message}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-white/80 bg-white/90 px-3 py-3 space-y-2">
@@ -2655,16 +2651,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivery</p>
                           <p className="text-sm font-bold text-slate-700">
-                            {paymentRazorpayContext.payment_link.notify?.sms && paymentRazorpayContext.payment_link.customer_contact
-                              ? `SMS to ${maskCollectionContact(paymentRazorpayContext.payment_link.customer_contact)}`
-                              : paymentRazorpayContext.payment_link.notify?.email && paymentRazorpayContext.payment_link.customer_email
-                                ? `Email to ${paymentRazorpayContext.payment_link.customer_email}`
-                                : 'Manual share required'}
+                            {describeCollectionLinkDelivery(paymentRazorpayContext.payment_link).label}
                           </p>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => handleCopyPaymentCollectionDetail(paymentRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50 transition-colors">Copy Link</button>
+                        <button type="button" onClick={() => openCollectionLink(paymentRazorpayContext.payment_link.short_url)} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Open Link</button>
                         <button type="button" onClick={() => checkDashboardRazorpayStatus({ manual: true })} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Check Status</button>
                       </div>
                     </div>
@@ -2674,8 +2667,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               )}
               {paymentMode === 'Online' && paymentOnlineMode === 'UPI' && paymentCollectionContext && (
                 <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 px-4 py-4 shadow-sm">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                    <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
                       <QRCodeCanvas
                         value={buildUpiCollectionUri({
                           upiId: paymentCollectionContext.upi_id,

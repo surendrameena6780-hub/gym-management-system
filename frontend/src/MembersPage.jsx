@@ -8,7 +8,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
-import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount, maskCollectionContact } from './utils/memberCollection';
+import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
@@ -1916,12 +1916,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         <div className="app-modal-shell z-[110] bg-slate-900/70 backdrop-blur-sm">
           <div className="app-modal-panel rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200"
             style={{ background: 'linear-gradient(180deg, #1e1b4b 0%, #0f172a 100%)' }}>
-            <div className="p-8 text-center">
+            <div className="p-8 text-center shrink-0">
               <div className="w-16 h-16 bg-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3 border border-purple-500/30"><Zap size={32} fill="currentColor" /></div>
               <h2 className="text-2xl font-black text-white tracking-tight">Activate Plan</h2>
               <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">For {selectedMember?.full_name}</p>
             </div>
-            <div className="px-8 pb-8 space-y-4">
+            <div className="app-modal-scroll px-8 pb-8 space-y-4">
               <div className="relative">
                 <select required className="w-full px-5 py-4 rounded-2xl focus:outline-none text-sm font-black appearance-none cursor-pointer border border-white/10" style={{ background: 'rgba(255,255,255,0.07)', color: '#e2e8f0' }} value={selectedPlanId} onChange={(e) => { setSelectedPlanId(e.target.value); setActivationCollectionContext(null); setActivationRazorpayContext(null); setActivationReference(''); }}>
                   <option value="" style={{ background: '#1e1b4b' }}>Select Membership Plan...</option>
@@ -1952,12 +1952,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-slate-400 font-medium mt-2">{activationOnlineMode === 'RAZORPAY' ? 'Razorpay sends the member a hosted payment link and also gives you a QR to show from this screen.' : 'Direct UPI shows your gym QR and lets you record the receipt after payment.'}</p>
+                <p className="text-xs text-slate-400 font-medium mt-2">{activationOnlineMode === 'RAZORPAY' ? 'Razorpay sends the member a payment link and also shows the same hosted checkout QR on this screen.' : 'Direct UPI shows your gym QR and lets you record the receipt after payment.'}</p>
               </div>
               {activationOnlineMode === 'RAZORPAY' && activationRazorpayContext?.payment_link && (
                 <div className="rounded-[28px] border border-white/10 bg-white/8 p-4 space-y-4">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-xl shadow-slate-950/20">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                    <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-xl shadow-slate-950/20">
                       <QRCodeCanvas
                         value={activationRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
                         size={156}
@@ -1972,11 +1972,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-200/70">Razorpay Payment Link</p>
                         <p className="text-xl font-black text-white mt-1">₹{formatCollectionAmount(activationRazorpayContext.payment_link.amount)}</p>
                         <p className="text-sm font-semibold text-slate-300 mt-1">
-                          {activationRazorpayContext.payment_link.notify?.sms && activationRazorpayContext.payment_link.customer_contact
-                            ? `A Razorpay link has been sent to ${maskCollectionContact(activationRazorpayContext.payment_link.customer_contact)}. Keep this screen open or let the member scan the QR.`
-                            : activationRazorpayContext.payment_link.notify?.email && activationRazorpayContext.payment_link.customer_email
-                              ? `A Razorpay link has been sent to ${activationRazorpayContext.payment_link.customer_email}. Keep this screen open or let the member scan the QR.`
-                              : 'No member phone or email is saved, so show this QR or copy the payment link manually.'}
+                          {describeCollectionLinkDelivery(activationRazorpayContext.payment_link).message}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-white/10 bg-slate-950/35 px-3 py-3 space-y-2">
@@ -1987,11 +1983,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivery</p>
                           <p className="text-sm font-bold text-slate-200">
-                            {activationRazorpayContext.payment_link.notify?.sms && activationRazorpayContext.payment_link.customer_contact
-                              ? `SMS to ${maskCollectionContact(activationRazorpayContext.payment_link.customer_contact)}`
-                              : activationRazorpayContext.payment_link.notify?.email && activationRazorpayContext.payment_link.customer_email
-                                ? `Email to ${activationRazorpayContext.payment_link.customer_email}`
-                                : 'Manual share required'}
+                            {describeCollectionLinkDelivery(activationRazorpayContext.payment_link).label}
                           </p>
                         </div>
                       </div>
@@ -1999,6 +1991,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={() => handleCopyActivationDetail(activationRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-violet-300/30 bg-white/10 text-violet-100 hover:bg-white/15 transition-colors">Copy Link</button>
+                    <button type="button" onClick={() => openCollectionLink(activationRazorpayContext.payment_link.short_url)} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Open Link</button>
                     <button type="button" onClick={() => { const selectedPlan = plans.find((plan) => plan.id === parseInt(selectedPlanId, 10)); if (selectedPlan) { checkActivationRazorpayStatus(selectedPlan, { manual: true }); } }} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Check Status</button>
                   </div>
                   <p className="text-[11px] font-semibold text-violet-100/75">The member can pay from their own phone using the Razorpay link, or scan this QR from your phone. We also keep checking automatically while this modal stays open.</p>
@@ -2006,8 +1999,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               )}
               {activationOnlineMode === 'UPI' && activationCollectionContext && (
                 <div className="rounded-[28px] border border-white/10 bg-white/8 p-4 space-y-4">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-xl shadow-slate-950/20">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                    <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-xl shadow-slate-950/20">
                       <QRCodeCanvas
                         value={buildUpiCollectionUri({
                           upiId: activationCollectionContext.upi_id,

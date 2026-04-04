@@ -45,3 +45,37 @@ export const maskCollectionContact = (value) => {
   const visibleTail = digits.slice(-4);
   return `••••${visibleTail}`;
 };
+
+export const describeCollectionLinkDelivery = (paymentLink) => {
+  const maskedContact = paymentLink?.customer_contact ? maskCollectionContact(paymentLink.customer_contact) : '';
+  const email = String(paymentLink?.customer_email || '').trim();
+
+  if (paymentLink?.notify?.sms && maskedContact) {
+    return {
+      message: `A Razorpay payment link has been sent to ${maskedContact}. Keep this screen open or let the member scan the QR.`,
+      label: `Razorpay SMS to ${maskedContact}`,
+    };
+  }
+
+  if (paymentLink?.notify?.email && email) {
+    return {
+      message: `A payment link has been sent to ${email}. Keep this screen open or let the member scan the QR.`,
+      label: `Email to ${email}`,
+    };
+  }
+
+  return {
+    message: 'No member phone or email is saved, so show this QR or copy the payment link manually.',
+    label: 'Manual share required',
+  };
+};
+
+export const openCollectionLink = (value) => {
+  const url = String(value || '').trim();
+  if (!url || typeof window === 'undefined') {
+    return false;
+  }
+
+  window.open(url, '_blank', 'noopener,noreferrer');
+  return true;
+};

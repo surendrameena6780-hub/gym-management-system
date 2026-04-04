@@ -74,6 +74,8 @@ const buildAutoCollectionReference = (paymentId) => `DUE-${paymentId}-${Date.now
 
 const normalizeCollectionContact = (value) => {
     const digitsOnly = String(value || '').replace(/\D/g, '');
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) return digitsOnly.slice(2);
+    if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) return digitsOnly.slice(1);
     if (digitsOnly.length < 10 || digitsOnly.length > 15) return '';
     return digitsOnly;
 };

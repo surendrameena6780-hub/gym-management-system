@@ -161,6 +161,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   animation: gv-overlay-in 0.25s ease both;
 }
 
@@ -188,6 +189,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   scroll-padding-bottom: calc(var(--safe-area-bottom) + 1rem);
 }
 
