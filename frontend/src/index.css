@@ -216,12 +216,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
 .app-mobile-nav {
   padding-bottom: var(--safe-area-bottom);
-  background: linear-gradient(
-    to top,
-    rgba(243, 244, 255, 0.98) 0%,
-    rgba(243, 244, 255, 0.94) calc(var(--safe-area-bottom) + 0.85rem),
-    rgba(243, 244, 255, 0) calc(var(--safe-area-bottom) + 4rem)
-  );
+  background: #f3f4ff;
 }
 
 .app-mobile-nav > div {
@@ -467,18 +462,18 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .gv-dashboard-hero::before {
-  inset: -28% auto auto -14%;
-  width: 24rem;
-  height: 24rem;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.32) 0%, transparent 66%);
+  inset: -14% auto auto 6%;
+  width: 18rem;
+  height: 18rem;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.24) 0%, transparent 68%);
   animation: gv-hero-wave-a 15s ease-in-out infinite alternate;
 }
 
 .gv-dashboard-hero::after {
-  inset: auto -10% -38% auto;
-  width: 22rem;
-  height: 22rem;
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.24) 0%, transparent 68%);
+  inset: auto 6% -24% auto;
+  width: 18rem;
+  height: 18rem;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.18) 0%, transparent 70%);
   animation: gv-hero-wave-b 18s ease-in-out infinite alternate;
 }
 
@@ -501,29 +496,29 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .gv-dashboard-hero-orb-a {
-  top: 12%;
-  right: 8%;
-  width: 18rem;
-  height: 18rem;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.2) 0%, transparent 70%);
+  top: 16%;
+  right: 12%;
+  width: 14rem;
+  height: 14rem;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 72%);
   animation: gv-hero-wave-b 16s ease-in-out infinite alternate;
 }
 
 .gv-dashboard-hero-orb-b {
-  left: 30%;
-  bottom: -18%;
-  width: 15rem;
-  height: 12rem;
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.18) 0%, transparent 70%);
+  left: 34%;
+  bottom: -10%;
+  width: 12rem;
+  height: 10rem;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.14) 0%, transparent 72%);
   animation: gv-hero-wave-c 14s ease-in-out infinite alternate;
 }
 
 .gv-dashboard-hero-orb-c {
-  left: -4%;
-  top: 40%;
-  width: 12rem;
-  height: 12rem;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, transparent 72%);
+  left: 4%;
+  top: 44%;
+  width: 10rem;
+  height: 10rem;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 74%);
   animation: gv-hero-wave-a 17s ease-in-out infinite alternate;
 }
 
@@ -531,9 +526,9 @@ html.gv-compact-ui main.app-scroll-shell > div {
   position: absolute;
   inset: -36% -38%;
   pointer-events: none;
-  background: linear-gradient(115deg, transparent 28%, rgba(255,255,255,0.12) 46%, rgba(255,255,255,0.02) 58%, transparent 76%);
+  background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.05) 48%, rgba(255,255,255,0.01) 58%, transparent 72%);
   animation: gv-hero-sheen-pass 8.5s linear infinite;
-  opacity: 0.7;
+  opacity: 0.45;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -665,12 +660,7 @@ html.gv-dark-mode .app-header-safe span { color: var(--dm-t2) !important; }
 html.gv-dark-mode .app-header-safe span.font-bold,
 html.gv-dark-mode .app-header-safe span.text-slate-800 { color: var(--dm-t1) !important; }
 html.gv-dark-mode .app-mobile-nav {
-  background: linear-gradient(
-    to top,
-    rgba(9, 11, 20, 0.98) 0%,
-    rgba(9, 11, 20, 0.95) calc(var(--safe-area-bottom) + 0.85rem),
-    rgba(9, 11, 20, 0) calc(var(--safe-area-bottom) + 4rem)
-  ) !important;
+  background: var(--dm-bg) !important;
   border-top: none !important;
 }
 html.gv-dark-mode .drawer-sheet,
