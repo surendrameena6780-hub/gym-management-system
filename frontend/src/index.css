@@ -18,7 +18,7 @@ body,
   --app-viewport-height: 100vh;
   --app-keyboard-inset: 0px;
   --mobile-nav-height: 84px;
-  --mobile-nav-offset: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
+  --mobile-nav-offset: var(--mobile-nav-height);
   --app-bottom-ui-offset: var(--mobile-nav-offset);
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
