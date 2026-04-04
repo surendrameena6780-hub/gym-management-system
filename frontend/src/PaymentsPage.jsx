@@ -6,8 +6,10 @@ import {
   Clock, X, ChevronDown, User, ArrowDownToLine, History, Wallet, CreditCard, Trash2,
   Phone, MessageCircle
 } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
+import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount } from './utils/memberCollection';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -24,17 +26,6 @@ const extractObject = (value, fallback = {}) => {
 };
 
 const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
-
-const loadRazorpayScript = () => {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-};
 
 // ─── Count-Up Hook ────────────────────────────────────────────────────────────
 
@@ -151,6 +142,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const [dueFormData, setDueFormData] = useState({ amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
   const [dueSubmitting, setDueSubmitting] = useState(false);
   const [dueStep, setDueStep] = useState('idle');
+  const [dueCollectionContext, setDueCollectionContext] = useState(null);
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -622,6 +614,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     setDueModalPayment(null);
     setDueFormData({ amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
     setDueStep('idle');
+    setDueCollectionContext(null);
   }, []);
 
   const openDueModal = useCallback((payment) => {
@@ -639,6 +632,16 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       notes: '',
     });
     setDueStep('idle');
+    setDueCollectionContext(null);
+  }, [toast]);
+
+  const handleCopyDueCollectionDetail = useCallback(async (value, successMessage) => {
+    const copied = await copyCollectionText(value);
+    if (copied) {
+      toast?.(successMessage, 'success');
+      return;
+    }
+    toast?.('Copy failed on this device. Long-press and copy it manually.', 'warning');
   }, [toast]);
 
   const settleDueLocally = useCallback(async (payload, fallbackMessage) => {
@@ -669,81 +672,55 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     }
 
     setDueSubmitting(true);
-    setDueStep('processing');
 
     try {
       if (dueFormData.payment_mode === 'Online') {
-        const scriptLoaded = await loadRazorpayScript();
-        if (!scriptLoaded) {
-          toast?.('Failed to load Razorpay checkout.', 'error');
-          setDueStep('idle');
+        if (!dueCollectionContext) {
+          setDueStep('processing');
+
+          const collectionRes = await axios.post(
+            `/api/payments/${dueModalPayment.id}/due/create-order`,
+            { amount: requestedAmount, notes: dueFormData.notes },
+            { headers: { 'x-auth-token': token } }
+          );
+
+          const collection = collectionRes.data?.collection;
+          if (!collection?.upi_id) {
+            toast?.('Failed to prepare the collection QR.', 'error');
+            setDueStep('idle');
+            return;
+          }
+
+          setDueCollectionContext(collection);
+          setDueFormData((prev) => ({
+            ...prev,
+            transaction_id: prev.transaction_id || collection.reference || '',
+          }));
+          setDueStep('collecting');
+          toast?.('Show this QR to the member, then confirm after you receive the money.', 'success');
           return;
         }
 
-        const orderRes = await axios.post(
-          `/api/payments/${dueModalPayment.id}/due/create-order`,
-          { amount: requestedAmount, notes: dueFormData.notes },
+        setDueStep('processing');
+
+        const onlineRes = await axios.post(
+          `/api/payments/${dueModalPayment.id}/due/collect`,
+          {
+            amount: requestedAmount,
+            payment_mode: 'Online',
+            transaction_id: dueFormData.transaction_id || dueCollectionContext.reference,
+            notes: dueFormData.notes,
+          },
           { headers: { 'x-auth-token': token } }
         );
-
-        const order = orderRes.data?.order;
-        const keyId = orderRes.data?.key_id;
-        if (!order?.id || !keyId) {
-          toast?.('Failed to start online due payment.', 'error');
-          setDueStep('idle');
-          return;
-        }
-
-        await new Promise((resolve) => {
-          const options = {
-            key: keyId,
-            amount: order.amount,
-            currency: order.currency || 'INR',
-            name: 'Pending Due Collection',
-            description: `${dueModalPayment.member_name || 'Member'} · ${dueModalPayment.plan_name || 'Membership'}`,
-            order_id: order.id,
-            prefill: {
-              name: dueModalPayment.member_name || '',
-              email: dueModalPayment.member_email || '',
-              contact: orderRes.data?.payment?.member_phone || dueModalPayment.member_phone || '',
-            },
-            theme: { color: '#f97316' },
-            handler: async (response) => {
-              try {
-                const verifyRes = await axios.post(
-                  `/api/payments/${dueModalPayment.id}/due/verify`,
-                  {
-                    amount: requestedAmount,
-                    notes: dueFormData.notes,
-                    razorpay_order_id: response.razorpay_order_id,
-                    razorpay_payment_id: response.razorpay_payment_id,
-                    razorpay_signature: response.razorpay_signature,
-                  },
-                  { headers: { 'x-auth-token': token } }
-                );
-                await settleDueLocally(verifyRes.data, 'Pending due collected successfully.');
-              } catch (err) {
-                toast?.(err?.response?.data?.error || 'Due payment verification failed.', 'error');
-                setDueStep('idle');
-              } finally {
-                resolve();
-              }
-            },
-            modal: {
-              ondismiss: () => {
-                setDueStep('idle');
-                resolve();
-              },
-            },
-          };
-          const rzp = new window.Razorpay(options);
-          rzp.open();
-        });
+        await settleDueLocally(onlineRes.data, 'Pending due collected successfully.');
       } else {
+        setDueStep('processing');
         const cashRes = await axios.post(
           `/api/payments/${dueModalPayment.id}/due/collect`,
           {
             amount: requestedAmount,
+            payment_mode: 'Cash',
             transaction_id: dueFormData.transaction_id,
             notes: dueFormData.notes,
           },
@@ -753,7 +730,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       }
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to collect pending due.', 'error');
-      setDueStep('idle');
+      setDueStep(dueCollectionContext && dueFormData.payment_mode === 'Online' ? 'collecting' : 'idle');
     } finally {
       setDueSubmitting(false);
     }
@@ -1658,7 +1635,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-100/80 mb-2">Pending Balance</p>
                   <h2 className="text-2xl font-black tracking-tight">Collect Due</h2>
-                  <p className="text-sm font-semibold text-orange-50/80 mt-1">Settle the remaining balance smoothly with Razorpay or cash.</p>
+                  <p className="text-sm font-semibold text-orange-50/80 mt-1">Collect the remaining balance using your gym QR / UPI details or cash.</p>
                 </div>
                 <button onClick={() => !dueSubmitting && resetDueModal()} className="bg-white/10 p-2 rounded-full text-white/80 hover:text-white transition-colors disabled:opacity-50" disabled={dueSubmitting}><X size={20} /></button>
               </div>
@@ -1680,29 +1657,77 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Collection Amount</label>
-                  <input type="number" min="0" step="0.01" max={roundMoney(dueModalPayment.amount_due || 0)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-orange-500/20" value={dueFormData.amount} onChange={(e) => setDueFormData((prev) => ({ ...prev, amount: e.target.value }))} />
+                  <input type="number" min="0" step="0.01" max={roundMoney(dueModalPayment.amount_due || 0)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-orange-500/20" value={dueFormData.amount} onChange={(e) => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: e.target.value, transaction_id: '' })); }} />
                   <div className="flex items-center gap-2 mt-2">
-                    <button type="button" onClick={() => setDueFormData((prev) => ({ ...prev, amount: String(roundMoney(dueModalPayment.amount_due || 0)) }))} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-100">Full Balance</button>
-                    <button type="button" onClick={() => setDueFormData((prev) => ({ ...prev, amount: String(roundMoney((dueModalPayment.amount_due || 0) / 2)) }))} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">Half Now</button>
+                    <button type="button" onClick={() => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: String(roundMoney(dueModalPayment.amount_due || 0)), transaction_id: '' })); }} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-100">Full Balance</button>
+                    <button type="button" onClick={() => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: String(roundMoney((dueModalPayment.amount_due || 0) / 2)), transaction_id: '' })); }} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">Half Now</button>
                   </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Payment Method</label>
                   <div className="grid grid-cols-2 gap-2">
                     {['Online', 'Cash'].map((mode) => (
-                      <button key={mode} type="button" onClick={() => setDueFormData((prev) => ({ ...prev, payment_mode: mode }))} className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${dueFormData.payment_mode === mode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-300'}`}>
-                        {mode}
+                      <button key={mode} type="button" onClick={() => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, payment_mode: mode, transaction_id: '' })); }} className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${dueFormData.payment_mode === mode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-300'}`}>
+                        {mode === 'Online' ? 'Online / UPI' : mode}
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Razorpay opens with the exact pending balance.' : 'Record a smooth cash settlement right from the ledger.'}</p>
+                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Show your collection QR, let the member pay, then record the receipt.' : 'Record a smooth cash settlement right from the ledger.'}</p>
                 </div>
               </div>
 
-              {dueFormData.payment_mode === 'Cash' && (
+              {dueFormData.payment_mode === 'Online' && dueCollectionContext && (
+                <div className="rounded-[26px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-4 py-4 shadow-sm">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
+                      <QRCodeCanvas
+                        value={buildUpiCollectionUri({
+                          upiId: dueCollectionContext.upi_id,
+                          payeeName: dueCollectionContext.payee_name,
+                          amount: dueCollectionContext.amount,
+                          note: dueCollectionContext.note,
+                          reference: dueCollectionContext.reference,
+                        }) || 'upi://pay'}
+                        size={156}
+                        includeMargin
+                        bgColor="#ffffff"
+                        fgColor="#111827"
+                        level="M"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-500/70">Owner Collection QR</p>
+                        <p className="text-lg font-black text-slate-900 mt-1">₹{formatCollectionAmount(dueCollectionContext.amount)}</p>
+                        <p className="text-sm font-semibold text-slate-600 mt-1">Ask {dueModalPayment.member_name} to scan and pay this exact amount.</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/80 bg-white/90 px-3 py-3 space-y-2">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">UPI ID</p>
+                          <p className="text-sm font-black text-slate-900 break-all">{dueCollectionContext.upi_id}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Collect Into</p>
+                          <p className="text-sm font-bold text-slate-700">{dueCollectionContext.payee_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reference</p>
+                          <p className="text-sm font-bold text-slate-700 break-all">{dueCollectionContext.reference}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => handleCopyDueCollectionDetail(dueCollectionContext.upi_id, 'UPI ID copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-orange-600 border border-orange-200 hover:bg-orange-50 transition-colors">Copy UPI ID</button>
+                        <button type="button" onClick={() => handleCopyDueCollectionDetail(dueCollectionContext.reference, 'Collection reference copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Copy Reference</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(dueFormData.payment_mode === 'Cash' || dueCollectionContext) && (
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Cash / UPI Reference</label>
-                  <input type="text" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10" placeholder="Optional desk reference" value={dueFormData.transaction_id} onChange={(e) => setDueFormData((prev) => ({ ...prev, transaction_id: e.target.value }))} />
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">{dueFormData.payment_mode === 'Online' ? 'UPI UTR / Collection Reference' : 'Cash / Desk Reference'}</label>
+                  <input type="text" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10" placeholder={dueFormData.payment_mode === 'Online' ? 'Paste the UPI UTR or keep the generated reference' : 'Optional desk reference'} value={dueFormData.transaction_id} onChange={(e) => setDueFormData((prev) => ({ ...prev, transaction_id: e.target.value }))} />
                 </div>
               )}
 
@@ -1716,13 +1741,19 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">After Collection</p>
                   <p className="text-sm font-bold text-slate-800 mt-1">Remaining due will be ₹{Math.max(0, roundMoney((dueModalPayment.amount_due || 0) - (Number.parseFloat(dueFormData.amount || 0) || 0))).toLocaleString()}</p>
                 </div>
-                <div className={`text-[10px] font-black uppercase tracking-[0.18em] px-2.5 py-1 rounded-full ${dueStep === 'processing' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                  {dueStep === 'processing' ? 'Processing' : 'Ready'}
+                <div className={`text-[10px] font-black uppercase tracking-[0.18em] px-2.5 py-1 rounded-full ${dueStep === 'processing' ? 'bg-orange-100 text-orange-600' : dueStep === 'collecting' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-600'}`}>
+                  {dueStep === 'processing' ? 'Processing' : dueStep === 'collecting' ? 'QR Ready' : 'Ready'}
                 </div>
               </div>
 
               <button type="submit" disabled={dueSubmitting} className="w-full py-4 rounded-2xl font-black text-sm uppercase tracking-[0.18em] text-white transition-all active:scale-[0.99] disabled:opacity-60" style={{ background: dueFormData.payment_mode === 'Online' ? 'linear-gradient(135deg, #f97316, #ea580c)' : 'linear-gradient(135deg, #111827, #334155)', boxShadow: dueFormData.payment_mode === 'Online' ? '0 14px 30px rgba(249,115,22,0.25)' : '0 14px 30px rgba(15,23,42,0.18)' }}>
-                {dueSubmitting ? (dueFormData.payment_mode === 'Online' ? 'Opening Razorpay...' : 'Collecting Due...') : (dueFormData.payment_mode === 'Online' ? 'Pay Pending Due Online' : 'Record Cash Collection')}
+                {dueSubmitting
+                  ? (dueFormData.payment_mode === 'Online'
+                    ? (dueCollectionContext ? 'Recording Collection...' : 'Preparing Collection QR...')
+                    : 'Collecting Due...')
+                  : (dueFormData.payment_mode === 'Online'
+                    ? (dueCollectionContext ? 'Mark Online Collection Received' : 'Show Collection QR')
+                    : 'Record Cash Collection')}
               </button>
             </form>
           </div>

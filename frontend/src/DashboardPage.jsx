@@ -9,7 +9,9 @@ import {
   X, TrendingUp, ChevronRight, UserPlus, RefreshCw, Check,
   Bot, Play, Trash2 // <-- 🚨 ADDED ICONS
 } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount } from './utils/memberCollection';
 import PageLoader from './PageLoader';
 
 // ─── Count-Up Hook ─────────────────────────────────────────────────────────────
@@ -37,17 +39,6 @@ function useCountUp(target, duration = 900) {
 }
 
 const buildProfileUrl = (pic) => normalizeProfileImageUrl(pic);
-
-const loadRazorpayScript = () => {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-};
 
 const DEFAULT_BROADCAST_MESSAGES = {
   All: 'Hi {{name}}, here is an update from {{gym_name}}. Reply if you need any help with your membership.',
@@ -512,6 +503,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [payMemberDropdownOpen, setPayMemberDropdownOpen] = useState(false);
   const [selectedPlanForPay, setSelectedPlanForPay] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentCollectionContext, setPaymentCollectionContext] = useState(null);
+  const [paymentReference, setPaymentReference] = useState('');
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentStep, setPaymentStep] = useState('idle'); // 'idle' | 'processing' | 'success'
   const [broadcastAudience, setBroadcastAudience] = useState('All');
@@ -534,6 +527,27 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [campaignLogs, setCampaignLogs] = useState([]);
 
   const headers = { headers: { 'x-auth-token': token } };
+
+  const closePaymentModal = useCallback(() => {
+    setShowPaymentModal(false);
+    setSelectedMemberForPay('');
+    setPayMemberSearch('');
+    setPayMemberDropdownOpen(false);
+    setSelectedPlanForPay('');
+    setPaymentMode('Cash');
+    setPaymentCollectionContext(null);
+    setPaymentReference('');
+    setPaymentStep('idle');
+  }, []);
+
+  const handleCopyPaymentCollectionDetail = useCallback(async (value, successMessage) => {
+    const copied = await copyCollectionText(value);
+    if (copied) {
+      toast(successMessage, 'success');
+      return;
+    }
+    toast('Copy failed on this device. Long-press and copy it manually.', 'warning');
+  }, [toast]);
 
   const unwrapApiData = (payload) => {
     if (payload && typeof payload === 'object' && 'data' in payload) {
@@ -816,81 +830,44 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     }
 
     setPaymentSubmitting(true);
-    setPaymentStep('processing');
     try {
       if (paymentMode === 'Online') {
-        const scriptLoaded = await loadRazorpayScript();
-        if (!scriptLoaded) {
-          toast('Failed to load Razorpay checkout.', 'error');
-          setPaymentStep('idle');
+        if (!paymentCollectionContext) {
+          const collectionRes = await axios.post('/api/memberships/online/create-order', {
+            member_id: selectedMemberForPay,
+            plan_id: selectedPlanForPay,
+          }, headers);
+
+          const collection = collectionRes.data?.collection;
+          if (!collection?.upi_id) {
+            toast('Failed to prepare the collection QR. Check payment settings.', 'error');
+            setPaymentStep('idle');
+            return;
+          }
+
+          setPaymentCollectionContext(collection);
+          setPaymentReference(collection.reference || '');
+          toast('Show this QR to the member, then confirm once payment is received.', 'success');
           return;
         }
 
-        const orderRes = await axios.post('/api/memberships/online/create-order', {
-          member_id: selectedMemberForPay,
+        const paidMemberId = selectedMemberForPay;
+        setPaymentStep('processing');
+        await axios.post('/api/memberships/activate', {
+          member_id: paidMemberId,
           plan_id: selectedPlanForPay,
+          payment_mode: 'Online',
+          payment_id: paymentReference || paymentCollectionContext.reference || null,
         }, headers);
-
-        const order = orderRes.data?.order;
-        const keyId = orderRes.data?.key_id;
-        if (!order?.id || !keyId) {
-          toast('Failed to start online payment. Missing gateway details.', 'error');
-          setPaymentStep('idle');
-          return;
-        }
-
-        await new Promise((resolve) => {
-          const options = {
-            key: keyId,
-            amount: order.amount,
-            currency: order.currency || 'INR',
-            name: 'Gym Membership Payment',
-            description: orderRes.data?.plan?.name || 'Membership Plan',
-            order_id: order.id,
-            prefill: {
-              name: orderRes.data?.member?.full_name || '',
-              email: orderRes.data?.member?.email || '',
-              contact: orderRes.data?.member?.phone || '',
-            },
-            theme: { color: '#6366f1' },
-            handler: async (response) => {
-              try {
-                await axios.post('/api/memberships/online/verify', {
-                  member_id: selectedMemberForPay,
-                  plan_id: selectedPlanForPay,
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_signature: response.razorpay_signature,
-                }, headers);
-                // Auto check-in for today so member shows ACTIVE immediately
-                try { await axios.post('/api/attendance/checkin', { member_id: selectedMemberForPay, method: 'STAFF' }, headers); } catch (_) {}
-                window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
-                setPaymentStep('success');
-                await new Promise(r => setTimeout(r, 1500));
-                setShowPaymentModal(false);
-                setSelectedMemberForPay('');
-                setSelectedPlanForPay('');
-                setPaymentStep('idle');
-                fetchData();
-              } catch (verifyErr) {
-                toast(verifyErr?.response?.data?.error || 'Payment verification failed.', 'error');
-                setPaymentStep('idle');
-              } finally {
-                resolve();
-              }
-            },
-            modal: {
-              ondismiss: () => {
-                setPaymentStep('idle');
-                resolve();
-              },
-            },
-          };
-          const rzp = new window.Razorpay(options);
-          rzp.open();
-        });
+        try { await axios.post('/api/attendance/checkin', { member_id: paidMemberId, method: 'STAFF' }, headers); } catch (_) {}
+        window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
+        setPaymentStep('success');
+        await new Promise(r => setTimeout(r, 1500));
+        closePaymentModal();
+        fetchData();
       } else {
         const paidMemberId = selectedMemberForPay;
+        setPaymentStep('processing');
         await axios.post('/api/memberships/activate', {
           member_id: paidMemberId,
           plan_id: selectedPlanForPay,
@@ -902,10 +879,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
         setPaymentStep('success');
         await new Promise(r => setTimeout(r, 1500));
-        setShowPaymentModal(false);
-        setSelectedMemberForPay('');
-        setSelectedPlanForPay('');
-        setPaymentStep('idle');
+        closePaymentModal();
         fetchData();
       }
     } catch (_err) {
@@ -2409,7 +2383,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 </div>
                 <h2 className="text-lg font-black text-slate-900">Record Payment</h2>
               </div>
-              <button onClick={() => { setShowPaymentModal(false); setPayMemberSearch(''); setPayMemberDropdownOpen(false); }}
+              <button onClick={closePaymentModal}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
                 <X size={16} className="text-slate-500" />
               </button>
@@ -2433,7 +2407,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                               <p className="text-[10px] text-slate-500 font-semibold truncate">{m?.phone}</p>
                             </div>
                             <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0 ${badge}`}>{status || 'UNPAID'}</span>
-                            <button type="button" onClick={() => { setSelectedMemberForPay(''); setPayMemberSearch(''); setPayMemberDropdownOpen(false); }}
+                            <button type="button" onClick={() => { setSelectedMemberForPay(''); setPayMemberSearch(''); setPayMemberDropdownOpen(false); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                               className="w-6 h-6 rounded-full bg-slate-200 hover:bg-rose-100 flex items-center justify-center shrink-0 transition-colors">
                               <X size={12} />
                             </button>
@@ -2496,7 +2470,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                             const badge = status === 'EXPIRED' ? 'text-rose-600 bg-rose-50' : status === 'ACTIVE' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50';
                             return (
                               <button key={m.id} type="button"
-                                onClick={() => { setSelectedMemberForPay(String(m.id)); setPayMemberSearch(''); setPayMemberDropdownOpen(false); }}
+                                onClick={() => { setSelectedMemberForPay(String(m.id)); setPayMemberSearch(''); setPayMemberDropdownOpen(false); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors text-left border-b border-slate-50 last:border-0">
                                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-black shrink-0">
                                   {(m.full_name || '?').charAt(0).toUpperCase()}
@@ -2523,7 +2497,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Plan</label>
                 <select required
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                  value={selectedPlanForPay} onChange={e => setSelectedPlanForPay(e.target.value)}>
+                  value={selectedPlanForPay} onChange={e => { setSelectedPlanForPay(e.target.value); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}>
                   <option value="">Choose a plan...</option>
                   {plans.map(p => <option key={p.id} value={p.id}>{p.name} — ₹{p.price}</option>)}
                 </select>
@@ -2532,18 +2506,75 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Payment Mode</label>
                 <div className="flex gap-2">
                   {['Cash', 'Online'].map(mode => (
-                    <button key={mode} type="button" onClick={() => setPaymentMode(mode)}
+                    <button key={mode} type="button" onClick={() => { setPaymentMode(mode); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                       className={`flex-1 py-2.5 rounded-xl font-bold text-sm border transition-all ${paymentMode === mode ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>
                       {mode === 'Online' ? 'Online / UPI' : mode}
                     </button>
                   ))}
                 </div>
               </div>
+              {paymentMode === 'Online' && paymentCollectionContext && (
+                <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 px-4 py-4 shadow-sm">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
+                      <QRCodeCanvas
+                        value={buildUpiCollectionUri({
+                          upiId: paymentCollectionContext.upi_id,
+                          payeeName: paymentCollectionContext.payee_name,
+                          amount: paymentCollectionContext.amount,
+                          note: paymentCollectionContext.note,
+                          reference: paymentCollectionContext.reference,
+                        }) || 'upi://pay'}
+                        size={150}
+                        includeMargin
+                        bgColor="#ffffff"
+                        fgColor="#111827"
+                        level="M"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500/70">Owner Collection QR</p>
+                        <p className="text-lg font-black text-slate-900 mt-1">₹{formatCollectionAmount(paymentCollectionContext.amount)}</p>
+                        <p className="text-sm font-semibold text-slate-600 mt-1">Let the member scan this QR, then record the collection here.</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/80 bg-white/90 px-3 py-3 space-y-2">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">UPI ID</p>
+                          <p className="text-sm font-black text-slate-900 break-all">{paymentCollectionContext.upi_id}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Collect Into</p>
+                          <p className="text-sm font-bold text-slate-700">{paymentCollectionContext.payee_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reference</p>
+                          <p className="text-sm font-bold text-slate-700 break-all">{paymentCollectionContext.reference}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => handleCopyPaymentCollectionDetail(paymentCollectionContext.upi_id, 'UPI ID copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50 transition-colors">Copy UPI ID</button>
+                        <button type="button" onClick={() => handleCopyPaymentCollectionDetail(paymentCollectionContext.reference, 'Collection reference copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Copy Reference</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">UPI UTR / Collection Reference</label>
+                    <input
+                      type="text"
+                      value={paymentReference}
+                      onChange={e => setPaymentReference(e.target.value)}
+                      placeholder="Paste the UPI UTR or keep the generated reference"
+                      className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </div>
+                </div>
+              )}
               <button type="submit"
                 disabled={paymentSubmitting || paymentStep !== 'idle'}
                 className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-98"
                 style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>
-                {paymentSubmitting ? <RefreshCw size={16} className="animate-spin" /> : <Zap size={16} fill="currentColor" />} {paymentSubmitting ? 'Please wait...' : 'Complete Transaction'}
+                {paymentSubmitting ? <RefreshCw size={16} className="animate-spin" /> : <Zap size={16} fill="currentColor" />} {paymentSubmitting ? (paymentMode === 'Online' ? (paymentCollectionContext ? 'Recording Collection...' : 'Preparing Collection QR...') : 'Please wait...') : (paymentMode === 'Online' ? (paymentCollectionContext ? 'Record Online Collection' : 'Show Collection QR') : 'Complete Transaction')}
               </button>
             </form>
 
@@ -2555,7 +2586,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   <div className="flex flex-col items-center gap-5 rounded-[28px] border border-white/10 bg-slate-950/70 px-8 py-8 shadow-2xl">
                     <div className="w-16 h-16 rounded-full border-4 border-white/15 border-t-indigo-400 animate-spin" />
                     <div className="text-center">
-                      <p className="font-black text-white text-xl">Processing payment...</p>
+                      <p className="font-black text-white text-xl">Recording collection...</p>
                       <p className="text-sm text-slate-300 mt-1 font-medium">Please wait. Do not close this window.</p>
                     </div>
                   </div>
@@ -2565,7 +2596,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                       <Check size={36} className="text-white" strokeWidth={3} />
                     </div>
                     <div className="text-center">
-                      <p className="font-black text-white text-xl">Payment complete</p>
+                      <p className="font-black text-white text-xl">Collection recorded</p>
                       <p className="text-sm text-slate-300 mt-1 font-medium">Member activated and checked in.</p>
                     </div>
                   </div>

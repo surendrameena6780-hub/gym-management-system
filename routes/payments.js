@@ -17,6 +17,10 @@ let ensurePaymentCollectionsSchemaPromise;
 const ensurePaymentCollectionsSchema = async () => {
     if (!ensurePaymentCollectionsSchemaPromise) {
         ensurePaymentCollectionsSchemaPromise = pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120);
+
             CREATE TABLE IF NOT EXISTS payment_collections (
                 id               SERIAL PRIMARY KEY,
                 gym_id           INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
@@ -66,6 +70,37 @@ const appendNote = (existingNotes, newNote) => {
 };
 
 const buildAutoCollectionReference = (paymentId) => `DUE-${paymentId}-${Date.now().toString().slice(-6)}`;
+
+const getGymCollectionProfile = async (gymId) => {
+    const gymConfigRes = await pool.query(
+        `SELECT
+            name,
+            member_payments_enabled,
+            member_upi_id
+         FROM gyms
+         WHERE id = $1
+         LIMIT 1`,
+        [gymId]
+    );
+
+    const gymConfig = gymConfigRes.rows[0] || {};
+    if (!gymConfig.member_payments_enabled) {
+        return { ok: false, status: 400, error: 'Member online collection is disabled in Integrations.' };
+    }
+
+    const upiId = String(gymConfig.member_upi_id || '').trim().toLowerCase();
+    if (!upiId) {
+        return { ok: false, status: 400, error: 'Add your collection UPI ID in Integrations before collecting member payments online.' };
+    }
+
+    return {
+        ok: true,
+        data: {
+            payeeName: String(gymConfig.name || 'GymVault Gym').trim() || 'GymVault Gym',
+            upiId,
+        },
+    };
+};
 
 const getPendingPaymentById = async (db, gymId, paymentId, { lock = false } = {}) => {
     const query = `
@@ -196,7 +231,7 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
 
         const normalizedMode = normalizeCollectionMode(paymentMode);
         const providedTransactionId = String(transactionId || '').trim();
-        const collectionTransactionId = providedTransactionId || (normalizedMode === 'Cash' ? buildAutoCollectionReference(paymentId) : '');
+        const collectionTransactionId = providedTransactionId || buildAutoCollectionReference(paymentId);
         const nextAmountPaid = roundMoney(Number(payment.amount_paid || 0) + requestedAmount);
         const nextAmountDue = Math.max(0, roundMoney(remainingDue - requestedAmount));
         const nextStatus = nextAmountDue <= DUE_ZERO_THRESHOLD ? 'Completed' : 'Pending';
@@ -440,7 +475,6 @@ router.get('/stats', async (req, res) => {
     try {
         await ensurePaymentCollectionsSchema();
         const gym_id = req.user.gym_id;
-
         const [revenue, today, pending] = await Promise.all([
             pool.query(
                 `SELECT COALESCE(SUM(amount_paid), 0) AS total
@@ -657,68 +691,21 @@ router.post('/:id/due/create-order', async (req, res) => {
             return res.status(400).json({ error: 'Collection amount cannot exceed the remaining due.' });
         }
 
-        const gatewayConfig = await getGymGatewayConfig(gym_id);
-        if (!gatewayConfig.ok) {
-            return res.status(gatewayConfig.status).json({ error: gatewayConfig.error });
-        }
-
-        const { connectMode, connectedAccount, keyId, keySecret } = gatewayConfig.data;
-        const amountPaise = Math.round(collectionAmount * 100);
-        if (!Number.isFinite(amountPaise) || amountPaise <= 0) {
-            return res.status(400).json({ error: 'Pending due amount is invalid.' });
-        }
-
-        let order;
-
-        if (connectMode === 'PARTNER') {
-            const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
-            const feeAmount = Math.round(amountPaise * feePercent / 100);
-            const transferAmount = Math.max(0, amountPaise - feeAmount);
-            const platformRazorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-            order = await platformRazorpay.orders.create({
-                amount: amountPaise,
-                currency: 'INR',
-                receipt: `due_${paymentId}_${Date.now()}`,
-                transfers: [{
-                    account: connectedAccount,
-                    amount: transferAmount,
-                    currency: 'INR',
-                    on_hold: false,
-                    notes: {
-                        purpose: 'DUE_COLLECTION',
-                        gym_id: String(gym_id),
-                        payment_id: String(paymentId),
-                        member_id: String(payment.user_id),
-                    },
-                }],
-                notes: {
-                    purpose: 'DUE_COLLECTION',
-                    gym_id: String(gym_id),
-                    payment_id: String(paymentId),
-                    member_id: String(payment.user_id),
-                    invoice_id: String(payment.invoice_id || ''),
-                },
-            });
-        } else {
-            const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-            order = await razorpay.orders.create({
-                amount: amountPaise,
-                currency: 'INR',
-                receipt: `due_${paymentId}_${Date.now()}`,
-                notes: {
-                    purpose: 'DUE_COLLECTION',
-                    gym_id: String(gym_id),
-                    payment_id: String(paymentId),
-                    member_id: String(payment.user_id),
-                    invoice_id: String(payment.invoice_id || ''),
-                },
-            });
+        const collectionProfile = await getGymCollectionProfile(gym_id);
+        if (!collectionProfile.ok) {
+            return res.status(collectionProfile.status).json({ error: collectionProfile.error });
         }
 
         return res.json({
-            key_id: keyId,
-            order,
-            amount: collectionAmount,
+            mode: 'COLLECTION',
+            collection: {
+                amount: collectionAmount,
+                currency: 'INR',
+                payee_name: collectionProfile.data.payeeName,
+                upi_id: collectionProfile.data.upiId,
+                note: `Pending due · ${payment.member_name} · Invoice ${payment.invoice_id || payment.id}`,
+                reference: buildAutoCollectionReference(payment.id),
+            },
             payment: {
                 id: payment.id,
                 invoice_id: payment.invoice_id,
@@ -731,8 +718,8 @@ router.post('/:id/due/create-order', async (req, res) => {
             },
         });
     } catch (err) {
-        console.error('DUE ORDER ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to initiate due payment.' });
+        console.error('DUE COLLECTION CONTEXT ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to prepare due collection details.' });
     }
 });
 
@@ -749,7 +736,7 @@ router.post('/:id/due/collect', async (req, res) => {
             gymId: gym_id,
             paymentId,
             amount: req.body?.amount,
-            paymentMode: 'Cash',
+            paymentMode: req.body?.payment_mode || 'Cash',
             transactionId: req.body?.transaction_id,
             notes: req.body?.notes,
             collectedBy: req.user.id,
@@ -761,7 +748,7 @@ router.post('/:id/due/collect', async (req, res) => {
 
         return res.json(result.data);
     } catch (err) {
-        console.error('CASH DUE COLLECTION ERROR:', err.message);
+        console.error('DUE COLLECTION ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to collect pending due.' });
     }
 });

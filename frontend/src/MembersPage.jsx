@@ -5,8 +5,10 @@ import {
   CreditCard, Clock, AlertTriangle, CheckCircle, Flame, TrendingUp,
   MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail, Snowflake,
 } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
+import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount } from './utils/memberCollection';
 import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
@@ -240,17 +242,6 @@ const getLatestPaymentDate = (member) => member?.latest_payment_date || (Array.i
 
 const getEffectiveVisitSource = (member) => member?.last_visit || getLatestPaymentDate(member) || null;
 
-const loadRazorpayScript = () => {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-};
-
 const SuccessModal = ({ memberName, onClose, onDownload }) => {
   const [countdown, setCountdown] = useState(4);
   useEffect(() => {
@@ -294,6 +285,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [previewImage, setPreviewImage] = useState(null);
   const [addMemberSubmitting, setAddMemberSubmitting] = useState(false);
   const [activatingMode, setActivatingMode] = useState('');
+  const [activationCollectionContext, setActivationCollectionContext] = useState(null);
+  const [activationReference, setActivationReference] = useState('');
   const [memberActionLoading, setMemberActionLoading] = useState(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -639,6 +632,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       return;
     }
     setSelectedMember(member);
+    setSelectedPlanId('');
+    setActivationCollectionContext(null);
+    setActivationReference('');
+    setActivatingMode('');
     setShowActivateModal(true);
   };
 
@@ -655,10 +652,31 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
     memberActionTimerRef.current = setTimeout(() => {
       setSelectedMember(member);
+      setSelectedPlanId('');
+      setActivationCollectionContext(null);
+      setActivationReference('');
+      setActivatingMode('');
       setShowActivateModal(true);
       setMemberActionLoading(null);
       memberActionTimerRef.current = null;
     }, 150);
+  };
+
+  const closeActivateModal = () => {
+    setShowActivateModal(false);
+    setSelectedPlanId('');
+    setActivationCollectionContext(null);
+    setActivationReference('');
+    setActivatingMode('');
+  };
+
+  const handleCopyActivationDetail = async (value, successMessage) => {
+    const copied = await copyCollectionText(value);
+    if (copied) {
+      toast?.(successMessage, 'success');
+      return;
+    }
+    toast?.('Copy failed on this device. Long-press and copy it manually.', 'warning');
   };
 
   const openFreezeModalForMember = (member) => {
@@ -907,81 +925,43 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         message: `Record a cash payment of ₹${selectedPlan.price} for ${selectedMember?.full_name}?`,
         confirmLabel: 'Confirm Cash',
         variant: 'warning',
-        onConfirm: () => processActivation(selectedPlan, `CASH-${Date.now()}`),
+        onConfirm: () => processActivation(selectedPlan, `CASH-${Date.now()}`, 'Cash'),
       });
       return;
     }
 
     try {
       setActivatingMode('online');
-      const scriptLoaded = await loadRazorpayScript();
-      if (!scriptLoaded) {
+      if (!activationCollectionContext) {
+        const collectionRes = await axios.post(
+          '/api/memberships/online/create-order',
+          { member_id: selectedMember.id, plan_id: selectedPlan.id },
+          { headers: { 'x-auth-token': token } }
+        );
+
+        const collection = collectionRes.data?.collection;
+        if (!collection?.upi_id) {
+          setActivatingMode('');
+          return toast?.('Failed to prepare the collection QR. Check your payment settings.', 'error');
+        }
+
+        setActivationCollectionContext(collection);
+        setActivationReference(collection.reference || '');
         setActivatingMode('');
-        return toast?.('Failed to load Razorpay checkout.', 'error');
+        toast?.('Show this QR to the member, then record the collection once payment is received.', 'success');
+        return;
       }
 
-      const orderRes = await axios.post(
-        '/api/memberships/online/create-order',
-        { member_id: selectedMember.id, plan_id: selectedPlan.id },
-        { headers: { 'x-auth-token': token } }
-      );
-
-      const keyId = orderRes.data?.key_id;
-      const order = orderRes.data?.order;
-      if (!keyId || !order?.id) {
-        setActivatingMode('');
-        return toast?.('Member payment gateway not configured. Ask owner to setup Integrations.', 'error');
-      }
-
-      const options = {
-        key: keyId,
-        amount: order.amount,
-        currency: order.currency || 'INR',
-        name: 'Gym Membership Payment',
-        description: `Membership: ${selectedPlan.name}`,
-        order_id: order.id,
-        handler: async (res) => {
-          try {
-            setActivatingMode('verifying');
-            await axios.post(
-              '/api/memberships/online/verify',
-              {
-                member_id: selectedMember.id,
-                plan_id: selectedPlan.id,
-                razorpay_order_id: res.razorpay_order_id,
-                razorpay_payment_id: res.razorpay_payment_id,
-                razorpay_signature: res.razorpay_signature,
-              },
-              { headers: { 'x-auth-token': token } }
-            );
-            if (canWriteAttendance) {
-              await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
-            }
-            setReceiptData({ memberName: selectedMember.full_name, planName: selectedPlan.name, amount: selectedPlan.price, payId: res.razorpay_payment_id });
-            setShowActivateModal(false);
-            setShowSuccessAnim(true);
-          } catch (verifyErr) {
-            toast?.(verifyErr?.response?.data?.error || 'Payment verification failed. Please try again.', 'error');
-            setActivatingMode('');
-          }
-        },
-        prefill: { name: selectedMember.full_name, contact: selectedMember.phone, email: selectedMember.email },
-        theme: { color: '#7c3aed' },
-      };
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-      setActivatingMode('');
+      await processActivation(selectedPlan, activationReference || activationCollectionContext.reference, 'Online');
     } catch (err) {
       setActivatingMode('');
-      toast?.(err?.response?.data?.error || 'Unable to start online payment.', 'error');
+      toast?.(err?.response?.data?.error || 'Unable to prepare member collection.', 'error');
     }
   };
 
-  const processActivation = async (plan, paymentId) => {
+  const processActivation = async (plan, paymentId, mode = 'Cash') => {
     try {
-      setActivatingMode('cash');
-      const isOnline = paymentId && String(paymentId).startsWith('pay_');
-      const mode = isOnline ? 'Online' : 'Cash';
+      setActivatingMode(mode === 'Online' ? 'verifying' : 'cash');
       await axios.post('/api/memberships/activate', { member_id: selectedMember.id, plan_id: plan.id, payment_id: paymentId, payment_mode: mode }, { headers: { 'x-auth-token': token } });
       if (canWriteAttendance) {
         await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
@@ -989,7 +969,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       await fetchMembers();
       notifyDashboardDataChanged();
       setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
-      setShowActivateModal(false);
+      closeActivateModal();
       setShowSuccessAnim(true);
     } catch (err) {
       toast?.('Activation failed. Please try again.', 'error');
@@ -1839,17 +1819,68 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </div>
             <div className="px-8 pb-8 space-y-4">
               <div className="relative">
-                <select required className="w-full px-5 py-4 rounded-2xl focus:outline-none text-sm font-black appearance-none cursor-pointer border border-white/10" style={{ background: 'rgba(255,255,255,0.07)', color: '#e2e8f0' }} value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)}>
+                <select required className="w-full px-5 py-4 rounded-2xl focus:outline-none text-sm font-black appearance-none cursor-pointer border border-white/10" style={{ background: 'rgba(255,255,255,0.07)', color: '#e2e8f0' }} value={selectedPlanId} onChange={(e) => { setSelectedPlanId(e.target.value); setActivationCollectionContext(null); setActivationReference(''); }}>
                   <option value="" style={{ background: '#1e1b4b' }}>Select Membership Plan...</option>
                   {plans.map((p) => (<option key={p.id} value={p.id} style={{ background: '#1e1b4b' }}>{p.name} — ₹{p.price}</option>))}
                 </select>
                 <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><Calendar size={18} /></div>
               </div>
+              {activationCollectionContext && (
+                <div className="rounded-[28px] border border-white/10 bg-white/8 p-4 space-y-4">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-xl shadow-slate-950/20">
+                      <QRCodeCanvas
+                        value={buildUpiCollectionUri({
+                          upiId: activationCollectionContext.upi_id,
+                          payeeName: activationCollectionContext.payee_name,
+                          amount: activationCollectionContext.amount,
+                          note: activationCollectionContext.note,
+                          reference: activationCollectionContext.reference,
+                        }) || 'upi://pay'}
+                        size={156}
+                        includeMargin
+                        bgColor="#ffffff"
+                        fgColor="#111827"
+                        level="M"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-200/70">Owner Collection QR</p>
+                        <p className="text-xl font-black text-white mt-1">₹{formatCollectionAmount(activationCollectionContext.amount)}</p>
+                        <p className="text-sm font-semibold text-slate-300 mt-1">Ask {selectedMember?.full_name} to scan and pay before you activate the plan.</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/35 px-3 py-3 space-y-2">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">UPI ID</p>
+                          <p className="text-sm font-black text-white break-all">{activationCollectionContext.upi_id}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Collect Into</p>
+                          <p className="text-sm font-bold text-slate-200">{activationCollectionContext.payee_name}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reference</p>
+                          <p className="text-sm font-bold text-slate-200 break-all">{activationCollectionContext.reference}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => handleCopyActivationDetail(activationCollectionContext.upi_id, 'UPI ID copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-violet-300/30 bg-white/10 text-violet-100 hover:bg-white/15 transition-colors">Copy UPI ID</button>
+                    <button type="button" onClick={() => handleCopyActivationDetail(activationCollectionContext.reference, 'Collection reference copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Copy Reference</button>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">UPI UTR / Collection Reference</label>
+                    <input type="text" className="w-full px-4 py-3 rounded-2xl border border-white/10 bg-white/8 text-sm font-bold text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-400/30" placeholder="Paste the UPI UTR or keep the generated reference" value={activationReference} onChange={(e) => setActivationReference(e.target.value)} />
+                  </div>
+                </div>
+              )}
               <div className="pt-2 space-y-3">
-                <button onClick={() => handleActivateSubscription(null, 'online')} disabled={Boolean(activatingMode)} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}>{activatingMode === 'online' || activatingMode === 'verifying' ? <RefreshCw size={18} className="animate-spin" /> : <CreditCard size={18} />}{activatingMode === 'verifying' ? 'Checking Payment...' : activatingMode === 'online' ? 'Opening Payment...' : 'Proceed for Payment'}</button>
+                <button onClick={() => handleActivateSubscription(null, 'online')} disabled={Boolean(activatingMode)} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}>{activatingMode === 'online' || activatingMode === 'verifying' ? <RefreshCw size={18} className="animate-spin" /> : <CreditCard size={18} />}{activatingMode === 'verifying' ? 'Recording Collection...' : activatingMode === 'online' ? 'Preparing Collection QR...' : activationCollectionContext ? 'Record Online Collection' : 'Show Collection QR'}</button>
                 <button onClick={() => handleActivateSubscription(null, 'cash')} disabled={Boolean(activatingMode)} className="w-full py-4 rounded-2xl font-black text-sm hover:opacity-80 transition-all flex items-center justify-center gap-2 border border-white/10 disabled:opacity-70" style={{ background: 'rgba(255,255,255,0.06)', color: '#6ee7b7' }}>{activatingMode === 'cash' ? <RefreshCw size={18} className="animate-spin" /> : <span className="font-black text-lg">₹</span>}{activatingMode === 'cash' ? 'Recording Cash Payment...' : 'Paid as Cash'}</button>
               </div>
-              <button onClick={() => setShowActivateModal(false)} className="w-full text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors pt-1">Cancel Transaction</button>
+              <button onClick={closeActivateModal} className="w-full text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors pt-1">Cancel Transaction</button>
             </div>
           </div>
         </div>

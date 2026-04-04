@@ -33,6 +33,46 @@ const ensureMemberPaymentsSchema = async () => {
     await ensureMemberPaymentsSchemaPromise;
 };
 
+const buildDeskCollectionReference = (prefix, entityId) => {
+    const safePrefix = String(prefix || 'COL').trim().toUpperCase() || 'COL';
+    const safeEntityId = String(entityId || '').trim();
+    const timeStamp = Date.now().toString().slice(-6);
+    return safeEntityId ? `${safePrefix}-${safeEntityId}-${timeStamp}` : `${safePrefix}-${timeStamp}`;
+};
+
+const getGymCollectionProfile = async (gymId) => {
+    await ensureMemberPaymentsSchema();
+
+    const gymConfigRes = await pool.query(
+        `SELECT
+            name,
+            member_payments_enabled,
+            member_upi_id
+         FROM gyms
+         WHERE id = $1
+         LIMIT 1`,
+        [gymId]
+    );
+
+    const gymConfig = gymConfigRes.rows[0] || {};
+    if (!gymConfig.member_payments_enabled) {
+        return { ok: false, status: 400, error: 'Member online collection is disabled in Integrations.' };
+    }
+
+    const upiId = String(gymConfig.member_upi_id || '').trim().toLowerCase();
+    if (!upiId) {
+        return { ok: false, status: 400, error: 'Add your collection UPI ID in Integrations before collecting member payments online.' };
+    }
+
+    return {
+        ok: true,
+        data: {
+            payeeName: String(gymConfig.name || 'GymVault Gym').trim() || 'GymVault Gym',
+            upiId,
+        },
+    };
+};
+
 const safeCompare = (left, right) => {
     const a = Buffer.from(String(left || ''), 'utf8');
     const b = Buffer.from(String(right || ''), 'utf8');
@@ -218,42 +258,9 @@ router.post('/online/create-order', auth, saasMiddleware, requirePermission('pay
     if (!member_id || !plan_id) return res.status(400).json({ error: 'member_id and plan_id are required.' });
 
     try {
-        await ensureMemberPaymentsSchema();
-
-        const gymConfigRes = await pool.query(
-            `SELECT
-                member_payments_enabled,
-                member_razorpay_key_id,
-                member_razorpay_key_secret_enc,
-                member_payments_connect_mode,
-                member_payments_onboarding_status,
-                member_razorpay_connected_account_id
-             FROM gyms WHERE id = $1 LIMIT 1`,
-            [gym_id]
-        );
-        const gymConfig = gymConfigRes.rows[0] || {};
-        const connectMode = String(gymConfig.member_payments_connect_mode || 'MANUAL').toUpperCase();
-        const connectedAccount = String(gymConfig.member_razorpay_connected_account_id || '').trim();
-
-        if (!gymConfig.member_payments_enabled) {
-            return res.status(400).json({ error: 'Member online payments are disabled in Integrations.' });
-        }
-
-        if (connectMode === 'PARTNER') {
-            // Route mode requires a linked account ID from the OAuth callback
-            if (!connectedAccount) {
-                return res.status(400).json({ error: 'Razorpay account is not connected yet. Complete Connect Razorpay onboarding first.' });
-            }
-            if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-                return res.status(500).json({ error: 'Platform payment gateway not configured. Contact support.' });
-            }
-        } else {
-            // Manual mode requires the gym to have saved their own Razorpay keys
-            const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
-            const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
-            if (!keyId || !keySecret) {
-                return res.status(400).json({ error: 'Razorpay member payment gateway is not configured. Please update Integrations.' });
-            }
+        const collectionProfile = await getGymCollectionProfile(gym_id);
+        if (!collectionProfile.ok) {
+            return res.status(collectionProfile.status).json({ error: collectionProfile.error });
         }
 
         const planResult = await pool.query(
@@ -275,63 +282,16 @@ router.post('/online/create-order', auth, saasMiddleware, requirePermission('pay
             return res.status(400).json({ error: 'Selected plan has invalid price.' });
         }
 
-        let order, effectiveKeyId;
-
-        if (connectMode === 'PARTNER') {
-            // ── ROUTE MODE ──────────────────────────────────────────────────────────
-            // Payment collected by GymVault's Razorpay account.
-            // Razorpay Route automatically transfers (amount minus platform fee)
-            // to the gym owner's linked account (acc_XXXXX) after capture.
-            const platformKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
-            const platformKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
-            const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
-            const feeAmount = Math.round(amountPaise * feePercent / 100);
-            const transferAmount = amountPaise - feeAmount;
-
-            const platformRazorpay = new Razorpay({ key_id: platformKeyId, key_secret: platformKeySecret });
-            order = await platformRazorpay.orders.create({
-                amount: amountPaise,
-                currency: 'INR',
-                receipt: `gym_${gym_id}_m_${member_id}_${Date.now()}`,
-                // Route: transfer funds to gym's linked account at capture
-                transfers: [{
-                    account: connectedAccount,
-                    amount: transferAmount,
-                    currency: 'INR',
-                    on_hold: false,
-                    notes: { gym_id: String(gym_id), member_id: String(member_id), plan_id: String(plan_id) },
-                }],
-                notes: {
-                    purpose: 'MEMBER_PAYMENT',
-                    gym_id: String(gym_id),
-                    member_id: String(member_id),
-                    plan_id: String(plan_id),
-                },
-            });
-            effectiveKeyId = platformKeyId;
-        } else {
-            // ── MANUAL MODE ─────────────────────────────────────────────────────────
-            // Gym owner's own Razorpay keys; money goes directly to their account.
-            const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
-            const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
-            const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-            order = await razorpay.orders.create({
-                amount: amountPaise,
-                currency: 'INR',
-                receipt: `gym_${gym_id}_m_${member_id}_${Date.now()}`,
-                notes: {
-                    purpose: 'MEMBER_PAYMENT',
-                    gym_id: String(gym_id),
-                    member_id: String(member_id),
-                    plan_id: String(plan_id),
-                },
-            });
-            effectiveKeyId = keyId;
-        }
-
         return res.json({
-            key_id: effectiveKeyId,
-            order,
+            mode: 'COLLECTION',
+            collection: {
+                amount: Number(plan.price || 0),
+                currency: 'INR',
+                payee_name: collectionProfile.data.payeeName,
+                upi_id: collectionProfile.data.upiId,
+                note: `${plan.name} membership · ${member.full_name}`,
+                reference: buildDeskCollectionReference('MEM', member.id),
+            },
             member: {
                 id: member.id,
                 full_name: member.full_name,
@@ -345,8 +305,8 @@ router.post('/online/create-order', auth, saasMiddleware, requirePermission('pay
             },
         });
     } catch (err) {
-        console.error('MEMBER ONLINE ORDER ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to initiate online member payment.' });
+        console.error('MEMBER COLLECTION CONTEXT ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to prepare member collection details.' });
     }
 });
 

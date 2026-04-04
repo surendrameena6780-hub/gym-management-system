@@ -1869,17 +1869,17 @@ const loadRazorpayScript = () => {
                       {/* UPI + Enable toggle */}
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
                         <div>
-                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">UPI ID <span className="font-medium normal-case text-slate-400">(optional)</span></label>
+                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">UPI ID for Collection</label>
                           <input value={integrationData.member_payments?.upi_id || ''}
                             onChange={(e) => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, upi_id: e.target.value } }))}
                             placeholder="yourgym@upi"
                             className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
-                          <p className="text-xs text-slate-400 mt-1 font-medium">Displayed to members as a payment option</p>
+                          <p className="text-xs text-slate-400 mt-1 font-medium">Shown in the collection QR and payment details when staff collects member fees</p>
                         </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between py-1">
                           <div>
-                            <p className="font-bold text-slate-800 text-sm">Enable Member Online Payments</p>
-                            <p className="text-xs text-slate-500 mt-0.5">Members can pay membership fees through the app</p>
+                            <p className="font-bold text-slate-800 text-sm">Enable Member Online Collection</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Staff can collect member payments using your QR / UPI details inside the app</p>
                           </div>
                           <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, enabled: !prev.member_payments?.enabled } }))}
                             className={`relative w-11 h-6 rounded-full transition-colors ${integrationData.member_payments?.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}>

@@ -590,20 +590,16 @@ router.put('/integrations', auth, async (req, res) => {
             const current = currentRes.rows[0] || {};
             const existingEncryptedSecret = current.member_razorpay_key_secret_enc || '';
             const connectMode = connectModeInput || String(current.member_payments_connect_mode || 'MANUAL').toUpperCase();
-            const connectedAccountId = String(current.member_razorpay_connected_account_id || '').trim();
 
-            if (enabled && connectMode === 'MANUAL' && (!keyId || (!incomingSecret && member_payments.has_razorpay_secret !== true))) {
-                return res.status(400).json({ error: 'To enable member online payments in manual mode, enter Razorpay Key ID and Key Secret.' });
-            }
-            if (enabled && connectMode === 'PARTNER' && !connectedAccountId) {
-                return res.status(400).json({ error: 'Razorpay account not connected yet. Use Connect Razorpay first.' });
+            if (enabled && !upiId) {
+                return res.status(400).json({ error: 'Add your collection UPI ID to enable member online collection.' });
             }
 
             const secretToPersist = incomingSecret ? encryptSecret(incomingSecret) : existingEncryptedSecret;
             const nextOnboardingStatus = connectMode === 'PARTNER'
                 ? String(current.member_payments_onboarding_status || 'NOT_CONNECTED').toUpperCase()
                 : enabled
-                    ? 'MANUAL_CONFIGURED'
+                    ? (keyId || incomingSecret || member_payments.has_razorpay_secret === true ? 'MANUAL_CONFIGURED' : 'UPI_COLLECTION_READY')
                     : 'NOT_CONNECTED';
 
             await pool.query(
