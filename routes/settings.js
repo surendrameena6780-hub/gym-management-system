@@ -538,6 +538,7 @@ router.put('/integrations', auth, async (req, res) => {
 
         const gymId = req.user.gym_id;
         const {
+            save_scope,
             owner_mobile,
             bulk_enabled,
             bulk_monthly_limit,
@@ -547,7 +548,31 @@ router.put('/integrations', auth, async (req, res) => {
             member_payments,
         } = req.body || {};
 
-        const ownerMobile = normalizePhone(owner_mobile);
+        const saveScope = ['payments', 'messaging', 'campaigns', 'all'].includes(String(save_scope || '').trim().toLowerCase())
+            ? String(save_scope || '').trim().toLowerCase()
+            : 'all';
+        const shouldSavePayments = saveScope === 'payments' || saveScope === 'all';
+        const shouldSaveMessaging = saveScope === 'messaging' || saveScope === 'all';
+        const shouldSaveCampaigns = saveScope === 'campaigns' || saveScope === 'all';
+
+        const currentGymRes = await pool.query(
+            `SELECT
+                messaging_owner_mobile,
+                bulk_enabled,
+                bulk_monthly_limit,
+                bulk_per_campaign_limit,
+                bulk_channels
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [gymId]
+        );
+        const currentGym = currentGymRes.rows[0] || {};
+
+        const ownerMobileInput = String(owner_mobile || '').trim();
+        const normalizedOwnerMobile = ownerMobileInput
+            ? normalizePhone(owner_mobile)
+            : String(currentGym.messaging_owner_mobile || '').trim();
 
         const monthlyLimit = Math.min(100000, Math.max(10, toPositiveInt(bulk_monthly_limit, 500)));
         const perCampaign = Math.min(1000, Math.max(1, toPositiveInt(bulk_per_campaign_limit, 50)));
@@ -556,22 +581,35 @@ router.put('/integrations', auth, async (req, res) => {
             sms: Boolean(bulk_channels?.sms ?? false),
         };
 
-        if (!ownerMobile) {
+        if ((shouldSaveMessaging || shouldSaveCampaigns) && ownerMobileInput && !normalizedOwnerMobile) {
             return res.status(400).json({ error: 'Please enter a valid owner mobile number in +91XXXXXXXXXX format.' });
         }
 
-        await pool.query(
-            `UPDATE gyms
-             SET messaging_owner_mobile = $1,
-                 bulk_enabled = $2,
-                 bulk_monthly_limit = $3,
-                 bulk_per_campaign_limit = $4,
-                 bulk_channels = $5
-             WHERE id = $6`,
-            [ownerMobile, Boolean(bulk_enabled), monthlyLimit, perCampaign, channels, gymId]
-        );
+        if (shouldSaveMessaging && !normalizedOwnerMobile) {
+            return res.status(400).json({ error: 'Please enter a valid owner mobile number in +91XXXXXXXXXX format.' });
+        }
 
-        if (member_payments && typeof member_payments === 'object') {
+        if (shouldSaveMessaging || shouldSaveCampaigns) {
+            await pool.query(
+                `UPDATE gyms
+                 SET messaging_owner_mobile = $1,
+                     bulk_enabled = $2,
+                     bulk_monthly_limit = $3,
+                     bulk_per_campaign_limit = $4,
+                     bulk_channels = $5
+                 WHERE id = $6`,
+                [
+                    normalizedOwnerMobile || String(currentGym.messaging_owner_mobile || '').trim() || null,
+                    shouldSaveCampaigns ? Boolean(bulk_enabled) : Boolean(currentGym.bulk_enabled),
+                    shouldSaveCampaigns ? monthlyLimit : toPositiveInt(currentGym.bulk_monthly_limit, 500),
+                    shouldSaveCampaigns ? perCampaign : toPositiveInt(currentGym.bulk_per_campaign_limit, 50),
+                    shouldSaveCampaigns ? channels : (currentGym.bulk_channels || { whatsapp: true, sms: false }),
+                    gymId,
+                ]
+            );
+        }
+
+        if (shouldSavePayments && member_payments && typeof member_payments === 'object') {
             const enabled = Boolean(member_payments.enabled);
             const keyId = String(member_payments.razorpay_key_id || '').trim();
             const upiId = String(member_payments.upi_id || '').trim().toLowerCase();
@@ -624,7 +662,7 @@ router.put('/integrations', auth, async (req, res) => {
             );
         }
 
-        if (Array.isArray(templates) && templates.length > 0) {
+        if (shouldSaveCampaigns && Array.isArray(templates) && templates.length > 0) {
             for (const template of templates) {
                 const key = String(template.template_key || '').trim().toUpperCase();
                 const fallback = MESSAGE_TEMPLATE_DEFAULTS.find((item) => item.template_key === key);
@@ -648,11 +686,19 @@ router.put('/integrations', auth, async (req, res) => {
                     [gymId, key, title, whatsappText, smsText, isActive]
                 );
             }
-        } else {
+        } else if (shouldSaveCampaigns) {
             await seedMessageTemplates(gymId);
         }
 
-        return res.json({ message: 'Messaging integrations saved successfully.' });
+        const message = shouldSavePayments && !shouldSaveMessaging && !shouldSaveCampaigns
+            ? 'Payment integrations saved successfully.'
+            : shouldSaveCampaigns && !shouldSavePayments && !shouldSaveMessaging
+                ? 'Campaign settings saved successfully.'
+                : shouldSaveMessaging && !shouldSavePayments && !shouldSaveCampaigns
+                    ? 'Messaging integrations saved successfully.'
+                    : 'Integration settings saved successfully.';
+
+        return res.json({ message });
     } catch (err) {
         console.error('INTEGRATIONS SAVE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });

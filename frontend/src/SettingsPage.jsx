@@ -663,7 +663,8 @@ const loadRazorpayScript = () => {
     e.preventDefault();
     setIntegrationSaving(true);
     try {
-      await axios.put('/api/settings/integrations', {
+      const res = await axios.put('/api/settings/integrations', {
+        save_scope: integSubTab,
         ...integrationData,
         templates: integrationData.templates,
         member_payments: {
@@ -675,7 +676,7 @@ const loadRazorpayScript = () => {
           upi_id: String(integrationData.member_payments?.upi_id || '').trim(),
         },
       }, headers);
-      toast('Messaging integration saved successfully.', 'success');
+      toast(res.data?.message || 'Integration settings saved successfully.', 'success');
       await loadIntegrations();
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to save integration settings.', 'error');
