@@ -257,7 +257,8 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
 .app-keyboard-open .app-bottom-sheet {
   bottom: var(--app-keyboard-inset);
-  max-height: calc(var(--app-viewport-height) - var(--app-keyboard-inset));
+  top: max(env(safe-area-inset-top), 0.5rem);
+  max-height: unset;
 }
 
 .dashboard-broadcast-scroll {
@@ -467,14 +468,21 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 @keyframes gv-hero-gradient-drift {
-  0% { background-position: 0% 45%; }
-  50% { background-position: 100% 55%; }
-  100% { background-position: 18% 100%; }
+  0%   { background-position: 0% 0%; }
+  100% { background-position: 100% 100%; }
 }
 
 .gv-dashboard-hero {
-  background: linear-gradient(148deg, #080d1f 0%, #0e0821 50%, #14092a 100%);
-  background-size: 180% 180%;
+  background: linear-gradient(
+    135deg,
+    #06091c 0%,
+    #1e1060 20%,
+    #0d0520 40%,
+    #4a0f8a 60%,
+    #0c183e 80%,
+    #06091c 100%
+  );
+  background-size: 300% 300%;
   isolation: isolate;
   will-change: background-position;
 }
@@ -772,7 +780,16 @@ html.gv-dark-mode .app-mobile-nav {
   border-top: none !important;
 }
 html.gv-dark-mode .gv-dashboard-hero {
-  background: linear-gradient(148deg, #0a0d1b 0%, #140925 56%, #12091f 100%);
+  background: linear-gradient(
+    135deg,
+    #06091c 0%,
+    #1a0e52 20%,
+    #0a0618 40%,
+    #3d0c78 60%,
+    #0b1536 80%,
+    #06091c 100%
+  );
+  background-size: 300% 300%;
 }
 html.gv-dark-mode .gv-dashboard-hero::before,
 html.gv-dark-mode .gv-dashboard-hero::after,

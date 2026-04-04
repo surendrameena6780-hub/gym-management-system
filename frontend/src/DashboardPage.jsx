@@ -1652,7 +1652,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         className="gv-dashboard-hero relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 md:p-8 mb-5 sm:mb-6"
         style={{
           boxShadow: '0 20px 60px rgba(7,10,24,0.34)',
-          opacity: 0, animation: 'cardCascade 0.7s cubic-bezier(0.16,1,0.3,1) 0ms forwards, gv-hero-gradient-drift 15s ease-in-out 700ms infinite alternate'
+          opacity: 0, animation: 'cardCascade 0.7s cubic-bezier(0.16,1,0.3,1) 0ms forwards, gv-hero-gradient-drift 8s ease-in-out 700ms infinite alternate'
         }}
       >
         <div className="gv-dashboard-hero-sheen" />
