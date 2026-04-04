@@ -386,25 +386,10 @@ const getGymGatewayConfig = async (gymId) => {
     }
 
     if (connectMode === 'PARTNER') {
-        const keyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
-        const keySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
-
         if (!connectedAccount) {
             return { ok: false, status: 400, error: 'Razorpay account is not connected yet. Complete Connect Razorpay onboarding first.' };
         }
-        if (!keyId || !keySecret) {
-            return { ok: false, status: 500, error: 'Platform payment gateway not configured. Contact support.' };
-        }
-
-        return {
-            ok: true,
-            data: {
-                connectMode,
-                connectedAccount,
-                keyId,
-                keySecret,
-            },
-        };
+        return { ok: false, status: 410, error: 'Partner-mode Razorpay checkout is disabled. Use the Razorpay payment link flow instead.' };
     }
 
     const keyId = String(gymConfig.member_razorpay_key_id || '').trim();

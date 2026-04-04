@@ -1017,11 +1017,11 @@ router.post('/online/verify', auth, saasMiddleware, requirePermission('payments:
         );
         const row = gymConfigRes.rows[0] || {};
         const verifyMode = String(row.member_payments_connect_mode || 'MANUAL').toUpperCase();
-        // PARTNER: order was created with GymVault's key, so verify with GymVault's secret.
-        // MANUAL: order was created with the gym's own key, so verify with their secret.
-        const keySecret = verifyMode === 'PARTNER'
-            ? String(process.env.RAZORPAY_KEY_SECRET || '').trim()
-            : decryptSecret(row.member_razorpay_key_secret_enc || '');
+        if (verifyMode === 'PARTNER') {
+            return res.status(410).json({ error: 'Partner-mode Razorpay checkout is disabled. Use the Razorpay payment link flow instead.' });
+        }
+
+        const keySecret = decryptSecret(row.member_razorpay_key_secret_enc || '');
         if (!keySecret) {
             return res.status(400).json({ error: 'Razorpay gateway secret missing. Update Integrations first.' });
         }
