@@ -590,17 +590,25 @@ router.put('/integrations', auth, async (req, res) => {
             const current = currentRes.rows[0] || {};
             const existingEncryptedSecret = current.member_razorpay_key_secret_enc || '';
             const connectMode = connectModeInput || String(current.member_payments_connect_mode || 'MANUAL').toUpperCase();
+            const connectedAccountId = String(current.member_razorpay_connected_account_id || '').trim();
+            const hasManualGateway = connectMode === 'MANUAL' && Boolean(keyId && (incomingSecret || member_payments.has_razorpay_secret === true));
+            const hasPartnerGateway = connectMode === 'PARTNER' && Boolean(connectedAccountId);
+            const hasCollectionChannel = Boolean(upiId || hasManualGateway || hasPartnerGateway);
 
-            if (enabled && !upiId) {
-                return res.status(400).json({ error: 'Add your collection UPI ID to enable member online collection.' });
+            if (enabled && !hasCollectionChannel) {
+                return res.status(400).json({ error: 'Configure Razorpay collection or a direct UPI ID before enabling member online collection.' });
             }
 
             const secretToPersist = incomingSecret ? encryptSecret(incomingSecret) : existingEncryptedSecret;
-            const nextOnboardingStatus = connectMode === 'PARTNER'
-                ? String(current.member_payments_onboarding_status || 'NOT_CONNECTED').toUpperCase()
-                : enabled
-                    ? (keyId || incomingSecret || member_payments.has_razorpay_secret === true ? 'MANUAL_CONFIGURED' : 'UPI_COLLECTION_READY')
-                    : 'NOT_CONNECTED';
+            const nextOnboardingStatus = !enabled
+                ? 'NOT_CONNECTED'
+                : hasPartnerGateway
+                    ? String(current.member_payments_onboarding_status || 'NOT_CONNECTED').toUpperCase()
+                    : hasManualGateway
+                        ? 'MANUAL_CONFIGURED'
+                        : upiId
+                            ? 'UPI_COLLECTION_READY'
+                            : 'NOT_CONNECTED';
 
             await pool.query(
                 `UPDATE gyms

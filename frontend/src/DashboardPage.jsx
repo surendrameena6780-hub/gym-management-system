@@ -12,6 +12,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount } from './utils/memberCollection';
+import { loadRazorpayCheckoutScript } from './utils/razorpayCheckout';
 import PageLoader from './PageLoader';
 
 // ─── Count-Up Hook ─────────────────────────────────────────────────────────────
@@ -503,6 +504,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [payMemberDropdownOpen, setPayMemberDropdownOpen] = useState(false);
   const [selectedPlanForPay, setSelectedPlanForPay] = useState('');
   const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentOnlineMode, setPaymentOnlineMode] = useState('RAZORPAY');
   const [paymentCollectionContext, setPaymentCollectionContext] = useState(null);
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
@@ -535,6 +537,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     setPayMemberDropdownOpen(false);
     setSelectedPlanForPay('');
     setPaymentMode('Cash');
+    setPaymentOnlineMode('RAZORPAY');
     setPaymentCollectionContext(null);
     setPaymentReference('');
     setPaymentStep('idle');
@@ -832,39 +835,103 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     setPaymentSubmitting(true);
     try {
       if (paymentMode === 'Online') {
-        if (!paymentCollectionContext) {
-          const collectionRes = await axios.post('/api/memberships/online/create-order', {
-            member_id: selectedMemberForPay,
-            plan_id: selectedPlanForPay,
-          }, headers);
+        if (paymentOnlineMode === 'UPI') {
+          if (!paymentCollectionContext) {
+            const collectionRes = await axios.post('/api/memberships/online/create-order', {
+              member_id: selectedMemberForPay,
+              plan_id: selectedPlanForPay,
+            }, headers);
 
-          const collection = collectionRes.data?.collection;
-          if (!collection?.upi_id) {
-            toast('Failed to prepare the collection QR. Check payment settings.', 'error');
+            const collection = collectionRes.data?.collection;
+            if (!collection?.upi_id) {
+              toast('Direct UPI QR is not configured. Add a collection UPI ID in Integrations or use Razorpay collection.', 'error');
+              setPaymentStep('idle');
+              return;
+            }
+
+            setPaymentCollectionContext(collection);
+            setPaymentReference(collection.reference || '');
+            toast('Show this direct UPI QR to the member, then confirm once payment is received.', 'success');
+            return;
+          }
+
+          const paidMemberId = selectedMemberForPay;
+          setPaymentStep('processing');
+          await axios.post('/api/memberships/activate', {
+            member_id: paidMemberId,
+            plan_id: selectedPlanForPay,
+            payment_mode: 'Online',
+            payment_id: paymentReference || paymentCollectionContext.reference || null,
+          }, headers);
+          try { await axios.post('/api/attendance/checkin', { member_id: paidMemberId, method: 'STAFF' }, headers); } catch (_) {}
+          window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
+          setPaymentStep('success');
+          await new Promise(r => setTimeout(r, 1500));
+          closePaymentModal();
+          fetchData();
+        } else {
+          setPaymentStep('processing');
+          const scriptLoaded = await loadRazorpayCheckoutScript();
+          if (!scriptLoaded) {
+            toast('Failed to load Razorpay collection.', 'error');
             setPaymentStep('idle');
             return;
           }
 
-          setPaymentCollectionContext(collection);
-          setPaymentReference(collection.reference || '');
-          toast('Show this QR to the member, then confirm once payment is received.', 'success');
-          return;
-        }
+          const orderRes = await axios.post('/api/memberships/online/create-order', {
+            member_id: selectedMemberForPay,
+            plan_id: selectedPlanForPay,
+          }, headers);
 
-        const paidMemberId = selectedMemberForPay;
-        setPaymentStep('processing');
-        await axios.post('/api/memberships/activate', {
-          member_id: paidMemberId,
-          plan_id: selectedPlanForPay,
-          payment_mode: 'Online',
-          payment_id: paymentReference || paymentCollectionContext.reference || null,
-        }, headers);
-        try { await axios.post('/api/attendance/checkin', { member_id: paidMemberId, method: 'STAFF' }, headers); } catch (_) {}
-        window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
-        setPaymentStep('success');
-        await new Promise(r => setTimeout(r, 1500));
-        closePaymentModal();
-        fetchData();
+          const razorpay = orderRes.data?.razorpay;
+          if (!razorpay?.key_id || !razorpay?.order?.id) {
+            toast('Razorpay collection is not configured. Add Razorpay keys/connect in Integrations or use Direct UPI.', 'error');
+            setPaymentStep('idle');
+            return;
+          }
+
+          await new Promise((resolve) => {
+            const options = {
+              key: razorpay.key_id,
+              amount: razorpay.order.amount,
+              currency: razorpay.order.currency || 'INR',
+              name: razorpay.merchant_name || orderRes.data?.merchant_name || 'Collection via Razorpay',
+              description: `Collect membership fee for ${orderRes.data?.member?.full_name || 'member'}`,
+              order_id: razorpay.order.id,
+              theme: { color: '#6366f1' },
+              handler: async (response) => {
+                try {
+                  await axios.post('/api/memberships/online/verify', {
+                    member_id: selectedMemberForPay,
+                    plan_id: selectedPlanForPay,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature: response.razorpay_signature,
+                  }, headers);
+                  try { await axios.post('/api/attendance/checkin', { member_id: selectedMemberForPay, method: 'STAFF' }, headers); } catch (_) {}
+                  window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
+                  setPaymentStep('success');
+                  await new Promise(r => setTimeout(r, 1500));
+                  closePaymentModal();
+                  fetchData();
+                } catch (verifyErr) {
+                  toast(verifyErr?.response?.data?.error || 'Razorpay collection verification failed.', 'error');
+                  setPaymentStep('idle');
+                } finally {
+                  resolve();
+                }
+              },
+              modal: {
+                ondismiss: () => {
+                  setPaymentStep('idle');
+                  resolve();
+                },
+              },
+            };
+            const rzp = new window.Razorpay(options);
+            rzp.open();
+          });
+        }
       } else {
         const paidMemberId = selectedMemberForPay;
         setPaymentStep('processing');
@@ -2407,7 +2474,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                               <p className="text-[10px] text-slate-500 font-semibold truncate">{m?.phone}</p>
                             </div>
                             <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0 ${badge}`}>{status || 'UNPAID'}</span>
-                            <button type="button" onClick={() => { setSelectedMemberForPay(''); setPayMemberSearch(''); setPayMemberDropdownOpen(false); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
+                            <button type="button" onClick={() => { setSelectedMemberForPay(''); setPayMemberSearch(''); setPayMemberDropdownOpen(false); setPaymentOnlineMode('RAZORPAY'); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                               className="w-6 h-6 rounded-full bg-slate-200 hover:bg-rose-100 flex items-center justify-center shrink-0 transition-colors">
                               <X size={12} />
                             </button>
@@ -2470,7 +2537,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                             const badge = status === 'EXPIRED' ? 'text-rose-600 bg-rose-50' : status === 'ACTIVE' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50';
                             return (
                               <button key={m.id} type="button"
-                                onClick={() => { setSelectedMemberForPay(String(m.id)); setPayMemberSearch(''); setPayMemberDropdownOpen(false); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
+                                onClick={() => { setSelectedMemberForPay(String(m.id)); setPayMemberSearch(''); setPayMemberDropdownOpen(false); setPaymentOnlineMode('RAZORPAY'); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors text-left border-b border-slate-50 last:border-0">
                                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-black shrink-0">
                                   {(m.full_name || '?').charAt(0).toUpperCase()}
@@ -2506,14 +2573,30 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Payment Mode</label>
                 <div className="flex gap-2">
                   {['Cash', 'Online'].map(mode => (
-                    <button key={mode} type="button" onClick={() => { setPaymentMode(mode); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
+                    <button key={mode} type="button" onClick={() => { setPaymentMode(mode); setPaymentOnlineMode('RAZORPAY'); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                       className={`flex-1 py-2.5 rounded-xl font-bold text-sm border transition-all ${paymentMode === mode ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>
                       {mode === 'Online' ? 'Online / UPI' : mode}
                     </button>
                   ))}
                 </div>
               </div>
-              {paymentMode === 'Online' && paymentCollectionContext && (
+              {paymentMode === 'Online' && (
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Online Collection Channel</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { key: 'RAZORPAY', label: 'Razorpay', detail: 'Card, UPI, netbanking, wallets' },
+                      { key: 'UPI', label: 'Direct UPI', detail: 'Show QR and record receipt' },
+                    ].map((option) => (
+                      <button key={option.key} type="button" onClick={() => { setPaymentOnlineMode(option.key); setPaymentCollectionContext(null); setPaymentReference(''); setPaymentStep('idle'); }} className={`rounded-2xl border px-3 py-3 text-left transition-all ${paymentOnlineMode === option.key ? 'border-indigo-300 bg-indigo-50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                        <p className={`text-xs font-black uppercase tracking-wider ${paymentOnlineMode === option.key ? 'text-indigo-700' : 'text-slate-700'}`}>{option.label}</p>
+                        <p className="text-[11px] font-semibold text-slate-500 mt-1">{option.detail}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {paymentMode === 'Online' && paymentOnlineMode === 'UPI' && paymentCollectionContext && (
                 <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 px-4 py-4 shadow-sm">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                     <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
@@ -2574,7 +2657,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 disabled={paymentSubmitting || paymentStep !== 'idle'}
                 className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-98"
                 style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>
-                {paymentSubmitting ? <RefreshCw size={16} className="animate-spin" /> : <Zap size={16} fill="currentColor" />} {paymentSubmitting ? (paymentMode === 'Online' ? (paymentCollectionContext ? 'Recording Collection...' : 'Preparing Collection QR...') : 'Please wait...') : (paymentMode === 'Online' ? (paymentCollectionContext ? 'Record Online Collection' : 'Show Collection QR') : 'Complete Transaction')}
+                {paymentSubmitting ? <RefreshCw size={16} className="animate-spin" /> : <Zap size={16} fill="currentColor" />} {paymentSubmitting ? (paymentMode === 'Online' ? (paymentOnlineMode === 'RAZORPAY' ? 'Opening Razorpay Collection...' : (paymentCollectionContext ? 'Recording Collection...' : 'Preparing Collection QR...')) : 'Please wait...') : (paymentMode === 'Online' ? (paymentOnlineMode === 'RAZORPAY' ? 'Open Razorpay Collection' : (paymentCollectionContext ? 'Record Direct UPI Collection' : 'Show Direct UPI QR')) : 'Complete Transaction')}
               </button>
             </form>
 

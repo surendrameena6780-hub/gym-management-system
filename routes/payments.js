@@ -71,12 +71,16 @@ const appendNote = (existingNotes, newNote) => {
 
 const buildAutoCollectionReference = (paymentId) => `DUE-${paymentId}-${Date.now().toString().slice(-6)}`;
 
-const getGymCollectionProfile = async (gymId) => {
+const getGymCollectionSetup = async (gymId) => {
     const gymConfigRes = await pool.query(
         `SELECT
             name,
             member_payments_enabled,
-            member_upi_id
+            member_upi_id,
+            member_razorpay_key_id,
+            member_razorpay_key_secret_enc,
+            member_payments_connect_mode,
+            member_razorpay_connected_account_id
          FROM gyms
          WHERE id = $1
          LIMIT 1`,
@@ -88,16 +92,57 @@ const getGymCollectionProfile = async (gymId) => {
         return { ok: false, status: 400, error: 'Member online collection is disabled in Integrations.' };
     }
 
+    const payeeName = String(gymConfig.name || 'GymVault Gym').trim() || 'GymVault Gym';
     const upiId = String(gymConfig.member_upi_id || '').trim().toLowerCase();
-    if (!upiId) {
-        return { ok: false, status: 400, error: 'Add your collection UPI ID in Integrations before collecting member payments online.' };
+    const upi = upiId
+        ? {
+            payeeName,
+            upiId,
+        }
+        : null;
+
+    const connectMode = String(gymConfig.member_payments_connect_mode || 'MANUAL').toUpperCase();
+    const connectedAccount = String(gymConfig.member_razorpay_connected_account_id || '').trim();
+    let razorpay = null;
+
+    if (connectMode === 'PARTNER') {
+        const platformKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
+        const platformKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+        if (connectedAccount && platformKeyId && platformKeySecret) {
+            razorpay = {
+                connectMode,
+                connectedAccount,
+                keyId: platformKeyId,
+                keySecret: platformKeySecret,
+            };
+        }
+    } else {
+        const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
+        const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
+        if (keyId && keySecret) {
+            razorpay = {
+                connectMode,
+                connectedAccount: '',
+                keyId,
+                keySecret,
+            };
+        }
+    }
+
+    if (!upi && !razorpay) {
+        return {
+            ok: false,
+            status: 400,
+            error: 'Configure Razorpay collection or a direct UPI ID in Integrations before collecting member payments online.',
+        };
     }
 
     return {
         ok: true,
         data: {
-            payeeName: String(gymConfig.name || 'GymVault Gym').trim() || 'GymVault Gym',
-            upiId,
+            payeeName,
+            upi,
+            razorpay,
         },
     };
 };
@@ -691,20 +736,87 @@ router.post('/:id/due/create-order', async (req, res) => {
             return res.status(400).json({ error: 'Collection amount cannot exceed the remaining due.' });
         }
 
-        const collectionProfile = await getGymCollectionProfile(gym_id);
-        if (!collectionProfile.ok) {
-            return res.status(collectionProfile.status).json({ error: collectionProfile.error });
+        const collectionSetup = await getGymCollectionSetup(gym_id);
+        if (!collectionSetup.ok) {
+            return res.status(collectionSetup.status).json({ error: collectionSetup.error });
+        }
+
+        let razorpay = null;
+        if (collectionSetup.data.razorpay) {
+            const { connectMode, connectedAccount, keyId, keySecret } = collectionSetup.data.razorpay;
+            const amountPaise = Math.round(collectionAmount * 100);
+            if (!Number.isFinite(amountPaise) || amountPaise <= 0) {
+                return res.status(400).json({ error: 'Pending due amount is invalid.' });
+            }
+
+            let order;
+            if (connectMode === 'PARTNER') {
+                const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
+                const feeAmount = Math.round(amountPaise * feePercent / 100);
+                const transferAmount = Math.max(0, amountPaise - feeAmount);
+                const platformRazorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+                order = await platformRazorpay.orders.create({
+                    amount: amountPaise,
+                    currency: 'INR',
+                    receipt: `due_${paymentId}_${Date.now()}`,
+                    transfers: [{
+                        account: connectedAccount,
+                        amount: transferAmount,
+                        currency: 'INR',
+                        on_hold: false,
+                        notes: {
+                            purpose: 'DUE_COLLECTION',
+                            gym_id: String(gym_id),
+                            payment_id: String(paymentId),
+                            member_id: String(payment.user_id),
+                        },
+                    }],
+                    notes: {
+                        purpose: 'DUE_COLLECTION',
+                        gym_id: String(gym_id),
+                        payment_id: String(paymentId),
+                        member_id: String(payment.user_id),
+                        invoice_id: String(payment.invoice_id || ''),
+                    },
+                });
+            } else {
+                const razorpayClient = new Razorpay({ key_id: keyId, key_secret: keySecret });
+                order = await razorpayClient.orders.create({
+                    amount: amountPaise,
+                    currency: 'INR',
+                    receipt: `due_${paymentId}_${Date.now()}`,
+                    notes: {
+                        purpose: 'DUE_COLLECTION',
+                        gym_id: String(gym_id),
+                        payment_id: String(paymentId),
+                        member_id: String(payment.user_id),
+                        invoice_id: String(payment.invoice_id || ''),
+                    },
+                });
+            }
+
+            razorpay = {
+                key_id: keyId,
+                order,
+                merchant_name: collectionSetup.data.payeeName,
+            };
         }
 
         return res.json({
             mode: 'COLLECTION',
-            collection: {
+            merchant_name: collectionSetup.data.payeeName,
+            collection: collectionSetup.data.upi ? {
                 amount: collectionAmount,
                 currency: 'INR',
-                payee_name: collectionProfile.data.payeeName,
-                upi_id: collectionProfile.data.upiId,
+                payee_name: collectionSetup.data.upi.payeeName,
+                upi_id: collectionSetup.data.upi.upiId,
                 note: `Pending due · ${payment.member_name} · Invoice ${payment.invoice_id || payment.id}`,
                 reference: buildAutoCollectionReference(payment.id),
+            } : null,
+            razorpay,
+            channels: {
+                upi: Boolean(collectionSetup.data.upi),
+                razorpay: Boolean(razorpay),
             },
             payment: {
                 id: payment.id,
