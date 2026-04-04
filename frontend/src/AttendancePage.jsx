@@ -160,12 +160,14 @@ const hasPermission = (user, permission) => {
   return Boolean(scope && permissions.includes(`${scope}:*`));
 };
 
-function AttendancePage({ token, toast, isActive = true, currentUser = null, onOpenRfidSetup }) {
+function AttendancePage({ token, toast, isActive = true, currentUser = null, onOpenRfidSetup, focusSection = null, onSectionHandled }) {
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
   const qrScannerRef = useRef(null);
   const qrScannerBusyRef = useRef(false);
+  const checkinOpsRef = useRef(null);
+  const liveFeedRef = useRef(null);
 
   const [overview, setOverview] = useState({
     today_checkins: 0,
@@ -248,6 +250,30 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
       fetchPlans();
     }
   }, [attendanceTab, isOwner, token]);
+
+  useEffect(() => {
+    if (!focusSection || !isActive) return undefined;
+
+    if ((focusSection === 'checkin-ops' || focusSection === 'live-feed') && attendanceTab !== 'checkin') {
+      setAttendanceTab('checkin');
+      return undefined;
+    }
+
+    const sectionNode = focusSection === 'live-feed'
+      ? liveFeedRef.current
+      : focusSection === 'checkin-ops'
+        ? checkinOpsRef.current
+        : null;
+
+    if (!sectionNode) return undefined;
+
+    const timer = window.setTimeout(() => {
+      sectionNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onSectionHandled?.();
+    }, 90);
+
+    return () => window.clearTimeout(timer);
+  }, [attendanceTab, focusSection, isActive, onSectionHandled]);
 
   const closePolicyModal = () => {
     setShowPolicyModal(false);
@@ -893,7 +919,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
       {/* ═══════ CHECK-IN OPS TAB ═══════ */}
       {attendanceTab === 'checkin' && (<>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+      <div ref={checkinOpsRef} className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
         <div className="flex items-center gap-2 mb-4">
           <Shield size={18} className="text-indigo-500" />
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Attendance Mode</h3>
@@ -1061,7 +1087,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
           )}
         </div>
 
-        <div className="xl:col-span-2 bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+        <div ref={liveFeedRef} className="xl:col-span-2 bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Live Feed + Records</h3>
             <div className="flex items-center gap-2">

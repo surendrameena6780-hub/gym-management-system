@@ -390,6 +390,63 @@ html.gv-compact-ui main.app-scroll-shell > div {
   transform: translateY(-2px);
 }
 
+@keyframes gv-hero-wave-a {
+  0% { transform: translate3d(-8%, -6%, 0) scale(1); }
+  50% { transform: translate3d(6%, 6%, 0) scale(1.08); }
+  100% { transform: translate3d(-3%, 10%, 0) scale(1.02); }
+}
+
+@keyframes gv-hero-wave-b {
+  0% { transform: translate3d(10%, -4%, 0) scale(1.02); }
+  50% { transform: translate3d(-4%, 8%, 0) scale(1.1); }
+  100% { transform: translate3d(8%, -8%, 0) scale(1); }
+}
+
+@keyframes gv-hero-sheen-pass {
+  0% { transform: translateX(-42%) rotate(12deg); opacity: 0.12; }
+  50% { opacity: 0.28; }
+  100% { transform: translateX(88%) rotate(12deg); opacity: 0.08; }
+}
+
+.gv-dashboard-hero {
+  background:
+    linear-gradient(135deg, #111935 0%, #272d72 34%, #3d38b5 68%, #5746e9 100%),
+    radial-gradient(circle at 16% 16%, rgba(34, 197, 94, 0.16) 0%, transparent 32%),
+    radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.18) 0%, transparent 28%),
+    radial-gradient(circle at 50% 100%, rgba(56, 189, 248, 0.18) 0%, transparent 38%);
+  isolation: isolate;
+}
+
+.gv-dashboard-hero::before,
+.gv-dashboard-hero::after {
+  content: '';
+  position: absolute;
+  inset: -24%;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(30px);
+  mix-blend-mode: screen;
+}
+
+.gv-dashboard-hero::before {
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.22) 0%, transparent 60%);
+  animation: gv-hero-wave-a 16s ease-in-out infinite alternate;
+}
+
+.gv-dashboard-hero::after {
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.22) 0%, transparent 60%);
+  animation: gv-hero-wave-b 18s ease-in-out infinite alternate;
+}
+
+.gv-dashboard-hero-sheen {
+  position: absolute;
+  inset: -30% -35%;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 28%, rgba(255,255,255,0.18) 46%, rgba(255,255,255,0.04) 57%, transparent 76%);
+  animation: gv-hero-sheen-pass 10s linear infinite;
+  opacity: 0.9;
+}
+
 /* ══════════════════════════════════════════════════════════════
    AUTH PAGES — Login & Signup
 ════════════════════════════════════════════════════════════════ */

@@ -122,10 +122,10 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
                 COALESCE((
                     SELECT SUM(amount_paid) FROM payments WHERE user_id = m.id AND gym_id = $1 AND deleted_at IS NULL
                 ), 0) AS total_paid,
-                COALESCE((
-                    SELECT json_agg(pay ORDER BY pay.payment_date DESC)
+                (
+                    SELECT MAX(pay.payment_date)
                     FROM payments pay WHERE pay.user_id = m.id AND gym_id = $1 AND pay.deleted_at IS NULL
-                ), '[]') AS payment_history,
+                ) AS latest_payment_date,
                 ms_latest.plan_name,
                 ms_latest.end_date AS expiry_date,
                 ms_latest.freeze_start_date,
@@ -215,6 +215,10 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
                 ms_latest.plan_name,
                 ms_latest.end_date AS expiry_date,
                 COALESCE((SELECT SUM(amount_paid) FROM payments WHERE user_id = m.id AND gym_id = $2 AND deleted_at IS NULL), 0) AS total_paid,
+                (
+                    SELECT MAX(pay.payment_date)
+                    FROM payments pay WHERE pay.user_id = m.id AND gym_id = $2 AND pay.deleted_at IS NULL
+                ) AS latest_payment_date,
                 COALESCE((
                     SELECT json_agg(pay ORDER BY pay.payment_date DESC)
                     FROM payments pay WHERE pay.user_id = m.id AND gym_id = $2 AND pay.deleted_at IS NULL

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   LifeBuoy,
@@ -30,11 +30,11 @@ const priorityBadge = (priority) => {
 };
 
 const QUICK_PROBLEMS = [
-  'How to add members?',
-  'Staff cannot login',
-  'Attendance check-in is failing',
-  'Need billing invoice',
-  'Recover deleted member',
+  'How do I add a member?',
+  'Staff login not working',
+  'Check-in is not working',
+  'I need my billing invoice',
+  'Get my deleted member back',
   'Reset staff password',
 ];
 
@@ -43,17 +43,17 @@ const fallbackAssistantReply = (message) => {
 
   if (lower.includes('add member') || lower.includes('new member') || lower.includes('register member')) {
     return {
-      answer: 'To add members: go to Members → Add Member, fill name/phone/email, assign a plan, and save. If save fails, check duplicate phone and required fields.',
+      answer: 'To add a member, open Members, tap Add Member, fill the name, phone, and email, then save. If it fails, check if the phone number is already used.',
       category: 'GENERAL',
       priority: 'MEDIUM',
-      suggested_subject: 'Unable to add members',
+      suggested_subject: 'Unable to add member',
       actions: ['Open Members page', 'Raise support ticket'],
     };
   }
 
   if (lower.includes('staff') && lower.includes('login')) {
     return {
-      answer: 'For staff login issues: verify staff account is active in Settings → Staff & Roles, confirm role is assigned, and reset password if needed.',
+      answer: 'If staff cannot log in, check that the staff account is active, the role is assigned correctly, and the password is right. You can also reset the password from staff settings.',
       category: 'ACCOUNT',
       priority: 'MEDIUM',
       suggested_subject: 'Staff login issue',
@@ -63,7 +63,7 @@ const fallbackAssistantReply = (message) => {
 
   if (lower.includes('attendance') || lower.includes('check in') || lower.includes('check-in') || lower.includes('checkin')) {
     return {
-      answer: 'For attendance issues: check selected attendance mode, verify member membership status, and retry check-in. If blocked unexpectedly, raise a technical ticket with member name/time.',
+      answer: 'For check-in issues, first check the attendance mode, then confirm the member plan is active, and try again. If it still fails, send the member name and time in a ticket.',
       category: 'TECHNICAL',
       priority: 'HIGH',
       suggested_subject: 'Attendance check-in issue',
@@ -73,7 +73,7 @@ const fallbackAssistantReply = (message) => {
 
   if (lower.includes('bill') || lower.includes('invoice') || lower.includes('subscription') || lower.includes('payment')) {
     return {
-      answer: 'For billing help: open Settings → Billing & Subscriptions, verify current plan and validity, then download invoice from billing history.',
+      answer: 'For billing help, open Settings and go to Billing. There you can check your current plan, validity, and download the invoice from billing history.',
       category: 'BILLING',
       priority: 'MEDIUM',
       suggested_subject: 'Billing or invoice issue',
@@ -83,7 +83,7 @@ const fallbackAssistantReply = (message) => {
 
   if (lower.includes('delete') && lower.includes('member')) {
     return {
-      answer: 'Deleted members are soft-deleted. Share member name, phone, and approx deletion time in a ticket to recover quickly.',
+      answer: 'Deleted members can usually be recovered. Send the member name, phone number, and approximate delete time in a ticket.',
       category: 'DATA',
       priority: 'HIGH',
       suggested_subject: 'Recover deleted member',
@@ -92,7 +92,7 @@ const fallbackAssistantReply = (message) => {
   }
 
   return {
-    answer: 'I can help with adding members, staff login, attendance issues, billing, and data recovery. Choose a quick problem below or raise a support ticket.',
+    answer: 'I can help with member add issues, staff login, check-in issues, billing, and deleted data. Tap a quick issue below or raise a ticket.',
     category: 'GENERAL',
     priority: 'LOW',
     suggested_subject: 'General support assistance',
@@ -121,11 +121,12 @@ function HelpSupportPage({ token, toast }) {
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const chatScrollRef = useRef(null);
   const [chatMessages, setChatMessages] = useState([
     {
       id: 'init-assistant',
       role: 'assistant',
-      text: 'Hi! I am GymVault Support Assistant. Tell me your issue (billing, attendance, staff login, data recovery), and I will suggest a fix or help you raise a ticket.',
+      text: 'Hi! I am your GymVault support helper. Tell me the problem in simple words and I will guide you or help you raise a ticket.',
       meta: null,
     },
   ]);
@@ -164,6 +165,12 @@ function HelpSupportPage({ token, toast }) {
   useEffect(() => {
     if (token) loadAll();
   }, [token]);
+
+  useEffect(() => {
+    const chatBox = chatScrollRef.current;
+    if (!chatBox) return;
+    chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+  }, [chatBusy, chatMessages, chatOpen]);
 
   const createTicket = async ({ subject, category, priority, description }) => {
     if (!subject?.trim() || !description?.trim()) {
@@ -276,6 +283,88 @@ function HelpSupportPage({ token, toast }) {
     return <PageLoader className="min-h-[56vh]" />;
   }
 
+  const renderChatAssistant = ({ embedded = false } = {}) => {
+    const wrapperClass = embedded
+      ? 'bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 min-h-[28rem] flex flex-col overflow-hidden'
+      : 'fixed right-6 bottom-20 z-[170] w-[380px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden';
+
+    return (
+      <div className={wrapperClass}>
+        <div className="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between">
+          <div>
+            <p className="text-sm font-black uppercase tracking-wider">Support Chat</p>
+            <p className="text-[11px] text-white/75 font-semibold mt-0.5">Quick help for billing, login, check-in, and data issues.</p>
+          </div>
+          {!embedded && (
+            <button type="button" onClick={() => setChatOpen(false)} className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/70">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Quick Issues</p>
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+            {QUICK_PROBLEMS.map((problem) => (
+              <button
+                key={problem}
+                type="button"
+                onClick={() => sendChat(problem)}
+                className="shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+              >
+                {problem}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-white">
+          {chatMessages.map((msg) => (
+            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[92%] rounded-2xl px-3.5 py-3 border text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}>
+                <p className="font-semibold whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                {msg.role === 'assistant' && msg.meta?.actions?.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button onClick={() => raiseTicketFromBot(msg)} className="px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100">
+                      Raise Ticket
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {chatBusy && <div className="text-[12px] text-slate-400 font-semibold">Support helper is typing...</div>}
+        </div>
+
+        <div className="border-t border-slate-100 bg-white px-4 py-3">
+          <div className="flex items-end gap-2">
+            <textarea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendChat();
+                }
+              }}
+              rows={2}
+              placeholder="Type your issue here..."
+              className="flex-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold resize-none"
+            />
+            <button
+              type="button"
+              onClick={() => sendChat()}
+              disabled={chatBusy || !chatInput.trim()}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-60"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (accessDenied) {
     return (
       <div className="space-y-5">
@@ -291,13 +380,13 @@ function HelpSupportPage({ token, toast }) {
   }
 
   return (
-    <div className="space-y-5 min-h-[calc(100dvh-120px)] md:h-[calc(100vh-120px)] flex flex-col">
+    <div className="space-y-5 min-h-full pb-6 flex flex-col">
       <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
         <div className="flex items-center gap-2 mb-2">
           <LifeBuoy size={18} className="text-indigo-500" />
           <h2 className="text-lg font-black text-slate-900">Help & Support</h2>
         </div>
-        <p className="text-sm text-slate-500 font-medium">Fast support, clear communication, and trackable ticket resolution for your gym operations.</p>
+        <p className="text-sm text-slate-500 font-medium">Get help quickly, talk clearly with support, and track all your tickets in one place.</p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 flex-1 min-h-0">
@@ -312,39 +401,28 @@ function HelpSupportPage({ token, toast }) {
               <input
                 value={ticketForm.subject}
                 onChange={(e) => setTicketForm((prev) => ({ ...prev, subject: e.target.value }))}
-                placeholder="Subject (e.g., Staff login issue)"
+                placeholder="What do you need help with?"
                 className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <select
-                  value={ticketForm.category}
-                  onChange={(e) => setTicketForm((prev) => ({ ...prev, category: e.target.value }))}
-                  className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-                >
-                  <option value="GENERAL">General</option>
-                  <option value="BILLING">Billing</option>
-                  <option value="TECHNICAL">Technical</option>
-                  <option value="ACCOUNT">Account</option>
-                  <option value="DATA">Data & Backup</option>
-                </select>
-
-                <select
-                  value={ticketForm.priority}
-                  onChange={(e) => setTicketForm((prev) => ({ ...prev, priority: e.target.value }))}
-                  className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-                >
-                  <option value="LOW">Low</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="HIGH">High</option>
-                </select>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                {QUICK_PROBLEMS.map((problem) => (
+                  <button
+                    key={`ticket-${problem}`}
+                    type="button"
+                    onClick={() => setTicketForm((prev) => ({ ...prev, subject: problem.replace('?', '') }))}
+                    className="shrink-0 px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-[11px] font-black text-slate-600 hover:bg-slate-100"
+                  >
+                    {problem}
+                  </button>
+                ))}
               </div>
 
               <textarea
                 rows={4}
                 value={ticketForm.description}
                 onChange={(e) => setTicketForm((prev) => ({ ...prev, description: e.target.value }))}
-                placeholder="Describe the issue in detail..."
+                placeholder="Tell us what happened and where you got stuck."
                 className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold resize-none"
               />
 
@@ -354,9 +432,13 @@ function HelpSupportPage({ token, toast }) {
                 className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-black hover:bg-indigo-700 transition-colors disabled:opacity-60 inline-flex items-center gap-2"
               >
                 <Send size={14} />
-                {raising ? 'Submitting...' : 'Submit Ticket'}
+                {raising ? 'Sending...' : 'Send Ticket'}
               </button>
             </form>
+          </div>
+
+          <div className="xl:hidden min-h-0 flex-1">
+            {renderChatAssistant({ embedded: true })}
           </div>
 
           <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 min-h-0 flex-1 flex flex-col">
@@ -441,75 +523,14 @@ function HelpSupportPage({ token, toast }) {
       <button
         type="button"
         onClick={() => setChatOpen((prev) => !prev)}
-        className="fixed right-6 bottom-6 z-[170] w-12 h-12 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 flex items-center justify-center"
+        className="hidden xl:flex fixed right-6 bottom-6 z-[170] w-12 h-12 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 items-center justify-center"
         title="Open support assistant"
       >
         {chatOpen ? <X size={18} /> : <MessageSquare size={18} />}
       </button>
 
       {chatOpen && (
-        <div className="fixed right-6 bottom-20 z-[170] w-[380px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
-          <div className="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between">
-            <p className="text-sm font-black uppercase tracking-wider">Support Assistant</p>
-            <button type="button" onClick={() => setChatOpen(false)} className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center">
-              <X size={14} />
-            </button>
-          </div>
-
-          <div className="p-3 border-b border-slate-100">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Quick Problems</p>
-            <div className="flex flex-wrap gap-1.5">
-              {QUICK_PROBLEMS.map((problem) => (
-                <button
-                  key={problem}
-                  type="button"
-                  onClick={() => sendChat(problem)}
-                  className="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 hover:bg-slate-200"
-                >
-                  {problem}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3">
-            <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-              {chatMessages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[90%] rounded-2xl px-3 py-2 border text-xs ${msg.role === 'user' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-700 border-slate-200'}`}>
-                    <p className="font-semibold whitespace-pre-wrap">{msg.text}</p>
-                    {msg.role === 'assistant' && msg.meta?.actions?.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <button onClick={() => raiseTicketFromBot(msg)} className="px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100">
-                          Raise Ticket
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {chatBusy && <div className="text-[11px] text-slate-400 font-semibold">Assistant is typing...</div>}
-            </div>
-
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendChat()}
-                placeholder="Describe your issue..."
-                className="flex-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold"
-              />
-              <button
-                type="button"
-                onClick={() => sendChat()}
-                disabled={chatBusy || !chatInput.trim()}
-                className="px-3 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-60"
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        </div>
+        renderChatAssistant()
       )}
     </div>
   );

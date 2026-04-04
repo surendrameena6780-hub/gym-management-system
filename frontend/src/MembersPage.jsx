@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   Search, Edit2, Plus, X, Zap, RefreshCw, Trash2, Ban, Calendar,
@@ -236,6 +236,10 @@ const normalizeMemberRecord = (member) => ({
   profile_pic: normalizeProfileImageUrl(member?.profile_pic),
 });
 
+const getLatestPaymentDate = (member) => member?.latest_payment_date || (Array.isArray(member?.payment_history) ? member.payment_history[0]?.payment_date : null) || null;
+
+const getEffectiveVisitSource = (member) => member?.last_visit || getLatestPaymentDate(member) || null;
+
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {
     if (window.Razorpay) return resolve(true);
@@ -280,6 +284,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [loading, setLoading] = useState(true);
 
   const [selectedIds, setSelectedIds] = useState([]);
@@ -287,6 +292,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [showSuccessAnim, setShowSuccessAnim] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [addMemberSubmitting, setAddMemberSubmitting] = useState(false);
+  const [activatingMode, setActivatingMode] = useState('');
+  const [memberActionLoading, setMemberActionLoading] = useState(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showActivateModal, setShowActivateModal] = useState(false);
@@ -326,6 +334,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
   const docCameraInputRef = useRef(null);
   const docGalleryInputRef = useRef(null);
+  const memberActionTimerRef = useRef(null);
 
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
@@ -597,6 +606,14 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   // Load lifecycle data when drawer opens
   useEffect(() => {
+    return () => {
+      if (memberActionTimerRef.current) {
+        clearTimeout(memberActionTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (showDetailsModal && selectedMember?.id) {
       setDrawerTab('profile');
       syncOnboardingForm(selectedMember);
@@ -623,6 +640,25 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
     setSelectedMember(member);
     setShowActivateModal(true);
+  };
+
+  const openActivateModalWithFeedback = (member, actionKey) => {
+    if (!canWritePayments) {
+      toast?.('You do not have permission to manage memberships or payments.', 'warning');
+      return;
+    }
+
+    setMemberActionLoading(actionKey);
+    if (memberActionTimerRef.current) {
+      clearTimeout(memberActionTimerRef.current);
+    }
+
+    memberActionTimerRef.current = setTimeout(() => {
+      setSelectedMember(member);
+      setShowActivateModal(true);
+      setMemberActionLoading(null);
+      memberActionTimerRef.current = null;
+    }, 150);
   };
 
   const openFreezeModalForMember = (member) => {
@@ -668,10 +704,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     return true;
   };
 
-  const fetchMembers = async ({ search = searchTerm } = {}) => {
+  const fetchMembers = async () => {
     try {
-      const url = `/api/members${search ? `?search=${encodeURIComponent(search)}` : ''}`;
-      const res = await axios.get(url, { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/members', { headers: { 'x-auth-token': token } });
       const normalizedMembers = extractArray(res.data, ['members', 'rows', 'items']).map(normalizeMemberRecord);
       setMembers(normalizedMembers);
       // Sync selectedMember so photo & data stay fresh after any upload/edit
@@ -698,19 +733,16 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   useEffect(() => {
     if (!token) return;
     setLoading(true);
-    const timer = setTimeout(() => {
-      fetchMembers({ search: searchTerm });
-    }, 220);
-    return () => clearTimeout(timer);
-  }, [token, searchTerm]);
+    fetchMembers();
+  }, [token]);
 
   // Instantly refresh when dashboard check-in or payment fires the data-changed event
   useEffect(() => {
     if (!token) return;
-    const handler = () => fetchMembers({ search: searchTerm });
+    const handler = () => fetchMembers();
     window.addEventListener('gymvault:data-changed', handler);
     return () => window.removeEventListener('gymvault:data-changed', handler);
-  }, [token, searchTerm]);
+  }, [token]);
 
   useEffect(() => {
     if (!focusAction || focusMemberId) return;
@@ -881,8 +913,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
 
     try {
+      setActivatingMode('online');
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
+        setActivatingMode('');
         return toast?.('Failed to load Razorpay checkout.', 'error');
       }
 
@@ -895,6 +929,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       const keyId = orderRes.data?.key_id;
       const order = orderRes.data?.order;
       if (!keyId || !order?.id) {
+        setActivatingMode('');
         return toast?.('Member payment gateway not configured. Ask owner to setup Integrations.', 'error');
       }
 
@@ -907,6 +942,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         order_id: order.id,
         handler: async (res) => {
           try {
+            setActivatingMode('verifying');
             await axios.post(
               '/api/memberships/online/verify',
               {
@@ -926,6 +962,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             setShowSuccessAnim(true);
           } catch (verifyErr) {
             toast?.(verifyErr?.response?.data?.error || 'Payment verification failed. Please try again.', 'error');
+            setActivatingMode('');
           }
         },
         prefill: { name: selectedMember.full_name, contact: selectedMember.phone, email: selectedMember.email },
@@ -933,13 +970,16 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       };
       const rzp = new window.Razorpay(options);
       rzp.open();
+      setActivatingMode('');
     } catch (err) {
+      setActivatingMode('');
       toast?.(err?.response?.data?.error || 'Unable to start online payment.', 'error');
     }
   };
 
   const processActivation = async (plan, paymentId) => {
     try {
+      setActivatingMode('cash');
       const isOnline = paymentId && String(paymentId).startsWith('pay_');
       const mode = isOnline ? 'Online' : 'Cash';
       await axios.post('/api/memberships/activate', { member_id: selectedMember.id, plan_id: plan.id, payment_id: paymentId, payment_mode: mode }, { headers: { 'x-auth-token': token } });
@@ -951,7 +991,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
       setShowActivateModal(false);
       setShowSuccessAnim(true);
-    } catch (err) { toast?.('Activation failed. Please try again.', 'error'); }
+    } catch (err) {
+      toast?.('Activation failed. Please try again.', 'error');
+    } finally {
+      setActivatingMode('');
+    }
   };
 
   const sendWhatsApp = (member, type) => {
@@ -1043,10 +1087,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     // Expiring soon: 7-day window — highest priority, checked before inactivity
     if (member.days_left <= 7) return { label: 'EXPIRING SOON', color: 'bg-orange-500', text: 'text-orange-500' };
     // Fresh activations should not immediately look inactive just because no visit happened yet.
-    const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
-    const activationReference = latestPayment?.payment_date || member.joining_date;
+    const latestPaymentDate = getLatestPaymentDate(member);
+    const activationReference = latestPaymentDate || member.joining_date;
     const today = new Date();
-    const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
+    const effectiveVisitSource = getEffectiveVisitSource(member);
     const lastVisit = effectiveVisitSource ? new Date(effectiveVisitSource) : null;
     const activationDate = activationReference ? new Date(activationReference) : null;
     const diffDays = lastVisit
@@ -1108,6 +1152,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     formData.append('phone', normalizedPhone);
     if (addFileToUpload) formData.append('profile_pic', addFileToUpload);
     try {
+      setAddMemberSubmitting(true);
       const res = await axios.post('/api/members/add', formData, { headers: { 'x-auth-token': token } });
       setShowAddModal(false);
       setAddFormData({ full_name: '', email: '', phone: '' }); setAddFile(null); setPreviewUrl(null);
@@ -1119,6 +1164,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Error adding member.';
       toast?.(message, 'error');
+    } finally {
+      setAddMemberSubmitting(false);
     }
   };
 
@@ -1201,18 +1248,37 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const toggleSelection = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
 
-  const filteredMembers = members.filter((m) => {
-    const statusInfo = getStatusInfo(m);
-    const latestPayment = Array.isArray(m.payment_history) ? m.payment_history[0] : null;
-    const effectiveVisitSource = m.last_visit || latestPayment?.payment_date || null;
-    const lastVisitDate = effectiveVisitSource ? new Date(effectiveVisitSource) : null;
-    const diffDays = lastVisitDate ? Math.ceil((new Date() - lastVisitDate) / (1000 * 60 * 60 * 24)) : 999;
-    const matchesFilter = filter === 'All' ? true : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON')) || (filter === 'Frozen' && statusInfo.label === 'FROZEN') || (filter === 'Unpaid' && statusInfo.label === 'UNPAID') || (filter === 'Expired' && statusInfo.label === 'EXPIRED') || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON') || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
-    const searchLower = searchTerm.toLowerCase();
-    return matchesFilter && (m.full_name?.toLowerCase().includes(searchLower) || m.email?.toLowerCase().includes(searchLower) || m.phone?.includes(searchTerm));
-  });
+  const filteredMembers = useMemo(() => {
+    const searchLower = deferredSearchTerm.trim().toLowerCase();
+    return members.filter((member) => {
+      const statusInfo = getStatusInfo(member);
+      const matchesFilter = filter === 'All'
+        ? true
+        : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON'))
+          || (filter === 'Frozen' && statusInfo.label === 'FROZEN')
+          || (filter === 'Unpaid' && statusInfo.label === 'UNPAID')
+          || (filter === 'Expired' && statusInfo.label === 'EXPIRED')
+          || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON')
+          || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
 
-  const counts = { All: members.length, Active: members.filter((m) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(m).label)).length, Frozen: members.filter((m) => getStatusInfo(m).label === 'FROZEN').length, Expired: members.filter((m) => getStatusInfo(m).label === 'EXPIRED').length, 'Expiring Soon': members.filter((m) => getStatusInfo(m).label === 'EXPIRING SOON').length, Inactive: members.filter((m) => getStatusInfo(m).label === 'INACTIVE').length, Unpaid: members.filter((m) => getStatusInfo(m).label === 'UNPAID').length };
+      if (!matchesFilter) return false;
+      if (!searchLower) return true;
+
+      return member.full_name?.toLowerCase().includes(searchLower)
+        || member.email?.toLowerCase().includes(searchLower)
+        || String(member.phone || '').includes(deferredSearchTerm);
+    });
+  }, [deferredSearchTerm, filter, members]);
+
+  const counts = useMemo(() => ({
+    All: members.length,
+    Active: members.filter((member) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(member).label)).length,
+    Frozen: members.filter((member) => getStatusInfo(member).label === 'FROZEN').length,
+    Expired: members.filter((member) => getStatusInfo(member).label === 'EXPIRED').length,
+    'Expiring Soon': members.filter((member) => getStatusInfo(member).label === 'EXPIRING SOON').length,
+    Inactive: members.filter((member) => getStatusInfo(member).label === 'INACTIVE').length,
+    Unpaid: members.filter((member) => getStatusInfo(member).label === 'UNPAID').length,
+  }), [members]);
 
   if (loading && members.length === 0) return <PageLoader className="min-h-[56vh]" />;
 
@@ -1299,8 +1365,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                     ) : (
                       filteredMembers.map((member, idx) => {
                         const statusInfo = getStatusInfo(member);
-                        const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
-                        const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
+                        const effectiveVisitSource = getEffectiveVisitSource(member);
                         return (
                           <div
                             key={`member-mobile-${member.id}`}
@@ -1367,8 +1432,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                   filteredMembers.map((member) => {
                     const statusInfo = getStatusInfo(member);
                     const displayDays = member.days_left < 0 ? 0 : (member.days_left || 0);
-                    const latestPayment = Array.isArray(member.payment_history) ? member.payment_history[0] : null;
-                    const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
+                    const effectiveVisitSource = getEffectiveVisitSource(member);
                     return (
                       <tr key={member.id} onClick={() => (isBulkMode ? toggleSelection(member.id) : handleViewDetails(member))} className={`group cursor-pointer transition-colors ${selectedIds.includes(member.id) ? 'bg-indigo-50/40' : 'hover:bg-slate-50/70'}`}>
                         <td className="py-4 px-2" onClick={(e) => e.stopPropagation()}>
@@ -1388,8 +1452,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600">{effectiveVisitSource ? new Date(effectiveVisitSource).toLocaleDateString('en-GB') : '—'}</span></td>
                         <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end items-center gap-1.5">
-                            {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm"><Zap size={10} fill="currentColor" /> Initiate</button>}
-                            {canWritePayments && statusInfo.label === 'EXPIRED' && <button onClick={() => openActivateModalForMember(member)} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm"><RefreshCw size={10} /> Renew</button>}
+                            {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
+                            {canWritePayments && statusInfo.label === 'EXPIRED' && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
                             {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => sendWhatsApp(member, statusInfo.label === 'INACTIVE' ? 'followup' : 'reminder')} className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm"><MessageSquare size={10} fill="currentColor" /> Remind</button>}
                             {canWriteAttendance && canCheckMemberIn(member) && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
                             {canWriteMembers && <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
@@ -1517,7 +1581,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <div className="flex items-center gap-1.5 text-slate-400 mb-1"><TrendingUp size={11} /><span className="text-[9px] font-bold uppercase tracking-tight">Last Check-In</span></div>
-                <p className="font-bold text-sm text-slate-700">{selectedMember.last_visit || selectedMember.payment_history?.[0]?.payment_date ? new Date(selectedMember.last_visit || selectedMember.payment_history?.[0]?.payment_date).toLocaleDateString('en-GB') : 'Never'}</p>
+                <p className="font-bold text-sm text-slate-700">{getEffectiveVisitSource(selectedMember) ? new Date(getEffectiveVisitSource(selectedMember)).toLocaleDateString('en-GB') : 'Never'}</p>
               </div>
             </div>
 
@@ -1695,8 +1759,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           <div className="px-5 py-3 border-t border-slate-100 shrink-0 bg-white">
             <div className="grid grid-cols-3 gap-2">
             {canWritePayments && (getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
-              <button onClick={() => { setShowDetailsModal(false); openActivateModalForMember(selectedMember); }} className="col-span-3 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
-                <Zap size={13} fill="currentColor" />{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
+              <button onClick={() => { setShowDetailsModal(false); openActivateModalWithFeedback(selectedMember, 'details-activate'); }} className="col-span-3 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+                {memberActionLoading === 'details-activate' ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} fill="currentColor" />}{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
               </button>
             )}
             <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
@@ -1758,7 +1822,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 text-sm font-semibold text-slate-700 appearance-none cursor-pointer transition-all" value={addSelectedPlanId} onChange={(e) => setAddSelectedPlanId(e.target.value)}><option value="">Skip — assign plan later</option>{plans.map((p) => (<option key={p.id} value={p.id}>{p.name} — ₹{p.price} / {p.duration_days}d</option>))}</select>
                 {addSelectedPlanId && <p className="text-[10px] text-emerald-600 font-bold mt-1.5 ml-0.5">Payment will be collected in the next step →</p>}
               </div>}
-              <button type="submit" className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}>{canWritePayments && addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member'}</button>
+              <button type="submit" disabled={addMemberSubmitting} className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}>{addMemberSubmitting ? <span className="inline-flex items-center gap-2"><RefreshCw size={16} className="animate-spin" /> Saving...</span> : (canWritePayments && addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member')}</button>
             </form>
           </div>
         </div>
@@ -1782,8 +1846,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><Calendar size={18} /></div>
               </div>
               <div className="pt-2 space-y-3">
-                <button onClick={() => handleActivateSubscription(null, 'online')} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98]" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}><CreditCard size={18} /> Proceed for Payment</button>
-                <button onClick={() => handleActivateSubscription(null, 'cash')} className="w-full py-4 rounded-2xl font-black text-sm hover:opacity-80 transition-all flex items-center justify-center gap-2 border border-white/10" style={{ background: 'rgba(255,255,255,0.06)', color: '#6ee7b7' }}><span className="font-black text-lg">₹</span> Paid as Cash</button>
+                <button onClick={() => handleActivateSubscription(null, 'online')} disabled={Boolean(activatingMode)} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}>{activatingMode === 'online' || activatingMode === 'verifying' ? <RefreshCw size={18} className="animate-spin" /> : <CreditCard size={18} />}{activatingMode === 'verifying' ? 'Checking Payment...' : activatingMode === 'online' ? 'Opening Payment...' : 'Proceed for Payment'}</button>
+                <button onClick={() => handleActivateSubscription(null, 'cash')} disabled={Boolean(activatingMode)} className="w-full py-4 rounded-2xl font-black text-sm hover:opacity-80 transition-all flex items-center justify-center gap-2 border border-white/10 disabled:opacity-70" style={{ background: 'rgba(255,255,255,0.06)', color: '#6ee7b7' }}>{activatingMode === 'cash' ? <RefreshCw size={18} className="animate-spin" /> : <span className="font-black text-lg">₹</span>}{activatingMode === 'cash' ? 'Recording Cash Payment...' : 'Paid as Cash'}</button>
               </div>
               <button onClick={() => setShowActivateModal(false)} className="w-full text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors pt-1">Cancel Transaction</button>
             </div>

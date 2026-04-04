@@ -56,13 +56,100 @@ const DEFAULT_AUTOMATION_SETTINGS = {
     AFTERNOON: false,
     EVENING: true,
   },
+  owner_staff_daily_limit: 3,
+  member_daily_limit: 50,
   member_max_per_slot: 25,
+  message_templates: {
+    SETUP_FOCUS: {
+      title: 'Your next move is obvious',
+      body: '{{setup_hint}}',
+    },
+    LEAD_SPRINT: {
+      title: 'Lead queue is warm',
+      body: '{{count}} follow-up {{lead_label}} {{are_is}} ready today. A quick callback sprint before the day gets noisy can turn curiosity into walk-ins.',
+    },
+    RENEWAL_RADAR: {
+      title: 'Renewals are within reach',
+      body: '{{count}} {{membership_label}} {{enter_label}} the final 3-day window today. One crisp follow-up can lock revenue before the day slips away.',
+    },
+    RENEWAL_WEEK: {
+      title: 'Renewal week just opened',
+      body: '{{count}} {{member_label}} {{are_is}} now inside renewal week. Get ahead of the rush and make the rejoin decision feel easy.',
+    },
+    ATTENDANCE_PULSE: {
+      title: 'The floor could use a lift',
+      body: '{{today_checkins}} check-ins so far against a {{avg_daily}}/day recent rhythm. One story, one class ping, or one comeback call can still lift the evening rush.',
+    },
+    COLLECTIONS_PUSH: {
+      title: 'Collections are still on the table',
+      body: '{{due_amount}} is still waiting across {{due_members}} {{account_label}}. Tonight is a clean window to recover dues while intent is still warm.',
+    },
+    WINBACK_LIST: {
+      title: 'Your comeback list is ready',
+      body: '{{count}} {{member_label}} {{have_has}} been quiet for 10+ days. A smart nudge tonight can wake up stalled routines before they go cold.',
+    },
+    MEMBER_RENEWAL: {
+      title: 'Your plan is almost out of reps',
+      body: '{{first_name}}, {{gym_name}} access wraps in {{days_left}} {{day_label}}. Renew today and keep your streak moving, not paused.',
+    },
+    MEMBER_DUE: {
+      title: 'A quick clear-up keeps you moving',
+      body: '{{first_name}}, {{amount_due}} is still pending on your plan. Clear it today and keep your next entry smooth.',
+    },
+    MEMBER_COMEBACK: {
+      title: 'Your spot is still warm',
+      body: '{{first_name}}, it has been {{days_inactive}} days since your last workout. One session today can flip the whole week back in your favour.',
+    },
+  },
 };
 
 const SLOT_LABELS = {
   MORNING: 'Morning',
   AFTERNOON: 'Afternoon',
   EVENING: 'Evening',
+};
+
+const AUTOMATION_TEMPLATE_FIELDS = [
+  { key: 'SETUP_FOCUS', label: 'Setup Reminder', audience: 'Owner / Staff', placeholders: '{{setup_hint}}' },
+  { key: 'LEAD_SPRINT', label: 'Lead Follow-Up', audience: 'Owner / Staff', placeholders: '{{count}}, {{lead_label}}, {{are_is}}' },
+  { key: 'RENEWAL_RADAR', label: '3-Day Renewals', audience: 'Owner / Staff', placeholders: '{{count}}, {{membership_label}}, {{enter_label}}' },
+  { key: 'RENEWAL_WEEK', label: '7-Day Renewals', audience: 'Owner / Staff', placeholders: '{{count}}, {{member_label}}, {{are_is}}' },
+  { key: 'ATTENDANCE_PULSE', label: 'Attendance Push', audience: 'Owner / Staff', placeholders: '{{today_checkins}}, {{avg_daily}}' },
+  { key: 'COLLECTIONS_PUSH', label: 'Collections Push', audience: 'Owner / Staff', placeholders: '{{due_amount}}, {{due_members}}, {{account_label}}' },
+  { key: 'WINBACK_LIST', label: 'Comeback Push', audience: 'Owner / Staff', placeholders: '{{count}}, {{member_label}}, {{have_has}}' },
+  { key: 'MEMBER_RENEWAL', label: 'Member Renewal Push', audience: 'Member', placeholders: '{{first_name}}, {{gym_name}}, {{days_left}}, {{day_label}}' },
+  { key: 'MEMBER_DUE', label: 'Member Due Push', audience: 'Member', placeholders: '{{first_name}}, {{amount_due}}' },
+  { key: 'MEMBER_COMEBACK', label: 'Member Comeback Push', audience: 'Member', placeholders: '{{first_name}}, {{days_inactive}}' },
+];
+
+const mergeAutomationSettings = (value) => {
+  const raw = value && typeof value === 'object' ? value : {};
+  return {
+    ...DEFAULT_AUTOMATION_SETTINGS,
+    ...raw,
+    owner_staff_slots: {
+      ...DEFAULT_AUTOMATION_SETTINGS.owner_staff_slots,
+      ...(raw.owner_staff_slots || {}),
+    },
+    member_slots: {
+      ...DEFAULT_AUTOMATION_SETTINGS.member_slots,
+      ...(raw.member_slots || {}),
+    },
+    owner_staff_daily_limit: Math.min(3, Math.max(1, Number(raw.owner_staff_daily_limit) || DEFAULT_AUTOMATION_SETTINGS.owner_staff_daily_limit)),
+    member_daily_limit: Math.min(500, Math.max(1, Number(raw.member_daily_limit) || DEFAULT_AUTOMATION_SETTINGS.member_daily_limit)),
+    member_max_per_slot: Math.min(100, Math.max(1, Number(raw.member_max_per_slot) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
+    message_templates: Object.fromEntries(
+      Object.entries(DEFAULT_AUTOMATION_SETTINGS.message_templates).map(([templateKey, templateValue]) => {
+        const source = raw.message_templates && typeof raw.message_templates === 'object' && raw.message_templates[templateKey] && typeof raw.message_templates[templateKey] === 'object'
+          ? raw.message_templates[templateKey]
+          : {};
+        return [templateKey, {
+          title: typeof source.title === 'string' && source.title.trim() ? source.title : templateValue.title,
+          body: typeof source.body === 'string' && source.body.trim() ? source.body : templateValue.body,
+        }];
+      })
+    ),
+  };
 };
 
 function SuperAdminDashboard({ token, onLogout }) {
@@ -226,19 +313,7 @@ function SuperAdminDashboard({ token, onLogout }) {
         maintenance_mode: typeof payload.maintenance_mode === 'boolean' ? payload.maintenance_mode : (prev.maintenance_mode || false),
         maintenance_message: payload.maintenance_message ?? prev.maintenance_message ?? '',
         feature_flags: payload.feature_flags || prev.feature_flags || {},
-        automation_settings: {
-          ...DEFAULT_AUTOMATION_SETTINGS,
-          ...(payload.automation_settings || {}),
-          owner_staff_slots: {
-            ...DEFAULT_AUTOMATION_SETTINGS.owner_staff_slots,
-            ...(payload.automation_settings?.owner_staff_slots || {}),
-          },
-          member_slots: {
-            ...DEFAULT_AUTOMATION_SETTINGS.member_slots,
-            ...(payload.automation_settings?.member_slots || {}),
-          },
-          member_max_per_slot: Math.min(100, Math.max(1, Number(payload.automation_settings?.member_max_per_slot) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
-        },
+        automation_settings: mergeAutomationSettings(payload.automation_settings),
         support_profile: {
           phone: payload.support_profile?.phone ?? prev.support_profile?.phone ?? '',
           email: payload.support_profile?.email ?? prev.support_profile?.email ?? '',
@@ -517,6 +592,25 @@ function SuperAdminDashboard({ token, onLogout }) {
       handleApiError(err);
       alert('Failed to save system settings');
     }
+  };
+
+  const updateAutomationTemplate = (templateKey, field, value) => {
+    setSystem((prev) => {
+      const nextAutomationSettings = mergeAutomationSettings(prev.automation_settings);
+      return {
+        ...prev,
+        automation_settings: {
+          ...nextAutomationSettings,
+          message_templates: {
+            ...nextAutomationSettings.message_templates,
+            [templateKey]: {
+              ...nextAutomationSettings.message_templates[templateKey],
+              [field]: value,
+            },
+          },
+        },
+      };
+    });
   };
 
   const sendBroadcast = async () => {
@@ -978,22 +1072,97 @@ function SuperAdminDashboard({ token, onLogout }) {
                 </div>
               </div>
 
-              <div className="max-w-xs">
-                <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Member Push Cap Per Slot</p>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
-                  value={system.automation_settings?.member_max_per_slot || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot}
-                  onChange={(e) => setSystem((p) => ({
-                    ...p,
-                    automation_settings: {
-                      ...(p.automation_settings || DEFAULT_AUTOMATION_SETTINGS),
-                      member_max_per_slot: Math.min(100, Math.max(1, Number(e.target.value) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
-                    },
-                  }))}
-                />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Owner / Staff Nudges Per Day</p>
+                  <input
+                    type="number"
+                    min="1"
+                    max="3"
+                    className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                    value={system.automation_settings?.owner_staff_daily_limit || DEFAULT_AUTOMATION_SETTINGS.owner_staff_daily_limit}
+                    onChange={(e) => setSystem((p) => ({
+                      ...p,
+                      automation_settings: {
+                        ...mergeAutomationSettings(p.automation_settings),
+                        owner_staff_daily_limit: Math.min(3, Math.max(1, Number(e.target.value) || DEFAULT_AUTOMATION_SETTINGS.owner_staff_daily_limit)),
+                      },
+                    }))}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Member Pushes Per Day</p>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                    value={system.automation_settings?.member_daily_limit || DEFAULT_AUTOMATION_SETTINGS.member_daily_limit}
+                    onChange={(e) => setSystem((p) => ({
+                      ...p,
+                      automation_settings: {
+                        ...mergeAutomationSettings(p.automation_settings),
+                        member_daily_limit: Math.min(500, Math.max(1, Number(e.target.value) || DEFAULT_AUTOMATION_SETTINGS.member_daily_limit)),
+                      },
+                    }))}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Member Push Cap Per Slot</p>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                    value={system.automation_settings?.member_max_per_slot || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot}
+                    onChange={(e) => setSystem((p) => ({
+                      ...p,
+                      automation_settings: {
+                        ...mergeAutomationSettings(p.automation_settings),
+                        member_max_per_slot: Math.min(100, Math.max(1, Number(e.target.value) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
+                      },
+                    }))}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-black/30 border border-white/10 p-4 space-y-3">
+                <div>
+                  <p className="text-xs uppercase tracking-widest font-black text-slate-400">Editable Message Templates</p>
+                  <p className="text-sm text-slate-500 mt-1">These texts apply only to automatic notifications controlled here in HQ. Gym admins do not get these controls.</p>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  {AUTOMATION_TEMPLATE_FIELDS.map((template) => (
+                    <div key={template.key} className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-200">{template.label}</p>
+                          <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mt-1">{template.audience}</p>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-500 text-right">{template.placeholders}</span>
+                      </div>
+
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                        value={system.automation_settings?.message_templates?.[template.key]?.title || DEFAULT_AUTOMATION_SETTINGS.message_templates[template.key].title}
+                        onChange={(e) => updateAutomationTemplate(template.key, 'title', e.target.value)}
+                        placeholder="Notification title"
+                      />
+
+                      <textarea
+                        rows={4}
+                        className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm resize-y"
+                        value={system.automation_settings?.message_templates?.[template.key]?.body || DEFAULT_AUTOMATION_SETTINGS.message_templates[template.key].body}
+                        onChange={(e) => updateAutomationTemplate(template.key, 'body', e.target.value)}
+                        placeholder="Notification body"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Automation Settings</button>

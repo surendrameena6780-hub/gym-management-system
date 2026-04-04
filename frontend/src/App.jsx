@@ -295,6 +295,8 @@ function App() {
   const [memberFocus, setMemberFocus] = useState({ id: null, action: null });
   const [paymentFilter, setPaymentFilter] = useState('All');
   const [paymentFocus, setPaymentFocus] = useState({ id: null, action: null });
+  const [paymentSectionFocus, setPaymentSectionFocus] = useState(null);
+  const [attendanceSectionFocus, setAttendanceSectionFocus] = useState(null);
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [currentUser, setCurrentUser] = useState(() => {
@@ -681,8 +683,13 @@ function App() {
     if (page === 'Payments') {
       setPaymentFilter('All');
       setPaymentFocus({ id: null, action: null });
+      setPaymentSectionFocus(null);
     } else {
       setPaymentFocus({ id: null, action: null });
+      setPaymentSectionFocus(null);
+    }
+    if (page !== 'Attendance') {
+      setAttendanceSectionFocus(null);
     }
     if (page === 'Settings') {
       setSettingsTab('menu');
@@ -710,8 +717,15 @@ function App() {
         id: Number.isInteger(rawPaymentId) ? rawPaymentId : null,
         action: typeof options?.action === 'string' ? options.action : null,
       });
+      setPaymentSectionFocus(typeof options?.section === 'string' && options.section ? options.section : null);
     } else {
       setPaymentFocus({ id: null, action: null });
+      setPaymentSectionFocus(null);
+    }
+    if (page === 'Attendance') {
+      setAttendanceSectionFocus(typeof options?.section === 'string' && options.section ? options.section : null);
+    } else {
+      setAttendanceSectionFocus(null);
     }
     if (page === 'Settings') setSettingsTab(subPath || 'menu');
     setCurrentPage(page);
@@ -1217,6 +1231,8 @@ function App() {
                   focusPaymentId={paymentFocus.id}
                   focusAction={paymentFocus.action}
                   onFocusHandled={() => setPaymentFocus({ id: null, action: null })}
+                  focusSection={paymentSectionFocus}
+                  onSectionHandled={() => setPaymentSectionFocus(null)}
                 />
               )}
             </div>
@@ -1229,6 +1245,8 @@ function App() {
                   toast={toast}
                   isActive={currentPage === 'Attendance'}
                   currentUser={currentUser}
+                  focusSection={attendanceSectionFocus}
+                  onSectionHandled={() => setAttendanceSectionFocus(null)}
                   onOpenRfidSetup={() => navigateTo('RFID Setup')}
                 />
               )}

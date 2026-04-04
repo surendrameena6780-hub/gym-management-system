@@ -220,8 +220,8 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
     <div className="min-h-full p-0 space-y-8 font-inter text-slate-900">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Business Insights</h1>
-          <p className="text-slate-500 font-medium mt-1">Live analytics from actual payments, memberships, and attendance.</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
+          <p className="text-slate-500 font-medium mt-1">Simple numbers from real payments, memberships, and attendance.</p>
         </div>
         <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
           {['1M', '3M', '6M', '1Y'].map((range) => (
@@ -245,47 +245,47 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="ARPU" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
-        <KPICard title="Renewals Due Soon" value={analytics.risk.expiringCount} change={analytics.risk.expiringCount > 0 ? 'priority' : null} trend="down" icon={Clock} color="bg-amber-500" className="gv-fade-up gv-fade-up-1" />
-        <KPICard title="Retention Rate" value={`${analytics.health.retention}%`} change={`${analytics.health.expired} expired`} trend={Number(analytics.health.churn || 0) > 0 ? 'down' : 'up'} icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
-        <KPICard title="Revenue At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={analytics.risk.inactiveCount > 0 ? `${analytics.risk.inactiveCount} inactive` : null} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
+        <KPICard title="Average Per Member" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
+        <KPICard title="Renewals Due Soon" value={analytics.risk.expiringCount} change={analytics.risk.expiringCount > 0 ? 'urgent' : null} trend="down" icon={Clock} color="bg-amber-500" className="gv-fade-up gv-fade-up-1" />
+        <KPICard title="Members Staying" value={`${analytics.health.retention}%`} change={`${analytics.health.expired} expired`} trend={Number(analytics.health.churn || 0) > 0 ? 'down' : 'up'} icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
+        <KPICard title="Money At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={analytics.risk.inactiveCount > 0 ? `${analytics.risk.inactiveCount} not visiting` : null} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
       </div>
 
-      {/* ── Business Narrative Summary ── */}
+      {/* ── Plain Summary ── */}
       <div className="bg-white/80 backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
-        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Executive Summary</p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Quick Summary</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
           <div className="space-y-2">
             <p>
-              <span className="font-bold text-slate-900">Revenue & Growth:</span>{' '}
+              <span className="font-bold text-slate-900">Money:</span>{' '}
               {analytics.revenue.arpu > 0
-                ? `Your ARPU stands at ₹${analytics.revenue.arpu.toLocaleString()}, with ₹${analytics.revenue.lostRevenue.toLocaleString()} in lost value from expired memberships. `
-                : 'No revenue data available yet for this period. '}
-              {analytics.health.active > 0 && `Monthly baseline from ${analytics.health.active} active members is ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()}.`}
+                ? `You are earning about ₹${analytics.revenue.arpu.toLocaleString()} per active member, and ₹${analytics.revenue.lostRevenue.toLocaleString()} was lost from expired plans. `
+                : 'No payment data is available yet for this period. '}
+              {analytics.health.active > 0 && `If current members stay active, that is about ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()} for the month.`}
             </p>
             <p>
-              <span className="font-bold text-slate-900">Retention:</span>{' '}
+              <span className="font-bold text-slate-900">Members staying:</span>{' '}
               {Number(analytics.health.retention) >= 80
-                ? `At ${analytics.health.retention}%, retention is healthy. `
+                ? `${analytics.health.retention}% of members are staying active. `
                 : Number(analytics.health.retention) >= 50
-                  ? `Retention at ${analytics.health.retention}% needs attention. `
-                  : `Retention at ${analytics.health.retention}% is critical — focus on re-engagement. `}
+                  ? `${analytics.health.retention}% of members are staying active, but this needs attention. `
+                  : `Only ${analytics.health.retention}% of members are staying active. Follow-up is needed. `}
               {analytics.health.expired > 0 && `${analytics.health.expired} memberships expired in this window.`}
             </p>
           </div>
           <div className="space-y-2">
             <p>
-              <span className="font-bold text-slate-900">Risk:</span>{' '}
+              <span className="font-bold text-slate-900">Attention needed:</span>{' '}
               {analytics.risk.expiringCount > 0
-                ? `${analytics.risk.expiringCount} renewals are due soon — ₹${analytics.risk.revenueAtRisk.toLocaleString()} revenue at risk. `
-                : 'No imminent renewal risk. '}
-              {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members are inactive and may churn.`}
+                ? `${analytics.risk.expiringCount} renewals are due soon and ₹${analytics.risk.revenueAtRisk.toLocaleString()} could be lost. `
+                : 'No urgent renewal risk right now. '}
+              {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members are not visiting and may stop coming.`}
             </p>
             <p>
-              <span className="font-bold text-slate-900">Engagement:</span>{' '}
+              <span className="font-bold text-slate-900">Visits:</span>{' '}
               {hasPeakHourData
-                ? `Peak activity observed in attendance data. Use the Attendance tab below for hourly breakdown.`
-                : 'Attendance data is still building up — check back after a few days of check-ins.'}
+                ? `Attendance data now shows the busiest hours. Open the Attendance tab below to see them.`
+                : 'Attendance data is still building. Check again after a few more check-ins.'}
             </p>
           </div>
         </div>
@@ -293,10 +293,10 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
       <div className="border-b border-slate-200 flex gap-8 overflow-x-auto">
         {[
-          { id: 'revenue', label: 'Revenue & Finance', icon: TrendingUp },
-          { id: 'attendance', label: 'Attendance & Trends', icon: Users },
-          { id: 'retention', label: 'Retention & Churn', icon: UserCheck },
-          { id: 'risk', label: 'Risk Analysis', icon: AlertTriangle },
+          { id: 'revenue', label: 'Money', icon: TrendingUp },
+          { id: 'attendance', label: 'Attendance', icon: Users },
+          { id: 'retention', label: 'Member Health', icon: UserCheck },
+          { id: 'risk', label: 'Attention Needed', icon: AlertTriangle },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -314,24 +314,24 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="p-5 border-l-4 border-l-blue-500">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><Target size={12} /> ARPU (30D)</p>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><Target size={12} /> Average Per Member (30D)</p>
                 <div className="flex items-end gap-2">
                   <h3 className="text-2xl font-black text-slate-900">₹{analytics.revenue.arpu.toLocaleString()}</h3>
                   <span className="text-sm font-bold text-slate-400 mb-1">/ active member</span>
                 </div>
               </Card>
               <Card className="p-5 border-l-4 border-l-rose-500">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><TrendingUp size={12} className="rotate-180" /> Plan Value Lost</p>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><TrendingUp size={12} className="rotate-180" /> Money Lost From Expired Plans</p>
                 <div className="flex items-end gap-2">
                   <h3 className="text-2xl font-black text-rose-600">₹{analytics.revenue.lostRevenue.toLocaleString()}</h3>
                   <span className="text-sm font-bold text-slate-400 mb-1">from expired memberships</span>
                 </div>
               </Card>
               <Card className="p-5 border-l-4 border-l-emerald-500">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><ShieldCheck size={12} /> Baseline Next Month</p>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><ShieldCheck size={12} /> Expected Next Month</p>
                 <div className="flex items-end gap-2">
                   <h3 className="text-2xl font-black text-emerald-600">₹{(analytics.health.active * analytics.revenue.arpu).toLocaleString()}</h3>
-                  <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded mb-1 border border-emerald-100">Active-member run rate</span>
+                  <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded mb-1 border border-emerald-100">Based on active members</span>
                 </div>
               </Card>
             </div>
@@ -340,8 +340,8 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
               <Card className="lg:col-span-2 p-6">
                 <div className="flex justify-between items-center mb-6">
                   <div>
-                    <h3 className="font-bold text-lg text-slate-900">Revenue Velocity</h3>
-                    <p className="text-xs text-slate-400 font-medium mt-1">Collected payments over the selected period</p>
+                    <h3 className="font-bold text-lg text-slate-900">Payment Trend</h3>
+                    <p className="text-xs text-slate-400 font-medium mt-1">Payments collected in the selected period</p>
                   </div>
                 </div>
                 <div className="h-[250px] w-full">
@@ -371,8 +371,8 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
               <Card className="p-0 overflow-hidden flex flex-col">
                 <div className="p-6 border-b border-slate-50 bg-slate-900 text-white">
-                  <h3 className="font-bold text-lg">Plan Performance Matrix</h3>
-                  <p className="text-xs text-slate-400 font-medium mt-1">Plans ranked by real collected revenue</p>
+                  <h3 className="font-bold text-lg">Top Plans</h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Plans ranked by real collected payments</p>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2">
                   {analytics.revenue.topPlans.length > 0 ? (
@@ -386,7 +386,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
                           <div className="flex justify-between items-center text-xs">
                             <div className="flex items-center gap-1.5 text-slate-500 font-medium">
                               <Users size={12} />
-                              <span>{Number(plan.users || 0)} Active Users</span>
+                              <span>{Number(plan.users || 0)} Active Members</span>
                             </div>
                             <span className="text-slate-400 font-bold uppercase text-[10px]">Rank #{idx + 1}</span>
                           </div>
@@ -440,7 +440,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
             </Card>
 
             <Card className="p-6">
-              <h3 className="font-bold text-lg text-slate-900 mb-6">Top Active Members (Real Spend)</h3>
+              <h3 className="font-bold text-lg text-slate-900 mb-6">Top Paying Members</h3>
               <div className="space-y-4">
                 {analytics.attendance.topMembers.length > 0 ? (
                   analytics.attendance.topMembers.map((member, index) => (
@@ -456,7 +456,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
                         </div>
                         <div className="flex flex-col min-w-0">
                           <span className="font-bold text-sm text-slate-700 truncate">{member.full_name}</span>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase">₹{member.total_paid.toLocaleString()} Lifetime</span>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">₹{member.total_paid.toLocaleString()} Total Paid</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100 shrink-0">
@@ -477,14 +477,14 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-rose-50 border border-rose-100 p-6 rounded-2xl">
                 <div className="flex items-center gap-2 text-rose-600 mb-2 font-bold uppercase text-xs tracking-wider">
-                  <AlertTriangle size={14} /> Critical Attention
+                  <AlertTriangle size={14} /> Immediate Attention
                 </div>
                 <h3 className="text-2xl font-black text-rose-900">{analytics.risk.expiringCount} Members</h3>
-                <p className="text-rose-700/70 text-sm font-medium mt-1">Expired or expiring within 7 days. Real plan value at risk: <b>₹{analytics.risk.revenueAtRisk.toLocaleString()}</b>.</p>
+                <p className="text-rose-700/70 text-sm font-medium mt-1">Expired or ending within 7 days. Money at risk: <b>₹{analytics.risk.revenueAtRisk.toLocaleString()}</b>.</p>
               </div>
               <div className="bg-amber-50 border border-amber-100 p-6 rounded-2xl">
                 <div className="flex items-center gap-2 text-amber-600 mb-2 font-bold uppercase text-xs tracking-wider">
-                  <UserMinus size={14} /> Inactive Active Members
+                  <UserMinus size={14} /> Active But Not Visiting
                 </div>
                 <h3 className="text-2xl font-black text-amber-900">{analytics.risk.inactiveCount} Members</h3>
                 <p className="text-amber-700/70 text-sm font-medium mt-1">Active members who have not visited in the last 7+ days.</p>
@@ -495,7 +495,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
               <Card className="p-6">
                 <h3 className="font-bold text-lg text-slate-900 mb-4 flex items-center gap-2">
                   <AlertTriangle size={18} className="text-rose-500" />
-                  Critical Renewals
+                  Renew Soon
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
@@ -581,28 +581,28 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="p-5 border-l-4 border-l-violet-500">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><UserCheck size={12} /> Active Membership Base</p>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><UserCheck size={12} /> Active Members</p>
                 <h3 className="text-2xl font-black text-slate-900">{analytics.health.active}</h3>
               </Card>
               <Card className="p-5 border-l-4 border-l-rose-500">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><UserMinus size={12} /> Expired Memberships</p>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><UserMinus size={12} /> Expired Members</p>
                 <h3 className="text-2xl font-black text-rose-600">{analytics.health.expired}</h3>
               </Card>
               <Card className="p-5 border-l-4 border-l-amber-500">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><Clock size={12} /> Inactive Active Members</p>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><Clock size={12} /> Active But Not Visiting</p>
                 <h3 className="text-2xl font-black text-amber-600">{analytics.risk.inactiveCount}</h3>
               </Card>
             </div>
 
             <Card className="p-8">
-              <h3 className="text-xl font-bold text-slate-900">Retention Snapshot</h3>
-              <p className="text-slate-500 max-w-2xl mt-2 mb-6 font-medium">This view is built only from actual membership status and visit activity. There are no synthetic churn projections or seeded chart values here.</p>
+              <h3 className="text-xl font-bold text-slate-900">Member Stay Snapshot</h3>
+              <p className="text-slate-500 max-w-2xl mt-2 mb-6 font-medium">This view uses real member status and visit activity only. Nothing here is estimated or seeded.</p>
               <div className="w-full bg-slate-100 rounded-full h-3 mb-3 overflow-hidden shadow-inner">
                 <div className="bg-violet-500 h-full rounded-full shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]" style={{ width: `${analytics.health.retention}%` }} />
               </div>
               <div className="flex justify-between w-full text-xs font-bold text-slate-500 mb-6">
-                <span>Churn Rate: {analytics.health.churn}%</span>
-                <span>Retention: {analytics.health.retention}%</span>
+                <span>Leaving: {analytics.health.churn}%</span>
+                <span>Staying: {analytics.health.retention}%</span>
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -611,15 +611,15 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
                   <p className="text-2xl font-black text-slate-900 mt-1">{analytics.risk.expiringCount}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Revenue At Risk</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Money At Risk</p>
                   <p className="text-2xl font-black text-slate-900 mt-1">₹{analytics.risk.revenueAtRisk.toLocaleString()}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Retention</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Staying</p>
                   <p className="text-2xl font-black text-emerald-600 mt-1">{analytics.health.retention}%</p>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Churn</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Leaving</p>
                   <p className="text-2xl font-black text-rose-600 mt-1">{analytics.health.churn}%</p>
                 </div>
               </div>

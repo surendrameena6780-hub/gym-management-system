@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import axios from 'axios';
 import { 
   Search, Filter, Download, Plus, DollarSign, 
   AlertCircle, FileText, CheckCircle2, 
-  Clock, X, ChevronDown, User, ArrowDownToLine, History, Wallet, CreditCard, Trash2
+  Clock, X, ChevronDown, User, ArrowDownToLine, History, Wallet, CreditCard, Trash2,
+  Phone, MessageCircle
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import { openWhatsAppConversation } from './utils/externalNavigation';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -123,9 +125,8 @@ const INSIGHT_TONE_STYLES = {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled }) => {
+const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled }) => {
   const [payments, setPayments] = useState([]);
-  const [filteredPayments, setFilteredPayments] = useState([]);
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -135,6 +136,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const animatedPendingDues  = useCountUp(parseFloat(stats.pending_dues  || 0));
 
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [activeFilter, setActiveFilter] = useState(defaultFilter || 'All');
 
@@ -160,6 +162,12 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   const paymentsListRef = useRef(null);
   const paymentsScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
+  const financeFocusTimerRef = useRef(null);
+  const collectionsOverviewRef = useRef(null);
+  const collectionsLedgerRef = useRef(null);
+  const expensesListRef = useRef(null);
+  const payrollListRef = useRef(null);
+  const posCatalogRef = useRef(null);
 
   // ── Finance Hub State ──
   const [financeTab, setFinanceTab] = useState('collections');
@@ -376,6 +384,62 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   const getImageUrl = (path) => normalizeProfileImageUrl(path);
 
+  const buildDueReminderMessage = useCallback((payment) => {
+    const memberName = String(payment?.member_name || 'there').trim();
+    const amountDue = roundMoney(payment?.amount_due || 0).toLocaleString('en-IN');
+    const planName = String(payment?.plan_name || 'membership').trim();
+    return `Hi ${memberName}, this is a reminder that ₹${amountDue} is still pending for your ${planName}. Please clear the due amount today.`;
+  }, []);
+
+  const handleDueWhatsApp = useCallback((payment) => {
+    if (!payment?.member_phone) {
+      toast?.('Phone number not available for this member.', 'warning');
+      return;
+    }
+
+    const opened = openWhatsAppConversation({
+      phone: payment.member_phone,
+      message: buildDueReminderMessage(payment),
+    });
+
+    if (!opened) {
+      toast?.('Unable to open WhatsApp for this member.', 'error');
+    }
+  }, [buildDueReminderMessage, toast]);
+
+  const handleDueCall = useCallback((payment) => {
+    const digits = String(payment?.member_phone || '').replace(/\D/g, '');
+    if (!digits) {
+      toast?.('Phone number not available for this member.', 'warning');
+      return;
+    }
+    window.open(`tel:${digits}`, '_self');
+  }, [toast]);
+
+  const focusFinanceSection = useCallback((sectionKey) => {
+    const sectionMap = {
+      'collections-overview': { tab: 'collections', ref: collectionsOverviewRef },
+      'payments-ledger': { tab: 'collections', ref: collectionsLedgerRef },
+      'expenses-list': { tab: 'expenses', ref: expensesListRef },
+      'payroll-list': { tab: 'payroll', ref: payrollListRef },
+      'pos-catalog': { tab: 'pos', ref: posCatalogRef },
+    };
+
+    const target = sectionMap[sectionKey];
+    if (!target) return;
+
+    setFinanceTab(target.tab);
+
+    if (financeFocusTimerRef.current) {
+      clearTimeout(financeFocusTimerRef.current);
+    }
+
+    financeFocusTimerRef.current = window.setTimeout(() => {
+      target.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onSectionHandled?.();
+    }, 180);
+  }, [onSectionHandled]);
+
   const matchesFilter = useCallback((payment, filter) => {
     if (filter === 'Pending') {
       return String(payment.status || '').toLowerCase() === 'pending' && Number(payment.amount_due || 0) > 0;
@@ -391,15 +455,37 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     return true;
   }, []);
 
+  const filteredPayments = useMemo(() => {
+    const query = String(deferredSearchTerm || '').trim().toLowerCase();
+
+    return payments.filter((payment) => {
+      if (!matchesFilter(payment, activeFilter)) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const searchableFields = [
+        payment.member_name,
+        payment.member_email,
+        payment.member_phone,
+        payment.plan_name,
+        payment.invoice_id,
+        payment.transaction_id,
+      ];
+
+      return searchableFields.some((field) => String(field || '').toLowerCase().includes(query));
+    });
+  }, [activeFilter, deferredSearchTerm, matchesFilter, payments]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
       const headers = { 'x-auth-token': token };
-      const paymentUrl = searchTerm
-        ? `/api/payments?search=${encodeURIComponent(searchTerm)}`
-        : '/api/payments';
       const [paymentsRes, statsRes, membersRes, plansRes] = await Promise.all([
-        axios.get(paymentUrl, { headers }),
+        axios.get('/api/payments', { headers }),
         axios.get('/api/payments/stats', { headers }),
         axios.get('/api/members', { headers }),
         axios.get('/api/plans', { headers })
@@ -413,8 +499,6 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       const plansData = extractArray(plansRes.data, ['plans', 'rows', 'items']);
 
       setPayments(paymentsData);
-        setFilteredPayments(paymentsData.filter((payment) => matchesFilter(payment, activeFilter)));
-
       setStats(extractObject(statsRes.data, { total_revenue: 0, today_revenue: 0, pending_dues: 0 }));
       setMembers(membersData);
       setPlans(plansData);
@@ -426,19 +510,13 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   };
 
   useEffect(() => {
-    if (token) {
-      const delayDebounceFn = setTimeout(() => { fetchData(); }, 300);
-      return () => clearTimeout(delayDebounceFn);
-    }
-  }, [token, searchTerm]);
+    if (!token) return;
+    fetchData();
+  }, [token]);
 
   useEffect(() => {
     setActiveFilter(defaultFilter || 'All');
   }, [defaultFilter]);
-
-  useEffect(() => {
-    setFilteredPayments(payments.filter((payment) => matchesFilter(payment, activeFilter)));
-  }, [activeFilter, payments, matchesFilter]);
 
   useEffect(() => {
     const handleDashboardFilter = (event) => {
@@ -450,6 +528,28 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     window.addEventListener('gymvault:payments-filter', handleDashboardFilter);
     return () => window.removeEventListener('gymvault:payments-filter', handleDashboardFilter);
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const refreshPayments = () => {
+      fetchData();
+    };
+
+    window.addEventListener('gymvault:data-changed', refreshPayments);
+    return () => window.removeEventListener('gymvault:data-changed', refreshPayments);
+  }, [token]);
+
+  useEffect(() => {
+    if (!focusSection) return;
+    focusFinanceSection(focusSection);
+    return () => {
+      if (financeFocusTimerRef.current) {
+        clearTimeout(financeFocusTimerRef.current);
+        financeFocusTimerRef.current = null;
+      }
+    };
+  }, [focusFinanceSection, focusSection]);
 
   const handleRecordPayment = async (e) => {
     if (e) e.preventDefault();
@@ -940,13 +1040,13 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
       {/* CHARTS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white/90 p-5 sm:p-8 rounded-[24px] border border-slate-100/60" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
+          <div ref={collectionsOverviewRef} className="lg:col-span-2 bg-white/90 p-5 sm:p-8 rounded-[24px] border border-slate-100/60 scroll-mt-28" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
             <div>
               <h3 className="text-lg font-black text-slate-900">Collection Intelligence</h3>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Short signals to improve cashflow today</p>
             </div>
-            <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 self-start">
+            <div className="hidden sm:block rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 self-start">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Dominant Mode</p>
               <p className="text-sm font-black text-slate-900">{collectionIntelligence.dominantMode} · {collectionIntelligence.onlineShare}% digital</p>
             </div>
@@ -1034,7 +1134,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       </div>
 
       {/* LEDGER TABLE */}
-      <div className="bg-white/90 rounded-[24px] border border-slate-100/60 overflow-hidden" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
+      <div ref={collectionsLedgerRef} className="bg-white/90 rounded-[24px] border border-slate-100/60 overflow-hidden scroll-mt-28" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
         <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between gap-4">
           <div className="relative flex-1 max-w-md"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} /><input type="text" placeholder="Search..." className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-slate-900/10 transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="relative">
@@ -1060,9 +1160,36 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
             ) : (
               filteredPayments.map((payment) => (
                 <div key={`pay-mobile-${payment.id}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="font-bold text-slate-900 truncate pr-2">{payment.member_name}</p>
-                    <p className="font-black text-emerald-600">₹{parseFloat(payment.amount_paid).toLocaleString()}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-900 truncate pr-2">{payment.member_name}</p>
+                        {parseFloat(payment.amount_due) > 0 && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleDueWhatsApp(payment)}
+                              className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center"
+                              aria-label={`Send WhatsApp reminder to ${payment.member_name}`}
+                              title="Send WhatsApp reminder"
+                            >
+                              <MessageCircle size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDueCall(payment)}
+                              className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center"
+                              aria-label={`Call ${payment.member_name}`}
+                              title="Call member"
+                            >
+                              <Phone size={13} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 truncate mt-1">{payment.member_phone || payment.member_email || 'No contact saved'}</p>
+                    </div>
+                    <p className="font-black text-emerald-600 shrink-0">₹{parseFloat(payment.amount_paid).toLocaleString()}</p>
                   </div>
                   <p className="text-xs text-slate-500 truncate">{payment.plan_name || 'N/A'} • {new Date(payment.payment_date).toLocaleDateString()}</p>
                   <div className="flex items-center justify-between">
@@ -1115,7 +1242,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               ) : (
                 filteredPayments.map((payment) => (
                   <tr key={payment.id} className="group hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-100">{payment.profile_pic ? (<img src={getImageUrl(payment.profile_pic)} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} alt="Member" className="w-full h-full object-cover" />) : (<div className="w-full h-full flex items-center justify-center font-black text-xs text-slate-500 bg-slate-200">{(payment.member_name || '?').charAt(0).toUpperCase()}</div>)}</div><div><div className="font-bold text-slate-900">{payment.member_name}</div><div className="text-xs font-bold text-slate-400">{payment.plan_name}</div></div></div></td>
+                    <td className="p-6"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-100">{payment.profile_pic ? (<img src={getImageUrl(payment.profile_pic)} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} alt="Member" className="w-full h-full object-cover" />) : (<div className="w-full h-full flex items-center justify-center font-black text-xs text-slate-500 bg-slate-200">{(payment.member_name || '?').charAt(0).toUpperCase()}</div>)}</div><div><div className="flex items-center gap-2"><div className="font-bold text-slate-900">{payment.member_name}</div>{parseFloat(payment.amount_due) > 0 && (<div className="flex items-center gap-1"><button type="button" onClick={() => handleDueWhatsApp(payment)} className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center" title="Send WhatsApp reminder"><MessageCircle size={13} /></button><button type="button" onClick={() => handleDueCall(payment)} className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center" title="Call member"><Phone size={13} /></button></div>)}</div><div className="text-xs font-bold text-slate-400">{payment.plan_name}</div></div></div></td>
                     <td className="p-6"><div className={`font-mono text-xs font-bold px-2 py-1 rounded w-fit ${payment.transaction_id || payment.invoice_id ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400'}`}>{(payment.transaction_id && payment.transaction_id.trim() !== "" && payment.transaction_id !== "Processing...") ? payment.transaction_id : (payment.invoice_id || `ID-${payment.id}`)}</div></td>
                     <td className="p-6"><div className="text-sm font-bold text-slate-600">{new Date(payment.payment_date).toLocaleDateString()}</div><div className="text-xs font-bold text-slate-400 mt-0.5">{new Date(payment.payment_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></td>
                     <td className="p-6"><div className="font-black text-slate-900">₹{parseFloat(payment.amount_paid).toLocaleString()}</div>{parseFloat(payment.amount_due) > 0 && (<div className="text-[10px] font-bold text-orange-500">Due: ₹{payment.amount_due}</div>)}</td>
@@ -1133,14 +1260,33 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
       {/* ═══════ EXPENSES TAB ═══════ */}
       {financeTab === 'expenses' && (
-        <div className="space-y-4">
+        <div ref={expensesListRef} className="space-y-4 scroll-mt-28">
           {expenses.length === 0 ? (
             <div className="text-center py-12 text-slate-400">
               <p className="text-lg font-bold">No expenses recorded yet</p>
               <p className="text-sm mt-1">Add your first expense to start tracking outflows.</p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-slate-100">
+            <>
+              <div className="space-y-3 md:hidden">
+                {expenses.map((expense) => (
+                  <div key={`expense-mobile-${expense.id}`} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">{expense.category}</p>
+                        <p className="text-xs font-semibold text-slate-500 mt-1">{expense.vendor || 'No vendor added'}</p>
+                      </div>
+                      <span className="text-sm font-black text-slate-900">₹{Number(expense.amount).toLocaleString()}</span>
+                    </div>
+                    <p className="text-sm text-slate-600 leading-relaxed">{expense.description || 'No description added.'}</p>
+                    <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-slate-500">
+                      <span>{expense.bill_date ? new Date(expense.bill_date).toLocaleDateString('en-GB') : 'No date'}</span>
+                      <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 uppercase">{expense.payment_mode}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden md:block overflow-hidden rounded-xl border border-slate-100">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
@@ -1165,21 +1311,64 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </div>
       )}
 
       {/* ═══════ PAYROLL TAB ═══════ */}
       {financeTab === 'payroll' && (
-        <div className="space-y-4">
+        <div ref={payrollListRef} className="space-y-4 scroll-mt-28">
           {payrollEntries.length === 0 ? (
             <div className="text-center py-12 text-slate-400">
               <p className="text-lg font-bold">No payroll entries yet</p>
               <p className="text-sm mt-1">Add staff salary records to track payroll.</p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-slate-100">
+            <>
+              <div className="space-y-3 md:hidden">
+                {payrollEntries.map((entry) => (
+                  <div key={`payroll-mobile-${entry.id}`} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">{entry.staff_name}</p>
+                        <p className="text-xs font-semibold text-slate-500 mt-1">{entry.staff_role || 'Staff'}</p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${String(entry.status || '').toUpperCase() === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{String(entry.status || '').toUpperCase() === 'PAID' ? 'Paid' : 'Pending'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm font-semibold text-slate-600">
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Base</p>
+                        <p className="font-black text-slate-900">₹{Number(entry.base_pay).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Net Pay</p>
+                        <p className="font-black text-slate-900">₹{Number(entry.net_pay).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-rose-500/70 mb-1">Deductions</p>
+                        <p className="font-black text-rose-600">₹{Number(entry.deductions).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500/70 mb-1">Commission</p>
+                        <p className="font-black text-emerald-600">₹{Number(entry.commission).toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-500">
+                      <span>{entry.pay_period || 'No pay period set'}</span>
+                      {String(entry.status || '').toUpperCase() === 'PAID' ? (
+                        <span className="text-slate-400 font-bold">Cleared</span>
+                      ) : (
+                        <button onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800">
+                          Mark Paid
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden md:block overflow-hidden rounded-xl border border-slate-100">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
@@ -1218,14 +1407,15 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </div>
       )}
 
       {/* ═══════ POS TAB ═══════ */}
       {financeTab === 'pos' && (
-        <div className="space-y-4">
+        <div ref={posCatalogRef} className="space-y-4 scroll-mt-28">
           <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-4">
             <div className="space-y-4">
               <div className="rounded-[24px] border border-slate-100 bg-white p-5">
@@ -1619,12 +1809,12 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       {/* ── Add Payroll Modal ── */}
       {showPayrollModal && (
         <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div><h2 className="text-xl font-black text-slate-900">Add Payroll Entry</h2></div>
               <button onClick={() => setShowPayrollModal(false)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="app-modal-scroll p-4 sm:p-6 space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1">Staff Member</label>
                 <select value={payrollForm.user_id} onChange={e => setPayrollForm(p => ({ ...p, user_id: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">

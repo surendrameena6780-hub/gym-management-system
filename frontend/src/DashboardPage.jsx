@@ -293,7 +293,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [checkinQuery, setCheckinQuery] = useState('');
   const [checkinBusyMemberId, setCheckinBusyMemberId] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState([]);
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [quickActionLoading, setQuickActionLoading] = useState('');
   const isAnyDashboardModalOpen = showAddModal || showPaymentModal || showBroadcastModal || showCheckinModal;
+  const quickActionTimerRef = useRef(null);
 
   // Form states
   const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
@@ -441,6 +444,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   useEffect(() => {
     return () => {
+      if (quickActionTimerRef.current) {
+        clearTimeout(quickActionTimerRef.current);
+      }
       if (warmupRetryTimerRef.current) {
         clearTimeout(warmupRetryTimerRef.current);
       }
@@ -496,6 +502,19 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     setIsSkipped(true);
   };
 
+  const launchQuickAction = useCallback((actionKey, action) => {
+    if (quickActionLoading) return;
+    setQuickActionLoading(actionKey);
+    if (quickActionTimerRef.current) {
+      clearTimeout(quickActionTimerRef.current);
+    }
+    quickActionTimerRef.current = setTimeout(() => {
+      action();
+      setQuickActionLoading('');
+      quickActionTimerRef.current = null;
+    }, 160);
+  }, [quickActionLoading]);
+
   const handleAddMember = async (e) => {
     e.preventDefault();
     const normalizedPhone = normalizePhoneInput(addFormData.phone);
@@ -509,6 +528,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     formData.append('phone', normalizedPhone);
     if (addFile) formData.append('profile_pic', addFile);
     try {
+      setAddSubmitting(true);
       const res = await axios.post('/api/members/add', formData, {
         headers: { 'x-auth-token': token }
       });
@@ -529,6 +549,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       setAddSelectedPlanId('');
     } catch (_err) {
       toast(_err.response?.data?.error || 'Error adding member.', 'error');
+    } finally {
+      setAddSubmitting(false);
     }
   };
 
@@ -1183,7 +1205,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'Today',
         priority: 'P0',
         cta: expiringImmediateCta.cta,
-        sub: 'Immediate revenue protection',
+        sub: 'Renew these today',
         action: expiringImmediateCta.action,
       }),
       buildRecommendation({
@@ -1197,7 +1219,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P1',
         cta: expiringSoonCta.cta,
-        sub: 'Prevent upcoming churn',
+        sub: 'Follow up this week',
         action: expiringSoonCta.action,
       }),
       buildRecommendation({
@@ -1211,12 +1233,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P1',
         cta: expiredCta.cta,
-        sub: 'Recover dormant revenue',
+        sub: 'Bring them back',
         action: expiredCta.action,
       }),
       buildRecommendation({
         id: 'GHOST_REACTIVATION',
-        title: 'Reactivate members who stopped visiting',
+        title: 'Bring back members who stopped coming',
         reason: `${ghostCta.count} active member${ghostCta.count === 1 ? '' : 's'} absent 14+ days`,
         count: ghostCta.count,
         members: ghostCta.members,
@@ -1225,12 +1247,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P1',
         cta: ghostCta.cta,
-        sub: 'Stop silent churn',
+        sub: 'Bring quiet members back',
         action: ghostCta.action,
       }),
       buildRecommendation({
         id: 'UNPAID_ACTIVATION',
-        title: 'Activate unpaid profiles',
+        title: 'Start unpaid members',
         reason: `${unpaidCta.count} unpaid member${unpaidCta.count === 1 ? ' is' : 's are'} waiting for activation`,
         count: unpaidCta.count,
         members: unpaidCta.members,
@@ -1239,12 +1261,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P1',
         cta: unpaidCta.cta,
-        sub: 'Convert pending dues',
+        sub: 'Finish pending payments',
         action: unpaidCta.action,
       }),
       buildRecommendation({
         id: 'PENDING_DUES',
-        title: 'Collect pending dues from recent payments',
+        title: 'Collect pending dues',
         reason: `${pendingDueCta.count} member${pendingDueCta.count === 1 ? ' still has' : 's still have'} an outstanding balance`,
         count: pendingDueCta.count,
         members: pendingDueCta.members,
@@ -1253,7 +1275,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P1',
         cta: pendingDueCta.cta,
-        sub: 'Recover outstanding balance',
+        sub: 'Clear pending balance',
         action: pendingDueCta.action,
       }),
       // Note: ESCALATED_CALLS is intentionally omitted here — the "Escalated Leads (Call Now)"
@@ -1304,7 +1326,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       }),
       members.length >= 12 && weeklyRuns === 0 && buildRecommendation({
         id: 'AUTOMATION_RESTART',
-        title: 'Restart member outreach cadence',
+        title: 'Restart member messages',
         reason: 'No campaign was sent in the last 7 days',
         count: Math.max(active.length, members.length),
         impact: Math.round(Math.max(avgPlanPrice * 2, active.length * avgPlanPrice * 0.12)),
@@ -1312,25 +1334,25 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P2',
         cta: 'Launch Broadcast',
-        sub: 'Re-engage active and silent members',
+        sub: 'Send member reminders again',
         action: () => openBroadcastDraft('Active', 'Hi from GymVault! New week, new goals. Reply if you want help with your next workout plan or renewal options.'),
       }),
       topPlanEntry && topPlanPct >= 65 && plans.length >= 2 && buildRecommendation({
         id: 'PLAN_CONCENTRATION',
-        title: `Diversify beyond "${topPlanEntry[0]}" plan`,
-        reason: `${topPlanPct}% of members are on a single plan — spreading risk improves revenue stability`,
+        title: `Add another plan besides "${topPlanEntry[0]}"`,
+        reason: `${topPlanPct}% of members are on one plan. Adding one more option can balance revenue better.`,
         count: topPlanEntry[1],
         impact: Math.round(monthlyRevenue > 0 ? monthlyRevenue * 0.18 : avgPlanPrice * topPlanEntry[1]),
         confidence: Math.min(82, 60 + Math.round(topPlanPct / 2)),
         urgency: 'This week',
         priority: 'P2',
         cta: 'Review Plans',
-        sub: 'Broaden pricing mix',
+        sub: 'Offer more plan options',
         action: () => navigateTo('Plans'),
       }),
       plans.length === 1 && members.length >= 8 && buildRecommendation({
         id: 'SECOND_TIER',
-        title: 'Add a second pricing tier',
+        title: 'Add one more plan option',
         reason: 'One plan limits upsell and downgrade paths',
         count: members.length,
         impact: Math.round(avgPlanPrice * 2),
@@ -1338,12 +1360,12 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P2',
         cta: 'Add Tier',
-        sub: 'Improve pricing coverage',
+        sub: 'Give members one more choice',
         action: () => navigateTo('Plans'),
       }),
       active.length >= 12 && expiringIn7Days.length === 0 && highChurnMembers.length < 3 && pendingDues < avgPlanPrice && buildRecommendation({
         id: 'GROWTH_PUSH',
-        title: 'Use this calm week for a growth push',
+        title: 'This week is good for new joins',
         reason: `Risk signals are stable across ${active.length} active members`,
         count: Math.max(6, Math.round(active.length * 0.35)),
         impact: Math.round(avgPlanPrice * 3),
@@ -1351,7 +1373,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         urgency: 'This week',
         priority: 'P2',
         cta: 'Launch Growth',
-        sub: 'Convert momentum into fresh joins',
+        sub: 'Bring in new members',
         action: () => openBroadcastDraft('All', 'Hi from GymVault! Bring your momentum back this week. Reply if you want help choosing the right plan or bringing a friend along.'),
       }),
     ].filter(Boolean)
@@ -1362,15 +1384,15 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
     const primary = recommendations[0] || {
       id: 'BASELINE',
-      title: 'Keep gym momentum high',
-      reason: 'Core operations are stable. Stay consistent with growth and daily follow-ups.',
+      title: 'Keep the gym running strong',
+      reason: 'Things look stable. Keep following up and keep new joins moving.',
       count: active.length || members.length || 0,
       impact: avgPlanPrice * 2,
       confidence: 76,
       urgency: 'This week',
       priority: 'P2',
       cta: plans.length > 0 ? 'Add Member' : 'Create Plan',
-      sub: plans.length > 0 ? 'Steady growth execution' : 'Set up your plan catalog',
+      sub: plans.length > 0 ? 'Keep growth steady' : 'Set up your plans',
       action: () => {
         if (plans.length === 0) {
           navigateTo('Plans');
@@ -1390,14 +1412,14 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
           : 'No immediate retention or revenue risks are peaking right now';
     const aiSummaryLines = recommendations.length > 0
       ? [
-          { label: 'Active coverage', value: `${active.length} of ${members.length || 0} members currently hold active plans (${activeCoveragePct}%)` },
-          { label: 'Revenue signal', value: (() => { const earliest = chart30.find(d => (d.revenue || 0) > 0); const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null; return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} — no revenue in the last 30 days`; })() },
-          { label: 'What to watch', value: nextWatchline },
+          { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
+          { label: 'Money collected', value: (() => { const earliest = chart30.find(d => (d.revenue || 0) > 0); const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null; return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`; })() },
+          { label: 'Watch today', value: nextWatchline },
         ]
       : [
-          { label: 'Active coverage', value: `${active.length} of ${members.length || 0} members currently hold active plans (${activeCoveragePct}%)` },
-          { label: 'Revenue signal', value: (() => { const earliest = chart30.find(d => (d.revenue || 0) > 0); const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null; return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} — no revenue in the last 30 days`; })() },
-          { label: 'What to watch', value: nextWatchline },
+          { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
+          { label: 'Money collected', value: (() => { const earliest = chart30.find(d => (d.revenue || 0) > 0); const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null; return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`; })() },
+          { label: 'Watch today', value: nextWatchline },
         ];
 
     const subscriptionWarning = (() => {
@@ -1433,12 +1455,18 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       });
     })();
 
-    // ── Action Required: show ALL P0 + P1 items (no artificial cap) ──
-    const actionCandidates = [subscriptionWarning, ...aiCandidates].filter(Boolean);
+    const priorityRank = { P0: 0, P1: 1, P2: 2 };
+    const actionCandidates = [subscriptionWarning, ...aiCandidates]
+      .filter(Boolean)
+      .sort((a, b) => {
+        const rankDiff = (priorityRank[a.priority] ?? 99) - (priorityRank[b.priority] ?? 99);
+        if (rankDiff !== 0) return rankDiff;
+        return Number(b.score || 0) - Number(a.score || 0);
+      });
     const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
     const mergedActionRows = actionRequiredRows.length > 0
-      ? actionRequiredRows  // show all urgent items — no slice cap
-      : actionCandidates.slice(0, 3);
+      ? actionRequiredRows.slice(0, 4)
+      : actionCandidates.slice(0, 4);
     const urgentCount = actionRequiredRows.length;
 
     return {
@@ -1590,13 +1618,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       ════════════════════════════════════════ */}
       <div
         id="tour-dashboard-hero"
-        className="relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 md:p-8 mb-5 sm:mb-6"
+        className="gv-dashboard-hero relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 md:p-8 mb-5 sm:mb-6"
         style={{
-          background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
           boxShadow: '0 20px 60px rgba(48,43,99,0.25), 0 1px 0 rgba(255,255,255,0.05) inset',
           opacity: 0, animation: 'cardCascade 0.7s cubic-bezier(0.16,1,0.3,1) 0ms forwards'
         }}
       >
+        <div className="gv-dashboard-hero-sheen" />
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.28) 0%, transparent 70%)' }} />
@@ -1617,7 +1645,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             <h1 className="text-2xl sm:text-3xl md:text-[2.75rem] font-black text-white tracking-tight leading-none mb-2">
               {getGreeting()} 👋
             </h1>
-            <p className="text-white/35 font-semibold text-sm">
+            <p className="text-white/75 font-semibold text-sm mb-1">
+              {gymName || 'Your gym'}
+            </p>
+            <p className="text-white/40 font-semibold text-sm">
               {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           </div>
@@ -1632,7 +1663,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 {i > 0 && <div className="w-[1px] h-10 bg-white/10 hidden sm:block" />}
                 <div>
                   <p className={`text-2xl md:text-3xl font-black tracking-tight ${m.color}`}>{m.value}</p>
-                  <p className="text-white/30 text-[9px] font-black uppercase tracking-[0.2em] mt-0.5">{m.label}</p>
+                  <p className="text-white/35 text-[9px] font-black uppercase tracking-[0.2em] mt-0.5">{m.label === 'Health Score' ? 'Gym Health' : m.label}</p>
                 </div>
               </React.Fragment>
             ))}
@@ -1652,13 +1683,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Monthly Revenue" value={`₹${dashboardData.monthlyRevenue.toLocaleString()}`}
             icon={TrendingUp} index={1}
             iconGradient="linear-gradient(135deg, #6366f1, #8b5cf6)"
-            onClick={() => navigateTo('Payments')}
+            onClick={() => navigateTo('Payments', 'All', { section: 'collections-overview' })}
           />
           <KPICard
             title="Today's Revenue" value={`₹${Number(payStats.today_revenue).toLocaleString()}`}
             icon={DollarSign} index={2}
             iconGradient="linear-gradient(135deg, #3b82f6, #0ea5e9)"
-            onClick={() => navigateTo('Payments')}
+            onClick={() => navigateTo('Payments', 'All', { section: 'collections-overview' })}
           />
           <KPICard
             title="Expiring in 7 Days" value={dashboardData.expiring7}
@@ -1737,7 +1768,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                       style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
                       <Sparkles size={14} className="text-white" />
                     </div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">AI Engine</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Smart Tips</span>
                   </div>
                   <div className="text-[9px] font-bold text-slate-400 text-right">
                     <p>{dashboardData.automations.sentToday} Sent Today</p>
@@ -1764,13 +1795,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     <p className="text-xs font-black text-slate-800 mt-0.5">{dashboardData.automations.weeklySent}</p>
                   </div>
                   <div className="rounded-lg border border-slate-100 bg-slate-50/70 px-2 py-2">
-                    <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Est. Value</p>
+                    <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Possible Value</p>
                     <p className="text-xs font-black text-slate-800 mt-0.5">₹{dashboardData.automations.estimatedRecoveryValue.toLocaleString()}</p>
                   </div>
                 </div>
 
                 <p className="text-[10px] text-slate-400 font-semibold">
-                  Last automation: {dashboardData.automations.lastAutomationLabel}
+                  Last auto message: {dashboardData.automations.lastAutomationLabel}
                 </p>
 
                 <div className="space-y-2">
@@ -1781,7 +1812,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                         className="w-full rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-left"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-[10px] font-black text-slate-800">Insight {index + 1}</p>
+                          <p className="text-[10px] font-black text-slate-800">Tip {index + 1}</p>
                           <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200">{rec.urgency}</span>
                         </div>
                         <p className="text-[12px] font-bold text-slate-800 leading-snug mt-2">
@@ -1791,7 +1822,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                           {rec.reason}
                         </p>
                         <p className="text-[10px] text-slate-400 font-bold mt-2">
-                          Est. upside ₹{Number(rec.impact || 0).toLocaleString()} · {rec.confidence}% confidence
+                          Possible gain ₹{Number(rec.impact || 0).toLocaleString()} · {rec.confidence}% confidence
                         </p>
                       </div>
                     );
@@ -1806,7 +1837,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             >
               <div className="px-5 py-4 border-b border-slate-100/80 flex justify-between items-center bg-slate-50/50">
                 <h3 className="font-black text-slate-800 text-sm flex items-center gap-2">
-                  <ShieldAlert size={16} className="text-rose-500" /> Action Required
+                  <ShieldAlert size={16} className="text-rose-500" /> Need Attention
                 </h3>
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                   {dashboardData.ai.urgentCount} urgent
@@ -1821,7 +1852,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     !setup.steps?.members && { label: 'Add your first member', sub: 'Register a member to get started', onClick: () => setShowAddModal(true) },
                     setup.steps?.profile && setup.steps?.plans && { label: 'Set up WhatsApp / SMS messaging', sub: 'Enable automated member alerts', onClick: () => navigateTo('Settings', 'automation') },
                     setup.steps?.profile && { label: 'Connect payment gateway', sub: 'Integrate Razorpay for online payments', onClick: () => navigateTo('Settings', 'integrations') },
-                  ].filter(Boolean).slice(0, 3);
+                  ].filter(Boolean).slice(0, 4);
                   return (
                     <div className="flex flex-col items-center justify-center py-4 gap-3 text-center">
                       <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
@@ -1911,7 +1942,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Check-ins Today" value={todayCheckins}
             icon={CheckCircle} index={8}
             iconGradient="linear-gradient(135deg, #14b8a6, #06b6d4)"
-            onClick={() => navigateTo('Attendance')}
+            onClick={() => navigateTo('Attendance', 'All', { section: 'live-feed' })}
           />
           <KPICard
             title="Unpaid Profiles" value={dashboardData.unpaid}
@@ -1930,7 +1961,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
             title="Pending Dues" value={`₹${Number(payStats.pending_dues).toLocaleString()}`}
             icon={Activity} index={11}
             iconGradient="linear-gradient(135deg, #f97316, #ef4444)"
-            onClick={dashboardData.pendingDueAction}
+            onClick={() => navigateTo('Payments', 'Pending', { section: 'payments-ledger' })}
           />
         </div>
 
@@ -1960,13 +1991,15 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               violet:  'text-violet-400',
               sky:     'text-sky-400',
             }[color];
+            const isLoading = quickActionLoading === label;
             return (
               <button
                 key={label}
-                onClick={onBtnClick}
-                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] hover:bg-white/5 ${btnCls}`}
+                onClick={() => launchQuickAction(label, onBtnClick)}
+                disabled={Boolean(quickActionLoading)}
+                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] hover:bg-white/5 disabled:opacity-70 ${btnCls}`}
               >
-                {icon}
+                {isLoading ? <RefreshCw size={15} strokeWidth={2.5} className="animate-spin" /> : icon}
                 <span className="text-[10px] font-bold leading-none tracking-wide">{label}</span>
               </button>
             );
@@ -2096,10 +2129,13 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
               <button
                 type="submit"
+                disabled={addSubmitting}
                 className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg"
                 style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}
               >
-                {addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member'}
+                {addSubmitting ? (
+                  <span className="inline-flex items-center gap-2"><RefreshCw size={16} className="animate-spin" /> Saving...</span>
+                ) : (addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member')}
               </button>
             </form>
           </div>
@@ -2252,30 +2288,30 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 disabled={paymentSubmitting || paymentStep !== 'idle'}
                 className="w-full py-3 rounded-xl font-black text-sm text-white mt-2 flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-98"
                 style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>
-                <Zap size={16} fill="currentColor" /> Complete Transaction
+                {paymentSubmitting ? <RefreshCw size={16} className="animate-spin" /> : <Zap size={16} fill="currentColor" />} {paymentSubmitting ? 'Please wait...' : 'Complete Transaction'}
               </button>
             </form>
 
             {/* Payment processing / success animation overlay */}
             {paymentStep !== 'idle' && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-[24px] animate-in fade-in duration-150"
-                style={{ background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(8px)' }}>
+                style={{ background: 'rgba(15,23,42,0.76)', backdropFilter: 'blur(10px)' }}>
                 {paymentStep === 'processing' ? (
-                  <div className="flex flex-col items-center gap-5">
-                    <div className="w-16 h-16 rounded-full border-4 border-slate-100 border-t-indigo-600 animate-spin" />
+                  <div className="flex flex-col items-center gap-5 rounded-[28px] border border-white/10 bg-slate-950/70 px-8 py-8 shadow-2xl">
+                    <div className="w-16 h-16 rounded-full border-4 border-white/15 border-t-indigo-400 animate-spin" />
                     <div className="text-center">
-                      <p className="font-black text-slate-900 text-xl">Processing…</p>
-                      <p className="text-sm text-slate-500 mt-1 font-medium">Do not close this window</p>
+                      <p className="font-black text-white text-xl">Processing payment...</p>
+                      <p className="text-sm text-slate-300 mt-1 font-medium">Please wait. Do not close this window.</p>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center gap-5 animate-in zoom-in-90 duration-300">
+                  <div className="flex flex-col items-center gap-5 animate-in zoom-in-90 duration-300 rounded-[28px] border border-emerald-400/20 bg-slate-950/70 px-8 py-8 shadow-2xl">
                     <div className="w-20 h-20 rounded-full bg-emerald-500 flex items-center justify-center shadow-xl shadow-emerald-500/30">
                       <Check size={36} className="text-white" strokeWidth={3} />
                     </div>
                     <div className="text-center">
-                      <p className="font-black text-slate-900 text-xl">Payment Complete!</p>
-                      <p className="text-sm text-slate-500 mt-1 font-medium">Member activated &amp; checked in ✓</p>
+                      <p className="font-black text-white text-xl">Payment complete</p>
+                      <p className="text-sm text-slate-300 mt-1 font-medium">Member activated and checked in.</p>
                     </div>
                   </div>
                 )}

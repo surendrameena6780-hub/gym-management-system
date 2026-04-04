@@ -11,6 +11,48 @@ const AUTOMATION_SLOTS = [
 const PUSH_ROLES = ['OWNER', 'STAFF'];
 const MEMBER_ROLE = 'MEMBER';
 const MEMBER_APP_URL = '/login';
+const DEFAULT_AUTOMATION_MESSAGE_TEMPLATES = {
+    SETUP_FOCUS: {
+        title: 'Your next move is obvious',
+        body: '{{setup_hint}}',
+    },
+    LEAD_SPRINT: {
+        title: 'Lead queue is warm',
+        body: '{{count}} follow-up {{lead_label}} {{are_is}} ready today. A quick callback sprint before the day gets noisy can turn curiosity into walk-ins.',
+    },
+    RENEWAL_RADAR: {
+        title: 'Renewals are within reach',
+        body: '{{count}} {{membership_label}} {{enter_label}} the final 3-day window today. One crisp follow-up can lock revenue before the day slips away.',
+    },
+    RENEWAL_WEEK: {
+        title: 'Renewal week just opened',
+        body: '{{count}} {{member_label}} {{are_is}} now inside renewal week. Get ahead of the rush and make the rejoin decision feel easy.',
+    },
+    ATTENDANCE_PULSE: {
+        title: 'The floor could use a lift',
+        body: '{{today_checkins}} check-ins so far against a {{avg_daily}}/day recent rhythm. One story, one class ping, or one comeback call can still lift the evening rush.',
+    },
+    COLLECTIONS_PUSH: {
+        title: 'Collections are still on the table',
+        body: '{{due_amount}} is still waiting across {{due_members}} {{account_label}}. Tonight is a clean window to recover dues while intent is still warm.',
+    },
+    WINBACK_LIST: {
+        title: 'Your comeback list is ready',
+        body: '{{count}} {{member_label}} {{have_has}} been quiet for 10+ days. A smart nudge tonight can wake up stalled routines before they go cold.',
+    },
+    MEMBER_RENEWAL: {
+        title: 'Your plan is almost out of reps',
+        body: '{{first_name}}, {{gym_name}} access wraps in {{days_left}} {{day_label}}. Renew today and keep your streak moving, not paused.',
+    },
+    MEMBER_DUE: {
+        title: 'A quick clear-up keeps you moving',
+        body: '{{first_name}}, {{amount_due}} is still pending on your plan. Clear it today and keep your next entry smooth.',
+    },
+    MEMBER_COMEBACK: {
+        title: 'Your spot is still warm',
+        body: '{{first_name}}, it has been {{days_inactive}} days since your last workout. One session today can flip the whole week back in your favour.',
+    },
+};
 const DEFAULT_AUTOMATION_SETTINGS = {
     owner_staff_enabled: true,
     member_push_enabled: true,
@@ -24,7 +66,10 @@ const DEFAULT_AUTOMATION_SETTINGS = {
         AFTERNOON: false,
         EVENING: true,
     },
+    owner_staff_daily_limit: 3,
+    member_daily_limit: 50,
     member_max_per_slot: 25,
+    message_templates: DEFAULT_AUTOMATION_MESSAGE_TEMPLATES,
 };
 
 let ensureAutomationSchemaPromise;
@@ -62,7 +107,32 @@ const normalizeAutomationSettings = (value) => {
             ...DEFAULT_AUTOMATION_SETTINGS.member_slots,
             ...(raw.member_slots && typeof raw.member_slots === 'object' ? raw.member_slots : {}),
         },
+        owner_staff_daily_limit: Math.min(3, Math.max(1, toInt(raw.owner_staff_daily_limit) || DEFAULT_AUTOMATION_SETTINGS.owner_staff_daily_limit)),
+        member_daily_limit: Math.min(500, Math.max(1, toInt(raw.member_daily_limit) || DEFAULT_AUTOMATION_SETTINGS.member_daily_limit)),
         member_max_per_slot: Math.min(100, Math.max(1, toInt(raw.member_max_per_slot) || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot)),
+        message_templates: Object.fromEntries(Object.entries(DEFAULT_AUTOMATION_MESSAGE_TEMPLATES).map(([templateKey, defaults]) => {
+            const source = raw.message_templates && typeof raw.message_templates === 'object' && raw.message_templates[templateKey] && typeof raw.message_templates[templateKey] === 'object'
+                ? raw.message_templates[templateKey]
+                : {};
+            return [templateKey, {
+                title: typeof source.title === 'string' && source.title.trim() ? source.title : defaults.title,
+                body: typeof source.body === 'string' && source.body.trim() ? source.body : defaults.body,
+            }];
+        })),
+    };
+};
+
+const interpolateAutomationTemplate = (template, variables = {}) => String(template || '').replace(/{{\s*([a-z0-9_]+)\s*}}/gi, (_match, key) => {
+    const value = variables[key];
+    return value == null ? '' : String(value);
+});
+
+const buildAutomationMessage = ({ settings, key, variables = {} }) => {
+    const templates = settings?.message_templates || DEFAULT_AUTOMATION_MESSAGE_TEMPLATES;
+    const template = templates[key] || DEFAULT_AUTOMATION_MESSAGE_TEMPLATES[key] || { title: '', body: '' };
+    return {
+        title: interpolateAutomationTemplate(template.title, variables).trim(),
+        body: interpolateAutomationTemplate(template.body, variables).trim(),
     };
 };
 
@@ -244,55 +314,95 @@ const getGymMetrics = async (gymId, timezone) => {
     return result.rows[0] || {};
 };
 
-const buildSetupNudge = (metrics) => {
+const buildSetupNudge = (metrics, settings) => {
     const plansCount = toInt(metrics.active_plans_count);
     const membersCount = toInt(metrics.members_count);
     if (plansCount > 0 && membersCount > 0) return null;
 
+    const setupHint = plansCount === 0
+        ? 'No plans are live yet. Set up one sharp starter plan this morning so every walk-in has a clear yes-path.'
+        : 'Your plan shelf is ready. Add the next few members today so the dashboard starts compounding with real data.';
+    const message = buildAutomationMessage({
+        settings,
+        key: 'SETUP_FOCUS',
+        variables: {
+            setup_hint: setupHint,
+            plans_count: plansCount,
+            members_count: membersCount,
+        },
+    });
+
     return {
         key: 'SETUP_FOCUS',
-        title: 'Your next move is obvious',
-        body: plansCount === 0
-            ? 'No plans are live yet. Set up one sharp starter plan this morning so every walk-in has a clear yes-path.'
-            : 'Your plan shelf is ready. Add the next few members today so the dashboard starts compounding with real data.',
+        title: message.title,
+        body: message.body,
         url: plansCount === 0 ? '/plans' : '/members',
     };
 };
 
-const buildLeadNudge = (metrics) => {
+const buildLeadNudge = (metrics, settings) => {
     const dueLeads = toInt(metrics.due_leads_count);
     if (dueLeads <= 0) return null;
 
+    const message = buildAutomationMessage({
+        settings,
+        key: 'LEAD_SPRINT',
+        variables: {
+            count: dueLeads,
+            lead_label: pluralize(dueLeads, 'lead'),
+            are_is: dueLeads === 1 ? 'is' : 'are',
+        },
+    });
+
     return {
         key: 'LEAD_SPRINT',
-        title: 'Lead queue is warm',
-        body: `${dueLeads} follow-up ${pluralize(dueLeads, 'lead')} ${dueLeads === 1 ? 'is' : 'are'} ready today. A quick callback sprint before the day gets noisy can turn curiosity into walk-ins.`,
+        title: message.title,
+        body: message.body,
         url: '/dashboard',
     };
 };
 
-const buildRenewalNudge = (count, variant = 'FINAL_3_DAYS') => {
+const buildRenewalNudge = (count, variant = 'FINAL_3_DAYS', settings) => {
     const total = toInt(count);
     if (total <= 0) return null;
 
     if (variant === 'FINAL_3_DAYS') {
+        const message = buildAutomationMessage({
+            settings,
+            key: 'RENEWAL_RADAR',
+            variables: {
+                count: total,
+                membership_label: pluralize(total, 'membership'),
+                enter_label: total === 1 ? 'enters' : 'enter',
+            },
+        });
         return {
             key: 'RENEWAL_RADAR',
-            title: 'Renewals are within reach',
-            body: `${total} ${pluralize(total, 'membership')} enter${total === 1 ? 's' : ''} the final 3-day window today. One crisp follow-up can lock revenue before the day slips away.`,
+            title: message.title,
+            body: message.body,
             url: '/members',
         };
     }
 
+    const message = buildAutomationMessage({
+        settings,
+        key: 'RENEWAL_WEEK',
+        variables: {
+            count: total,
+            member_label: pluralize(total, 'member'),
+            are_is: total === 1 ? 'is' : 'are',
+        },
+    });
+
     return {
         key: 'RENEWAL_WEEK',
-        title: 'Renewal week just opened',
-        body: `${total} ${pluralize(total, 'member')} ${total === 1 ? 'is' : 'are'} now inside renewal week. Get ahead of the rush and make the rejoin decision feel easy.`,
+        title: message.title,
+        body: message.body,
         url: '/members',
     };
 };
 
-const buildAttendancePulse = (metrics) => {
+const buildAttendancePulse = (metrics, settings) => {
     const todayCheckins = toInt(metrics.today_checkins);
     const avgDaily = Math.round(toNumber(metrics.avg_daily_checkins_7d));
     if (avgDaily < 8) return null;
@@ -300,65 +410,94 @@ const buildAttendancePulse = (metrics) => {
     const softFloor = Math.max(4, Math.floor(avgDaily * 0.6));
     if (todayCheckins >= softFloor) return null;
 
+    const message = buildAutomationMessage({
+        settings,
+        key: 'ATTENDANCE_PULSE',
+        variables: {
+            today_checkins: todayCheckins,
+            avg_daily: avgDaily,
+        },
+    });
+
     return {
         key: 'ATTENDANCE_PULSE',
-        title: 'The floor could use a lift',
-        body: `${todayCheckins} check-ins so far against a ${avgDaily}/day recent rhythm. One story, one class ping, or one comeback call can still lift the evening rush.`,
+        title: message.title,
+        body: message.body,
         url: '/attendance',
     };
 };
 
-const buildCollectionsNudge = (metrics, currency) => {
+const buildCollectionsNudge = (metrics, currency, settings) => {
     const dueMembers = toInt(metrics.due_members_count);
     const totalDue = toNumber(metrics.total_due_amount);
     if (dueMembers <= 0 || totalDue <= 0) return null;
 
+    const message = buildAutomationMessage({
+        settings,
+        key: 'COLLECTIONS_PUSH',
+        variables: {
+            due_amount: formatCurrency(totalDue, currency),
+            due_members: dueMembers,
+            account_label: pluralize(dueMembers, 'account'),
+        },
+    });
+
     return {
         key: 'COLLECTIONS_PUSH',
-        title: 'Collections are still on the table',
-        body: `${formatCurrency(totalDue, currency)} is still waiting across ${dueMembers} ${pluralize(dueMembers, 'account')}. Tonight is a clean window to recover dues while intent is still warm.`,
+        title: message.title,
+        body: message.body,
         url: '/payments',
     };
 };
 
-const buildWinbackNudge = (metrics) => {
+const buildWinbackNudge = (metrics, settings) => {
     const inactiveCount = toInt(metrics.inactive_10d_count);
     if (inactiveCount < 3) return null;
 
+    const message = buildAutomationMessage({
+        settings,
+        key: 'WINBACK_LIST',
+        variables: {
+            count: inactiveCount,
+            member_label: pluralize(inactiveCount, 'member'),
+            have_has: inactiveCount === 1 ? 'has' : 'have',
+        },
+    });
+
     return {
         key: 'WINBACK_LIST',
-        title: 'Your comeback list is ready',
-        body: `${inactiveCount} ${pluralize(inactiveCount, 'member')} ${inactiveCount === 1 ? 'has' : 'have'} been quiet for 10+ days. A smart nudge tonight can wake up stalled routines before they go cold.`,
+        title: message.title,
+        body: message.body,
         url: '/members',
     };
 };
 
-const pickInternalNotificationCandidate = ({ slot, metrics, gym }) => {
+const pickInternalNotificationCandidate = ({ slot, metrics, gym, settings }) => {
     if (!slot) return null;
 
     if (slot.key === 'MORNING') {
         return (
-            buildSetupNudge(metrics) ||
-            buildLeadNudge(metrics) ||
-            buildRenewalNudge(metrics.expiring_3d_count, 'FINAL_3_DAYS') ||
-            buildCollectionsNudge(metrics, gym.currency) ||
-            buildWinbackNudge(metrics)
+            buildSetupNudge(metrics, settings) ||
+            buildLeadNudge(metrics, settings) ||
+            buildRenewalNudge(metrics.expiring_3d_count, 'FINAL_3_DAYS', settings) ||
+            buildCollectionsNudge(metrics, gym.currency, settings) ||
+            buildWinbackNudge(metrics, settings)
         );
     }
 
     if (slot.key === 'AFTERNOON') {
         return (
-            buildAttendancePulse(metrics) ||
-            buildRenewalNudge(metrics.expiring_7d_count, 'WEEK') ||
-            buildLeadNudge(metrics) ||
-            buildWinbackNudge(metrics)
+            buildAttendancePulse(metrics, settings) ||
+            buildRenewalNudge(metrics.expiring_7d_count, 'WEEK', settings) ||
+            buildLeadNudge(metrics, settings) ||
+            buildWinbackNudge(metrics, settings)
         );
     }
 
     return (
-        buildCollectionsNudge(metrics, gym.currency) ||
-        buildWinbackNudge(metrics) ||
-        buildRenewalNudge(metrics.expiring_3d_count, 'FINAL_3_DAYS')
+        buildCollectionsNudge(metrics, gym.currency, settings) ||
+        buildWinbackNudge(metrics, settings) ||
+        buildRenewalNudge(metrics.expiring_3d_count, 'FINAL_3_DAYS', settings)
     );
 };
 
@@ -410,6 +549,28 @@ const createNotificationAndLog = async ({ gymId, localDate, slotKey, candidate, 
     } finally {
         client.release();
     }
+};
+
+const getInternalAutomationCountForDay = async (gymId, localDate) => {
+    const result = await pool.query(
+        `SELECT COUNT(*)::INT AS total
+         FROM notification_automation_log
+         WHERE gym_id = $1
+           AND local_date = $2::date`,
+        [gymId, localDate]
+    );
+    return toInt(result.rows[0]?.total);
+};
+
+const getMemberAutomationCountForDay = async (gymId, localDate) => {
+    const result = await pool.query(
+        `SELECT COUNT(*)::INT AS total
+         FROM member_notification_automation_log
+         WHERE gym_id = $1
+           AND local_date = $2::date`,
+        [gymId, localDate]
+    );
+    return toInt(result.rows[0]?.total);
 };
 
 const getMemberPushRecipients = async ({ gymId, timezone, localDate, criteria, limit }) => {
@@ -475,7 +636,7 @@ const getMemberPushRecipients = async ({ gymId, timezone, localDate, criteria, l
     return result.rows;
 };
 
-const buildMemberRenewalCampaign = async ({ gym, timezone, localDate, limit }) => {
+const buildMemberRenewalCampaign = async ({ gym, timezone, localDate, limit, settings }) => {
     const recipients = await getMemberPushRecipients({
         gymId: gym.id,
         timezone,
@@ -493,9 +654,19 @@ const buildMemberRenewalCampaign = async ({ gym, timezone, localDate, limit }) =
         recipients,
         compose: (member) => {
             const daysLeft = Math.max(0, toInt(member.days_to_expiry));
+            const message = buildAutomationMessage({
+                settings,
+                key: 'MEMBER_RENEWAL',
+                variables: {
+                    first_name: firstName(member.full_name),
+                    gym_name: gym.name,
+                    days_left: daysLeft,
+                    day_label: pluralize(daysLeft, 'day'),
+                },
+            });
             return {
-                title: 'Your plan is almost out of reps',
-                body: `${firstName(member.full_name)}, ${gym.name} access wraps in ${daysLeft} ${pluralize(daysLeft, 'day')}. Renew today and keep your streak moving, not paused.`,
+                title: message.title,
+                body: message.body,
                 url: MEMBER_APP_URL,
                 icon: '/vite.svg',
                 badge: '/vite.svg',
@@ -505,7 +676,7 @@ const buildMemberRenewalCampaign = async ({ gym, timezone, localDate, limit }) =
     };
 };
 
-const buildMemberDueCampaign = async ({ gym, timezone, localDate, limit }) => {
+const buildMemberDueCampaign = async ({ gym, timezone, localDate, limit, settings }) => {
     const recipients = await getMemberPushRecipients({
         gymId: gym.id,
         timezone,
@@ -521,18 +692,28 @@ const buildMemberDueCampaign = async ({ gym, timezone, localDate, limit }) => {
         audience: 'MEMBER',
         slotTitle: 'Member due reminder',
         recipients,
-        compose: (member) => ({
-            title: 'A quick clear-up keeps you moving',
-            body: `${firstName(member.full_name)}, ${formatCurrency(member.amount_due, gym.currency)} is still pending on your plan. Clear it today and keep your next entry smooth.`,
-            url: MEMBER_APP_URL,
-            icon: '/vite.svg',
-            badge: '/vite.svg',
-            tag: `gymvault-member-due-${gym.id}`,
-        }),
+        compose: (member) => {
+            const message = buildAutomationMessage({
+                settings,
+                key: 'MEMBER_DUE',
+                variables: {
+                    first_name: firstName(member.full_name),
+                    amount_due: formatCurrency(member.amount_due, gym.currency),
+                },
+            });
+            return {
+                title: message.title,
+                body: message.body,
+                url: MEMBER_APP_URL,
+                icon: '/vite.svg',
+                badge: '/vite.svg',
+                tag: `gymvault-member-due-${gym.id}`,
+            };
+        },
     };
 };
 
-const buildMemberComebackCampaign = async ({ gym, timezone, localDate, limit }) => {
+const buildMemberComebackCampaign = async ({ gym, timezone, localDate, limit, settings }) => {
     const recipients = await getMemberPushRecipients({
         gymId: gym.id,
         timezone,
@@ -548,38 +729,52 @@ const buildMemberComebackCampaign = async ({ gym, timezone, localDate, limit }) 
         audience: 'MEMBER',
         slotTitle: 'Member comeback push',
         recipients,
-        compose: (member) => ({
-            title: 'Your spot is still warm',
-            body: `${firstName(member.full_name)}, it has been ${toInt(member.days_inactive)} days since your last workout. One session today can flip the whole week back in your favour.`,
-            url: MEMBER_APP_URL,
-            icon: '/vite.svg',
-            badge: '/vite.svg',
-            tag: `gymvault-member-comeback-${gym.id}`,
-        }),
+        compose: (member) => {
+            const message = buildAutomationMessage({
+                settings,
+                key: 'MEMBER_COMEBACK',
+                variables: {
+                    first_name: firstName(member.full_name),
+                    days_inactive: toInt(member.days_inactive),
+                },
+            });
+            return {
+                title: message.title,
+                body: message.body,
+                url: MEMBER_APP_URL,
+                icon: '/vite.svg',
+                badge: '/vite.svg',
+                tag: `gymvault-member-comeback-${gym.id}`,
+            };
+        },
     };
 };
 
-const pickMemberCampaign = async ({ gym, slot, timezone, localDate, settings }) => {
+const pickMemberCampaign = async ({ gym, slot, timezone, localDate, settings, remainingDailyLimit }) => {
     if (!slot) return null;
-    const limit = settings.member_max_per_slot || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot;
+    const limit = Math.min(
+        settings.member_max_per_slot || DEFAULT_AUTOMATION_SETTINGS.member_max_per_slot,
+        remainingDailyLimit ?? settings.member_daily_limit ?? DEFAULT_AUTOMATION_SETTINGS.member_daily_limit
+    );
+    if (limit <= 0) return null;
 
     if (slot.key === 'MORNING') {
         return (
-            await buildMemberRenewalCampaign({ gym, timezone, localDate, limit }) ||
-            await buildMemberDueCampaign({ gym, timezone, localDate, limit })
+            await buildMemberRenewalCampaign({ gym, timezone, localDate, limit, settings }) ||
+            await buildMemberDueCampaign({ gym, timezone, localDate, limit, settings })
         );
     }
 
     if (slot.key === 'AFTERNOON') {
         return (
-            await buildMemberDueCampaign({ gym, timezone, localDate, limit }) ||
-            await buildMemberComebackCampaign({ gym, timezone, localDate, limit })
+            await buildMemberDueCampaign({ gym, timezone, localDate, limit, settings }) ||
+            await buildMemberComebackCampaign({ gym, timezone, localDate, limit, settings })
         );
     }
 
     return (
-        await buildMemberComebackCampaign({ gym, timezone, localDate, limit }) ||
-        await buildMemberRenewalCampaign({ gym, timezone, localDate, limit })
+        await buildMemberComebackCampaign({ gym, timezone, localDate, limit, settings }) ||
+        await buildMemberRenewalCampaign({ gym, timezone, localDate, limit, settings })
     );
 };
 
@@ -654,106 +849,115 @@ const runAutomatedNotificationNudges = async ({ dryRun = false, forceSlot = null
                 let deliveredSomething = false;
 
                 if (automationSettings.owner_staff_enabled && isSlotEnabled(automationSettings.owner_staff_slots, slot.key)) {
-                    const internalCandidate = pickInternalNotificationCandidate({ slot, metrics, gym });
-                    if (internalCandidate) {
-                        hasCandidate = true;
-                        if (dryRun) {
-                            summary.candidates.push({
-                                audience: 'OWNER_STAFF',
-                                gym_id: gym.id,
-                                gym_name: gym.name,
-                                slot: slot.key,
-                                candidate: internalCandidate,
-                            });
-                        } else {
-                            const notificationRecord = await createNotificationAndLog({
-                                gymId: gym.id,
-                                localDate: localContext.localDate,
-                                slotKey: slot.key,
-                                candidate: internalCandidate,
-                                metrics,
-                            });
+                    const internalSentToday = await getInternalAutomationCountForDay(gym.id, localContext.localDate);
+                    if (internalSentToday < (automationSettings.owner_staff_daily_limit || DEFAULT_AUTOMATION_SETTINGS.owner_staff_daily_limit)) {
+                        const internalCandidate = pickInternalNotificationCandidate({ slot, metrics, gym, settings: automationSettings });
+                        if (internalCandidate) {
+                            hasCandidate = true;
+                            if (dryRun) {
+                                summary.candidates.push({
+                                    audience: 'OWNER_STAFF',
+                                    gym_id: gym.id,
+                                    gym_name: gym.name,
+                                    slot: slot.key,
+                                    candidate: internalCandidate,
+                                });
+                            } else {
+                                const notificationRecord = await createNotificationAndLog({
+                                    gymId: gym.id,
+                                    localDate: localContext.localDate,
+                                    slotKey: slot.key,
+                                    candidate: internalCandidate,
+                                    metrics,
+                                });
 
-                            if (!notificationRecord.skipped) {
-                                const pushSent = await sendPushToGym(
-                                    gym.id,
-                                    {
-                                        title: internalCandidate.title,
-                                        body: internalCandidate.body,
-                                        icon: '/vite.svg',
-                                        badge: '/vite.svg',
-                                        url: internalCandidate.url || '/dashboard',
-                                        tag: `gymvault-auto-${slot.key.toLowerCase()}-${internalCandidate.key.toLowerCase()}`,
-                                    },
-                                    PUSH_ROLES
-                                );
+                                if (!notificationRecord.skipped) {
+                                    const pushSent = await sendPushToGym(
+                                        gym.id,
+                                        {
+                                            title: internalCandidate.title,
+                                            body: internalCandidate.body,
+                                            icon: '/vite.svg',
+                                            badge: '/vite.svg',
+                                            url: internalCandidate.url || '/dashboard',
+                                            tag: `gymvault-auto-${slot.key.toLowerCase()}-${internalCandidate.key.toLowerCase()}`,
+                                        },
+                                        PUSH_ROLES
+                                    );
 
-                                await pool.query(
-                                    `UPDATE notification_automation_log
-                                     SET push_sent_count = $2
-                                     WHERE id = $1`,
-                                    [notificationRecord.logId, pushSent]
-                                ).catch(() => {});
+                                    await pool.query(
+                                        `UPDATE notification_automation_log
+                                         SET push_sent_count = $2
+                                         WHERE id = $1`,
+                                        [notificationRecord.logId, pushSent]
+                                    ).catch(() => {});
 
-                                summary.sent += 1;
-                                summary.internal_campaigns_sent += 1;
-                                deliveredSomething = true;
+                                    summary.sent += 1;
+                                    summary.internal_campaigns_sent += 1;
+                                    deliveredSomething = true;
+                                }
                             }
                         }
                     }
                 }
 
                 if (automationSettings.member_push_enabled && isSlotEnabled(automationSettings.member_slots, slot.key)) {
-                    const memberCampaign = await pickMemberCampaign({
-                        gym,
-                        slot,
-                        timezone,
-                        localDate: localContext.localDate,
-                        settings: automationSettings,
-                    });
+                    const memberSentToday = await getMemberAutomationCountForDay(gym.id, localContext.localDate);
+                    const remainingMemberDailyLimit = Math.max(0, (automationSettings.member_daily_limit || DEFAULT_AUTOMATION_SETTINGS.member_daily_limit) - memberSentToday);
 
-                    if (memberCampaign) {
-                        hasCandidate = true;
-                        if (dryRun) {
-                            summary.candidates.push({
-                                audience: 'MEMBER',
-                                gym_id: gym.id,
-                                gym_name: gym.name,
-                                slot: slot.key,
-                                candidate: {
-                                    key: memberCampaign.key,
-                                    title: memberCampaign.slotTitle,
-                                    recipients: memberCampaign.recipients.length,
-                                    preview: memberCampaign.compose(memberCampaign.recipients[0]),
-                                },
-                            });
-                        } else {
-                            const insertedLogs = await createMemberCampaignLogs({
-                                gymId: gym.id,
-                                localDate: localContext.localDate,
-                                slotKey: slot.key,
-                                campaign: memberCampaign,
-                            });
+                    if (remainingMemberDailyLimit > 0) {
+                        const memberCampaign = await pickMemberCampaign({
+                            gym,
+                            slot,
+                            timezone,
+                            localDate: localContext.localDate,
+                            settings: automationSettings,
+                            remainingDailyLimit: remainingMemberDailyLimit,
+                        });
 
-                            if (insertedLogs.length > 0) {
-                                const pushResult = await sendPushToUsers(
-                                    gym.id,
-                                    insertedLogs.map((entry) => entry.member.id),
-                                    (userId) => insertedLogs.find((entry) => Number(entry.member.id) === Number(userId))?.payload,
-                                    MEMBER_ROLE
-                                );
+                        if (memberCampaign) {
+                            hasCandidate = true;
+                            if (dryRun) {
+                                summary.candidates.push({
+                                    audience: 'MEMBER',
+                                    gym_id: gym.id,
+                                    gym_name: gym.name,
+                                    slot: slot.key,
+                                    candidate: {
+                                        key: memberCampaign.key,
+                                        title: memberCampaign.slotTitle,
+                                        recipients: memberCampaign.recipients.length,
+                                        preview: memberCampaign.compose(memberCampaign.recipients[0]),
+                                    },
+                                });
+                            } else {
+                                const insertedLogs = await createMemberCampaignLogs({
+                                    gymId: gym.id,
+                                    localDate: localContext.localDate,
+                                    slotKey: slot.key,
+                                    campaign: memberCampaign,
+                                });
 
-                                await Promise.all(insertedLogs.map((entry) => pool.query(
-                                    `UPDATE member_notification_automation_log
-                                     SET push_sent_count = $2
-                                     WHERE id = $1`,
-                                    [entry.logId, pushResult.deliveredByUser?.[entry.member.id] || 0]
-                                ))).catch(() => {});
+                                if (insertedLogs.length > 0) {
+                                    const pushResult = await sendPushToUsers(
+                                        gym.id,
+                                        insertedLogs.map((entry) => entry.member.id),
+                                        (userId) => insertedLogs.find((entry) => Number(entry.member.id) === Number(userId))?.payload,
+                                        MEMBER_ROLE
+                                    );
 
-                                summary.sent += 1;
-                                summary.member_campaigns_sent += 1;
-                                summary.member_pushes_sent += pushResult.delivered;
-                                deliveredSomething = true;
+                                    await Promise.all(insertedLogs.map((entry) => pool.query(
+                                        `UPDATE member_notification_automation_log
+                                         SET push_sent_count = $2
+                                         WHERE id = $1`,
+                                        [entry.logId, pushResult.deliveredByUser?.[entry.member.id] || 0]
+                                    ))).catch(() => {});
+
+                                    summary.sent += 1;
+                                    summary.member_campaigns_sent += 1;
+                                    summary.member_pushes_sent += pushResult.delivered;
+                                    deliveredSomething = true;
+                                }
                             }
                         }
                     }

@@ -85,6 +85,49 @@ const defaultSupportProfile = {
     timings: 'Mon-Sat · 9:00 AM to 7:00 PM IST',
 };
 
+const defaultAutomationMessageTemplates = {
+    SETUP_FOCUS: {
+        title: 'Your next move is obvious',
+        body: '{{setup_hint}}',
+    },
+    LEAD_SPRINT: {
+        title: 'Lead queue is warm',
+        body: '{{count}} follow-up {{lead_label}} {{are_is}} ready today. A quick callback sprint before the day gets noisy can turn curiosity into walk-ins.',
+    },
+    RENEWAL_RADAR: {
+        title: 'Renewals are within reach',
+        body: '{{count}} {{membership_label}} {{enter_label}} the final 3-day window today. One crisp follow-up can lock revenue before the day slips away.',
+    },
+    RENEWAL_WEEK: {
+        title: 'Renewal week just opened',
+        body: '{{count}} {{member_label}} {{are_is}} now inside renewal week. Get ahead of the rush and make the rejoin decision feel easy.',
+    },
+    ATTENDANCE_PULSE: {
+        title: 'The floor could use a lift',
+        body: '{{today_checkins}} check-ins so far against a {{avg_daily}}/day recent rhythm. One story, one class ping, or one comeback call can still lift the evening rush.',
+    },
+    COLLECTIONS_PUSH: {
+        title: 'Collections are still on the table',
+        body: '{{due_amount}} is still waiting across {{due_members}} {{account_label}}. Tonight is a clean window to recover dues while intent is still warm.',
+    },
+    WINBACK_LIST: {
+        title: 'Your comeback list is ready',
+        body: '{{count}} {{member_label}} {{have_has}} been quiet for 10+ days. A smart nudge tonight can wake up stalled routines before they go cold.',
+    },
+    MEMBER_RENEWAL: {
+        title: 'Your plan is almost out of reps',
+        body: '{{first_name}}, {{gym_name}} access wraps in {{days_left}} {{day_label}}. Renew today and keep your streak moving, not paused.',
+    },
+    MEMBER_DUE: {
+        title: 'A quick clear-up keeps you moving',
+        body: '{{first_name}}, {{amount_due}} is still pending on your plan. Clear it today and keep your next entry smooth.',
+    },
+    MEMBER_COMEBACK: {
+        title: 'Your spot is still warm',
+        body: '{{first_name}}, it has been {{days_inactive}} days since your last workout. One session today can flip the whole week back in your favour.',
+    },
+};
+
 const defaultAutomationSettings = {
     owner_staff_enabled: true,
     member_push_enabled: true,
@@ -98,7 +141,21 @@ const defaultAutomationSettings = {
         AFTERNOON: false,
         EVENING: true,
     },
+    owner_staff_daily_limit: 3,
+    member_daily_limit: 50,
     member_max_per_slot: 25,
+    message_templates: defaultAutomationMessageTemplates,
+};
+
+const normalizeAutomationMessageTemplates = (value) => {
+    const raw = value && typeof value === 'object' ? value : {};
+    return Object.fromEntries(Object.entries(defaultAutomationMessageTemplates).map(([templateKey, defaults]) => {
+        const source = raw[templateKey] && typeof raw[templateKey] === 'object' ? raw[templateKey] : {};
+        return [templateKey, {
+            title: typeof source.title === 'string' && source.title.trim() ? source.title : defaults.title,
+            body: typeof source.body === 'string' && source.body.trim() ? source.body : defaults.body,
+        }];
+    }));
 };
 
 const normalizeAutomationSettings = (value) => {
@@ -114,7 +171,10 @@ const normalizeAutomationSettings = (value) => {
             ...defaultAutomationSettings.member_slots,
             ...(raw.member_slots && typeof raw.member_slots === 'object' ? raw.member_slots : {}),
         },
+        owner_staff_daily_limit: Math.min(3, Math.max(1, Number.parseInt(raw.owner_staff_daily_limit, 10) || defaultAutomationSettings.owner_staff_daily_limit)),
+        member_daily_limit: Math.min(500, Math.max(1, Number.parseInt(raw.member_daily_limit, 10) || defaultAutomationSettings.member_daily_limit)),
         member_max_per_slot: Math.min(100, Math.max(1, Number.parseInt(raw.member_max_per_slot, 10) || defaultAutomationSettings.member_max_per_slot)),
+        message_templates: normalizeAutomationMessageTemplates(raw.message_templates),
     };
 };
 
