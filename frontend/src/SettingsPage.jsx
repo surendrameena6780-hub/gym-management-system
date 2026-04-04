@@ -259,7 +259,7 @@ const loadRazorpayScript = () => {
   const [interfacePreferences, setInterfacePreferences] = useState({
     reduce_motion: false,
     compact_mode: false,
-    dark_mode: false,
+    dark_mode: true,
   });
   const [twoFactor, setTwoFactor] = useState(false);
   const [staffMembers, setStaffMembers] = useState([]);
@@ -317,7 +317,7 @@ const loadRazorpayScript = () => {
           const nextInterfacePreferences = {
             reduce_motion: Boolean(res.data.gym.interface_reduce_motion),
             compact_mode: Boolean(res.data.gym.interface_compact_mode),
-            dark_mode: Boolean(res.data.gym.interface_dark_mode),
+            dark_mode: Boolean(res.data.gym.interface_dark_mode ?? true),
           };
           setInterfacePreferences(nextInterfacePreferences);
           applyInterfacePreferences(nextInterfacePreferences);

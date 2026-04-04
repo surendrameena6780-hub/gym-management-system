@@ -1194,7 +1194,7 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Dashboard') && (
                 currentUser?.role === 'OWNER'
-                  ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} isActive={currentPage === 'Dashboard'} />
+                  ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} currentUser={currentUser} showConfirm={showConfirm} isActive={currentPage === 'Dashboard'} />
                   : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} />
               )}
             </div>

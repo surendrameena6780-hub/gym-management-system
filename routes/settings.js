@@ -313,8 +313,10 @@ const ensurePreferenceSchema = async () => {
                 ALTER TABLE gyms
                 ADD COLUMN IF NOT EXISTS interface_reduce_motion BOOLEAN DEFAULT FALSE,
                 ADD COLUMN IF NOT EXISTS interface_compact_mode BOOLEAN DEFAULT FALSE,
-                ADD COLUMN IF NOT EXISTS interface_dark_mode BOOLEAN DEFAULT FALSE;
+                ADD COLUMN IF NOT EXISTS interface_dark_mode BOOLEAN DEFAULT TRUE;
             `);
+            await pool.query(`ALTER TABLE gyms ALTER COLUMN interface_dark_mode SET DEFAULT TRUE;`);
+            await pool.query(`UPDATE gyms SET interface_dark_mode = TRUE WHERE interface_dark_mode IS NULL;`);
             await pool.query(`
                 ALTER TABLE users
                 ALTER COLUMN profile_pic TYPE TEXT;
@@ -383,7 +385,7 @@ router.get('/', auth, async (req, res) => {
 
         const userRes = await pool.query('SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1', [req.user.id]);
         const gymRes = await pool.query(
-            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, grace_period_days, interface_reduce_motion, interface_compact_mode, interface_dark_mode FROM gyms WHERE id = $1', 
+            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, grace_period_days, COALESCE(interface_reduce_motion, FALSE) AS interface_reduce_motion, COALESCE(interface_compact_mode, FALSE) AS interface_compact_mode, COALESCE(interface_dark_mode, TRUE) AS interface_dark_mode FROM gyms WHERE id = $1', 
             [req.user.gym_id]
         );
 
@@ -413,7 +415,10 @@ router.get('/preferences', auth, async (req, res) => {
         await ensurePreferenceSchema();
 
         const result = await pool.query(
-            `SELECT currency, timezone, interface_reduce_motion, interface_compact_mode, interface_dark_mode
+            `SELECT currency, timezone,
+                    COALESCE(interface_reduce_motion, FALSE) AS interface_reduce_motion,
+                    COALESCE(interface_compact_mode, FALSE) AS interface_compact_mode,
+                    COALESCE(interface_dark_mode, TRUE) AS interface_dark_mode
              FROM gyms
              WHERE id = $1
              LIMIT 1`,
@@ -425,7 +430,7 @@ router.get('/preferences', auth, async (req, res) => {
             timezone: 'Asia/Kolkata',
             interface_reduce_motion: false,
             interface_compact_mode: false,
-            interface_dark_mode: false,
+            interface_dark_mode: true,
         });
     } catch (err) {
         console.error('PREFERENCES FETCH ERROR:', err.message);

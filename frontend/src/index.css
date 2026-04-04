@@ -600,20 +600,80 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .dashboard-escalated-row {
-  padding: 0.9rem 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  transition: background-color 0.2s ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .dashboard-escalated-row + .dashboard-escalated-row {
   border-top: 1px solid rgba(244, 63, 94, 0.08);
 }
 
-.dashboard-escalated-row:hover {
+.dashboard-escalated-surface {
+  position: relative;
+  z-index: 1;
+  padding: 0.9rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: transparent;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s ease;
+  will-change: transform;
+  touch-action: pan-y;
+}
+
+.dashboard-escalated-row--dragging .dashboard-escalated-surface {
+  transition: none;
+}
+
+.dashboard-escalated-row:hover .dashboard-escalated-surface {
   background: rgba(255, 255, 255, 0.55);
+}
+
+.dashboard-escalated-delete-rail {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 6rem;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0.3rem 0.3rem 0.3rem 0;
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0) 0%, rgba(244, 63, 94, 0.14) 30%, rgba(244, 63, 94, 0.24) 100%);
+}
+
+.dashboard-escalated-delete-btn {
+  width: 100%;
+  border: 0;
+  border-radius: 0.85rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  background: linear-gradient(180deg, #fb7185 0%, #e11d48 100%);
+  color: #ffffff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 14px 28px rgba(244, 63, 94, 0.22);
+  transition: transform 0.24s ease, box-shadow 0.24s ease, opacity 0.24s ease;
+}
+
+.dashboard-escalated-delete-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px rgba(244, 63, 94, 0.26);
+}
+
+.dashboard-escalated-delete-btn:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
+
+.dashboard-escalated-row--busy .dashboard-escalated-surface,
+.dashboard-escalated-row--busy .dashboard-escalated-delete-btn {
+  pointer-events: none;
 }
 
 .dashboard-escalated-name {
@@ -828,7 +888,7 @@ html.gv-dark-mode .dashboard-escalated-title {
 html.gv-dark-mode .dashboard-escalated-row + .dashboard-escalated-row {
   border-top-color: rgba(255,255,255,0.05);
 }
-html.gv-dark-mode .dashboard-escalated-row:hover {
+html.gv-dark-mode .dashboard-escalated-row:hover .dashboard-escalated-surface {
   background: rgba(255,255,255,0.03);
 }
 html.gv-dark-mode .dashboard-escalated-name {
@@ -846,6 +906,13 @@ html.gv-dark-mode .dashboard-escalated-call {
 html.gv-dark-mode .dashboard-escalated-call:hover {
   background: #e11d48;
   color: #ffffff;
+}
+html.gv-dark-mode .dashboard-escalated-delete-rail {
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0) 0%, rgba(244, 63, 94, 0.12) 30%, rgba(225, 29, 72, 0.24) 100%);
+}
+html.gv-dark-mode .dashboard-escalated-delete-btn {
+  background: linear-gradient(180deg, #fb7185 0%, #be123c 100%);
+  box-shadow: 0 16px 30px rgba(225, 29, 72, 0.24);
 }
 html.gv-dark-mode .drawer-sheet,
 html.gv-dark-mode .app-bottom-sheet {

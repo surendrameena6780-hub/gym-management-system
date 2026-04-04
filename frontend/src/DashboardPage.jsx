@@ -7,7 +7,7 @@ import {
   Users, DollarSign, Plus, Zap, MessageSquare, ShieldAlert,
   Sparkles, Clock, CheckCircle, CreditCard, Flame, UserMinus, Activity,
   X, TrendingUp, ChevronRight, UserPlus, RefreshCw, Check,
-  Bot, Play // <-- 🚨 ADDED ICONS
+  Bot, Play, Trash2 // <-- 🚨 ADDED ICONS
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
@@ -59,6 +59,184 @@ const DEFAULT_BROADCAST_MESSAGES = {
 };
 
 const resolveBroadcastAudienceMessage = (audience) => DEFAULT_BROADCAST_MESSAGES[audience] || DEFAULT_BROADCAST_MESSAGES.All;
+
+const ESCALATED_LEAD_DELETE_WIDTH = 96;
+const ESCALATED_LEAD_DELETE_THRESHOLD = 42;
+
+const getEscalatedLeadSwipeOffset = (value) => {
+  if (value > 0) return value * 0.2;
+  if (value < -ESCALATED_LEAD_DELETE_WIDTH) {
+    return -ESCALATED_LEAD_DELETE_WIDTH + (value + ESCALATED_LEAD_DELETE_WIDTH) * 0.18;
+  }
+  return value;
+};
+
+const EscalatedLeadRow = ({
+  lead,
+  canDelete,
+  isOpen,
+  isDeleting,
+  onOpen,
+  onClose,
+  onDelete,
+}) => {
+  const gestureRef = useRef({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    baseOffset: 0,
+    dragging: false,
+  });
+  const offsetRef = useRef(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
+  const [dragOffset, setDragOffset] = useState(offsetRef.current);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const setOffset = useCallback((nextOffset) => {
+    offsetRef.current = nextOffset;
+    setDragOffset(nextOffset);
+  }, []);
+
+  useEffect(() => {
+    if (gestureRef.current.dragging) return;
+    setOffset(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
+  }, [canDelete, isOpen, setOffset]);
+
+  const resetGesture = useCallback(() => {
+    gestureRef.current = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      baseOffset: 0,
+      dragging: false,
+    };
+    setIsDragging(false);
+  }, []);
+
+  const finishGesture = useCallback((event) => {
+    const gesture = gestureRef.current;
+    if (gesture.pointerId !== event.pointerId) return;
+
+    if (!gesture.dragging) {
+      resetGesture();
+      return;
+    }
+
+    const shouldOpen = offsetRef.current <= -ESCALATED_LEAD_DELETE_THRESHOLD;
+    setOffset(shouldOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
+
+    if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    resetGesture();
+    if (shouldOpen) {
+      onOpen();
+    } else {
+      onClose();
+    }
+  }, [onClose, onOpen, resetGesture, setOffset]);
+
+  const handlePointerDown = (event) => {
+    if (!canDelete || isDeleting) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest('button')) return;
+
+    gestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseOffset: isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0,
+      dragging: false,
+    };
+  };
+
+  const handlePointerMove = (event) => {
+    if (!canDelete || isDeleting) return;
+
+    const gesture = gestureRef.current;
+    if (gesture.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+
+    if (!gesture.dragging) {
+      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) return;
+      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+        resetGesture();
+        return;
+      }
+
+      gesture.dragging = true;
+      gestureRef.current = gesture;
+      setIsDragging(true);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+
+    event.preventDefault();
+    setOffset(getEscalatedLeadSwipeOffset(gesture.baseOffset + deltaX));
+  };
+
+  const handlePointerCancel = (event) => {
+    const gesture = gestureRef.current;
+    if (gesture.pointerId !== event.pointerId) return;
+
+    setOffset(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
+    if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resetGesture();
+  };
+
+  return (
+    <div
+      className={`dashboard-escalated-row${canDelete ? ' dashboard-escalated-row--swipable' : ''}${isDragging ? ' dashboard-escalated-row--dragging' : ''}${isOpen ? ' dashboard-escalated-row--open' : ''}${isDeleting ? ' dashboard-escalated-row--busy' : ''}`}
+    >
+      {canDelete && (
+        <div className="dashboard-escalated-delete-rail" aria-hidden={!isOpen && !isDragging}>
+          <button
+            type="button"
+            onClick={() => onDelete(lead)}
+            className="dashboard-escalated-delete-btn"
+            disabled={isDeleting}
+          >
+            <Trash2 size={15} />
+            <span>{isDeleting ? 'Deleting' : 'Delete'}</span>
+          </button>
+        </div>
+      )}
+      <div
+        className="dashboard-escalated-surface"
+        style={{ transform: `translate3d(${dragOffset}px, 0, 0)` }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishGesture}
+        onPointerCancel={handlePointerCancel}
+        onPointerLeave={(event) => {
+          if (gestureRef.current.dragging) {
+            finishGesture(event);
+          }
+        }}
+        onClick={(event) => {
+          if (isOpen && !(event.target instanceof Element && event.target.closest('button'))) {
+            onClose();
+          }
+        }}
+      >
+        <div className="min-w-0">
+          <p className="dashboard-escalated-name">{lead.full_name}</p>
+          <p className="dashboard-escalated-meta">Unresponsive • {lead.phone}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => window.open(`tel:${lead.phone}`, '_self')}
+          className="dashboard-escalated-call"
+        >
+          <Activity size={14} />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 
 // ─── Animation Keyframes ──────────────────────────────────────────────────────
@@ -269,10 +447,11 @@ const CustomTooltip = ({ active, payload, label }) => {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 // 🚨 ADDED startTour to props!
-const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startTour, isActive = true }) => {
+const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startTour, currentUser, showConfirm, isActive = true }) => {
   const navigateTo = navTo || ((page) => setCurrentPage?.(page));
   const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
   const MAX_WARMUP_RETRIES = 8;
+  const canDeleteEscalatedLeads = String(currentUser?.role || '').toUpperCase() === 'OWNER';
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -293,6 +472,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [isSkipped, setIsSkipped] = useState(localStorage.getItem('gymvault_skip_setup') === 'true');
   const [showTourBanner, setShowTourBanner] = useState(localStorage.getItem('gymvault_tour_completed') !== 'true');
   const [isWarmupRetrying, setIsWarmupRetrying] = useState(false);
+  const [openEscalatedLeadId, setOpenEscalatedLeadId] = useState(null);
+  const [deletingEscalatedLeadId, setDeletingEscalatedLeadId] = useState(null);
   const warmupRetryTimerRef = useRef(null);
   const warmupRetryCountRef = useRef(0);
 
@@ -357,6 +538,31 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const asObject = (value, fallback = {}) => (
     value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
   );
+
+  const handleDeleteEscalatedLead = useCallback((lead) => {
+    if (!canDeleteEscalatedLeads) return;
+
+    showConfirm?.({
+      title: 'Delete Member',
+      message: `Delete ${lead.full_name} from GymVault? This cannot be undone.`,
+      confirmLabel: 'Delete Member',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          setDeletingEscalatedLeadId(lead.id);
+          await axios.delete(`/api/members/${lead.id}`, headers);
+          setOpenEscalatedLeadId((current) => (current === lead.id ? null : current));
+          setMembers((prev) => prev.filter((member) => member.id !== lead.id));
+          toast?.('Member deleted.', 'success');
+        } catch (err) {
+          const message = err?.response?.data?.error || err?.response?.data?.message || 'Delete failed.';
+          toast?.(message, 'error');
+        } finally {
+          setDeletingEscalatedLeadId(null);
+        }
+      },
+    });
+  }, [canDeleteEscalatedLeads, headers, showConfirm, toast]);
 
   const fetchData = async () => {
     try {
@@ -505,6 +711,20 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       document.removeEventListener('visibilitychange', handleVisibilityRefresh);
     };
   }, [token, isActive]);
+
+  useEffect(() => {
+    if (!openEscalatedLeadId) return;
+
+    const handleCloseSwipe = (event) => {
+      if (event.target instanceof Element && event.target.closest('.dashboard-escalated-row')) return;
+      setOpenEscalatedLeadId(null);
+    };
+
+    document.addEventListener('pointerdown', handleCloseSwipe);
+    return () => {
+      document.removeEventListener('pointerdown', handleCloseSwipe);
+    };
+  }, [openEscalatedLeadId]);
 
   const handleStartTour = () => {
       localStorage.setItem('gymvault_tour_completed', 'true');
@@ -1941,19 +2161,17 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                         <Flame size={12} fill="currentColor" /> Escalated Leads (Call Now)
                       </p>
                     </div>
-                    {dashboardData.escalated.slice(0, 3).map(lead => (
-                      <div key={lead.id} className="dashboard-escalated-row">
-                        <div className="min-w-0">
-                          <p className="dashboard-escalated-name">{lead.full_name}</p>
-                          <p className="dashboard-escalated-meta">Unresponsive • {lead.phone}</p>
-                        </div>
-                        <button
-                          onClick={() => window.open(`tel:${lead.phone}`, '_self')}
-                          className="dashboard-escalated-call"
-                        >
-                          <Activity size={14} />
-                        </button>
-                      </div>
+                    {dashboardData.escalated.slice(0, 3).map((lead) => (
+                      <EscalatedLeadRow
+                        key={lead.id}
+                        lead={lead}
+                        canDelete={canDeleteEscalatedLeads}
+                        isOpen={openEscalatedLeadId === lead.id}
+                        isDeleting={deletingEscalatedLeadId === lead.id}
+                        onOpen={() => setOpenEscalatedLeadId(lead.id)}
+                        onClose={() => setOpenEscalatedLeadId((current) => (current === lead.id ? null : current))}
+                        onDelete={handleDeleteEscalatedLead}
+                      />
                     ))}
                   </div>
                 )}

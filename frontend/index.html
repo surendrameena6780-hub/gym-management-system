@@ -39,6 +39,22 @@
       }
     </script>
 
+    <script>
+      (function () {
+        try {
+          var raw = window.localStorage.getItem('gymvault:ui-preferences');
+          var parsed = raw ? JSON.parse(raw) : null;
+          var hasDarkMode = parsed && Object.prototype.hasOwnProperty.call(parsed, 'dark_mode');
+          var hasLegacyDarkMode = parsed && Object.prototype.hasOwnProperty.call(parsed, 'interface_dark_mode');
+          var darkMode = hasDarkMode ? !!parsed.dark_mode : (hasLegacyDarkMode ? !!parsed.interface_dark_mode : true);
+          document.documentElement.classList.toggle('gv-dark-mode', darkMode);
+          document.documentElement.classList.toggle('gv-preboot-light', !darkMode);
+        } catch (_err) {
+          document.documentElement.classList.add('gv-dark-mode');
+        }
+      })();
+    </script>
+
     <style type="text/css">
       html,
       body,
@@ -51,13 +67,21 @@
         background: linear-gradient(to bottom, #1f2971 0px, #1f2971 calc(env(safe-area-inset-top, 44px) - 1px), #161d4f calc(env(safe-area-inset-top, 44px) + 12px));
       }
       body {
-        background: #eef0ff;
+        background: #0f1117;
         margin: 0;
         font-family: 'Inter', sans-serif !important;
         -webkit-font-smoothing: antialiased;
       }
 
       #root {
+        background: #0f1117 !important;
+      }
+
+      html.gv-preboot-light body {
+        background: #eef0ff;
+      }
+
+      html.gv-preboot-light #root {
         background: #eef0ff !important;
       }
       .premium-card {
