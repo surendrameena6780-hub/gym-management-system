@@ -52,8 +52,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: max(100vh, var(--app-viewport-height));
-  /* Body stays dark to avoid white flash on load — must match SPLASH_BG #161d4f */
-  background: #161d4f;
+  background: #ffffff;
   overflow-x: hidden;
   color: #0f172a;
 }
@@ -216,7 +215,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
 .app-mobile-nav {
   padding-bottom: var(--safe-area-bottom);
-  background: #f3f4ff;
+  background: #ffffff;
 }
 
 .app-mobile-nav > div {
@@ -662,6 +661,19 @@ html.gv-dark-mode .app-header-safe span.text-slate-800 { color: var(--dm-t1) !im
 html.gv-dark-mode .app-mobile-nav {
   background: var(--dm-bg) !important;
   border-top: none !important;
+}
+html.gv-dark-mode .gv-dashboard-hero {
+  background: linear-gradient(148deg, #0a0d1b 0%, #140925 56%, #12091f 100%);
+}
+html.gv-dark-mode .gv-dashboard-hero::before,
+html.gv-dark-mode .gv-dashboard-hero::after,
+html.gv-dark-mode .gv-dashboard-hero-orb,
+html.gv-dark-mode .gv-dashboard-hero-sheen {
+  display: none;
+}
+html.gv-dark-mode .gv-dashboard-hero-grid {
+  opacity: 0.03;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent 96%);
 }
 html.gv-dark-mode .drawer-sheet,
 html.gv-dark-mode .app-bottom-sheet {
