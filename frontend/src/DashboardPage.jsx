@@ -554,7 +554,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     toast('Copy failed on this device. Long-press and copy it manually.', 'warning');
   }, [toast]);
 
-  const finalizeDashboardPaymentSuccess = useCallback(async (memberId) => {
+  async function finalizeDashboardPaymentSuccess(memberId) {
     try {
       await axios.post('/api/attendance/checkin', { member_id: memberId, method: 'STAFF' }, { headers: { 'x-auth-token': token } });
     } catch (_err) {}
@@ -563,7 +563,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     await new Promise((resolve) => setTimeout(resolve, 1500));
     closePaymentModal();
     fetchData();
-  }, [closePaymentModal, fetchData, token]);
+  }
 
   const checkDashboardRazorpayStatus = useCallback(async ({ manual = false } = {}) => {
     const paymentLinkId = paymentRazorpayContext?.payment_link?.id;
