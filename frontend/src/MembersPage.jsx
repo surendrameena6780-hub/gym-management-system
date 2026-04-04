@@ -1055,13 +1055,13 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setActivationRazorpayContext(razorpay);
       setActivatingMode('');
 
-      if (paymentLink.notify?.sms && paymentLink.customer_contact) {
-        toast?.(`Razorpay link sent to ${maskCollectionContact(paymentLink.customer_contact)} and QR is ready on this screen.`, 'success');
-      } else if (paymentLink.notify?.email && paymentLink.customer_email) {
-        toast?.(`Razorpay link sent to ${paymentLink.customer_email} and QR is ready on this screen.`, 'success');
-      } else {
-        toast?.('Razorpay QR is ready. Since no member phone or email is saved, share the link manually.', 'success');
-      }
+      const delivery = describeCollectionLinkDelivery(paymentLink);
+      toast?.(
+        delivery.label === 'Manual share required'
+          ? 'Razorpay QR is ready. Since no member phone or email is saved, share the link manually.'
+          : `${delivery.label} and QR is ready on this screen.`,
+        'success'
+      );
     } catch (err) {
       setActivatingMode('');
       toast?.(err?.response?.data?.error || 'Unable to start online collection.', 'error');
