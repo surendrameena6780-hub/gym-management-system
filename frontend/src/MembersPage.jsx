@@ -1917,7 +1917,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           <div className="app-modal-panel rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200"
             style={{ background: 'linear-gradient(180deg, #1e1b4b 0%, #0f172a 100%)' }}>
             <div className="p-8 text-center shrink-0">
-              <div className="w-16 h-16 bg-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3 border border-purple-500/30"><Zap size={32} fill="currentColor" /></div>
+              <div className="w-16 h-16 bg-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-purple-500/30"><Zap size={32} fill="currentColor" /></div>
               <h2 className="text-2xl font-black text-white tracking-tight">Activate Plan</h2>
               <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">For {selectedMember?.full_name}</p>
             </div>
@@ -1989,10 +1989,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => handleCopyActivationDetail(activationRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-violet-300/30 bg-white/10 text-violet-100 hover:bg-white/15 transition-colors">Copy Link</button>
-                    <button type="button" onClick={() => openCollectionLink(activationRazorpayContext.payment_link.short_url)} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Open Link</button>
-                    <button type="button" onClick={() => { const selectedPlan = plans.find((plan) => plan.id === parseInt(selectedPlanId, 10)); if (selectedPlan) { checkActivationRazorpayStatus(selectedPlan, { manual: true }); } }} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Check Status</button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => openCollectionLink(activationRazorpayContext.payment_link.short_url)} className="w-full px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Open Link</button>
+                    <button type="button" onClick={() => { const selectedPlan = plans.find((plan) => plan.id === parseInt(selectedPlanId, 10)); if (selectedPlan) { checkActivationRazorpayStatus(selectedPlan, { manual: true }); } }} className="w-full px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Check Status</button>
                   </div>
                   <p className="text-[11px] font-semibold text-violet-100/75">The member can pay from their own phone using the Razorpay link, or scan this QR from your phone. We also keep checking automatically while this modal stays open.</p>
                 </div>

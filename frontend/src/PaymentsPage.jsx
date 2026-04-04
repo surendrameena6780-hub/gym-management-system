@@ -1841,10 +1841,9 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                           </p>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => handleCopyDueCollectionDetail(dueRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-orange-600 border border-orange-200 hover:bg-orange-50 transition-colors">Copy Link</button>
-                        <button type="button" onClick={() => openCollectionLink(dueRazorpayContext.payment_link.short_url)} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Open Link</button>
-                        <button type="button" onClick={() => checkDueRazorpayStatus({ manual: true })} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Check Status</button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => openCollectionLink(dueRazorpayContext.payment_link.short_url)} className="w-full px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Open Link</button>
+                        <button type="button" onClick={() => checkDueRazorpayStatus({ manual: true })} className="w-full px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Check Status</button>
                       </div>
                     </div>
                   </div>
