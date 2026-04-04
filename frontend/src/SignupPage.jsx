@@ -284,7 +284,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
   // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div
-      className="min-h-[100dvh] flex items-center justify-center font-['Inter'] p-4 py-10 overflow-y-auto"
+      className="app-min-shell-height flex items-center justify-center font-['Inter'] p-4 py-10 overflow-y-auto"
       style={{ background: T.page, transition: 'background 0.4s ease' }}
     >
       {/* Ambient blobs */}

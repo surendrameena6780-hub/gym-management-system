@@ -561,7 +561,7 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
     : 'No active plan';
 
   return (
-    <div className="min-h-[100dvh] font-['Inter'] overflow-y-auto"
+    <div className="app-min-shell-height font-['Inter'] overflow-y-auto"
       style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)' }}>
 
       {/* Ambient blobs */}
@@ -1193,7 +1193,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-[100dvh] flex font-['Inter'] overflow-hidden" style={{ background: '#060b14' }}>
+    <div className="app-min-shell-height flex font-['Inter'] overflow-hidden" style={{ background: '#060b14' }}>
 
       {/* ════════════════════ LEFT PANEL — desktop only ═══════════════════════ */}
       <div

@@ -117,6 +117,10 @@ html.gv-compact-ui main.app-scroll-shell > div {
   height: var(--app-viewport-height);
 }
 
+.app-min-shell-height {
+  min-height: var(--app-viewport-height);
+}
+
 .app-header-safe {
   padding-top: var(--safe-area-top);
   background: rgba(255, 255, 255, 0.78);
@@ -192,7 +196,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-mobile-nav {
-  padding: 0.5rem 0.75rem calc(var(--safe-area-bottom) + 0.18rem);
+  padding: 0.5rem 0.75rem 0;
   background:
     linear-gradient(
       to top,
@@ -201,6 +205,10 @@ html.gv-compact-ui main.app-scroll-shell > div {
       rgba(8, 11, 20, 0.28) calc(var(--safe-area-bottom) + 2.5rem),
       rgba(8, 11, 20, 0) calc(var(--safe-area-bottom) + 5.5rem)
     );
+}
+
+.app-mobile-nav > div {
+  padding-bottom: calc(var(--safe-area-bottom) + 0.18rem) !important;
 }
 
 .app-keyboard-open .app-mobile-nav,
