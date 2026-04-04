@@ -32,6 +32,7 @@ const addDays = (date, days) => {
 const parseArgs = () => {
   const options = {
     gymId: null,
+    gymName: '',
     replace: true,
     mix: { ...DEFAULT_STATUS_MIX },
   };
@@ -45,6 +46,11 @@ const parseArgs = () => {
     if (arg.startsWith('--gym-id=')) {
       const gymId = Number.parseInt(arg.split('=')[1], 10);
       options.gymId = Number.isInteger(gymId) ? gymId : null;
+      continue;
+    }
+
+    if (arg.startsWith('--gym-name=')) {
+      options.gymName = String(arg.split('=').slice(1).join('=') || '').trim();
       continue;
     }
 
@@ -89,7 +95,7 @@ const buildPhone = (gymId, index) => {
   return `9${gymFragment}${sequenceFragment}`;
 };
 
-const resolveTargetGym = async (client, gymId) => {
+const resolveTargetGym = async (client, gymId, gymName) => {
   if (Number.isInteger(gymId)) {
     const explicit = await client.query(
       `SELECT g.id, g.name
@@ -106,6 +112,24 @@ const resolveTargetGym = async (client, gymId) => {
     return explicit.rows[0];
   }
 
+  if (gymName) {
+    const namedGym = await client.query(
+      `SELECT g.id, g.name
+       FROM gyms g
+       WHERE lower(g.name) = lower($1)
+          OR lower(g.name) LIKE lower($2)
+       ORDER BY CASE WHEN lower(g.name) = lower($1) THEN 0 ELSE 1 END, g.created_at ASC, g.id ASC
+       LIMIT 1`,
+      [gymName, `%${gymName}%`]
+    );
+
+    if (namedGym.rows.length === 0) {
+      throw new Error(`No gym matched "${gymName}".`);
+    }
+
+    return namedGym.rows[0];
+  }
+
   const preferred = await client.query(
     `SELECT g.id, g.name
      FROM gyms g
@@ -115,26 +139,32 @@ const resolveTargetGym = async (client, gymId) => {
        WHERE p.gym_id = g.id
          AND p.deleted_at IS NULL
      )
-     ORDER BY g.created_at ASC, g.id ASC
-     LIMIT 1`
+     ORDER BY g.created_at ASC, g.id ASC`
   );
 
-  if (preferred.rows.length > 0) {
+  if (preferred.rows.length === 1) {
     return preferred.rows[0];
+  }
+
+  if (preferred.rows.length > 1) {
+    throw new Error(`Multiple gyms have active plans. Re-run with --gym-id=<id> or --gym-name="Gym Name". Matches: ${preferred.rows.map((gym) => `${gym.id}:${gym.name}`).join(', ')}`);
   }
 
   const fallback = await client.query(
     `SELECT id, name
      FROM gyms
-     ORDER BY created_at ASC, id ASC
-     LIMIT 1`
+     ORDER BY created_at ASC, id ASC`
   );
+
+  if (fallback.rows.length === 1) {
+    return fallback.rows[0];
+  }
 
   if (fallback.rows.length === 0) {
     throw new Error('No gyms found. Create a gym before seeding bot members.');
   }
 
-  return fallback.rows[0];
+  throw new Error(`Multiple gyms exist. Re-run with --gym-id=<id> or --gym-name="Gym Name". Matches: ${fallback.rows.map((gym) => `${gym.id}:${gym.name}`).join(', ')}`);
 };
 
 const loadPlans = async (client, gymId) => {
@@ -339,7 +369,7 @@ const main = async () => {
   try {
     await client.query('BEGIN');
 
-    const gym = await resolveTargetGym(client, options.gymId);
+    const gym = await resolveTargetGym(client, options.gymId, options.gymName);
     const plans = await loadPlans(client, gym.id);
     const removed = options.replace ? await deleteExistingBotMembers(client, gym.id) : 0;
     const seeds = buildSeedMembers(gym.id, statusList, plans);

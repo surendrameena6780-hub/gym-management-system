@@ -391,6 +391,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       setSetup(asObject(pickData(setupRes, { progress: 0, is_complete: false, steps: {} }), { progress: 0, is_complete: false, steps: {} }));
       const settingsData = asObject(pickData(settingsRes, {}), {});
       const billingData = asObject(settingsData.gym, {});
+      const resolvedGymName = String(billingData.name || settingsData.account?.gym_name || '').trim();
+      if (resolvedGymName) {
+        setGymName(resolvedGymName);
+      }
       setGymBilling({
         saas_status: String(billingData.saas_status || 'FREE_TRIAL').toUpperCase(),
         saas_valid_until: String(billingData.saas_valid_until || ''),
@@ -534,6 +538,14 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       });
       setShowAddModal(false);
       const newMember = res.data;
+
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+        detail: {
+          source: 'dashboard-add-member',
+          member_id: newMember?.id || null,
+          at: Date.now(),
+        },
+      }));
       
       setAddFormData({ full_name: '', email: '', phone: '' });
       setAddFile(null);
@@ -713,8 +725,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
           setBroadcastTemplates([]);
         }
         if (settRes.status === 'fulfilled') {
-          const acc = settRes.value.data?.account || settRes.value.data?.data?.account || {};
-          const name = String(acc.gym_name || '').trim();
+          const payload = settRes.value.data || {};
+          const gym = payload.gym || payload.data?.gym || {};
+          const acc = payload.account || payload.data?.account || {};
+          const name = String(gym.name || acc.gym_name || '').trim();
           if (name) setGymName(name);
         }
       } catch (_err) {
@@ -1625,16 +1639,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         }}
       >
         <div className="gv-dashboard-hero-sheen" />
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.28) 0%, transparent 70%)' }} />
-          <div className="absolute right-1/2 -bottom-10 w-72 h-56 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(168,85,247,0.16) 0%, transparent 70%)' }} />
-          <div className="absolute left-0 top-1/2 w-48 h-48 rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(56,189,248,0.08) 0%, transparent 70%)' }} />
-        </div>
-        <div className="absolute inset-0 pointer-events-none opacity-[0.035]"
-          style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,1) 1px, transparent 1px)', backgroundSize: '22px 22px' }} />
+        <div className="gv-dashboard-hero-grid" />
+        <div className="gv-dashboard-hero-orb gv-dashboard-hero-orb-a" />
+        <div className="gv-dashboard-hero-orb gv-dashboard-hero-orb-b" />
+        <div className="gv-dashboard-hero-orb gv-dashboard-hero-orb-c" />
 
         <div className="relative flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
           <div>

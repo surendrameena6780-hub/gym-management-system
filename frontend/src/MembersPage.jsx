@@ -1757,20 +1757,20 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
           {/* action bar */}
           <div className="px-5 py-3 border-t border-slate-100 shrink-0 bg-white">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex gap-2">
             {canWritePayments && (getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'UNPAID') && (
-              <button onClick={() => { setShowDetailsModal(false); openActivateModalWithFeedback(selectedMember, 'details-activate'); }} className="col-span-3 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+              <button onClick={() => { setShowDetailsModal(false); openActivateModalWithFeedback(selectedMember, 'details-activate'); }} className="flex-1 py-2.5 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all hover:opacity-90 active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
                 {memberActionLoading === 'details-activate' ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} fill="currentColor" />}{getStatusInfo(selectedMember).label === 'EXPIRED' ? 'Renew' : 'Activate'}
               </button>
             )}
-            <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
+            <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
               <MessageSquare size={13} fill="currentColor" /> WhatsApp
             </button>
-            {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
+            {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
               <Edit2 size={13} /> Edit
             </button>}
             {canWriteMembers && ['ACTIVE', 'FROZEN'].includes(String(selectedMember.membership_status || '').toUpperCase()) && (
-              <button onClick={() => setShowCancelModal(true)} className="py-2.5 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all active:scale-95">
+              <button onClick={() => setShowCancelModal(true)} className="flex-1 py-2.5 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all active:scale-95">
                 Cancel
               </button>
             )}

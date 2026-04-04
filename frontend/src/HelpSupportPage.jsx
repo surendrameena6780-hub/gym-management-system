@@ -283,10 +283,8 @@ function HelpSupportPage({ token, toast }) {
     return <PageLoader className="min-h-[56vh]" />;
   }
 
-  const renderChatAssistant = ({ embedded = false } = {}) => {
-    const wrapperClass = embedded
-      ? 'bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 min-h-[28rem] flex flex-col overflow-hidden'
-      : 'fixed right-6 bottom-20 z-[170] w-[380px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden';
+  const renderChatAssistant = () => {
+    const wrapperClass = 'fixed inset-x-3 bottom-[5.5rem] z-[170] h-[min(34rem,calc(100vh-8rem))] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col sm:inset-x-auto sm:right-6 sm:bottom-20 sm:w-[380px]';
 
     return (
       <div className={wrapperClass}>
@@ -295,11 +293,9 @@ function HelpSupportPage({ token, toast }) {
             <p className="text-sm font-black uppercase tracking-wider">Support Chat</p>
             <p className="text-[11px] text-white/75 font-semibold mt-0.5">Quick help for billing, login, check-in, and data issues.</p>
           </div>
-          {!embedded && (
-            <button type="button" onClick={() => setChatOpen(false)} className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center">
-              <X size={14} />
-            </button>
-          )}
+          <button type="button" onClick={() => setChatOpen(false)} className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center">
+            <X size={14} />
+          </button>
         </div>
 
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/70">
@@ -437,10 +433,6 @@ function HelpSupportPage({ token, toast }) {
             </form>
           </div>
 
-          <div className="xl:hidden min-h-0 flex-1">
-            {renderChatAssistant({ embedded: true })}
-          </div>
-
           <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 min-h-0 flex-1 flex flex-col">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-4">My Tickets</h3>
             {tickets.length === 0 ? (
@@ -523,7 +515,7 @@ function HelpSupportPage({ token, toast }) {
       <button
         type="button"
         onClick={() => setChatOpen((prev) => !prev)}
-        className="hidden xl:flex fixed right-6 bottom-6 z-[170] w-12 h-12 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 items-center justify-center"
+        className="fixed right-4 bottom-[5rem] sm:right-6 sm:bottom-6 z-[170] w-12 h-12 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 flex items-center justify-center"
         title="Open support assistant"
       >
         {chatOpen ? <X size={18} /> : <MessageSquare size={18} />}

@@ -391,29 +391,31 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 @keyframes gv-hero-wave-a {
-  0% { transform: translate3d(-8%, -6%, 0) scale(1); }
-  50% { transform: translate3d(6%, 6%, 0) scale(1.08); }
-  100% { transform: translate3d(-3%, 10%, 0) scale(1.02); }
+  0% { transform: translate3d(-10%, -12%, 0) scale(0.98); }
+  50% { transform: translate3d(6%, 4%, 0) scale(1.1); }
+  100% { transform: translate3d(-2%, 10%, 0) scale(1.03); }
 }
 
 @keyframes gv-hero-wave-b {
-  0% { transform: translate3d(10%, -4%, 0) scale(1.02); }
-  50% { transform: translate3d(-4%, 8%, 0) scale(1.1); }
-  100% { transform: translate3d(8%, -8%, 0) scale(1); }
+  0% { transform: translate3d(10%, -6%, 0) scale(1); }
+  50% { transform: translate3d(-6%, 10%, 0) scale(1.13); }
+  100% { transform: translate3d(4%, -10%, 0) scale(1.04); }
+}
+
+@keyframes gv-hero-wave-c {
+  0% { transform: translate3d(0, 8%, 0) scale(0.94); }
+  50% { transform: translate3d(10%, -4%, 0) scale(1.08); }
+  100% { transform: translate3d(-8%, 12%, 0) scale(1.02); }
 }
 
 @keyframes gv-hero-sheen-pass {
-  0% { transform: translateX(-42%) rotate(12deg); opacity: 0.12; }
-  50% { opacity: 0.28; }
-  100% { transform: translateX(88%) rotate(12deg); opacity: 0.08; }
+  0% { transform: translateX(-52%) rotate(10deg); opacity: 0.08; }
+  50% { opacity: 0.18; }
+  100% { transform: translateX(92%) rotate(10deg); opacity: 0.04; }
 }
 
 .gv-dashboard-hero {
-  background:
-    linear-gradient(135deg, #111935 0%, #272d72 34%, #3d38b5 68%, #5746e9 100%),
-    radial-gradient(circle at 16% 16%, rgba(34, 197, 94, 0.16) 0%, transparent 32%),
-    radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.18) 0%, transparent 28%),
-    radial-gradient(circle at 50% 100%, rgba(56, 189, 248, 0.18) 0%, transparent 38%);
+  background: linear-gradient(148deg, #080d1f 0%, #0e0821 50%, #14092a 100%);
   isolation: isolate;
 }
 
@@ -421,30 +423,80 @@ html.gv-compact-ui main.app-scroll-shell > div {
 .gv-dashboard-hero::after {
   content: '';
   position: absolute;
-  inset: -24%;
   pointer-events: none;
   border-radius: 999px;
-  filter: blur(30px);
+  filter: blur(90px);
   mix-blend-mode: screen;
 }
 
 .gv-dashboard-hero::before {
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.22) 0%, transparent 60%);
-  animation: gv-hero-wave-a 16s ease-in-out infinite alternate;
+  inset: -28% auto auto -14%;
+  width: 24rem;
+  height: 24rem;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.32) 0%, transparent 66%);
+  animation: gv-hero-wave-a 15s ease-in-out infinite alternate;
 }
 
 .gv-dashboard-hero::after {
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.22) 0%, transparent 60%);
+  inset: auto -10% -38% auto;
+  width: 22rem;
+  height: 22rem;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.24) 0%, transparent 68%);
   animation: gv-hero-wave-b 18s ease-in-out infinite alternate;
+}
+
+.gv-dashboard-hero-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.055;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.95) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent 96%);
+}
+
+.gv-dashboard-hero-orb {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(80px);
+  mix-blend-mode: screen;
+}
+
+.gv-dashboard-hero-orb-a {
+  top: 12%;
+  right: 8%;
+  width: 18rem;
+  height: 18rem;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.2) 0%, transparent 70%);
+  animation: gv-hero-wave-b 16s ease-in-out infinite alternate;
+}
+
+.gv-dashboard-hero-orb-b {
+  left: 30%;
+  bottom: -18%;
+  width: 15rem;
+  height: 12rem;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.18) 0%, transparent 70%);
+  animation: gv-hero-wave-c 14s ease-in-out infinite alternate;
+}
+
+.gv-dashboard-hero-orb-c {
+  left: -4%;
+  top: 40%;
+  width: 12rem;
+  height: 12rem;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, transparent 72%);
+  animation: gv-hero-wave-a 17s ease-in-out infinite alternate;
 }
 
 .gv-dashboard-hero-sheen {
   position: absolute;
-  inset: -30% -35%;
+  inset: -36% -38%;
   pointer-events: none;
-  background: linear-gradient(115deg, transparent 28%, rgba(255,255,255,0.18) 46%, rgba(255,255,255,0.04) 57%, transparent 76%);
-  animation: gv-hero-sheen-pass 10s linear infinite;
-  opacity: 0.9;
+  background: linear-gradient(115deg, transparent 28%, rgba(255,255,255,0.12) 46%, rgba(255,255,255,0.02) 58%, transparent 76%);
+  animation: gv-hero-sheen-pass 8.5s linear infinite;
+  opacity: 0.7;
 }
 
 /* ══════════════════════════════════════════════════════════════

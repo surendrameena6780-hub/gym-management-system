@@ -40,6 +40,27 @@ axios.interceptors.request.use((config) => {
 
 axios.interceptors.response.use((response) => {
   response.data = unwrapApiData(response.data)
+
+  const method = String(response?.config?.method || 'get').toLowerCase()
+  const requestUrl = String(response?.config?.url || '')
+  const isMutation = ['post', 'put', 'patch', 'delete'].includes(method)
+  const isApiRequest = requestUrl.includes('/api/')
+  const shouldBroadcastDataChange = isMutation
+    && isApiRequest
+    && !requestUrl.includes('/api/auth')
+    && !requestUrl.includes('/api/superadmin')
+    && !requestUrl.includes('/api/push/subscribe')
+
+  if (typeof window !== 'undefined' && shouldBroadcastDataChange) {
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+      detail: {
+        source: `axios:${method}`,
+        url: requestUrl,
+        at: Date.now(),
+      },
+    }))
+  }
+
   return response
 }, (error) => {
   const status = error?.response?.status
