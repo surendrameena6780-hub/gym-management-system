@@ -110,8 +110,8 @@ router.post('/test', authMiddleware, async (req, res) => {
         await Promise.all(subs.rows.map((sub) => sendPushPayload(sub, {
             title: 'GymVault Test',
             body: 'Push notifications are working!',
-            icon: '/gymvault-app-icon.svg',
-            badge: '/gymvault-app-icon.svg',
+            icon: '/gymvault-app-icon-192.png',
+            badge: '/gymvault-app-icon-64.png',
             url: '/',
         })));
 

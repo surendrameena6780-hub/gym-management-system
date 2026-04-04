@@ -143,8 +143,8 @@ const notifyStaffAccessAlert = async ({ gym_id, title, message, url = '/attendan
         await sendPushToGym(gym_id, {
             title,
             body: message,
-            icon: '/gymvault-app-icon.svg',
-            badge: '/gymvault-app-icon.svg',
+            icon: '/gymvault-app-icon-192.png',
+            badge: '/gymvault-app-icon-64.png',
             url,
         }, ACCESS_ALERT_ROLES);
     } catch (err) {

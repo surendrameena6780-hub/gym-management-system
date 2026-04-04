@@ -993,7 +993,7 @@ router.post('/system/broadcast', superAuth, async (req, res) => {
         // Send web push if VAPID is configured
         let pushSent = 0;
         if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-            const payload = JSON.stringify({ title, body: message, icon: '/gymvault-app-icon.svg', badge: '/gymvault-app-icon.svg', url });
+            const payload = JSON.stringify({ title, body: message, icon: '/gymvault-app-icon-192.png', badge: '/gymvault-app-icon-64.png', url });
             let subsQuery;
             if (target_gym_id) {
                 subsQuery = await pool.query(

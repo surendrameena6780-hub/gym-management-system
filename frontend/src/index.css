@@ -191,6 +191,18 @@ html.gv-compact-ui main.app-scroll-shell > div {
   transition: transform 0.24s ease, opacity 0.24s ease;
 }
 
+.app-mobile-nav {
+  padding: 0.5rem 0.75rem calc(var(--safe-area-bottom) + 0.18rem);
+  background:
+    linear-gradient(
+      to top,
+      rgba(8, 11, 20, 0.96) 0%,
+      rgba(8, 11, 20, 0.86) calc(var(--safe-area-bottom) + 0.95rem),
+      rgba(8, 11, 20, 0.28) calc(var(--safe-area-bottom) + 2.5rem),
+      rgba(8, 11, 20, 0) calc(var(--safe-area-bottom) + 5.5rem)
+    );
+}
+
 .app-keyboard-open .app-mobile-nav,
 .app-modal-open .app-mobile-nav {
   opacity: 0;
