@@ -215,7 +215,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
 .app-mobile-nav {
   padding-bottom: var(--safe-area-bottom);
-  background: #eef0ff;
+  background: transparent;
 }
 
 .app-mobile-nav > div {
@@ -776,7 +776,7 @@ html.gv-dark-mode .app-header-safe span { color: var(--dm-t2) !important; }
 html.gv-dark-mode .app-header-safe span.font-bold,
 html.gv-dark-mode .app-header-safe span.text-slate-800 { color: var(--dm-t1) !important; }
 html.gv-dark-mode .app-mobile-nav {
-  background: var(--dm-bg) !important;
+  background: transparent !important;
   border-top: none !important;
 }
 html.gv-dark-mode .gv-dashboard-hero {
