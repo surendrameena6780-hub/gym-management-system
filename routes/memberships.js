@@ -161,6 +161,18 @@ const resolvePaidPaymentLinkResult = async (razorpayClient, paymentLink) => {
     }
 };
 
+const createCollectionRazorpayClient = (razorpayConfig) => {
+    const headers = razorpayConfig.connectMode === 'PARTNER' && razorpayConfig.connectedAccount
+        ? { 'X-Razorpay-Account': razorpayConfig.connectedAccount }
+        : undefined;
+
+    return new Razorpay({
+        key_id: razorpayConfig.keyId,
+        key_secret: razorpayConfig.keySecret,
+        headers,
+    });
+};
+
 const createCollectionPaymentLink = async ({
     razorpayConfig,
     payeeName,
@@ -188,31 +200,7 @@ const createCollectionPaymentLink = async ({
         notes,
     };
 
-    if (razorpayConfig.connectMode === 'PARTNER') {
-        const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
-        const feeAmount = Math.round(amountPaise * feePercent / 100);
-        const transferAmount = amountPaise - feeAmount;
-        if (transferAmount <= 0) {
-            throw new Error('Collection amount is too small for the configured platform fee.');
-        }
-
-        payload.options = {
-            order: {
-                transfers: [{
-                    account: razorpayConfig.connectedAccount,
-                    amount: transferAmount,
-                    currency: 'INR',
-                    on_hold: false,
-                    notes,
-                }],
-            },
-        };
-    }
-
-    const razorpayClient = new Razorpay({
-        key_id: razorpayConfig.keyId,
-        key_secret: razorpayConfig.keySecret,
-    });
+    const razorpayClient = createCollectionRazorpayClient(razorpayConfig);
     const paymentLink = await razorpayClient.paymentLink.create(payload);
 
     return {
@@ -591,10 +579,7 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
             return res.status(400).json({ error: 'Razorpay collection is not configured for this gym.' });
         }
 
-        const razorpayClient = new Razorpay({
-            key_id: collectionSetup.data.razorpay.keyId,
-            key_secret: collectionSetup.data.razorpay.keySecret,
-        });
+        const razorpayClient = createCollectionRazorpayClient(collectionSetup.data.razorpay);
         const paymentLink = await razorpayClient.paymentLink.fetch(payment_link_id);
         const settledPayment = await resolvePaidPaymentLinkResult(razorpayClient, paymentLink);
 
