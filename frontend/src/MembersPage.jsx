@@ -8,8 +8,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
-import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount } from './utils/memberCollection';
-import { loadRazorpayCheckoutScript } from './utils/razorpayCheckout';
+import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount, maskCollectionContact } from './utils/memberCollection';
 import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
@@ -288,8 +287,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [activatingMode, setActivatingMode] = useState('');
   const [activationOnlineMode, setActivationOnlineMode] = useState('RAZORPAY');
   const [activationCollectionContext, setActivationCollectionContext] = useState(null);
+  const [activationRazorpayContext, setActivationRazorpayContext] = useState(null);
   const [activationReference, setActivationReference] = useState('');
   const [memberActionLoading, setMemberActionLoading] = useState(null);
+  const activationRazorpayPollBusyRef = useRef(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showActivateModal, setShowActivateModal] = useState(false);
@@ -637,6 +638,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     setSelectedPlanId('');
     setActivationOnlineMode('RAZORPAY');
     setActivationCollectionContext(null);
+    setActivationRazorpayContext(null);
     setActivationReference('');
     setActivatingMode('');
     setShowActivateModal(true);
@@ -658,6 +660,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       setSelectedPlanId('');
       setActivationOnlineMode('RAZORPAY');
       setActivationCollectionContext(null);
+      setActivationRazorpayContext(null);
       setActivationReference('');
       setActivatingMode('');
       setShowActivateModal(true);
@@ -671,6 +674,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     setSelectedPlanId('');
     setActivationOnlineMode('RAZORPAY');
     setActivationCollectionContext(null);
+    setActivationRazorpayContext(null);
     setActivationReference('');
     setActivatingMode('');
   };
@@ -683,6 +687,70 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
     toast?.('Copy failed on this device. Long-press and copy it manually.', 'warning');
   };
+
+  const finishActivationSuccess = async (plan, paymentId) => {
+    if (canWriteAttendance) {
+      await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
+    }
+    setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
+    closeActivateModal();
+    setShowSuccessAnim(true);
+  };
+
+  const checkActivationRazorpayStatus = async (plan, { manual = false } = {}) => {
+    const paymentLinkId = activationRazorpayContext?.payment_link?.id;
+    if (!selectedMember?.id || !plan?.id || !paymentLinkId || activationRazorpayPollBusyRef.current) {
+      return false;
+    }
+
+    activationRazorpayPollBusyRef.current = true;
+    try {
+      const statusRes = await axios.post(
+        '/api/memberships/online/payment-link-status',
+        {
+          member_id: selectedMember.id,
+          plan_id: plan.id,
+          payment_link_id: paymentLinkId,
+        },
+        { headers: { 'x-auth-token': token } }
+      );
+
+      if (!statusRes.data?.paid) {
+        if (manual) {
+          toast?.('Payment is still pending on Razorpay.', 'warning');
+        }
+        return false;
+      }
+
+      setActivatingMode('verifying');
+      await fetchMembers();
+      notifyDashboardDataChanged();
+      await finishActivationSuccess(plan, statusRes.data?.payment_id || paymentLinkId);
+      return true;
+    } catch (err) {
+      if (manual) {
+        toast?.(err?.response?.data?.error || 'Unable to verify Razorpay payment right now.', 'error');
+      }
+      return false;
+    } finally {
+      activationRazorpayPollBusyRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const selectedPlan = plans.find((plan) => plan.id === parseInt(selectedPlanId, 10));
+    if (!showActivateModal || activationOnlineMode !== 'RAZORPAY' || !activationRazorpayContext?.payment_link?.id || !selectedPlan) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      checkActivationRazorpayStatus(selectedPlan);
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activationOnlineMode, activationRazorpayContext, plans, selectedPlanId, showActivateModal]);
 
   const openFreezeModalForMember = (member) => {
     if (!canWritePayments) {
@@ -952,6 +1020,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
           }
 
           setActivationCollectionContext(collection);
+          setActivationRazorpayContext(null);
           setActivationReference(collection.reference || '');
           setActivatingMode('');
           toast?.('Show this direct UPI QR to the member, then record the collection once payment is received.', 'success');
@@ -963,10 +1032,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         return;
       }
 
-      const scriptLoaded = await loadRazorpayCheckoutScript();
-      if (!scriptLoaded) {
+      if (activationRazorpayContext?.payment_link?.id) {
+        await checkActivationRazorpayStatus(selectedPlan, { manual: true });
         setActivatingMode('');
-        return toast?.('Failed to load Razorpay collection.', 'error');
+        return;
       }
 
       const orderRes = await axios.post(
@@ -976,48 +1045,23 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       );
 
       const razorpay = orderRes.data?.razorpay;
-      if (!razorpay?.key_id || !razorpay?.order?.id) {
+      const paymentLink = razorpay?.payment_link;
+      if (!paymentLink?.id || !paymentLink?.short_url) {
         setActivatingMode('');
         return toast?.('Razorpay collection is not configured. Add Razorpay keys/connect in Integrations or use Direct UPI.', 'error');
       }
 
-      const options = {
-        key: razorpay.key_id,
-        amount: razorpay.order.amount,
-        currency: razorpay.order.currency || 'INR',
-        name: razorpay.merchant_name || orderRes.data?.merchant_name || 'Collection via Razorpay',
-        description: `Collect membership fee for ${selectedMember.full_name}`,
-        order_id: razorpay.order.id,
-        handler: async (res) => {
-          try {
-            setActivatingMode('verifying');
-            await axios.post(
-              '/api/memberships/online/verify',
-              {
-                member_id: selectedMember.id,
-                plan_id: selectedPlan.id,
-                razorpay_order_id: res.razorpay_order_id,
-                razorpay_payment_id: res.razorpay_payment_id,
-                razorpay_signature: res.razorpay_signature,
-              },
-              { headers: { 'x-auth-token': token } }
-            );
-            if (canWriteAttendance) {
-              await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
-            }
-            setReceiptData({ memberName: selectedMember.full_name, planName: selectedPlan.name, amount: selectedPlan.price, payId: res.razorpay_payment_id });
-            closeActivateModal();
-            setShowSuccessAnim(true);
-          } catch (verifyErr) {
-            toast?.(verifyErr?.response?.data?.error || 'Razorpay collection verification failed. Please try again.', 'error');
-            setActivatingMode('');
-          }
-        },
-        theme: { color: '#7c3aed' },
-      };
-      const rzp = new window.Razorpay(options);
-      rzp.open();
+      setActivationCollectionContext(null);
+      setActivationRazorpayContext(razorpay);
       setActivatingMode('');
+
+      if (paymentLink.notify?.sms && paymentLink.customer_contact) {
+        toast?.(`Razorpay link sent to ${maskCollectionContact(paymentLink.customer_contact)} and QR is ready on this screen.`, 'success');
+      } else if (paymentLink.notify?.email && paymentLink.customer_email) {
+        toast?.(`Razorpay link sent to ${paymentLink.customer_email} and QR is ready on this screen.`, 'success');
+      } else {
+        toast?.('Razorpay QR is ready. Since no member phone or email is saved, share the link manually.', 'success');
+      }
     } catch (err) {
       setActivatingMode('');
       toast?.(err?.response?.data?.error || 'Unable to start online collection.', 'error');
@@ -1028,14 +1072,9 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     try {
       setActivatingMode(mode === 'Online' ? 'verifying' : 'cash');
       await axios.post('/api/memberships/activate', { member_id: selectedMember.id, plan_id: plan.id, payment_id: paymentId, payment_mode: mode }, { headers: { 'x-auth-token': token } });
-      if (canWriteAttendance) {
-        await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
-      }
       await fetchMembers();
       notifyDashboardDataChanged();
-      setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
-      closeActivateModal();
-      setShowSuccessAnim(true);
+      await finishActivationSuccess(plan, paymentId);
     } catch (err) {
       toast?.('Activation failed. Please try again.', 'error');
     } finally {
@@ -1884,7 +1923,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
             </div>
             <div className="px-8 pb-8 space-y-4">
               <div className="relative">
-                <select required className="w-full px-5 py-4 rounded-2xl focus:outline-none text-sm font-black appearance-none cursor-pointer border border-white/10" style={{ background: 'rgba(255,255,255,0.07)', color: '#e2e8f0' }} value={selectedPlanId} onChange={(e) => { setSelectedPlanId(e.target.value); setActivationCollectionContext(null); setActivationReference(''); }}>
+                <select required className="w-full px-5 py-4 rounded-2xl focus:outline-none text-sm font-black appearance-none cursor-pointer border border-white/10" style={{ background: 'rgba(255,255,255,0.07)', color: '#e2e8f0' }} value={selectedPlanId} onChange={(e) => { setSelectedPlanId(e.target.value); setActivationCollectionContext(null); setActivationRazorpayContext(null); setActivationReference(''); }}>
                   <option value="" style={{ background: '#1e1b4b' }}>Select Membership Plan...</option>
                   {plans.map((p) => (<option key={p.id} value={p.id} style={{ background: '#1e1b4b' }}>{p.name} — ₹{p.price}</option>))}
                 </select>
@@ -1894,7 +1933,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Online Collection Channel</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { key: 'RAZORPAY', label: 'Razorpay', detail: 'Card, UPI, netbanking, wallets' },
+                    { key: 'RAZORPAY', label: 'Razorpay Link', detail: 'Auto-send link and show hosted checkout QR' },
                     { key: 'UPI', label: 'Direct UPI', detail: 'Show QR and record receipt' },
                   ].map((option) => (
                     <button
@@ -1903,6 +1942,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                       onClick={() => {
                         setActivationOnlineMode(option.key);
                         setActivationCollectionContext(null);
+                        setActivationRazorpayContext(null);
                         setActivationReference('');
                       }}
                       className={`rounded-2xl border px-3 py-3 text-left transition-all ${activationOnlineMode === option.key ? 'border-violet-300 bg-violet-500/10 shadow-sm' : 'border-white/10 bg-white/6 hover:border-white/20'}`}
@@ -1912,8 +1952,58 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-slate-400 font-medium mt-2">{activationOnlineMode === 'RAZORPAY' ? 'Razorpay opens the gym owner collection checkout with cards, UPI and more.' : 'Direct UPI shows your gym QR and lets you record the receipt after payment.'}</p>
+                <p className="text-xs text-slate-400 font-medium mt-2">{activationOnlineMode === 'RAZORPAY' ? 'Razorpay sends the member a hosted payment link and also gives you a QR to show from this screen.' : 'Direct UPI shows your gym QR and lets you record the receipt after payment.'}</p>
               </div>
+              {activationOnlineMode === 'RAZORPAY' && activationRazorpayContext?.payment_link && (
+                <div className="rounded-[28px] border border-white/10 bg-white/8 p-4 space-y-4">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-xl shadow-slate-950/20">
+                      <QRCodeCanvas
+                        value={activationRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
+                        size={156}
+                        includeMargin
+                        bgColor="#ffffff"
+                        fgColor="#111827"
+                        level="M"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-200/70">Razorpay Payment Link</p>
+                        <p className="text-xl font-black text-white mt-1">₹{formatCollectionAmount(activationRazorpayContext.payment_link.amount)}</p>
+                        <p className="text-sm font-semibold text-slate-300 mt-1">
+                          {activationRazorpayContext.payment_link.notify?.sms && activationRazorpayContext.payment_link.customer_contact
+                            ? `A Razorpay link has been sent to ${maskCollectionContact(activationRazorpayContext.payment_link.customer_contact)}. Keep this screen open or let the member scan the QR.`
+                            : activationRazorpayContext.payment_link.notify?.email && activationRazorpayContext.payment_link.customer_email
+                              ? `A Razorpay link has been sent to ${activationRazorpayContext.payment_link.customer_email}. Keep this screen open or let the member scan the QR.`
+                              : 'No member phone or email is saved, so show this QR or copy the payment link manually.'}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-slate-950/35 px-3 py-3 space-y-2">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Link Status</p>
+                          <p className="text-sm font-black text-white uppercase">{String(activationRazorpayContext.payment_link.status || 'created')}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivery</p>
+                          <p className="text-sm font-bold text-slate-200">
+                            {activationRazorpayContext.payment_link.notify?.sms && activationRazorpayContext.payment_link.customer_contact
+                              ? `SMS to ${maskCollectionContact(activationRazorpayContext.payment_link.customer_contact)}`
+                              : activationRazorpayContext.payment_link.notify?.email && activationRazorpayContext.payment_link.customer_email
+                                ? `Email to ${activationRazorpayContext.payment_link.customer_email}`
+                                : 'Manual share required'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => handleCopyActivationDetail(activationRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-violet-300/30 bg-white/10 text-violet-100 hover:bg-white/15 transition-colors">Copy Link</button>
+                    <button type="button" onClick={() => { const selectedPlan = plans.find((plan) => plan.id === parseInt(selectedPlanId, 10)); if (selectedPlan) { checkActivationRazorpayStatus(selectedPlan, { manual: true }); } }} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider border border-white/15 bg-white/10 text-slate-100 hover:bg-white/15 transition-colors">Check Status</button>
+                  </div>
+                  <p className="text-[11px] font-semibold text-violet-100/75">The member can pay from their own phone using the Razorpay link, or scan this QR from your phone. We also keep checking automatically while this modal stays open.</p>
+                </div>
+              )}
               {activationOnlineMode === 'UPI' && activationCollectionContext && (
                 <div className="rounded-[28px] border border-white/10 bg-white/8 p-4 space-y-4">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -1966,7 +2056,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 </div>
               )}
               <div className="pt-2 space-y-3">
-                <button onClick={() => handleActivateSubscription(null, 'online')} disabled={Boolean(activatingMode)} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}>{activatingMode === 'online' || activatingMode === 'verifying' ? <RefreshCw size={18} className="animate-spin" /> : <CreditCard size={18} />}{activatingMode === 'verifying' ? 'Recording Collection...' : activatingMode === 'online' ? (activationOnlineMode === 'RAZORPAY' ? 'Opening Razorpay Collection...' : 'Preparing Collection QR...') : activationOnlineMode === 'RAZORPAY' ? 'Open Razorpay Collection' : activationCollectionContext ? 'Record Direct UPI Collection' : 'Show Direct UPI QR'}</button>
+                <button onClick={() => handleActivateSubscription(null, 'online')} disabled={Boolean(activatingMode)} className="w-full py-4 text-white rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.4)' }}>{activatingMode === 'online' || activatingMode === 'verifying' ? <RefreshCw size={18} className="animate-spin" /> : <CreditCard size={18} />}{activatingMode === 'verifying' ? 'Recording Collection...' : activatingMode === 'online' ? (activationOnlineMode === 'RAZORPAY' ? (activationRazorpayContext ? 'Checking Razorpay Payment...' : 'Sending Razorpay Link...') : 'Preparing Collection QR...') : activationOnlineMode === 'RAZORPAY' ? (activationRazorpayContext ? 'Check Razorpay Payment' : 'Send Razorpay Link & Show QR') : activationCollectionContext ? 'Record Direct UPI Collection' : 'Show Direct UPI QR'}</button>
                 <button onClick={() => handleActivateSubscription(null, 'cash')} disabled={Boolean(activatingMode)} className="w-full py-4 rounded-2xl font-black text-sm hover:opacity-80 transition-all flex items-center justify-center gap-2 border border-white/10 disabled:opacity-70" style={{ background: 'rgba(255,255,255,0.06)', color: '#6ee7b7' }}>{activatingMode === 'cash' ? <RefreshCw size={18} className="animate-spin" /> : <span className="font-black text-lg">₹</span>}{activatingMode === 'cash' ? 'Recording Cash Payment...' : 'Paid as Cash'}</button>
               </div>
               <button onClick={closeActivateModal} className="w-full text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-slate-300 transition-colors pt-1">Cancel Transaction</button>

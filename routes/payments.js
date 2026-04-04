@@ -12,6 +12,7 @@ const router = express.Router();
 router.use(auth, saasMiddleware, requireOwner);
 
 const DUE_ZERO_THRESHOLD = 0.009;
+const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY_COLLECTION_LINK_TTL_SECONDS || '86400', 10));
 let ensurePaymentCollectionsSchemaPromise;
 
 const ensurePaymentCollectionsSchema = async () => {
@@ -70,6 +71,122 @@ const appendNote = (existingNotes, newNote) => {
 };
 
 const buildAutoCollectionReference = (paymentId) => `DUE-${paymentId}-${Date.now().toString().slice(-6)}`;
+
+const normalizeCollectionContact = (value) => {
+    const digitsOnly = String(value || '').replace(/\D/g, '');
+    if (digitsOnly.length < 10 || digitsOnly.length > 15) return '';
+    return digitsOnly;
+};
+
+const buildPaymentLinkCustomer = (member = {}) => {
+    const name = String(member.member_name || member.full_name || 'Gym member').trim() || 'Gym member';
+    const email = String(member.member_email || member.email || '').trim();
+    const contact = normalizeCollectionContact(member.member_phone || member.phone);
+    const customer = { name };
+
+    if (email) customer.email = email;
+    if (contact) customer.contact = contact;
+
+    return {
+        customer,
+        contact,
+        email,
+    };
+};
+
+const buildPaidPaymentLinkResult = (paymentLink) => {
+    const status = String(paymentLink?.status || '').trim().toLowerCase();
+    const payment = paymentLink?.payments && typeof paymentLink.payments === 'object' && !Array.isArray(paymentLink.payments)
+        ? paymentLink.payments
+        : null;
+
+    if (status !== 'paid' || !payment) {
+        return null;
+    }
+
+    const paymentId = String(payment.payment_id || '').trim();
+    const paymentStatus = String(payment.status || '').trim().toLowerCase();
+    if (!paymentId || paymentStatus === 'failed') {
+        return null;
+    }
+
+    const paidAmountPaise = Number(payment.amount || paymentLink?.amount_paid || 0);
+    return {
+        paymentId,
+        amount: Number.isFinite(paidAmountPaise) ? Math.round(paidAmountPaise) / 100 : 0,
+        method: String(payment.method || '').trim(),
+    };
+};
+
+const createCollectionPaymentLink = async ({
+    razorpayConfig,
+    payeeName,
+    amountPaise,
+    referenceId,
+    description,
+    member,
+    notes,
+}) => {
+    const { customer, contact, email } = buildPaymentLinkCustomer(member);
+    const notify = {
+        sms: Boolean(contact),
+        email: Boolean(email),
+    };
+
+    const payload = {
+        amount: amountPaise,
+        currency: 'INR',
+        reference_id: referenceId,
+        description,
+        customer,
+        notify,
+        reminder_enable: notify.sms || notify.email,
+        expire_by: Math.floor(Date.now() / 1000) + COLLECTION_LINK_TTL_SECONDS,
+        notes,
+    };
+
+    if (razorpayConfig.connectMode === 'PARTNER') {
+        const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
+        const feeAmount = Math.round(amountPaise * feePercent / 100);
+        const transferAmount = amountPaise - feeAmount;
+        if (transferAmount <= 0) {
+            throw new Error('Collection amount is too small for the configured platform fee.');
+        }
+
+        payload.options = {
+            order: {
+                transfers: [{
+                    account: razorpayConfig.connectedAccount,
+                    amount: transferAmount,
+                    currency: 'INR',
+                    on_hold: false,
+                    notes,
+                }],
+            },
+        };
+    }
+
+    const razorpayClient = new Razorpay({
+        key_id: razorpayConfig.keyId,
+        key_secret: razorpayConfig.keySecret,
+    });
+    const paymentLink = await razorpayClient.paymentLink.create(payload);
+
+    return {
+        merchant_name: payeeName,
+        payment_link: {
+            id: paymentLink.id,
+            short_url: paymentLink.short_url,
+            status: paymentLink.status,
+            amount: amountPaise / 100,
+            currency: paymentLink.currency || 'INR',
+            reference: paymentLink.reference_id || referenceId,
+            customer_contact: contact,
+            customer_email: email,
+            notify,
+        },
+    };
+};
 
 const getGymCollectionSetup = async (gymId) => {
     const gymConfigRes = await pool.query(
@@ -743,63 +860,26 @@ router.post('/:id/due/create-order', async (req, res) => {
 
         let razorpay = null;
         if (collectionSetup.data.razorpay) {
-            const { connectMode, connectedAccount, keyId, keySecret } = collectionSetup.data.razorpay;
             const amountPaise = Math.round(collectionAmount * 100);
             if (!Number.isFinite(amountPaise) || amountPaise <= 0) {
                 return res.status(400).json({ error: 'Pending due amount is invalid.' });
             }
 
-            let order;
-            if (connectMode === 'PARTNER') {
-                const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
-                const feeAmount = Math.round(amountPaise * feePercent / 100);
-                const transferAmount = Math.max(0, amountPaise - feeAmount);
-                const platformRazorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-                order = await platformRazorpay.orders.create({
-                    amount: amountPaise,
-                    currency: 'INR',
-                    receipt: `due_${paymentId}_${Date.now()}`,
-                    transfers: [{
-                        account: connectedAccount,
-                        amount: transferAmount,
-                        currency: 'INR',
-                        on_hold: false,
-                        notes: {
-                            purpose: 'DUE_COLLECTION',
-                            gym_id: String(gym_id),
-                            payment_id: String(paymentId),
-                            member_id: String(payment.user_id),
-                        },
-                    }],
-                    notes: {
-                        purpose: 'DUE_COLLECTION',
-                        gym_id: String(gym_id),
-                        payment_id: String(paymentId),
-                        member_id: String(payment.user_id),
-                        invoice_id: String(payment.invoice_id || ''),
-                    },
-                });
-            } else {
-                const razorpayClient = new Razorpay({ key_id: keyId, key_secret: keySecret });
-                order = await razorpayClient.orders.create({
-                    amount: amountPaise,
-                    currency: 'INR',
-                    receipt: `due_${paymentId}_${Date.now()}`,
-                    notes: {
-                        purpose: 'DUE_COLLECTION',
-                        gym_id: String(gym_id),
-                        payment_id: String(paymentId),
-                        member_id: String(payment.user_id),
-                        invoice_id: String(payment.invoice_id || ''),
-                    },
-                });
-            }
-
-            razorpay = {
-                key_id: keyId,
-                order,
-                merchant_name: collectionSetup.data.payeeName,
-            };
+            razorpay = await createCollectionPaymentLink({
+                razorpayConfig: collectionSetup.data.razorpay,
+                payeeName: collectionSetup.data.payeeName,
+                amountPaise,
+                referenceId: buildAutoCollectionReference(payment.id),
+                description: `Pending due for ${payment.member_name}`,
+                member: payment,
+                notes: {
+                    purpose: 'DUE_COLLECTION',
+                    gym_id: String(gym_id),
+                    payment_id: String(paymentId),
+                    member_id: String(payment.user_id),
+                    invoice_id: String(payment.invoice_id || ''),
+                },
+            });
         }
 
         return res.json({
@@ -832,6 +912,116 @@ router.post('/:id/due/create-order', async (req, res) => {
     } catch (err) {
         console.error('DUE COLLECTION CONTEXT ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to prepare due collection details.' });
+    }
+});
+
+router.post('/:id/due/payment-link-status', async (req, res) => {
+    const paymentId = Number.parseInt(req.params.id, 10);
+    const gym_id = req.user.gym_id;
+    const {
+        payment_link_id,
+        amount,
+        notes,
+    } = req.body || {};
+
+    if (!Number.isInteger(paymentId)) {
+        return res.status(400).json({ error: 'Invalid payment id.' });
+    }
+    if (!payment_link_id) {
+        return res.status(400).json({ error: 'payment_link_id is required.' });
+    }
+
+    try {
+        await ensurePaymentCollectionsSchema();
+
+        const collectionSetup = await getGymCollectionSetup(gym_id);
+        if (!collectionSetup.ok) {
+            return res.status(collectionSetup.status).json({ error: collectionSetup.error });
+        }
+        if (!collectionSetup.data.razorpay) {
+            return res.status(400).json({ error: 'Razorpay collection is not configured for this gym.' });
+        }
+
+        const razorpayClient = new Razorpay({
+            key_id: collectionSetup.data.razorpay.keyId,
+            key_secret: collectionSetup.data.razorpay.keySecret,
+        });
+        const paymentLink = await razorpayClient.paymentLink.fetch(payment_link_id);
+        const settledPayment = buildPaidPaymentLinkResult(paymentLink);
+
+        if (!settledPayment) {
+            return res.json({
+                paid: false,
+                status: String(paymentLink.status || 'created').toUpperCase(),
+                payment_link: {
+                    id: paymentLink.id,
+                    short_url: paymentLink.short_url,
+                    status: paymentLink.status,
+                },
+            });
+        }
+
+        const existingCollection = await pool.query(
+            `SELECT 1
+             FROM payment_collections
+             WHERE gym_id = $1
+               AND transaction_id = $2
+             LIMIT 1`,
+            [gym_id, settledPayment.paymentId]
+        );
+        if (existingCollection.rows.length > 0) {
+            return res.json({
+                paid: true,
+                already_processed: true,
+                status: 'PAID',
+                payment_id: settledPayment.paymentId,
+                payment_method: settledPayment.method || null,
+            });
+        }
+
+        const existingPayment = await pool.query(
+            `SELECT 1
+             FROM payments
+             WHERE gym_id = $1
+               AND transaction_id = $2
+               AND deleted_at IS NULL
+             LIMIT 1`,
+            [gym_id, settledPayment.paymentId]
+        );
+        if (existingPayment.rows.length > 0) {
+            return res.json({
+                paid: true,
+                already_processed: true,
+                status: 'PAID',
+                payment_id: settledPayment.paymentId,
+                payment_method: settledPayment.method || null,
+            });
+        }
+
+        const result = await applyDueCollection({
+            gymId: gym_id,
+            paymentId,
+            amount: Number.isFinite(Number(amount)) ? amount : settledPayment.amount,
+            paymentMode: 'Online',
+            transactionId: settledPayment.paymentId,
+            notes,
+            collectedBy: req.user.id,
+        });
+
+        if (!result.ok) {
+            return res.status(result.status).json({ error: result.error });
+        }
+
+        return res.json({
+            ...result.data,
+            paid: true,
+            status: 'PAID',
+            payment_id: settledPayment.paymentId,
+            payment_method: settledPayment.method || null,
+        });
+    } catch (err) {
+        console.error('DUE PAYMENT LINK STATUS ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to verify Razorpay due collection.' });
     }
 });
 

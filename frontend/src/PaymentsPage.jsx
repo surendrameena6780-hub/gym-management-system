@@ -9,8 +9,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { openWhatsAppConversation } from './utils/externalNavigation';
-import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount } from './utils/memberCollection';
-import { loadRazorpayCheckoutScript } from './utils/razorpayCheckout';
+import { buildUpiCollectionUri, copyCollectionText, formatCollectionAmount, maskCollectionContact } from './utils/memberCollection';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -145,6 +144,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const [dueStep, setDueStep] = useState('idle');
   const [dueOnlineMode, setDueOnlineMode] = useState('RAZORPAY');
   const [dueCollectionContext, setDueCollectionContext] = useState(null);
+  const [dueRazorpayContext, setDueRazorpayContext] = useState(null);
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -156,6 +156,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   const paymentsListRef = useRef(null);
   const paymentsScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
+  const dueRazorpayPollBusyRef = useRef(false);
   const financeFocusTimerRef = useRef(null);
   const collectionsOverviewRef = useRef(null);
   const collectionsLedgerRef = useRef(null);
@@ -618,6 +619,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     setDueStep('idle');
     setDueOnlineMode('RAZORPAY');
     setDueCollectionContext(null);
+    setDueRazorpayContext(null);
   }, []);
 
   const openDueModal = useCallback((payment) => {
@@ -637,6 +639,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     setDueStep('idle');
     setDueOnlineMode('RAZORPAY');
     setDueCollectionContext(null);
+    setDueRazorpayContext(null);
   }, [toast]);
 
   const handleCopyDueCollectionDetail = useCallback(async (value, successMessage) => {
@@ -659,8 +662,61 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     }
   }, [dueModalPayment, fetchData, openReceipt, resetDueModal, toast]);
 
-  const handleCollectDue = async (e) => {
+  const checkDueRazorpayStatus = useCallback(async ({ manual = false } = {}) => {
+    const paymentLinkId = dueRazorpayContext?.payment_link?.id;
+    if (!dueModalPayment?.id || !paymentLinkId || dueRazorpayPollBusyRef.current) {
+      return false;
+    }
+
+    dueRazorpayPollBusyRef.current = true;
+    try {
+      const statusRes = await axios.post(
+        `/api/payments/${dueModalPayment.id}/due/payment-link-status`,
+        {
+          payment_link_id: paymentLinkId,
+          amount: dueFormData.amount,
+          notes: dueFormData.notes,
+        },
+        { headers: { 'x-auth-token': token } }
+      );
+
+      if (!statusRes.data?.paid) {
+        if (manual) {
+          toast?.('Payment is still pending on Razorpay.', 'warning');
+        }
+        return false;
+      }
+
+      setDueStep('processing');
+      await settleDueLocally(statusRes.data, 'Pending due collected successfully.');
+      return true;
+    } catch (err) {
+      if (manual) {
+        toast?.(err?.response?.data?.error || 'Unable to verify Razorpay payment right now.', 'error');
+      }
+      return false;
+    } finally {
+      dueRazorpayPollBusyRef.current = false;
+    }
+  }, [dueFormData.amount, dueFormData.notes, dueModalPayment, dueRazorpayContext, settleDueLocally, toast, token]);
+
+  useEffect(() => {
+    if (!dueModalPayment?.id || dueFormData.payment_mode !== 'Online' || dueOnlineMode !== 'RAZORPAY' || !dueRazorpayContext?.payment_link?.id) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      checkDueRazorpayStatus();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [checkDueRazorpayStatus, dueFormData.payment_mode, dueModalPayment, dueOnlineMode, dueRazorpayContext]);
+
+  const handleCollectDue = useCallback(async (e) => {
     if (e) e.preventDefault();
+
     if (!dueModalPayment || dueSubmitting) return;
 
     const remainingDue = roundMoney(dueModalPayment.amount_due || 0);
@@ -697,6 +753,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
             }
 
             setDueCollectionContext(collection);
+            setDueRazorpayContext(null);
             setDueFormData((prev) => ({
               ...prev,
               transaction_id: prev.transaction_id || collection.reference || '',
@@ -720,6 +777,11 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           );
           await settleDueLocally(onlineRes.data, 'Pending due collected successfully.');
         } else {
+          if (dueRazorpayContext?.payment_link?.id) {
+            await checkDueRazorpayStatus({ manual: true });
+            return;
+          }
+
           setDueStep('processing');
 
           const orderRes = await axios.post(
@@ -729,59 +791,25 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           );
 
           const razorpay = orderRes.data?.razorpay;
-          if (!razorpay?.key_id || !razorpay?.order?.id) {
+          const paymentLink = razorpay?.payment_link;
+          if (!paymentLink?.id || !paymentLink?.short_url) {
             toast?.('Razorpay collection is not configured. Add Razorpay keys/connect in Integrations or use Direct UPI.', 'error');
             setDueStep('idle');
             return;
           }
 
-          const scriptLoaded = await loadRazorpayCheckoutScript();
-          if (!scriptLoaded) {
-            toast?.('Failed to load Razorpay collection.', 'error');
-            setDueStep('idle');
-            return;
-          }
+          setDueCollectionContext(null);
+          setDueRazorpayContext(razorpay);
+          setDueStep('collecting');
 
-          await new Promise((resolve) => {
-            const options = {
-              key: razorpay.key_id,
-              amount: razorpay.order.amount,
-              currency: razorpay.order.currency || 'INR',
-              name: razorpay.merchant_name || orderRes.data?.merchant_name || 'Collection via Razorpay',
-              description: `Collect ₹${formatCollectionAmount(requestedAmount)} from ${dueModalPayment.member_name || 'member'}`,
-              order_id: razorpay.order.id,
-              theme: { color: '#f97316' },
-              handler: async (response) => {
-                try {
-                  const verifyRes = await axios.post(
-                    `/api/payments/${dueModalPayment.id}/due/verify`,
-                    {
-                      amount: requestedAmount,
-                      notes: dueFormData.notes,
-                      razorpay_order_id: response.razorpay_order_id,
-                      razorpay_payment_id: response.razorpay_payment_id,
-                      razorpay_signature: response.razorpay_signature,
-                    },
-                    { headers: { 'x-auth-token': token } }
-                  );
-                  await settleDueLocally(verifyRes.data, 'Pending due collected successfully.');
-                } catch (err) {
-                  toast?.(err?.response?.data?.error || 'Razorpay collection verification failed.', 'error');
-                  setDueStep('idle');
-                } finally {
-                  resolve();
-                }
-              },
-              modal: {
-                ondismiss: () => {
-                  setDueStep('idle');
-                  resolve();
-                },
-              },
-            };
-            const rzp = new window.Razorpay(options);
-            rzp.open();
-          });
+          if (paymentLink.notify?.sms && paymentLink.customer_contact) {
+            toast?.(`Razorpay link sent to ${maskCollectionContact(paymentLink.customer_contact)} and QR is ready on this screen.`, 'success');
+          } else if (paymentLink.notify?.email && paymentLink.customer_email) {
+            toast?.(`Razorpay link sent to ${paymentLink.customer_email} and QR is ready on this screen.`, 'success');
+          } else {
+            toast?.('Razorpay QR is ready. Since no member phone or email is saved, share the link manually.', 'success');
+          }
+          return;
         }
       } else {
         setDueStep('processing');
@@ -799,11 +827,18 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       }
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to collect pending due.', 'error');
-      setDueStep(dueCollectionContext && dueFormData.payment_mode === 'Online' && dueOnlineMode === 'UPI' ? 'collecting' : 'idle');
+      setDueStep(
+        dueFormData.payment_mode === 'Online' && (
+          (dueOnlineMode === 'UPI' && dueCollectionContext)
+          || (dueOnlineMode === 'RAZORPAY' && dueRazorpayContext)
+        )
+          ? 'collecting'
+          : 'idle'
+      );
     } finally {
       setDueSubmitting(false);
     }
-  };
+  }, [checkDueRazorpayStatus, dueCollectionContext, dueFormData.amount, dueFormData.notes, dueFormData.payment_mode, dueModalPayment, dueOnlineMode, dueRazorpayContext, dueSubmitting, settleDueLocally, toast, token]);
 
   useEffect(() => {
     if (!focusPaymentId) return;
@@ -1704,7 +1739,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-100/80 mb-2">Pending Balance</p>
                   <h2 className="text-2xl font-black tracking-tight">Collect Due</h2>
-                  <p className="text-sm font-semibold text-orange-50/80 mt-1">Collect the remaining balance using your gym QR / UPI details or cash.</p>
+                  <p className="text-sm font-semibold text-orange-50/80 mt-1">Send a Razorpay payment link, show your gym UPI QR, or settle the balance in cash.</p>
                 </div>
                 <button onClick={() => !dueSubmitting && resetDueModal()} className="bg-white/10 p-2 rounded-full text-white/80 hover:text-white transition-colors disabled:opacity-50" disabled={dueSubmitting}><X size={20} /></button>
               </div>
@@ -1726,22 +1761,22 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Collection Amount</label>
-                  <input type="number" min="0" step="0.01" max={roundMoney(dueModalPayment.amount_due || 0)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-orange-500/20" value={dueFormData.amount} onChange={(e) => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: e.target.value, transaction_id: '' })); }} />
+                  <input type="number" min="0" step="0.01" max={roundMoney(dueModalPayment.amount_due || 0)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-orange-500/20" value={dueFormData.amount} onChange={(e) => { setDueCollectionContext(null); setDueRazorpayContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: e.target.value, transaction_id: '' })); }} />
                   <div className="flex items-center gap-2 mt-2">
-                    <button type="button" onClick={() => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: String(roundMoney(dueModalPayment.amount_due || 0)), transaction_id: '' })); }} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-100">Full Balance</button>
-                    <button type="button" onClick={() => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: String(roundMoney((dueModalPayment.amount_due || 0) / 2)), transaction_id: '' })); }} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">Half Now</button>
+                    <button type="button" onClick={() => { setDueCollectionContext(null); setDueRazorpayContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: String(roundMoney(dueModalPayment.amount_due || 0)), transaction_id: '' })); }} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-100">Full Balance</button>
+                    <button type="button" onClick={() => { setDueCollectionContext(null); setDueRazorpayContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, amount: String(roundMoney((dueModalPayment.amount_due || 0) / 2)), transaction_id: '' })); }} className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 border border-slate-200">Half Now</button>
                   </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Payment Method</label>
                   <div className="grid grid-cols-2 gap-2">
                     {['Online', 'Cash'].map((mode) => (
-                      <button key={mode} type="button" onClick={() => { setDueCollectionContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, payment_mode: mode, transaction_id: '' })); }} className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${dueFormData.payment_mode === mode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-300'}`}>
+                      <button key={mode} type="button" onClick={() => { setDueCollectionContext(null); setDueRazorpayContext(null); setDueStep('idle'); setDueFormData((prev) => ({ ...prev, payment_mode: mode, transaction_id: '' })); }} className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${dueFormData.payment_mode === mode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-300'}`}>
                         {mode === 'Online' ? 'Online / UPI' : mode}
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Choose Razorpay collection for cards, UPI and more, or use your direct UPI QR.' : 'Record a smooth cash settlement right from the ledger.'}</p>
+                  <p className="text-xs font-semibold text-slate-500 mt-2">{dueFormData.payment_mode === 'Online' ? 'Razorpay now sends a hosted payment link to the member and also gives you a QR on this screen.' : 'Record a smooth cash settlement right from the ledger.'}</p>
                 </div>
               </div>
 
@@ -1750,7 +1785,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Online Collection Channel</label>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { key: 'RAZORPAY', label: 'Razorpay', detail: 'Card, UPI, netbanking, wallets' },
+                      { key: 'RAZORPAY', label: 'Razorpay Link', detail: 'Auto-send link and show hosted checkout QR' },
                       { key: 'UPI', label: 'Direct UPI', detail: 'Show QR and record receipt' },
                     ].map((option) => (
                       <button
@@ -1759,6 +1794,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                         onClick={() => {
                           setDueOnlineMode(option.key);
                           setDueCollectionContext(null);
+                          setDueRazorpayContext(null);
                           setDueStep('idle');
                           setDueFormData((prev) => ({ ...prev, transaction_id: '' }));
                         }}
@@ -1769,6 +1805,57 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {dueFormData.payment_mode === 'Online' && dueOnlineMode === 'RAZORPAY' && dueRazorpayContext?.payment_link && (
+                <div className="rounded-[26px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-4 py-4 shadow-sm space-y-4">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="mx-auto sm:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
+                      <QRCodeCanvas
+                        value={dueRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
+                        size={156}
+                        includeMargin
+                        bgColor="#ffffff"
+                        fgColor="#111827"
+                        level="M"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-500/70">Razorpay Payment Link</p>
+                        <p className="text-lg font-black text-slate-900 mt-1">₹{formatCollectionAmount(dueRazorpayContext.payment_link.amount)}</p>
+                        <p className="text-sm font-semibold text-slate-600 mt-1">
+                          {dueRazorpayContext.payment_link.notify?.sms && dueRazorpayContext.payment_link.customer_contact
+                            ? `A Razorpay link has been sent to ${maskCollectionContact(dueRazorpayContext.payment_link.customer_contact)}. Keep this screen open or let the member scan the QR.`
+                            : dueRazorpayContext.payment_link.notify?.email && dueRazorpayContext.payment_link.customer_email
+                              ? `A Razorpay link has been sent to ${dueRazorpayContext.payment_link.customer_email}. Keep this screen open or let the member scan the QR.`
+                              : 'No member phone or email is saved, so show this QR or copy the payment link manually.'}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/80 bg-white/90 px-3 py-3 space-y-2">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Link Status</p>
+                          <p className="text-sm font-black text-slate-900 uppercase">{String(dueRazorpayContext.payment_link.status || 'created')}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivery</p>
+                          <p className="text-sm font-bold text-slate-700">
+                            {dueRazorpayContext.payment_link.notify?.sms && dueRazorpayContext.payment_link.customer_contact
+                              ? `SMS to ${maskCollectionContact(dueRazorpayContext.payment_link.customer_contact)}`
+                              : dueRazorpayContext.payment_link.notify?.email && dueRazorpayContext.payment_link.customer_email
+                                ? `Email to ${dueRazorpayContext.payment_link.customer_email}`
+                                : 'Manual share required'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => handleCopyDueCollectionDetail(dueRazorpayContext.payment_link.short_url, 'Payment link copied.')} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-orange-600 border border-orange-200 hover:bg-orange-50 transition-colors">Copy Link</button>
+                        <button type="button" onClick={() => checkDueRazorpayStatus({ manual: true })} className="px-3 py-2 rounded-full text-[11px] font-black uppercase tracking-wider bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">Check Status</button>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[11px] font-semibold text-orange-700/80">The member can pay on their own phone from the Razorpay link, or scan this QR from your phone. We also keep checking automatically while this sheet stays open.</p>
                 </div>
               )}
 
@@ -1838,7 +1925,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   <p className="text-sm font-bold text-slate-800 mt-1">Remaining due will be ₹{Math.max(0, roundMoney((dueModalPayment.amount_due || 0) - (Number.parseFloat(dueFormData.amount || 0) || 0))).toLocaleString()}</p>
                 </div>
                 <div className={`text-[10px] font-black uppercase tracking-[0.18em] px-2.5 py-1 rounded-full ${dueStep === 'processing' ? 'bg-orange-100 text-orange-600' : dueStep === 'collecting' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-600'}`}>
-                  {dueStep === 'processing' ? 'Processing' : dueStep === 'collecting' ? 'QR Ready' : 'Ready'}
+                  {dueStep === 'processing' ? 'Processing' : dueStep === 'collecting' ? (dueOnlineMode === 'RAZORPAY' ? 'Link Live' : 'QR Ready') : 'Ready'}
                 </div>
               </div>
 
@@ -1846,12 +1933,12 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                 {dueSubmitting
                   ? (dueFormData.payment_mode === 'Online'
                     ? (dueOnlineMode === 'RAZORPAY'
-                      ? 'Opening Razorpay Collection...'
+                      ? (dueRazorpayContext ? 'Checking Razorpay Payment...' : 'Sending Razorpay Link...')
                       : (dueCollectionContext ? 'Recording Collection...' : 'Preparing Collection QR...'))
                     : 'Collecting Due...')
                   : (dueFormData.payment_mode === 'Online'
                     ? (dueOnlineMode === 'RAZORPAY'
-                      ? 'Open Razorpay Collection'
+                      ? (dueRazorpayContext ? 'Check Razorpay Payment' : 'Send Razorpay Link & Show QR')
                       : (dueCollectionContext ? 'Mark Direct UPI Received' : 'Show Direct UPI QR'))
                     : 'Record Cash Collection')}
               </button>

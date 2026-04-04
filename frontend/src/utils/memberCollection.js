@@ -38,3 +38,10 @@ export const copyCollectionText = async (value) => {
     return false;
   }
 };
+
+export const maskCollectionContact = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length < 4) return String(value || '').trim();
+  const visibleTail = digits.slice(-4);
+  return `••••${visibleTail}`;
+};

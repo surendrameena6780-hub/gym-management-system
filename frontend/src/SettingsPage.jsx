@@ -1879,7 +1879,7 @@ const loadRazorpayScript = () => {
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between py-1">
                           <div>
                             <p className="font-bold text-slate-800 text-sm">Enable Member Online Collection</p>
-                            <p className="text-xs text-slate-500 mt-0.5">Staff can collect member payments using Razorpay checkout, direct UPI QR, or both</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Staff can collect member payments using Razorpay payment links with member-phone delivery and owner QR, direct UPI QR, or both</p>
                           </div>
                           <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, enabled: !prev.member_payments?.enabled } }))}
                             className={`relative w-11 h-6 rounded-full transition-colors ${integrationData.member_payments?.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}>
