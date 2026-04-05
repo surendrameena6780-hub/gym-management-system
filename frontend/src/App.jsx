@@ -300,14 +300,7 @@ function App() {
   const [attendanceSectionFocus, setAttendanceSectionFocus] = useState(null);
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const raw = localStorage.getItem('user');
-      return raw ? JSON.parse(raw) : null;
-    } catch (_err) {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(null);
   const [isSuspended, setIsSuspended] = useState(false); 
   const [saasGrace, setSaasGrace] = useState(false);
   const [saasGraceNoticeKey, setSaasGraceNoticeKey] = useState('');
