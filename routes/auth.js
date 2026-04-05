@@ -109,7 +109,6 @@ const getPasswordResetDeliveryMode = () => {
     return mode === 'email' && isEmailTransportConfigured() ? 'email' : 'preview';
 };
 
-const getAdminEmailOtpMode = () => (isEmailTransportConfigured() ? 'email' : 'preview');
 const getSignupEmailOtpMode = () => (isEmailTransportConfigured() ? 'email' : 'preview');
 
 const generatePasswordResetOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
@@ -1427,10 +1426,10 @@ router.get('/config', (req, res) => {
         apple_client_id: process.env.APPLE_CLIENT_ID || null,
         signup_email_otp_enabled: true,
         signup_email_otp_mode: getSignupEmailOtpMode(),
-        admin_email_otp_enabled: true,
-        admin_email_otp_mode: getAdminEmailOtpMode(),
-        admin_phone_otp_enabled: true,
-        admin_phone_otp_mode: getMsg91OtpMode().toLowerCase(),
+        admin_email_otp_enabled: false,
+        admin_email_otp_mode: 'disabled',
+        admin_phone_otp_enabled: false,
+        admin_phone_otp_mode: 'disabled',
     });
 });
 

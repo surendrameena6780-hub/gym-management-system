@@ -330,6 +330,28 @@ function App() {
     toastRef.current = toast;
   }, [toast]);
 
+  const stabilizeViewportAfterAuth = useCallback(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const activeElement = document.activeElement;
+    const isEditable = activeElement instanceof HTMLElement
+      && (activeElement.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName));
+
+    if (isEditable && typeof activeElement.blur === 'function') {
+      activeElement.blur();
+    }
+
+    document.documentElement.classList.remove('app-keyboard-open');
+    document.documentElement.style.setProperty('--app-keyboard-inset', '0px');
+
+    window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync', {
+      detail: {
+        source: 'auth-transition',
+        at: Date.now(),
+      },
+    }));
+  }, []);
+
   useEffect(() => {
     setVisitedPages((prev) => {
       if (prev.has(currentPage)) return prev;
@@ -345,12 +367,13 @@ function App() {
     const params   = new URLSearchParams(window.location.search);
     const urlToken = params.get('token');
     if (!urlToken) return;
+    stabilizeViewportAfterAuth();
     localStorage.setItem('token', urlToken);
     localStorage.removeItem('user');
     setCurrentUser(null);
     setToken(urlToken);
     window.history.replaceState({}, '', '/dashboard');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isHQ, stabilizeViewportAfterAuth]);
 
   useEffect(() => {
     const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '');
@@ -928,6 +951,7 @@ function App() {
 
   if (!token) {
     const storeToken = (t, user) => {
+      stabilizeViewportAfterAuth();
       localStorage.setItem('token', t);
       setToken(t);
       if (user) {

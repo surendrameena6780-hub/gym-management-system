@@ -132,6 +132,13 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
     })
   }
 
+  const handleForcedViewportSync = () => {
+    queueViewportSync()
+    window.setTimeout(() => {
+      queueViewportSync()
+    }, 180)
+  }
+
   const notifyAppResumed = (source) => {
     queueViewportSync()
     if (resumeSyncTimeoutId) {
@@ -159,6 +166,7 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   window.addEventListener('orientationchange', queueViewportSync, { passive: true })
   window.addEventListener('focus', () => notifyAppResumed('focus'), { passive: true })
   window.addEventListener('pageshow', () => notifyAppResumed('pageshow'), { passive: true })
+  window.addEventListener('gymvault:force-viewport-sync', handleForcedViewportSync, { passive: true })
   document.addEventListener('visibilitychange', handleVisibilityResume, { passive: true })
   window.visualViewport?.addEventListener('resize', queueViewportSync, { passive: true })
   window.visualViewport?.addEventListener('scroll', queueViewportSync, { passive: true })

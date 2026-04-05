@@ -185,8 +185,6 @@ const getTemplateSyncMeta = (status) => {
   return lookup[normalized] || lookup.NOT_SYNCED;
 };
 
-const getOtpModeLabel = (mode) => String(mode || 'preview').toLowerCase() === 'msg91' ? 'Live SMS' : 'Preview Mode';
-
 const getRazorpayCheckoutImageUrl = () => {
   if (typeof window === 'undefined') return '';
   return new URL('/gymvault-app-icon-192.png', window.location.origin).toString();
@@ -2210,14 +2208,14 @@ const loadRazorpayScript = () => {
                           <p className="text-[11px] text-slate-600 font-semibold mt-1">{getWhatsAppConnectionMeta(integrationData.whatsapp_status).note}</p>
                         </div>
 
-                        <div className={`rounded-2xl p-4 border ${integrationData.platform_otp_mode === 'msg91' ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                        <div className="rounded-2xl p-4 border bg-indigo-50 border-indigo-200">
                           <div className="flex items-center gap-2 mb-2">
-                            <div className={`w-2 h-2 rounded-full ${integrationData.platform_otp_mode === 'msg91' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Owner Login OTP</span>
+                            <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Owner Sign-In</span>
                           </div>
-                          <p className={`text-sm font-black ${integrationData.platform_otp_mode === 'msg91' ? 'text-emerald-700' : 'text-amber-700'}`}>{getOtpModeLabel(integrationData.platform_otp_mode)}</p>
+                          <p className="text-sm font-black text-indigo-700">Google or Email Password</p>
                           <p className="text-[11px] text-slate-600 font-semibold mt-1">
-                            {integrationData.platform_otp_mode === 'msg91' ? 'Live SMS delivery is configured for owner and staff login.' : 'Preview OTPs are shown in the login screen until production SMS is enabled.'}
+                            Owner and staff sign-in now uses Google or email and password. Email OTP remains available for signup verification and forgot-password recovery only.
                           </p>
                         </div>
 
