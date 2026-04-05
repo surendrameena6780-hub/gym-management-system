@@ -1409,7 +1409,7 @@ function App() {
               onClick={() => setShowMobileMoreNav(false)}
             />
             <div
-              className="fixed left-3 right-3 z-[116] desktop:hidden rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl p-2 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.55)]"
+              className="absolute left-3 right-3 z-[116] desktop:hidden rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl p-2 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.55)]"
               style={{ bottom: 'calc(var(--mobile-nav-offset) + 0.5rem)' }}
             >
               <div className="grid grid-cols-2 gap-1.5">
@@ -1438,7 +1438,7 @@ function App() {
           </>
         )}
 
-        <nav className="app-mobile-nav shrink-0 desktop:hidden z-[120] px-3 pt-2">
+        <nav className="app-mobile-nav absolute inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-2">
           <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
             {/* iOS-style sliding indicator nav */}
             <MobileNav

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gymvault-v7';
+const CACHE_NAME = 'gymvault-v8';
 const PRECACHE_URLS = [
   '/',
   '/index.html',

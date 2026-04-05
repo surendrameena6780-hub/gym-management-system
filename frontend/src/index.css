@@ -208,10 +208,11 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-main-scroll {
-  padding-bottom: 1.5rem !important;
+  padding-bottom: var(--mobile-content-safe-padding) !important;
 }
 
 .app-scroll-shell {
+  position: relative;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
@@ -221,6 +222,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .mobile-floating-offset {
+  position: absolute !important;
   bottom: calc(var(--mobile-nav-offset) + 0.5rem);
 }
 
@@ -837,6 +839,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
   }
 
   .mobile-floating-offset {
+    position: fixed !important;
     bottom: 1.5rem;
   }
 
