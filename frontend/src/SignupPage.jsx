@@ -13,6 +13,8 @@ const PLANS = [
   { key: 'elite', label: 'Elite',  price: '\u20B93,499', color: '#10b981', desc: 'Unlimited members'  },
 ];
 
+const PENDING_GOOGLE_SIGNUP_KEY = 'gv_pending_google_signup';
+
 // â”€â”€â”€ Password strength â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function passwordStrength(pwd) {
   if (!pwd) return { level: 0, label: '', color: '' };
@@ -96,16 +98,16 @@ function AppleIconSvg({ color }) {
   );
 }
 
-// â”€â”€â”€ Progress dots (4 steps) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function ProgressDots({ step, dotColor }) {
+// â”€â”€â”€ Progress dots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ProgressDots({ activeIndex, totalSteps, dotColor }) {
   return (
     <div className="flex items-center justify-center gap-2 mb-8">
-      {[0, 1, 2, 3].map(i => (
+      {Array.from({ length: totalSteps }, (_, i) => (
         <div key={i} className="rounded-full transition-all duration-500"
           style={{
-            width:      i === step ? '28px' : '8px',
+            width:      i === activeIndex ? '28px' : '8px',
             height:     '8px',
-            background: i <= step ? 'linear-gradient(90deg, #6366f1, #a855f7)' : dotColor,
+            background: i <= activeIndex ? 'linear-gradient(90deg, #6366f1, #a855f7)' : dotColor,
           }} />
       ))}
     </div>
@@ -147,6 +149,22 @@ export default function SignupPage({ onShowLogin, setToken }) {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [googleAuthEnabled, setGoogleAuthEnabled] = useState(null);
+  const [pendingGoogleSignup, setPendingGoogleSignup] = useState(null);
+
+  const isGoogleSignup = Boolean(pendingGoogleSignup?.signupToken);
+  const stepFlow = isGoogleSignup ? [1, 2, 3] : [0, 1, 2, 3];
+  const activeStepIndex = Math.max(stepFlow.indexOf(step), 0);
+  const totalSteps = stepFlow.length;
+
+  const clearPendingGoogleSignup = () => {
+    sessionStorage.removeItem(PENDING_GOOGLE_SIGNUP_KEY);
+    setPendingGoogleSignup(null);
+  };
+
+  const handleShowLogin = () => {
+    clearPendingGoogleSignup();
+    onShowLogin();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +188,50 @@ export default function SignupPage({ onShowLogin, setToken }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const signupToken = params.get('google_signup_token');
+
+    if (signupToken) {
+      const pending = {
+        signupToken,
+        email: params.get('signup_email') || '',
+        fullName: params.get('signup_name') || '',
+        avatarUrl: params.get('signup_avatar') || '',
+      };
+
+      sessionStorage.setItem(PENDING_GOOGLE_SIGNUP_KEY, JSON.stringify(pending));
+      setPendingGoogleSignup(pending);
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    try {
+      const raw = sessionStorage.getItem(PENDING_GOOGLE_SIGNUP_KEY);
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      if (pending?.signupToken) {
+        setPendingGoogleSignup(pending);
+      } else {
+        sessionStorage.removeItem(PENDING_GOOGLE_SIGNUP_KEY);
+      }
+    } catch (_err) {
+      sessionStorage.removeItem(PENDING_GOOGLE_SIGNUP_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pendingGoogleSignup?.signupToken) return;
+    if (pendingGoogleSignup.email) {
+      setEmail(pendingGoogleSignup.email);
+      setEmailSt('ok');
+    }
+    if (pendingGoogleSignup.fullName) {
+      setFullName((prev) => prev || pendingGoogleSignup.fullName);
+    }
+    setStep((currentStep) => (currentStep === 0 ? 1 : currentStep));
+  }, [pendingGoogleSignup]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
     const errCode = params.get('auth_error');
     if (!errCode) return;
 
@@ -178,6 +240,8 @@ export default function SignupPage({ onShowLogin, setToken }) {
       google_cancelled: 'Google sign-up was cancelled.',
       google_token_failed: 'Google sign-up failed. Please try again.',
       google_profile_failed: 'Google sign-up could not read your Google profile. Please try again.',
+      google_account_exists: 'This Google account is already registered. Sign in with Google instead.',
+      google_email_in_use: 'This email is already registered. Use the original sign-in method instead.',
       account_suspended: 'Your account is suspended. Contact GymVault HQ.',
       server_error: 'A server error occurred. Please try again.',
     };
@@ -274,21 +338,58 @@ export default function SignupPage({ onShowLogin, setToken }) {
       if (!gymName.trim() || gymName.trim().length < 2) { setError('Please enter your gym name (at least 2 characters).'); return; }
       if (!city.trim())                                  { setError('City / State is required.'); return; }
     }
+    const currentIndex = stepFlow.indexOf(step);
+    if (currentIndex >= stepFlow.length - 1) return;
     setStepDir(1);
-    setStep(s => s + 1);
+    setStep(stepFlow[currentIndex + 1]);
   };
 
-  const goBack = () => { setError(''); setStepDir(-1); setStep(s => s - 1); };
+  const goBack = () => {
+    setError('');
+    const currentIndex = stepFlow.indexOf(step);
+    if (currentIndex <= 0) {
+      handleShowLogin();
+      return;
+    }
+    setStepDir(-1);
+    setStep(stepFlow[currentIndex - 1]);
+  };
 
   // â”€â”€ Final submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (password.length < 8)     { setError('Password must be at least 8 characters.'); return; }
-    if (password !== confirmPwd) { setError('Passwords do not match.'); return; }
     if (!agreedToTerms)          { setError('Please agree to the Terms of Service to continue.'); return; }
+    if (!isGoogleSignup) {
+      if (password.length < 8)     { setError('Password must be at least 8 characters.'); return; }
+      if (password !== confirmPwd) { setError('Passwords do not match.'); return; }
+    }
     setLoading(true);
     try {
+      if (isGoogleSignup) {
+        const signupToken = pendingGoogleSignup?.signupToken;
+        if (!signupToken) {
+          setError('Google signup session expired. Please continue with Google again.');
+          return;
+        }
+
+        const res = await axios.post('/api/auth/google/signup/complete', {
+          signup_token: signupToken,
+          gym_name: gymName.trim(),
+          full_name: fullName.trim(),
+          owner_phone: ownerPhone.replace(/\D/g, '').slice(-10),
+          gym_address: address.trim() || null,
+          gym_city: city.trim(),
+          branches_count: parseInt(branches, 10) || 1,
+          selected_plan: selectedPlan,
+        });
+
+        clearPendingGoogleSignup();
+        setToken(res.data.token, res.data.user);
+        window.history.pushState({}, '', '/dashboard');
+        return;
+      }
+
       await axios.post('/api/auth/register-owner', {
         gym_name:      gymName.trim(),
         full_name:     fullName.trim(),
@@ -316,13 +417,18 @@ export default function SignupPage({ onShowLogin, setToken }) {
   const trialEndStr = trialEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const planObj = PLANS.find(p => p.key === selectedPlan);
 
-  const STEP_TITLES = ['Get started', 'About you', 'Your gym', 'Secure your account'];
-  const STEP_SUBS   = [
-    'Quick setup  -  no credit card required',
-    'Tell us a bit about yourself',
-    'A few details about your gym',
-    'Set a strong password and choose your plan',
-  ];
+  const STEP_TITLES = {
+    0: 'Get started',
+    1: 'About you',
+    2: 'Your gym',
+    3: isGoogleSignup ? 'Choose your plan' : 'Secure your account',
+  };
+  const STEP_SUBS = {
+    0: 'Quick setup  -  no credit card required',
+    1: 'Tell us a bit about yourself',
+    2: 'A few details about your gym',
+    3: isGoogleSignup ? 'Finish your Google signup and activate your 14-day trial' : 'Set a strong password and choose your plan',
+  };
   const primaryBtn = {
     background: 'linear-gradient(135deg, #6366f1, #a855f7)',
     boxShadow:  loading ? 'none' : '0 8px 28px rgba(99,102,241,0.42)',
@@ -364,12 +470,12 @@ export default function SignupPage({ onShowLogin, setToken }) {
         <div className="rounded-3xl p-7 sm:p-8"
           style={{ ...T.card, transition: 'background 0.4s ease, border 0.4s ease, box-shadow 0.4s ease' }}>
 
-          <ProgressDots step={step} dotColor={T.dot} />
+          <ProgressDots activeIndex={activeStepIndex} totalSteps={totalSteps} dotColor={T.dot} />
 
           {/* Heading */}
           <div className="mb-6">
             <p className="text-[10px] font-black uppercase tracking-[0.22em] mb-2" style={{ color: '#818cf8' }}>
-              Step {step + 1} of 4
+              Step {activeStepIndex + 1} of {totalSteps}
             </p>
             <h2 className="text-[1.5rem] font-black leading-tight" style={{ color: T.text }}>{STEP_TITLES[step]}</h2>
             <p className="text-sm font-medium mt-1.5" style={{ color: T.sub }}>{STEP_SUBS[step]}</p>
@@ -431,7 +537,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   {emailSt === 'taken' && (
                     <p className="text-[10px] font-bold mt-1.5 text-rose-400 flex items-center gap-1 gv-fade-in">
                       <AlertCircle size={10} /> Already registered  - {' '}
-                      <button type="button" onClick={onShowLogin} className="underline ml-0.5">sign in instead</button>
+                      <button type="button" onClick={handleShowLogin} className="underline ml-0.5">sign in instead</button>
                     </p>
                   )}
                 </div>
@@ -480,7 +586,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   {phoneSt === 'taken' && (
                     <p className="text-[10px] font-bold mt-1.5 text-rose-400 flex items-center gap-1 gv-fade-in">
                       <AlertCircle size={10} /> Number already registered  - {' '}
-                      <button type="button" onClick={onShowLogin} className="underline ml-0.5">sign in</button>
+                      <button type="button" onClick={handleShowLogin} className="underline ml-0.5">sign in</button>
                     </p>
                   )}
                 </div>
@@ -567,53 +673,70 @@ export default function SignupPage({ onShowLogin, setToken }) {
             {/* â•â•â•â• STEP 3  -  Password + Plan â•â•â•â• */}
             {step === 3 && (
               <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Password */}
-                <div>
-                  <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2" style={{ color: T.label }}>Password</label>
-                  <div className="relative">
-                    <Lock size={15} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.icon }} />
-                    <input type={showPwd ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-                      placeholder="Min. 8 characters" autoFocus
-                      className="w-full pl-11 pr-12 py-3.5 rounded-xl text-sm font-medium outline-none transition-all"
-                      style={{ ...iBase, color: T.text }} onFocus={iFocus} onBlur={iBlur} />
-                    <button type="button" onClick={() => setShowPwd(p => !p)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style={{ color: T.icon }}>
-                      {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                  {password && (
-                    <div className="mt-2">
-                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: T.strengthBg }}>
-                        <div className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${(strength.level / 4) * 100}%`, background: strength.color }} />
+                {!isGoogleSignup && (
+                  <>
+                    {/* Password */}
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2" style={{ color: T.label }}>Password</label>
+                      <div className="relative">
+                        <Lock size={15} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.icon }} />
+                        <input type={showPwd ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                          placeholder="Min. 8 characters" autoFocus
+                          className="w-full pl-11 pr-12 py-3.5 rounded-xl text-sm font-medium outline-none transition-all"
+                          style={{ ...iBase, color: T.text }} onFocus={iFocus} onBlur={iBlur} />
+                        <button type="button" onClick={() => setShowPwd(p => !p)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style={{ color: T.icon }}>
+                          {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
                       </div>
-                      <p className="text-[10px] font-bold mt-1" style={{ color: strength.color }}>{strength.label}</p>
+                      {password && (
+                        <div className="mt-2">
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: T.strengthBg }}>
+                            <div className="h-full rounded-full transition-all duration-500"
+                              style={{ width: `${(strength.level / 4) * 100}%`, background: strength.color }} />
+                          </div>
+                          <p className="text-[10px] font-bold mt-1" style={{ color: strength.color }}>{strength.label}</p>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Confirm password */}
-                <div>
-                  <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2" style={{ color: T.label }}>Confirm Password</label>
-                  <div className="relative">
-                    <Lock size={15} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.icon }} />
-                    <input type={showConfirm ? 'text' : 'password'} value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)}
-                      placeholder="Repeat your password"
-                      className="w-full pl-11 pr-12 py-3.5 rounded-xl text-sm font-medium outline-none transition-all"
-                      style={{ ...iBase, color: T.text }} onFocus={iFocus} onBlur={iBlur} />
-                    <button type="button" onClick={() => setShowConfirm(p => !p)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style={{ color: T.icon }}>
-                      {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
+                    {/* Confirm password */}
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2" style={{ color: T.label }}>Confirm Password</label>
+                      <div className="relative">
+                        <Lock size={15} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.icon }} />
+                        <input type={showConfirm ? 'text' : 'password'} value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)}
+                          placeholder="Repeat your password"
+                          className="w-full pl-11 pr-12 py-3.5 rounded-xl text-sm font-medium outline-none transition-all"
+                          style={{ ...iBase, color: T.text }} onFocus={iFocus} onBlur={iBlur} />
+                        <button type="button" onClick={() => setShowConfirm(p => !p)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 transition-colors" style={{ color: T.icon }}>
+                          {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </div>
+                      {confirmPwd && (
+                        <p className={`text-[10px] font-bold mt-1 flex items-center gap-1 ${password === confirmPwd && password.length >= 8 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {password === confirmPwd && password.length >= 8
+                            ? <><Check size={10} strokeWidth={3} /> Passwords match</>
+                            : 'Passwords don\'t match'}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {isGoogleSignup && (
+                  <div className="flex items-start gap-2.5 p-3.5 rounded-xl"
+                    style={{ background: T.social.background, border: T.social.border }}>
+                    <GoogleIcon />
+                    <div>
+                      <p className="font-black text-sm" style={{ color: T.text }}>Google account verified</p>
+                      <p className="text-[11px] mt-0.5" style={{ color: T.sub }}>
+                        {email} will be used for sign-in. Finish your gym details and plan to complete setup.
+                      </p>
+                    </div>
                   </div>
-                  {confirmPwd && (
-                    <p className={`text-[10px] font-bold mt-1 flex items-center gap-1 ${password === confirmPwd && password.length >= 8 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {password === confirmPwd && password.length >= 8
-                        ? <><Check size={10} strokeWidth={3} /> Passwords match</>
-                        : 'Passwords don\'t match'}
-                    </p>
-                  )}
-                </div>
+                )}
 
                 {/* â”€â”€ Trial banner + Plan picker â”€â”€ */}
                 <div>
@@ -687,8 +810,8 @@ export default function SignupPage({ onShowLogin, setToken }) {
                     className="flex-[2] py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all disabled:opacity-70"
                     style={primaryBtn}>
                     {loading
-                      ? <><Loader2 size={15} className="animate-spin" /> Creating...</>
-                      : <>Create Gym <ArrowRight size={16} /></>}
+                      ? <><Loader2 size={15} className="animate-spin" /> {isGoogleSignup ? 'Finishing...' : 'Creating...'}</>
+                      : <>{isGoogleSignup ? 'Complete Signup' : 'Create Gym'} <ArrowRight size={16} /></>}
                   </button>
                 </div>
               </form>
@@ -697,7 +820,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
 
           {/* Footer */}
           <p className="text-center mt-6">
-            <button type="button" onClick={onShowLogin}
+            <button type="button" onClick={handleShowLogin}
               className="text-[11px] font-bold transition-colors hover:text-indigo-400"
               style={{ color: T.footer }}>
               Already have an account? Sign in →

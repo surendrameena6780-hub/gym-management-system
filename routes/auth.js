@@ -25,15 +25,22 @@ const getGoogleRedirectUri = () => {
     return `${getAppUrl()}/api/auth/google/callback`;
 };
 
-const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', source = '' } = {}) => {
+const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', source = '', extraParams = {} } = {}) => {
     const targetPath = mode === 'signup' ? '/signup' : '/login';
     const params = new URLSearchParams();
     if (error) params.set('auth_error', error);
     if (token) params.set('token', token);
     if (source) params.set('auth_source', source);
+    Object.entries(extraParams || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value) !== '') {
+            params.set(key, String(value));
+        }
+    });
     const query = params.toString();
     return `${getFrontendUrl()}${targetPath}${query ? `?${query}` : ''}`;
 };
+
+const GOOGLE_SIGNUP_TOKEN_TTL_SECONDS = 15 * 60;
 
 const AUTH_CONTEXT_SELECT = `
     SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
@@ -60,6 +67,56 @@ const getAuthPermissions = (user) => (
             ? user.permissions
             : getDefaultPermissionsByStaffRole(user?.staff_role))
 );
+
+const issueAuthToken = (user) => {
+    const permissions = getAuthPermissions(user);
+    const token = jwt.sign(
+        {
+            user: {
+                id: user.id,
+                gym_id: user.gym_id,
+                role: user.role,
+                staff_role: user.staff_role,
+                permissions,
+                is_active: user.is_active,
+            }
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '30d' }
+    );
+
+    return { token, permissions };
+};
+
+const getPasswordlessProviderMessage = (user) => {
+    if (user?.google_id || String(user?.auth_provider || '').toLowerCase() === 'google') {
+        return 'This account uses Google sign-in. Continue with Google.';
+    }
+    if (user?.apple_id || String(user?.auth_provider || '').toLowerCase() === 'apple') {
+        return 'This account uses Apple Sign-In. Continue with Apple.';
+    }
+    return 'This account uses social sign-in. Continue with the original sign-in method.';
+};
+
+const createGoogleSignupToken = ({ googleId, email, fullName, avatarUrl }) => jwt.sign(
+    {
+        type: 'google_signup',
+        google_id: googleId,
+        email,
+        full_name: fullName,
+        avatar_url: avatarUrl || '',
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: GOOGLE_SIGNUP_TOKEN_TTL_SECONDS }
+);
+
+const verifyGoogleSignupToken = (signupToken) => {
+    const decoded = jwt.verify(String(signupToken || ''), process.env.JWT_SECRET);
+    if (!decoded || decoded.type !== 'google_signup' || !decoded.google_id || !decoded.email) {
+        throw new Error('INVALID_GOOGLE_SIGNUP_TOKEN');
+    }
+    return decoded;
+};
 
 const getOauthAccountError = (user) => {
     if (!user) return 'server_error';
@@ -114,18 +171,36 @@ const findExistingOauthEmailUser = async (email) => {
     return loadUserAuthContextById(userId);
 };
 
-const createOauthOwnerAccount = async ({ email, fullName, authProvider, providerField, providerValue, avatarUrl = null }) => {
+const createOauthOwnerAccount = async ({
+    email,
+    fullName,
+    authProvider,
+    providerField,
+    providerValue,
+    avatarUrl = null,
+    ownerPhone = null,
+    gymName = null,
+    gymCity = null,
+    gymAddress = null,
+    branchesCount = 1,
+    selectedPlan = 'pro',
+}) => {
     if (!['google_id', 'apple_id'].includes(providerField)) {
         throw new Error(`Unsupported OAuth provider field: ${providerField}`);
     }
 
     const ownerName = buildOAuthOwnerName(fullName, email);
-    const gymName = buildOAuthGymName(ownerName);
+    const resolvedGymName = truncateText(gymName || buildOAuthGymName(ownerName), 100) || 'My Gym';
+    const resolvedPlan = ['basic', 'pro', 'elite'].includes(String(selectedPlan || '').toLowerCase())
+        ? String(selectedPlan).toLowerCase()
+        : 'pro';
+    const resolvedBranchesCount = Math.max(1, Number.parseInt(branchesCount, 10) || 1);
+    const normalizedPhone = String(ownerPhone || '').replace(/\D/g, '').slice(-10) || null;
 
     const newGym = await pool.query(
         `INSERT INTO gyms (name, address, city, branches_count, current_plan, saas_status)
          VALUES ($1, $2, $3, $4, $5, 'FREE_TRIAL') RETURNING id`,
-        [gymName, null, null, 1, 'pro']
+        [resolvedGymName, gymAddress || null, gymCity || null, resolvedBranchesCount, resolvedPlan]
     );
     const gymId = newGym.rows[0].id;
 
@@ -140,7 +215,7 @@ const createOauthOwnerAccount = async ({ email, fullName, authProvider, provider
         `INSERT INTO users (gym_id, full_name, email, phone, password_hash, role, staff_role, is_active, ${providerColumns})
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${providerField === 'google_id' ? '$9, $10, $11' : '$9, $10'})
          RETURNING id`,
-        [gymId, ownerName, email, null, 'OAUTH_NO_PASSWORD', 'OWNER', 'OWNER', true, ...providerValues]
+        [gymId, ownerName, email, normalizedPhone, 'OAUTH_NO_PASSWORD', 'OWNER', 'OWNER', true, ...providerValues]
     );
 
     return loadUserAuthContextById(newUser.rows[0].id);
@@ -305,6 +380,10 @@ router.post('/login', async (req, res) => {
             return res.status(403).json({ message: "Staff account is inactive. Contact gym owner." });
         }
 
+        if (String(user.password_hash || '') === 'OAUTH_NO_PASSWORD') {
+            return res.status(400).json({ message: getPasswordlessProviderMessage(user) });
+        }
+
         // 2. Securely verify the password typed against the database hash
         const isMatch = await bcrypt.compare(password, user.password_hash);
         
@@ -313,26 +392,7 @@ router.post('/login', async (req, res) => {
         }
 
         // 3. Issue the JWT Token ONLY if the password is correct
-        const permissions = String(user.role || '').toUpperCase() === 'OWNER'
-            ? ['*']
-            : (Array.isArray(user.permissions)
-                ? user.permissions
-                : getDefaultPermissionsByStaffRole(user.staff_role));
-
-        const token = jwt.sign(
-            {
-                user: {
-                    id: user.id,
-                    gym_id: user.gym_id,
-                    role: user.role,
-                    staff_role: user.staff_role,
-                    permissions,
-                    is_active: user.is_active,
-                }
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '30d' }
-        );
+        const { token, permissions } = issueAuthToken(user);
 
         await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
@@ -434,59 +494,180 @@ router.get('/google/callback', async (req, res) => {
             return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_profile_failed' }));
         }
 
+        if (mode === 'signup') {
+            const existingGoogleUser = await loadUserAuthContextByProvider('google_id', googleId);
+            if (existingGoogleUser) {
+                return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_account_exists' }));
+            }
+
+            const emailUser = await findExistingOauthEmailUser(email);
+            if (emailUser) {
+                return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_email_in_use' }));
+            }
+
+            const signupToken = createGoogleSignupToken({
+                googleId,
+                email,
+                fullName,
+                avatarUrl,
+            });
+
+            return res.redirect(buildFrontendAuthRedirect({
+                mode,
+                source: 'google',
+                extraParams: {
+                    google_signup_token: signupToken,
+                    signup_email: email,
+                    signup_name: fullName,
+                    signup_avatar: avatarUrl,
+                },
+            }));
+        }
+
         await pool.query('BEGIN');
 
         let user = await loadUserAuthContextByProvider('google_id', googleId);
-        if (user) {
-            const authError = getOauthAccountError(user);
-            if (authError) {
-                await pool.query('ROLLBACK');
-                return res.redirect(buildFrontendAuthRedirect({ mode, error: authError }));
-            }
-            await pool.query(
-                'UPDATE users SET avatar_url = $1, last_login_at = NOW() WHERE id = $2',
-                [avatarUrl, user.id]
-            );
-            user = await loadUserAuthContextById(user.id);
-        } else {
+        if (!user) {
+            await pool.query('ROLLBACK');
             const emailUser = await findExistingOauthEmailUser(email);
-            if (emailUser) {
-                const authError = getOauthAccountError(emailUser);
-                if (authError) {
-                    await pool.query('ROLLBACK');
-                    return res.redirect(buildFrontendAuthRedirect({ mode, error: authError }));
-                }
-                await pool.query(
-                    'UPDATE users SET google_id = $1, avatar_url = $2, auth_provider = $3, last_login_at = NOW() WHERE id = $4',
-                    [googleId, avatarUrl, 'google', emailUser.id]
-                );
-                user = await loadUserAuthContextById(emailUser.id);
-            } else {
-                user = await createOauthOwnerAccount({
-                    email,
-                    fullName,
-                    authProvider: 'google',
-                    providerField: 'google_id',
-                    providerValue: googleId,
-                    avatarUrl,
-                });
-            }
+            const error = emailUser ? 'google_use_email_login' : 'google_signup_required';
+            return res.redirect(buildFrontendAuthRedirect({ mode, error }));
         }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            await pool.query('ROLLBACK');
+            return res.redirect(buildFrontendAuthRedirect({ mode, error: authError }));
+        }
+
+        if (String(user.password_hash || '') !== 'OAUTH_NO_PASSWORD') {
+            await pool.query('ROLLBACK');
+            return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_use_email_login' }));
+        }
+
+        await pool.query(
+            'UPDATE users SET avatar_url = $1, last_login_at = NOW() WHERE id = $2',
+            [avatarUrl, user.id]
+        );
+        user = await loadUserAuthContextById(user.id);
 
         await pool.query('COMMIT');
 
-        const permissions = getAuthPermissions(user);
-        const token = jwt.sign(
-            { user: { id: user.id, gym_id: user.gym_id, role: user.role || 'OWNER', staff_role: user.staff_role || 'OWNER', permissions, is_active: true } },
-            process.env.JWT_SECRET,
-            { expiresIn: '30d' }
-        );
+        const { token } = issueAuthToken({
+            ...user,
+            role: user.role || 'OWNER',
+            staff_role: user.staff_role || 'OWNER',
+            is_active: true,
+        });
 
         res.redirect(buildFrontendAuthRedirect({ mode, token, source: 'google' }));
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
         console.error('GOOGLE OAUTH ERROR:', err);
         res.redirect(buildFrontendAuthRedirect({ mode, error: 'server_error' }));
+    }
+});
+
+router.post('/google/signup/complete', async (req, res) => {
+    const signupToken = String(req.body?.signup_token || '').trim();
+    const gymName = String(req.body?.gym_name || '').trim();
+    const fullName = String(req.body?.full_name || '').trim();
+    const ownerPhone = String(req.body?.owner_phone || '').replace(/\D/g, '').slice(-10);
+    const gymAddress = req.body?.gym_address ? String(req.body.gym_address).trim() : null;
+    const gymCity = req.body?.gym_city ? String(req.body.gym_city).trim() : null;
+    const branchesCount = Number.parseInt(req.body?.branches_count, 10) || 1;
+    const selectedPlan = ['basic', 'pro', 'elite'].includes(String(req.body?.selected_plan || '').toLowerCase())
+        ? String(req.body.selected_plan).toLowerCase()
+        : 'basic';
+
+    if (!signupToken) {
+        return res.status(400).json({ message: 'Google signup session is missing. Please continue with Google again.' });
+    }
+    if (!gymName || !fullName || !gymCity) {
+        return res.status(400).json({ message: 'Gym name, owner name, and city are required.' });
+    }
+    if (!ownerPhone || ownerPhone.length < 10) {
+        return res.status(400).json({ message: 'Please enter a valid 10-digit mobile number.' });
+    }
+
+    try {
+        const payload = verifyGoogleSignupToken(signupToken);
+        const email = String(payload.email || '').trim().toLowerCase();
+        const googleId = String(payload.google_id || '').trim();
+        const avatarUrl = String(payload.avatar_url || '').trim();
+        const ownerName = fullName || String(payload.full_name || '').trim();
+
+        await pool.query('BEGIN');
+
+        const existingGoogleUser = await loadUserAuthContextByProvider('google_id', googleId);
+        if (existingGoogleUser) {
+            await pool.query('ROLLBACK');
+            return res.status(409).json({ message: 'This Google account is already registered. Sign in with Google instead.' });
+        }
+
+        const existingEmailUser = await findExistingOauthEmailUser(email);
+        if (existingEmailUser) {
+            await pool.query('ROLLBACK');
+            return res.status(409).json({ message: 'An account with this email already exists. Use the original sign-in method.' });
+        }
+
+        const existingPhone = await pool.query('SELECT id FROM users WHERE phone LIKE $1', [`%${ownerPhone}`]);
+        if (existingPhone.rows.length > 0) {
+            await pool.query('ROLLBACK');
+            return res.status(409).json({ message: 'This phone number is already registered.' });
+        }
+
+        const user = await createOauthOwnerAccount({
+            email,
+            fullName: ownerName,
+            authProvider: 'google',
+            providerField: 'google_id',
+            providerValue: googleId,
+            avatarUrl,
+            ownerPhone,
+            gymName,
+            gymCity,
+            gymAddress,
+            branchesCount,
+            selectedPlan,
+        });
+
+        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+
+        await pool.query('COMMIT');
+
+        const { token, permissions } = issueAuthToken({
+            ...user,
+            role: user.role || 'OWNER',
+            staff_role: user.staff_role || 'OWNER',
+            is_active: true,
+        });
+
+        return res.json({
+            token,
+            user: {
+                id: user.id,
+                full_name: user.full_name,
+                email: user.email,
+                gym_id: user.gym_id,
+                role: user.role,
+                staff_role: user.staff_role,
+                is_active: user.is_active,
+                permissions,
+            },
+            saas: {
+                status: user.saas_status || 'ACTIVE',
+                valid_until: user.saas_valid_until,
+                plan: user.current_plan,
+            }
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        if (err?.message === 'INVALID_GOOGLE_SIGNUP_TOKEN' || err?.name === 'JsonWebTokenError' || err?.name === 'TokenExpiredError') {
+            return res.status(400).json({ message: 'Google signup session expired. Please continue with Google again.' });
+        }
+        console.error('GOOGLE SIGNUP COMPLETE ERROR:', err);
+        return res.status(500).json({ message: 'Could not finish Google signup. Please try again.' });
     }
 });
 

@@ -353,6 +353,8 @@ function App() {
     const urlToken = params.get('token');
     if (!urlToken) return;
     localStorage.setItem('token', urlToken);
+    localStorage.removeItem('user');
+    setCurrentUser(null);
     setToken(urlToken);
     window.history.replaceState({}, '', '/dashboard');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -935,7 +937,13 @@ function App() {
     const storeToken = (t, user) => {
       localStorage.setItem('token', t);
       setToken(t);
-      if (user) { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); }
+      if (user) {
+        localStorage.setItem('user', JSON.stringify(user));
+        setCurrentUser(user);
+      } else {
+        localStorage.removeItem('user');
+        setCurrentUser(null);
+      }
         setVisitedPages(new Set(['Dashboard']));
         setCurrentPage('Dashboard');
         setSaasGrace(false);
@@ -958,6 +966,10 @@ function App() {
       return <SignupPage onShowLogin={showLoginPage} setToken={storeToken} />;
     }
     return <LoginPage setToken={storeToken} onShowSignup={showSignupPage} />;
+  }
+
+  if (!currentUser) {
+    return <SplashScreen exiting={false} />;
   }
 
   return (
