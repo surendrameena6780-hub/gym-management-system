@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="gv-splash-active">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" sizes="32x32" href="/gymvault-app-icon-32.png" />
@@ -80,7 +80,7 @@
         min-height: 100vh;
         min-height: 100svh;
         min-height: -webkit-fill-available;
-        background: #0f1117;
+        background: #161d4f;
         margin: 0;
         font-family: 'Inter', sans-serif !important;
         -webkit-font-smoothing: antialiased;
@@ -90,7 +90,13 @@
         min-height: 100vh;
         min-height: 100svh;
         min-height: -webkit-fill-available;
-        background: #0f1117 !important;
+        background: #161d4f !important;
+      }
+
+      /* Ensure gv-preboot-light body colour is overridden while splash is active */
+      html.gv-splash-active body,
+      html.gv-splash-active #root {
+        background: #161d4f !important;
       }
 
       html.gv-preboot-light body {
@@ -99,6 +105,12 @@
 
       html.gv-preboot-light #root {
         background: #eef0ff !important;
+      }
+
+      /* gv-splash-active must come after gv-preboot-light so it wins via cascade order */
+      html.gv-splash-active body,
+      html.gv-splash-active #root {
+        background: #161d4f !important;
       }
       .premium-card {
         background: white;

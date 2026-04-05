@@ -139,7 +139,7 @@ const SPLASH_STATUS_BAR_BG = '#1f2971';
 function SplashScreen({ exiting, overlay = false }) {
   return (
     <div
-      className={`${overlay ? 'absolute inset-0' : 'app-shell-height w-full'} relative z-[9999] overflow-hidden flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
+      className={`${overlay ? 'absolute' : 'fixed'} inset-0 z-[9999] overflow-hidden flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
       style={{
         background: `linear-gradient(to bottom, ${SPLASH_STATUS_BAR_BG} 0px, ${SPLASH_STATUS_BAR_BG} calc(env(safe-area-inset-top, 44px) - 1px), ${SPLASH_BG} calc(env(safe-area-inset-top, 44px) + 12px), ${SPLASH_BG} 100%)`,
         paddingBottom: 'var(--safe-area-bottom)',
