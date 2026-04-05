@@ -120,14 +120,75 @@ const DEFAULT_MESSAGE_TEMPLATES = [
   { template_key: 'PAYMENT_DUE', title: 'Payment Due Alert', whatsapp_text: '', sms_text: '', is_active: true },
 ];
 
+  const RAZORPAY_CHECKOUT_BRAND_IMAGE = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent([
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">',
+    '<defs>',
+    '<linearGradient id="shield" x1="8" y1="4" x2="56" y2="52" gradientUnits="userSpaceOnUse">',
+    '<stop stop-color="#6366f1"/>',
+    '<stop offset="1" stop-color="#8b5cf6"/>',
+    '</linearGradient>',
+    '<linearGradient id="highlight" x1="12" y1="8" x2="52" y2="48" gradientUnits="userSpaceOnUse">',
+    '<stop stop-color="#ffffff"/>',
+    '<stop offset="1" stop-color="#ffffff" stop-opacity="0"/>',
+    '</linearGradient>',
+    '</defs>',
+    '<path d="M32 4L8 16v16c0 14.4 10.24 27.84 24 32 13.76-4.16 24-17.6 24-32V16L32 4z" fill="url(#shield)"/>',
+    '<path d="M32 8L12 18v14c0 12.4 8.64 24.04 20 27.6 11.36-3.56 20-15.2 20-27.6V18L32 8z" fill="url(#highlight)" opacity="0.35"/>',
+    '<g transform="translate(32 34)" stroke="#ffffff" stroke-width="3" stroke-linecap="round" fill="none">',
+    '<line x1="-12" y1="0" x2="12" y2="0"/>',
+    '<rect x="-16" y="-6" width="5" height="12" rx="1.5" fill="#ffffff" stroke="none"/>',
+    '<rect x="11" y="-6" width="5" height="12" rx="1.5" fill="#ffffff" stroke="none"/>',
+    '<rect x="-19" y="-4" width="3.5" height="8" rx="1" fill="#ffffff" fill-opacity="0.7" stroke="none"/>',
+    '<rect x="15.5" y="-4" width="3.5" height="8" rx="1" fill="#ffffff" fill-opacity="0.7" stroke="none"/>',
+    '</g>',
+    '<circle cx="32" cy="20" r="2" fill="#ffffff" fill-opacity="0.9"/>',
+    '</svg>',
+  ].join(''))}`;
+
+  let razorpayScriptPromise = null;
+
 const loadRazorpayScript = () => {
-    return new Promise((resolve) => {
-        const script = document.createElement('script');
-        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        script.onload = () => resolve(true);
-        script.onerror = () => resolve(false);
-        document.body.appendChild(script);
+    if (typeof window !== 'undefined' && window.Razorpay) {
+      return Promise.resolve(true);
+    }
+
+    if (razorpayScriptPromise) {
+      return razorpayScriptPromise;
+    }
+
+    razorpayScriptPromise = new Promise((resolve) => {
+      const existingScript = document.querySelector('script[data-razorpay-checkout="true"]');
+      if (existingScript) {
+        if (existingScript.getAttribute('data-loaded') === 'true') {
+          resolve(true);
+          return;
+        }
+
+        existingScript.addEventListener('load', () => resolve(true), { once: true });
+        existingScript.addEventListener('error', () => {
+          razorpayScriptPromise = null;
+          resolve(false);
+        }, { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.setAttribute('data-razorpay-checkout', 'true');
+      script.onload = () => {
+        script.setAttribute('data-loaded', 'true');
+        resolve(true);
+      };
+      script.onerror = () => {
+        razorpayScriptPromise = null;
+        script.remove();
+        resolve(false);
+      };
+      document.body.appendChild(script);
     });
+
+    return razorpayScriptPromise;
 };
 
 // FIX: Added defaultTab to the props here!
@@ -981,6 +1042,7 @@ const loadRazorpayScript = () => {
               currency: order.currency,
               name: `GymVault ${selectedPlan.name}`,
               description: `${billingCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
+              image: RAZORPAY_CHECKOUT_BRAND_IMAGE,
               order_id: order.id,
               handler: async function (response) {
                   try {
@@ -1032,7 +1094,7 @@ const loadRazorpayScript = () => {
           };
 
               if (!options.key) {
-                toast("Payment key not configured. Please set VITE_RAZORPAY_KEY_ID.", "error");
+                toast("Payment gateway is not configured yet. Add Razorpay billing keys on the server.", "error");
                 setIsProcessingPayment(false);
                 return;
               }

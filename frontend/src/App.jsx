@@ -919,7 +919,7 @@ function App() {
 
   return (
     <>
-      {isSuspended && <SuspensionOverlay onLogout={handleLogout} onRenew={() => setIsSuspended(false)} />}
+      {isSuspended && <SuspensionOverlay onLogout={handleLogout} onRenew={() => { setIsSuspended(false); setCurrentPage('Settings'); setSettingsTab('billing'); }} />}
       {saasGrace && !isSuspended && (
         <div className="fixed top-0 left-0 right-0 z-[9980] bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2.5 text-center shadow-lg" style={{ paddingTop: 'calc(var(--safe-area-top) + 0.625rem)' }}>
           <p className="text-xs font-bold">⚠️ Your subscription has expired. You have a few days of grace period remaining. <button onClick={() => { setSaasGrace(false); setCurrentPage('Settings'); setSettingsTab('billing'); }} className="underline font-extrabold ml-1 hover:text-white/80">Renew Now</button></p>
