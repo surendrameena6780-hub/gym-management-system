@@ -136,13 +136,13 @@ const SPLASH_BG = '#161d4f';
 // to appear as SPLASH_BG after iOS applies its overlay â€” making top and bottom match.
 const SPLASH_STATUS_BAR_BG = '#1f2971';
 
-function SplashScreen({ exiting, overlay = false }) {
+function SplashScreen({ exiting }) {
   return (
     <div
-      className={`${overlay ? 'absolute' : 'fixed'} inset-0 z-[9999] overflow-hidden flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
+      className={`fixed inset-0 z-[9999] overflow-hidden flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
       style={{
         background: `linear-gradient(to bottom, ${SPLASH_STATUS_BAR_BG} 0px, ${SPLASH_STATUS_BAR_BG} calc(env(safe-area-inset-top, 44px) - 1px), ${SPLASH_BG} calc(env(safe-area-inset-top, 44px) + 12px), ${SPLASH_BG} 100%)`,
-        paddingBottom: 'var(--safe-area-bottom)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1454,7 +1454,7 @@ function App() {
           </div>
         </nav>
 
-        {showSplash && <SplashScreen exiting={splashExiting} overlay />}
+        {showSplash && <SplashScreen exiting={splashExiting} />}
       </div>
     </>
   );
