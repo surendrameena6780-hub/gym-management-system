@@ -2,11 +2,10 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import axios from 'axios';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
-  Mail, Lock, ArrowRight, Eye, EyeOff,
+  Dumbbell, Mail, Lock, ArrowRight, Eye, EyeOff,
   Users, TrendingUp, Layers, ChevronRight, Phone, CheckCircle,
   Copy, LocateFixed, MapPin, QrCode, RefreshCw, ScanLine, X
 } from 'lucide-react';
-import GymVaultLogo from './GymVaultLogo';
 
 // ─── Static left-panel stats (design elements) ────────────────────────────────
 const LEFT_STATS = [
@@ -575,8 +574,9 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
       <div className="sticky top-0 z-10 px-5 pb-4 flex items-center justify-between"
         style={{ paddingTop: 'calc(var(--safe-area-top) + 1rem)', background: 'rgba(6,11,20,0.88)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center">
-            <GymVaultLogo size={32} />
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }}>
+            <Dumbbell size={15} className="text-white" strokeWidth={2.5} />
           </div>
           <div>
             <p className="text-white font-black text-sm leading-none">GymVault</p>
@@ -1216,8 +1216,8 @@ export default function LoginPage({ setToken, onShowSignup }) {
           {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ boxShadow: '0 8px 24px rgba(99,102,241,0.55)' }}>
-              <GymVaultLogo size={40} />
+              style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 24px rgba(99,102,241,0.55)' }}>
+              <Dumbbell size={20} className="text-white" strokeWidth={2.5} />
             </div>
             <span className="text-white font-black text-xl tracking-tight">GymVault</span>
           </div>
@@ -1287,8 +1287,8 @@ export default function LoginPage({ setToken, onShowSignup }) {
         {/* Mobile logo */}
         <div className="lg:hidden flex items-center gap-2.5 mb-8">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ boxShadow: '0 6px 20px rgba(99,102,241,0.5)' }}>
-            <GymVaultLogo size={36} />
+            style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 6px 20px rgba(99,102,241,0.5)' }}>
+            <Dumbbell size={18} className="text-white" strokeWidth={2.5} />
           </div>
           <span className="text-white font-black text-lg tracking-tight">GymVault</span>
         </div>

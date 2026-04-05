@@ -1,5 +1,5 @@
 import React from 'react';
-import GymVaultLogo from './GymVaultLogo';
+import { Dumbbell } from 'lucide-react';
 
 const loaderStyles = `
   @keyframes gv-loader-spin {
@@ -43,7 +43,7 @@ const PageLoader = ({ className = '', label = '' }) => (
             className="flex h-11 w-11 items-center justify-center rounded-[16px] bg-black text-white shadow-[0_18px_36px_rgba(15,23,42,0.16)]"
             style={{ animation: 'gv-loader-bob 1s ease-in-out infinite' }}
           >
-            <GymVaultLogo size={24} />
+            <Dumbbell size={18} strokeWidth={2.5} />
           </div>
         </div>
       </div>

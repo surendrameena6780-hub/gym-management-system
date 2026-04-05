@@ -22,9 +22,9 @@ import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
   ClipboardCheck, BarChart3, Settings, LogOut, Lock, Bell, User, LifeBuoy,
+  Dumbbell,
   Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- ðŸš¨ ADDED TOUR ICONS
 } from 'lucide-react';
-import GymVaultLogo from './GymVaultLogo';
 
 // â”€â”€â”€ Navigation Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -159,10 +159,12 @@ function SplashScreen({ exiting }) {
       <div
         className="relative w-20 h-20 rounded-[22px] flex items-center justify-center mb-6 animate-in zoom-in-50 duration-700"
         style={{
+          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
           boxShadow: '0 0 80px rgba(99,102,241,0.5), 0 0 160px rgba(99,102,241,0.2), 0 20px 40px rgba(0,0,0,0.4)'
         }}
       >
-        <GymVaultLogo size={80} />
+        <Dumbbell size={36} className="text-white" strokeWidth={2} />
+        <div className="absolute inset-0 rounded-[22px] border border-white/20" />
       </div>
 
       <h1 className="text-4xl font-black text-white tracking-tight mb-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700 [animation-delay:200ms] [animation-fill-mode:both]">
@@ -1011,9 +1013,10 @@ function App() {
           <div className="flex items-center gap-3 mb-10 px-2 relative">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
               style={{
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
                 boxShadow: '0 4px 20px rgba(99,102,241,0.5)'
               }}>
-              <GymVaultLogo size={36} />
+              <Dumbbell size={17} className="text-white" strokeWidth={2.5} />
             </div>
             <div>
               <div className="text-[15px] font-extrabold tracking-tight leading-none text-white">GymVault</div>
