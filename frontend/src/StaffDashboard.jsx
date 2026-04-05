@@ -149,6 +149,53 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
     canSupport && { label: 'Support', icon: MessageSquare, gradient: 'linear-gradient(135deg, #64748b, #475569)', action: () => navigateTo('Help & Support') },
   ].filter(Boolean).slice(0, 4);
 
+  const topKpis = [
+    canAttendance && {
+      label: "Today's Check-ins",
+      value: stats.todayCheckins,
+      icon: CheckCircle,
+      gradient: 'linear-gradient(135deg, #10b981, #06d6a0)',
+      index: 0,
+      onClick: () => navigateTo('Attendance'),
+    },
+    canMembers && {
+      label: 'Active Members',
+      value: stats.activeMembers,
+      icon: Users,
+      gradient: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+      index: 1,
+      onClick: () => navigateTo('Members', 'Active'),
+    },
+    canMembers && {
+      label: 'Expiring This Week',
+      value: stats.expiringThisWeek,
+      icon: AlertTriangle,
+      gradient: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+      index: 2,
+      onClick: () => navigateTo('Members', 'Expiring Soon'),
+    },
+    (canPayments
+      ? {
+          label: 'Pending Dues',
+          value: stats.pendingDues,
+          icon: CreditCard,
+          gradient: 'linear-gradient(135deg, #f97316, #fb923c)',
+          index: 3,
+          onClick: () => navigateTo('Payments', 'Pending'),
+          prefix: '₹',
+        }
+      : canMembers
+      ? {
+          label: 'Total Members',
+          value: stats.totalMembers,
+          icon: UserCheck,
+          gradient: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
+          index: 3,
+          onClick: () => navigateTo('Members'),
+        }
+      : null),
+  ].filter(Boolean);
+
   const cardClass = (enabled) =>
     `p-4 rounded-2xl bg-white border text-left transition-all ${
       enabled
@@ -173,7 +220,7 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
         }
       `}</style>
 
-      <div className="space-y-5">
+      <div className="min-h-full dashboard-content-safe space-y-5">
         {/* ── Hero Welcome Card ─────────────────────────────── */}
         <div
           className="relative overflow-hidden rounded-[24px] p-6 text-white"
@@ -202,7 +249,7 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
             </p>
 
             {!loading && (
-              <div className="flex gap-6 mt-5">
+              <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3">
                 {canAttendance && (
                   <div>
                     <p className="text-3xl font-black text-emerald-400">{stats.todayCheckins}</p>
@@ -215,12 +262,23 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
                     <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Active Members</p>
                   </div>
                 )}
-                {stats.expiringThisWeek > 0 && canMembers && (
+                {canMembers && (
                   <div>
                     <p className="text-3xl font-black text-orange-400">{stats.expiringThisWeek}</p>
                     <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Expiring Soon</p>
                   </div>
                 )}
+                {canPayments ? (
+                  <div>
+                    <p className="text-3xl font-black text-amber-300">₹{stats.pendingDues}</p>
+                    <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Pending Dues</p>
+                  </div>
+                ) : canMembers ? (
+                  <div>
+                    <p className="text-3xl font-black text-violet-300">{stats.totalMembers}</p>
+                    <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Total Members</p>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -228,26 +286,18 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
 
         {/* ── KPI Cards ────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3">
-          {canAttendance && (
-            <StaffKPI label="Today's Check-ins" value={stats.todayCheckins}
-              icon={CheckCircle} gradient="linear-gradient(135deg, #10b981, #06d6a0)" index={0}
-              onClick={() => navigateTo('Attendance')} />
-          )}
-          {canMembers && (
-            <StaffKPI label="Active Members" value={stats.activeMembers}
-              icon={Users} gradient="linear-gradient(135deg, #3b82f6, #6366f1)" index={1}
-              onClick={() => navigateTo('Members', 'Active')} />
-          )}
-          {canMembers && stats.expiringThisWeek > 0 && (
-            <StaffKPI label="Expiring This Week" value={stats.expiringThisWeek}
-              icon={AlertTriangle} gradient="linear-gradient(135deg, #f59e0b, #ef4444)" index={2}
-              onClick={() => navigateTo('Members', 'Expiring Soon')} />
-          )}
-          {canPayments && (
-            <StaffKPI label="Pending Dues" value={stats.pendingDues}
-              icon={CreditCard} gradient="linear-gradient(135deg, #f97316, #fb923c)" index={3}
-              onClick={() => navigateTo('Payments', 'Pending')} prefix="₹" />
-          )}
+          {topKpis.map((kpi) => (
+            <StaffKPI
+              key={kpi.label}
+              label={kpi.label}
+              value={kpi.value}
+              icon={kpi.icon}
+              gradient={kpi.gradient}
+              index={kpi.index}
+              onClick={kpi.onClick}
+              prefix={kpi.prefix || ''}
+            />
+          ))}
         </div>
 
         {/* ── Quick Actions Strip ──────────────────────────── */}
@@ -268,27 +318,39 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
 
         {/* ── Expiring Members Alert ───────────────────────── */}
         {canMembers && stats.expiringMembers.length > 0 && (
-          <div className="rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 to-amber-50 p-4"
-            style={{ opacity: 0, animation: 'staffCardIn 0.5s ease-out 400ms forwards' }}>
+          <div className="rounded-2xl border p-4 shadow-[0_18px_50px_-32px_rgba(251,146,60,0.5)]"
+            style={{
+              background: 'linear-gradient(135deg, #181425 0%, #241917 45%, #3a2416 100%)',
+              borderColor: 'rgba(251, 146, 60, 0.22)',
+              opacity: 0,
+              animation: 'staffCardIn 0.5s ease-out 400ms forwards',
+            }}
+          >
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
                   <Clock size={14} className="text-white" />
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-orange-600">Expiring Soon</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-amber-200">Expiring Soon</span>
               </div>
               <button onClick={() => navigateTo('Members', 'Expiring Soon')}
-                className="text-[10px] font-bold text-orange-500 hover:text-orange-700 transition-colors">View All →</button>
+                className="text-[10px] font-bold text-amber-300 hover:text-amber-100 transition-colors">View All →</button>
             </div>
             <div className="space-y-2">
               {stats.expiringMembers.map((member, i) => (
-                <div key={member.id} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2.5"
-                  style={{ opacity: 0, animation: `staffSlideUp 0.35s ease-out ${450 + i * 60}ms forwards` }}>
+                <div key={member.id} className="flex items-center justify-between rounded-xl border px-3 py-2.5"
+                  style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    opacity: 0,
+                    animation: `staffSlideUp 0.35s ease-out ${450 + i * 60}ms forwards`,
+                  }}>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-800 truncate">{member.full_name}</p>
-                    <p className="text-[10px] text-slate-400 font-medium">{member.plan_name || 'No plan'}</p>
+                    <p className="text-sm font-bold text-white truncate">{member.full_name}</p>
+                    <p className="text-[10px] text-amber-100/60 font-medium">{member.plan_name || 'No plan'}</p>
                   </div>
-                  <span className="shrink-0 px-2.5 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full">
+                  <span className="shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black text-amber-200"
+                    style={{ background: 'rgba(251,146,60,0.14)', borderColor: 'rgba(251,146,60,0.16)' }}>
                     {member.days_left}d left
                   </span>
                 </div>

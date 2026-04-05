@@ -310,6 +310,7 @@ function App() {
   });
   const [isSuspended, setIsSuspended] = useState(false); 
   const [saasGrace, setSaasGrace] = useState(false);
+  const [saasGraceNoticeKey, setSaasGraceNoticeKey] = useState('');
   const [settingsTab, setSettingsTab] = useState('account'); 
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [canInstallApp, setCanInstallApp] = useState(false);
@@ -425,6 +426,7 @@ function App() {
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('gv_saas_grace_dismissed');
     
     // Wipe tour memory on logout
     localStorage.removeItem('gymvault_tour_completed');
@@ -433,6 +435,10 @@ function App() {
     setToken(null);
     setCurrentUser(null);
     setIsSuspended(false);
+    setSaasGrace(false);
+    setSaasGraceNoticeKey('');
+    setVisitedPages(new Set(['Dashboard']));
+    setCurrentPage('Dashboard');
     window.history.pushState({}, '', '/login');
   }, []);
 
@@ -487,16 +493,21 @@ function App() {
         // Check SaaS status from auth/me response
         const saas = res.data?.saas;
         if (saas) {
+          const graceKey = `GRACE_PERIOD:${saas.valid_until || ''}`;
           if (saas.status === 'EXPIRED') {
             setIsSuspended(true);
             setCurrentPage('Settings');
+            setSaasGrace(false);
+            setSaasGraceNoticeKey('');
           } else if (saas.status === 'GRACE_PERIOD') {
             setIsSuspended(false);
-            // Grace period banner handled via saasGrace state
-            setSaasGrace(true);
+            setSaasGraceNoticeKey(graceKey);
+            setSaasGrace(localStorage.getItem('gv_saas_grace_dismissed') !== graceKey);
           } else {
             setIsSuspended(false);
             setSaasGrace(false);
+            setSaasGraceNoticeKey('');
+            localStorage.removeItem('gv_saas_grace_dismissed');
           }
         }
       })
@@ -506,7 +517,7 @@ function App() {
   }, [token, isHQ]);
 
   useEffect(() => {
-    if (isHQ || !token) return undefined;
+    if (isHQ || !token || String(currentUser?.role || '').toUpperCase() !== 'OWNER') return undefined;
 
     let cancelled = false;
     axios.get('/api/settings/preferences', { headers: { 'x-auth-token': token } })
@@ -522,7 +533,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [token, isHQ]);
+  }, [token, isHQ, currentUser?.role]);
 
   useEffect(() => {
     if (isHQ) return;
@@ -912,6 +923,11 @@ function App() {
       localStorage.setItem('token', t);
       setToken(t);
       if (user) { localStorage.setItem('user', JSON.stringify(user)); setCurrentUser(user); }
+        setVisitedPages(new Set(['Dashboard']));
+        setCurrentPage('Dashboard');
+        setSaasGrace(false);
+        setSaasGraceNoticeKey('');
+        localStorage.removeItem('gv_saas_grace_dismissed');
     };
     if (showSignup) {
       return <SignupPage onShowLogin={() => setShowSignup(false)} setToken={storeToken} />;
@@ -924,7 +940,22 @@ function App() {
       {isSuspended && <SuspensionOverlay onLogout={handleLogout} onRenew={() => { setIsSuspended(false); setCurrentPage('Settings'); setSettingsTab('billing'); }} />}
       {saasGrace && !isSuspended && (
         <div className="fixed top-0 left-0 right-0 z-[9980] bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2.5 text-center shadow-lg" style={{ paddingTop: 'calc(var(--safe-area-top) + 0.625rem)' }}>
-          <p className="text-xs font-bold">⚠️ Your subscription has expired. You have a few days of grace period remaining. <button onClick={() => { setSaasGrace(false); setCurrentPage('Settings'); setSettingsTab('billing'); }} className="underline font-extrabold ml-1 hover:text-white/80">Renew Now</button></p>
+          <div className="relative mx-auto max-w-[1400px] px-8">
+            <p className="text-xs font-bold">⚠️ Your subscription has expired. You have a few days of grace period remaining. <button onClick={() => { setSaasGrace(false); setCurrentPage('Settings'); setSettingsTab('billing'); }} className="underline font-extrabold ml-1 hover:text-white/80">Renew Now</button></p>
+            <button
+              type="button"
+              onClick={() => {
+                if (saasGraceNoticeKey) {
+                  localStorage.setItem('gv_saas_grace_dismissed', saasGraceNoticeKey);
+                }
+                setSaasGrace(false);
+              }}
+              className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/15 hover:bg-white/25 transition-colors"
+              aria-label="Dismiss subscription warning"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       )}
       {showSplash && <SplashScreen exiting={splashExiting} />}
@@ -1303,7 +1334,7 @@ function App() {
             {/* Settings */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Settings') && (
-                <SettingsPage toast={toast} token={token} defaultTab={settingsTab} />
+                <SettingsPage toast={toast} token={token} defaultTab={settingsTab} isActive={currentPage === 'Settings'} currentUser={currentUser} />
               )}
             </div>
 

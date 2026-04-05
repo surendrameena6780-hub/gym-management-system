@@ -172,8 +172,9 @@ const loadRazorpayScript = () => {
 };
 
 // FIX: Added defaultTab to the props here!
-  const SettingsPage = ({ toast, token, defaultTab }) => { 
+  const SettingsPage = ({ toast, token, defaultTab, isActive = false, currentUser = null }) => { 
   const [razorpayKey, setRazorpayKey] = useState('');
+  const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   
   const [activeTab, setActiveTab] = useState(() => normalizeSettingsTab(defaultTab));
   const [mobileMenuVisible, setMobileMenuVisible] = useState(() => {
@@ -207,11 +208,11 @@ const loadRazorpayScript = () => {
 
   // Fetch Razorpay public key from backend (avoids need for VITE_ build-time env var)
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isActive || !isOwner) return;
     axios.get('/api/billing/config', { headers: { 'x-auth-token': token } })
       .then(res => setRazorpayKey(res.data.razorpay_key_id || ''))
       .catch(() => {});
-  }, [token]);
+  }, [token, isActive, isOwner]);
 
   const fileInputRef = useRef(null); 
   const [profileImage, setProfileImage] = useState(null); 
@@ -382,8 +383,13 @@ const loadRazorpayScript = () => {
   };
 
   useEffect(() => {
+    if (!token || !isActive || !isOwner) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
     fetchSettings();
-  }, [token]);
+  }, [token, isActive, isOwner]);
 
   const fetchStaff = async () => {
     if (!token) return;
@@ -399,10 +405,11 @@ const loadRazorpayScript = () => {
   };
 
   useEffect(() => {
+    if (!isActive || !isOwner) return;
     if (activeTab === 'staff') {
       fetchStaff();
     }
-  }, [activeTab, token]);
+  }, [activeTab, token, isActive, isOwner]);
 
   const loadIntegrations = async () => {
     if (!token) return;
@@ -476,11 +483,12 @@ const loadRazorpayScript = () => {
   };
 
   useEffect(() => {
+    if (!isActive || !isOwner) return;
     if (activeTab === 'integrations') {
       loadIntegrations();
       loadPlatform();
     }
-  }, [activeTab, token]);
+  }, [activeTab, token, isActive, isOwner]);
 
   const updateBranchCount = (value) => {
     const nextCount = Math.max(1, Math.min(25, Number.parseInt(value, 10) || 1));
