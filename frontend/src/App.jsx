@@ -1064,7 +1064,7 @@ function App() {
 
 
       <div
-        className="relative flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900"
+        className="relative flex flex-col desktop:flex-row h-full overflow-hidden font-['Inter'] antialiased text-slate-900"
         style={{  /* Splash is opaque z-9999, no need to hide the shell behind it */
           background: `
             radial-gradient(ellipse at 18% 18%, rgba(99,102,241,0.09) 0%, transparent 55%),
@@ -1147,7 +1147,7 @@ function App() {
           </div>
         </aside>
 
-        <div className="flex-1 flex flex-col app-shell-height overflow-hidden">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <header className="relative z-50 shrink-0 border-b border-white/60 app-header-safe">
             <div className="app-header-row flex items-center justify-between px-4 desktop:px-8">
               <div className="flex items-center gap-2">
@@ -1438,7 +1438,7 @@ function App() {
           </>
         )}
 
-        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-2">
+        <nav className="app-mobile-nav shrink-0 desktop:hidden z-[120] px-3 pt-2">
           <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
             {/* iOS-style sliding indicator nav */}
             <MobileNav
@@ -1454,8 +1454,8 @@ function App() {
           </div>
         </nav>
 
-        {showSplash && <SplashScreen exiting={splashExiting} />}
       </div>
+      {showSplash && <SplashScreen exiting={splashExiting} />}
     </>
   );
 }
