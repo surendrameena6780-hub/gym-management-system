@@ -1,16 +1,4 @@
-const getApiOrigin = () => {
-  const configured = String(import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
-  if (configured) return configured;
-
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname, port } = window.location;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return `${protocol}//${hostname}${port === '5173' ? ':5000' : port ? `:${port}` : ''}`;
-    }
-  }
-
-  return '';
-};
+import { getApiOrigin } from './apiUrl';
 
 export const normalizeProfileImageUrl = (value) => {
   const raw = String(value || '').trim();

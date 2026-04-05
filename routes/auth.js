@@ -9,6 +9,32 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.en
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
 }
 
+const normalizeAuthMode = (value) => (String(value || '').trim().toLowerCase() === 'signup' ? 'signup' : 'login');
+
+const stripTrailingSlash = (value, fallback) => {
+    const raw = String(value || fallback || '').trim();
+    return raw.replace(/\/+$/, '');
+};
+
+const getFrontendUrl = () => stripTrailingSlash(process.env.FRONTEND_URL, 'http://localhost:5173');
+const getAppUrl = () => stripTrailingSlash(process.env.APP_URL, 'http://localhost:5000');
+
+const getGoogleRedirectUri = () => {
+    const configured = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
+    if (configured) return configured;
+    return `${getAppUrl()}/api/auth/google/callback`;
+};
+
+const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', source = '' } = {}) => {
+    const targetPath = mode === 'signup' ? '/signup' : '/login';
+    const params = new URLSearchParams();
+    if (error) params.set('auth_error', error);
+    if (token) params.set('token', token);
+    if (source) params.set('auth_source', source);
+    const query = params.toString();
+    return `${getFrontendUrl()}${targetPath}${query ? `?${query}` : ''}`;
+};
+
 // POST /api/auth/check-email — real-time duplicate check (called on blur during signup)
 router.post('/check-email', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
@@ -237,11 +263,11 @@ router.get('/config', (req, res) => {
 // ─── GOOGLE OAUTH 2.0 ─────────────────────────────────────────────────────────
 // GET /api/auth/google — Redirect user to Google consent screen
 router.get('/google', (req, res) => {
+    const mode = normalizeAuthMode(req.query?.mode);
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        return res.redirect(`${frontendUrl}/?auth_error=google_not_configured`);
+        return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_not_configured' }));
     }
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.APP_URL || 'http://localhost:5000'}/api/auth/google/callback`;
+    const redirectUri = getGoogleRedirectUri();
     const params = new URLSearchParams({
         client_id: process.env.GOOGLE_CLIENT_ID,
         redirect_uri: redirectUri,
@@ -249,20 +275,21 @@ router.get('/google', (req, res) => {
         scope: 'email profile',
         access_type: 'offline',
         prompt: 'select_account',
+        state: mode,
     });
     res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
 
 // GET /api/auth/google/callback — Google sends back the auth code
 router.get('/google/callback', async (req, res) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const mode = normalizeAuthMode(req.query?.state);
     const code = String(req.query?.code || '');
     if (!code) {
-        return res.redirect(`${frontendUrl}/?auth_error=google_cancelled`);
+        return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_cancelled' }));
     }
 
     try {
-        const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.APP_URL || 'http://localhost:5000'}/api/auth/google/callback`;
+        const redirectUri = getGoogleRedirectUri();
 
         // Exchange code for access token
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -278,7 +305,7 @@ router.get('/google/callback', async (req, res) => {
         });
         const tokenData = await tokenRes.json();
         if (!tokenData.access_token) {
-            return res.redirect(`${frontendUrl}/?auth_error=google_token_failed`);
+            return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_token_failed' }));
         }
 
         // Fetch Google profile
@@ -293,7 +320,7 @@ router.get('/google/callback', async (req, res) => {
         const avatarUrl = String(profile.picture || '');
 
         if (!email || !googleId) {
-            return res.redirect(`${frontendUrl}/?auth_error=google_profile_failed`);
+            return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_profile_failed' }));
         }
 
         await pool.query('BEGIN');
@@ -311,7 +338,7 @@ router.get('/google/callback', async (req, res) => {
             user = userResult.rows[0];
             if (!user.gym_is_active) {
                 await pool.query('ROLLBACK');
-                return res.redirect(`${frontendUrl}/?auth_error=account_suspended`);
+                return res.redirect(buildFrontendAuthRedirect({ mode, error: 'account_suspended' }));
             }
             await pool.query(
                 'UPDATE users SET avatar_url = $1, last_login_at = NOW() WHERE id = $2',
@@ -353,11 +380,11 @@ router.get('/google/callback', async (req, res) => {
             { expiresIn: '30d' }
         );
 
-        res.redirect(`${frontendUrl}/?token=${encodeURIComponent(token)}&auth_source=google`);
+        res.redirect(buildFrontendAuthRedirect({ mode, token, source: 'google' }));
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
         console.error('GOOGLE OAUTH ERROR:', err.message);
-        res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/?auth_error=server_error`);
+        res.redirect(buildFrontendAuthRedirect({ mode, error: 'server_error' }));
     }
 });
 

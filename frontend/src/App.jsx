@@ -317,7 +317,7 @@ function App() {
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [isStandaloneMode, setIsStandaloneMode] = useState(false);
   const [showMobileMoreNav, setShowMobileMoreNav] = useState(false);
-  const [showSignup, setShowSignup] = useState(false);
+  const [showSignup, setShowSignup] = useState(normalizedPathname === '/signup');
 
   // ðŸš¨ MASTERCLASS TOUR STATE ðŸš¨
   const [tour, setTour] = useState({ isActive: false, step: 0, isWaitingForAction: false });
@@ -770,8 +770,21 @@ function App() {
   }, [isHQ]);
 
   useEffect(() => {
+    if (isHQ || token) return undefined;
+
+    const syncAuthRoute = () => {
+      const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
+      setShowSignup(currentPath === '/signup');
+    };
+
+    syncAuthRoute();
+    window.addEventListener('popstate', syncAuthRoute);
+    return () => window.removeEventListener('popstate', syncAuthRoute);
+  }, [isHQ, token]);
+
+  useEffect(() => {
     if (isHQ) return;
-    if (token && window.location.pathname === '/login') {
+    if (token && (window.location.pathname === '/login' || window.location.pathname === '/signup')) {
       window.history.pushState({}, '', '/dashboard');
       setCurrentPage('Dashboard');
     }
@@ -929,10 +942,22 @@ function App() {
         setSaasGraceNoticeKey('');
         localStorage.removeItem('gv_saas_grace_dismissed');
     };
+    const showLoginPage = () => {
+      setShowSignup(false);
+      if (window.location.pathname !== '/login') {
+        window.history.pushState({}, '', '/login');
+      }
+    };
+    const showSignupPage = () => {
+      setShowSignup(true);
+      if (window.location.pathname !== '/signup') {
+        window.history.pushState({}, '', '/signup');
+      }
+    };
     if (showSignup) {
-      return <SignupPage onShowLogin={() => setShowSignup(false)} setToken={storeToken} />;
+      return <SignupPage onShowLogin={showLoginPage} setToken={storeToken} />;
     }
-    return <LoginPage setToken={storeToken} onShowSignup={() => setShowSignup(true)} />;
+    return <LoginPage setToken={storeToken} onShowSignup={showSignupPage} />;
   }
 
   return (

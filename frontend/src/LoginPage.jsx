@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { QRCodeCanvas } from 'qrcode.react';
+import { buildApiUrl } from './utils/apiUrl';
 import {
   Dumbbell, Mail, Lock, ArrowRight, Eye, EyeOff,
   Users, TrendingUp, Layers, ChevronRight, Phone, CheckCircle,
@@ -1084,6 +1085,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [showPwd, setShowPwd]       = useState(false);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState('');
+  const [googleAuthEnabled, setGoogleAuthEnabled] = useState(null);
 
   // Member portal state
   const [phone, setPhone]           = useState('');
@@ -1094,6 +1096,26 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [memberData, setMemberData] = useState(null);
   const [memberToken, setMemberToken] = useState(null);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    axios.get('/api/auth/config')
+      .then((res) => {
+        if (!cancelled) {
+          setGoogleAuthEnabled(Boolean(res.data?.google_auth_enabled));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGoogleAuthEnabled(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Read auth_error from OAuth redirect URL param
   useEffect(() => {
     const params  = new URLSearchParams(window.location.search);
@@ -1103,6 +1125,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
       google_not_configured: 'Google Sign-In is not set up on this server. Use email & password.',
       google_cancelled:      'Google sign-in was cancelled.',
       google_token_failed:   'Google sign-in failed. Please try again.',
+      google_profile_failed: 'Google sign-in could not read your Google profile. Please try again.',
       account_suspended:     'Your account is suspended. Contact GymVault HQ.',
       server_error:          'A server error occurred. Please try again.',
     };
@@ -1128,7 +1151,14 @@ export default function LoginPage({ setToken, onShowSignup }) {
     } finally { setLoading(false); }
   };
 
-  const handleGoogle = () => { window.location.href = '/api/auth/google'; };
+  const handleGoogle = () => {
+    if (googleAuthEnabled === false) {
+      setError('Google Sign-In is not set up on this server. Use email & password.');
+      return;
+    }
+
+    window.location.href = buildApiUrl('/api/auth/google?mode=login');
+  };
 
   const handleApple = () => {
     if (!window.AppleID) {
@@ -1293,7 +1323,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
           <span className="text-white font-black text-lg tracking-tight">GymVault</span>
         </div>
 
-        <div className="w-full max-w-[390px] flex min-h-full flex-col">
+        <div className="w-full max-w-[390px] flex min-h-full flex-col lg:min-h-0 lg:justify-center">
 
           {/* Page title */}
           <div className="mb-7">

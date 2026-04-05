@@ -1,5 +1,6 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { buildApiUrl } from './utils/apiUrl';
 import {
   Dumbbell, Mail, Lock, ArrowRight, ArrowLeft, User, Building2,
   Eye, EyeOff, Check, Phone, MapPin, Sun, Moon, Loader2, AlertCircle,
@@ -145,6 +146,45 @@ export default function SignupPage({ onShowLogin, setToken }) {
 
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
+  const [googleAuthEnabled, setGoogleAuthEnabled] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    axios.get('/api/auth/config')
+      .then((res) => {
+        if (!cancelled) {
+          setGoogleAuthEnabled(Boolean(res.data?.google_auth_enabled));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGoogleAuthEnabled(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errCode = params.get('auth_error');
+    if (!errCode) return;
+
+    const msgs = {
+      google_not_configured: 'Google sign-up is not set up on this server. Continue with email instead.',
+      google_cancelled: 'Google sign-up was cancelled.',
+      google_token_failed: 'Google sign-up failed. Please try again.',
+      google_profile_failed: 'Google sign-up could not read your Google profile. Please try again.',
+      account_suspended: 'Your account is suspended. Contact GymVault HQ.',
+      server_error: 'A server error occurred. Please try again.',
+    };
+
+    setError(msgs[errCode] || 'Sign-up failed. Please try again.');
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
 
   const strength = passwordStrength(password);
 
@@ -171,7 +211,14 @@ export default function SignupPage({ onShowLogin, setToken }) {
   };
 
   // â”€â”€ Social handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const handleGoogle = () => { window.location.href = '/api/auth/google'; };
+  const handleGoogle = () => {
+    if (googleAuthEnabled === false) {
+      setError('Google sign-up is not set up on this server. Continue with email instead.');
+      return;
+    }
+
+    window.location.href = buildApiUrl('/api/auth/google?mode=signup');
+  };
   const handleApple = () => {
     if (!window.AppleID) { setError('Apple Sign-In is not available on this server.'); return; }
     window.AppleID.auth.signIn()
