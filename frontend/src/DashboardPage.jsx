@@ -588,20 +588,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     };
   }, [token, isActive]);
 
-  useEffect(() => {
-    if (!openEscalatedLeadId) return;
-
-    const handleCloseSwipe = (event) => {
-      if (event.target instanceof Element && event.target.closest('.dashboard-escalated-row')) return;
-      setOpenEscalatedLeadId(null);
-    };
-
-    document.addEventListener('pointerdown', handleCloseSwipe);
-    return () => {
-      document.removeEventListener('pointerdown', handleCloseSwipe);
-    };
-  }, [openEscalatedLeadId]);
-
   const handleStartTour = () => {
       localStorage.setItem('gymvault_tour_completed', 'true');
       setShowTourBanner(false);
@@ -1087,20 +1073,8 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     const expiringIn3Days = active.filter(m => m.days_left > 0 && m.days_left <= 3);
     const expiringIn7Days = active.filter(m => m.days_left > 0 && m.days_left <= 7);
 
-    // Inactive / ghost members: ACTIVE in DB, not expiring soon, absent 14+ days
-    // Threshold matches getStatusInfo in MembersPage so the Inactive filter shows the same people
-    const escalatedLeads = members.filter(m => {
-      if (m.membership_status === 'UNPAID' || hasRecentActivation(m)) return false;
-      const daysAbsent = getDaysAbsent(m);
-      const expiredAgeDays = m.expiry_date ? toDayAge(m.expiry_date) : -1;
-      const isLongExpired = m.membership_status === 'EXPIRED' && expiredAgeDays > 5;
-      const isDeepGhost = m.membership_status === 'ACTIVE' && m.days_left > 7 && daysAbsent > 30;
-      return isLongExpired || isDeepGhost;
-    });
-    const escalatedIds = new Set(escalatedLeads.map(m => m.id));
-
     const ghosts = active.filter(m => {
-      if (m.days_left <= 7 || hasRecentActivation(m) || escalatedIds.has(m.id)) return false;
+      if (m.days_left <= 7 || hasRecentActivation(m)) return false;
       return getDaysAbsent(m) > 14;
     });
 
