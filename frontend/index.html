@@ -67,14 +67,19 @@
       html,
       body,
       #root {
+        height: 100%;
         min-height: 100%;
       }
 
       /* Pre-React background — html uses same pre-compensation gradient as the splash */
       html {
+        height: -webkit-fill-available;
         background: linear-gradient(to bottom, #1f2971 0px, #1f2971 calc(env(safe-area-inset-top, 44px) - 1px), #161d4f calc(env(safe-area-inset-top, 44px) + 12px));
       }
       body {
+        min-height: 100vh;
+        min-height: 100svh;
+        min-height: -webkit-fill-available;
         background: #0f1117;
         margin: 0;
         font-family: 'Inter', sans-serif !important;
@@ -82,6 +87,9 @@
       }
 
       #root {
+        min-height: 100vh;
+        min-height: 100svh;
+        min-height: -webkit-fill-available;
         background: #0f1117 !important;
       }
 

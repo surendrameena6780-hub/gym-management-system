@@ -9,7 +9,12 @@ html,
 body,
 #root {
   height: 100%;
+  min-height: 100%;
   overscroll-behavior-y: none;
+}
+
+html {
+  height: -webkit-fill-available;
 }
 
 :root {
@@ -137,6 +142,15 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
   .app-min-shell-height {
     min-height: max(100dvh, var(--app-viewport-height));
+  }
+}
+
+@supports (-webkit-touch-callout: none) {
+  body,
+  #root,
+  .app-shell-height,
+  .app-min-shell-height {
+    min-height: -webkit-fill-available;
   }
 }
 
