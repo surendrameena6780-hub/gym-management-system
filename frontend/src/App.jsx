@@ -139,10 +139,9 @@ const SPLASH_STATUS_BAR_BG = '#1f2971';
 function SplashScreen({ exiting }) {
   return (
     <div
-      className={`fixed inset-0 z-[9999] overflow-hidden flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
+      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center transition-opacity duration-300 ease-out ${exiting ? 'opacity-0' : 'opacity-100'}`}
       style={{
         background: `linear-gradient(to bottom, ${SPLASH_STATUS_BAR_BG} 0px, ${SPLASH_STATUS_BAR_BG} calc(env(safe-area-inset-top, 44px) - 1px), ${SPLASH_BG} calc(env(safe-area-inset-top, 44px) + 12px), ${SPLASH_BG} 100%)`,
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1013,6 +1012,8 @@ function App() {
           </div>
         </div>
       )}
+      {showSplash && <SplashScreen exiting={splashExiting} />}
+
       {/* ðŸš€ SMART SPOTLIGHT TOUR OVERLAY */}
       {tour.isActive && (
         <div className="fixed inset-0 z-[9990] pointer-events-none">
@@ -1064,7 +1065,7 @@ function App() {
 
 
       <div
-        className="relative flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900"
+        className="flex app-shell-height overflow-hidden font-['Inter'] antialiased text-slate-900"
         style={{  /* Splash is opaque z-9999, no need to hide the shell behind it */
           background: `
             radial-gradient(ellipse at 18% 18%, rgba(99,102,241,0.09) 0%, transparent 55%),
@@ -1453,8 +1454,6 @@ function App() {
             />
           </div>
         </nav>
-
-        {showSplash && <SplashScreen exiting={splashExiting} />}
       </div>
     </>
   );

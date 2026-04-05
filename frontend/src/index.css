@@ -9,12 +9,7 @@ html,
 body,
 #root {
   height: 100%;
-  min-height: 100%;
   overscroll-behavior-y: none;
-}
-
-html {
-  height: -webkit-fill-available;
 }
 
 :root {
@@ -23,7 +18,7 @@ html {
   --app-viewport-height: 100vh;
   --app-keyboard-inset: 0px;
   --mobile-nav-height: 84px;
-  --mobile-nav-offset: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 0.5rem);
+  --mobile-nav-offset: var(--mobile-nav-height);
   --app-bottom-ui-offset: var(--mobile-nav-offset);
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
@@ -144,15 +139,6 @@ html.gv-compact-ui main.app-scroll-shell > div {
   }
 }
 
-@supports (-webkit-touch-callout: none) {
-  body,
-  #root,
-  .app-shell-height,
-  .app-min-shell-height {
-    min-height: -webkit-fill-available;
-  }
-}
-
 .app-header-safe {
   padding-top: var(--safe-area-top);
   background: rgba(255, 255, 255, 0.78);
@@ -230,7 +216,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-mobile-nav {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  padding-bottom: var(--safe-area-bottom);
   background: linear-gradient(
     to bottom,
     rgba(238, 240, 255, 0) 0%,
@@ -238,6 +224,10 @@ html.gv-compact-ui main.app-scroll-shell > div {
     #eef0ff 48%,
     #eef0ff 100%
   );
+}
+
+.app-mobile-nav > div {
+  margin-bottom: calc(0.45rem - var(--safe-area-bottom));
 }
 
 .app-keyboard-open .app-mobile-nav,

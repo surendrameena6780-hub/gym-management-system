@@ -134,10 +134,9 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
 
   const handleForcedViewportSync = () => {
     queueViewportSync()
-    // iOS keyboard takes ~350ms to fully animate closed;
-    // run a second and third sync to catch the correct height
-    window.setTimeout(() => { queueViewportSync() }, 200)
-    window.setTimeout(() => { queueViewportSync() }, 450)
+    window.setTimeout(() => {
+      queueViewportSync()
+    }, 180)
   }
 
   const notifyAppResumed = (source) => {
