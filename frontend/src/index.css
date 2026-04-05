@@ -18,7 +18,8 @@ body,
   --app-viewport-height: 100vh;
   --app-keyboard-inset: 0px;
   --mobile-nav-height: 84px;
-  --mobile-nav-offset: var(--mobile-nav-height);
+  --mobile-nav-bottom-gap: 0.6rem;
+  --mobile-nav-offset: calc(var(--mobile-nav-height) + var(--mobile-nav-bottom-gap));
   --app-bottom-ui-offset: var(--mobile-nav-offset);
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
@@ -227,7 +228,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-mobile-nav > div {
-  margin-bottom: calc(0.45rem - var(--safe-area-bottom));
+  margin-bottom: calc(var(--mobile-nav-bottom-gap) - var(--safe-area-bottom));
 }
 
 .app-keyboard-open .app-mobile-nav,
