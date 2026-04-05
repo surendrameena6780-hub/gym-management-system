@@ -120,6 +120,73 @@ const DEFAULT_MESSAGE_TEMPLATES = [
   { template_key: 'PAYMENT_DUE', title: 'Payment Due Alert', whatsapp_text: '', sms_text: '', is_active: true },
 ];
 
+const normalizeTemplateSyncStatus = (value) => {
+  const status = String(value || '').trim().toUpperCase();
+  if (!status) return 'NOT_SYNCED';
+  if (status.includes('APPROVED') || status === 'ACTIVE') return 'APPROVED';
+  if (status.includes('PENDING') || status.includes('PROCESS') || status.includes('QUEUE') || status.includes('REVIEW') || status.includes('REQUESTED')) return 'PENDING';
+  if (status.includes('REJECT')) return 'REJECTED';
+  if (status.includes('DISABLE') || status.includes('INACTIVE')) return 'DISABLED';
+  if (status.includes('FAIL') || status.includes('ERROR')) return 'FAILED';
+  return status;
+};
+
+const getWhatsAppConnectionMeta = (status) => {
+  const normalized = String(status || 'NOT_CONFIGURED').toUpperCase();
+  const lookup = {
+    CONNECTED: {
+      label: 'Connected',
+      card: 'bg-emerald-50 border-emerald-200',
+      dot: 'bg-emerald-500',
+      text: 'text-emerald-700',
+      note: 'This gym number is verified and ready for MSG91 template messaging.',
+    },
+    PENDING_CONNECTION: {
+      label: 'Pending Connection',
+      card: 'bg-amber-50 border-amber-200',
+      dot: 'bg-amber-400',
+      text: 'text-amber-700',
+      note: 'Finish the one-time MSG91 and Meta verification for this business number.',
+    },
+    PLATFORM_NOT_READY: {
+      label: 'Platform Not Ready',
+      card: 'bg-rose-50 border-rose-200',
+      dot: 'bg-rose-500',
+      text: 'text-rose-700',
+      note: 'MSG91 WhatsApp auth is missing on the server.',
+    },
+    ERROR: {
+      label: 'Sync Error',
+      card: 'bg-rose-50 border-rose-200',
+      dot: 'bg-rose-500',
+      text: 'text-rose-700',
+      note: 'GymVault could not refresh this number right now. Try again after checking MSG91.',
+    },
+    NOT_CONFIGURED: {
+      label: 'Not Configured',
+      card: 'bg-slate-50 border-slate-200',
+      dot: 'bg-slate-300',
+      text: 'text-slate-600',
+      note: 'Add your gym business WhatsApp number to start setup.',
+    },
+  };
+  return lookup[normalized] || lookup.NOT_CONFIGURED;
+};
+
+const getTemplateSyncMeta = (status) => {
+  const normalized = String(status || 'NOT_SYNCED').toUpperCase();
+  const lookup = {
+    READY: { label: 'Templates Ready', pill: 'bg-emerald-100 text-emerald-700' },
+    PARTIAL: { label: 'Partially Ready', pill: 'bg-amber-100 text-amber-700' },
+    PENDING_APPROVAL: { label: 'Pending Approval', pill: 'bg-amber-100 text-amber-700' },
+    ERROR: { label: 'Needs Attention', pill: 'bg-rose-100 text-rose-700' },
+    NOT_SYNCED: { label: 'Not Synced', pill: 'bg-slate-100 text-slate-600' },
+  };
+  return lookup[normalized] || lookup.NOT_SYNCED;
+};
+
+const getOtpModeLabel = (mode) => String(mode || 'preview').toLowerCase() === 'msg91' ? 'Live SMS' : 'Preview Mode';
+
 const getRazorpayCheckoutImageUrl = () => {
   if (typeof window === 'undefined') return '';
   return new URL('/gymvault-app-icon-192.png', window.location.origin).toString();
@@ -269,9 +336,21 @@ const loadRazorpayScript = () => {
   });
   const [integrationData, setIntegrationData] = useState({
     owner_mobile: '',
+    whatsapp_number: '',
+    whatsapp_display_name: '',
+    whatsapp_category: '',
+    whatsapp_status: 'NOT_CONFIGURED',
+    whatsapp_connected_at: null,
+    whatsapp_last_checked_at: null,
+    whatsapp_last_error: '',
+    whatsapp_templates_status: 'NOT_SYNCED',
+    whatsapp_templates_last_synced_at: null,
     gateway_connected: false,
-    whatsapp_mode: 'UNAVAILABLE',
+    whatsapp_mode: 'NOT_CONFIGURED',
     whatsapp_ready: false,
+    platform_otp_ready: true,
+    platform_otp_mode: 'preview',
+    approved_template_count: 0,
     sms_ready: false,
     bulk_enabled: false,
     bulk_monthly_limit: 500,
@@ -293,9 +372,8 @@ const loadRazorpayScript = () => {
     },
   });
   const [integrationTest, setIntegrationTest] = useState({
-    channel: 'WHATSAPP',
     to: '',
-    message: 'Test message from GymVault integration setup.',
+    template_key: '',
   });
 
   const [interfacePreferences, setInterfacePreferences] = useState({
@@ -426,9 +504,21 @@ const loadRazorpayScript = () => {
       setIntegrationData((prev) => ({
         ...prev,
         owner_mobile: payload.owner_mobile || gymData.phone || '',
+        whatsapp_number: payload.whatsapp_number || '',
+        whatsapp_display_name: payload.whatsapp_display_name || '',
+        whatsapp_category: payload.whatsapp_category || '',
+        whatsapp_status: String(payload.whatsapp_status || payload.whatsapp_mode || 'NOT_CONFIGURED').toUpperCase(),
+        whatsapp_connected_at: payload.whatsapp_connected_at || null,
+        whatsapp_last_checked_at: payload.whatsapp_last_checked_at || null,
+        whatsapp_last_error: payload.whatsapp_last_error || '',
+        whatsapp_templates_status: String(payload.whatsapp_templates_status || 'NOT_SYNCED').toUpperCase(),
+        whatsapp_templates_last_synced_at: payload.whatsapp_templates_last_synced_at || null,
         gateway_connected: Boolean(payload.gateway_connected),
-        whatsapp_mode: String(payload.whatsapp_mode || 'UNAVAILABLE'),
+        whatsapp_mode: String(payload.whatsapp_mode || 'NOT_CONFIGURED').toUpperCase(),
         whatsapp_ready: Boolean(payload.whatsapp_ready),
+        platform_otp_ready: Boolean(payload.platform_otp_ready ?? true),
+        platform_otp_mode: String(payload.platform_otp_mode || 'preview').toLowerCase(),
+        approved_template_count: Number(payload.approved_template_count || 0),
         sms_ready: Boolean(payload.sms_ready),
         bulk_enabled: Boolean(payload.bulk_enabled),
         bulk_monthly_limit: Number(payload.bulk_monthly_limit || 500),
@@ -452,7 +542,7 @@ const loadRazorpayScript = () => {
 
       setIntegrationTest((prev) => ({
         ...prev,
-        channel: String(payload.whatsapp_mode || 'UNAVAILABLE') === 'SANDBOX' ? 'SMS' : prev.channel,
+        template_key: prev.template_key || normalizedTemplates.find((item) => item.is_active !== false && normalizeTemplateSyncStatus(item.whatsapp_template_status) === 'APPROVED')?.template_key || '',
       }));
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to load integration settings.', 'error');
@@ -736,8 +826,8 @@ const loadRazorpayScript = () => {
 
   const handleTestMessage = async (e) => {
     e.preventDefault();
-    if (!integrationTest.to.trim() || !integrationTest.message.trim()) {
-      toast('Test recipient and message are required.', 'warning');
+    if (!integrationTest.to.trim()) {
+      toast('Test recipient is required.', 'warning');
       return;
     }
 
@@ -1952,53 +2042,125 @@ const loadRazorpayScript = () => {
                   {/* â•â• MESSAGING TAB â•â• */}
                   {integSubTab === 'messaging' && (
                     <div className="space-y-4 animate-in fade-in duration-200">
-
-                      {/* Owner mobile */}
-                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
-                        <h4 className="font-black text-slate-900 text-sm mb-1">Owner Mobile Number</h4>
-                        <p className="text-xs text-slate-500 mb-3 font-medium">All alerts and WhatsApp messages are sent from/to this number</p>
-                        <input value={integrationData.owner_mobile}
-                          onChange={(e) => setIntegrationData(prev => ({ ...prev, owner_mobile: e.target.value }))}
-                          placeholder="+91XXXXXXXXXX"
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
-                        <p className="text-[11px] mt-2 text-slate-400 font-medium">Twilio credentials are managed by GymVault. You only need to set this number.</p>
-                      </div>
-
-                      {/* Gateway status cards */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className={`rounded-2xl p-4 border ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-50 border-emerald-200' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className={`w-2 h-2 rounded-full ${integrationData.whatsapp_mode === 'PRODUCTION' ? 'bg-emerald-500' : integrationData.whatsapp_mode === 'SANDBOX' ? 'bg-amber-400' : 'bg-slate-300'}`} />
-                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">WhatsApp</span>
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
+                        <div>
+                          <h4 className="font-black text-slate-900 text-sm mb-1">Gym Business WhatsApp</h4>
+                          <p className="text-xs text-slate-500 font-medium">This is the verified business number GymVault will use for outbound member messaging.</p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Business WhatsApp Number</label>
+                            <input value={integrationData.whatsapp_number}
+                              onChange={(e) => setIntegrationData(prev => ({ ...prev, whatsapp_number: e.target.value }))}
+                              placeholder="+91XXXXXXXXXX"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
                           </div>
-                          <p className="text-sm font-black text-slate-800">
-                            {integrationData.whatsapp_mode === 'PRODUCTION' ? 'Production' : integrationData.whatsapp_mode === 'SANDBOX' ? 'Sandbox' : 'Not Set Up'}
+                          <div>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Owner Alert Mobile (optional)</label>
+                            <input value={integrationData.owner_mobile}
+                              onChange={(e) => setIntegrationData(prev => ({ ...prev, owner_mobile: e.target.value }))}
+                              placeholder="+91XXXXXXXXXX"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                          <p className="text-[11px] font-semibold text-emerald-800 leading-relaxed">
+                            Gym owners still log in using the phone saved on their account. This business number is only for member-facing WhatsApp templates and reminders.
                           </p>
-                          {integrationData.whatsapp_mode === 'SANDBOX' && <p className="text-[11px] text-amber-700 font-semibold mt-1">Members must join sandbox</p>}
-                        </div>
-                        <div className={`rounded-2xl p-4 border ${integrationData.sms_ready ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className={`w-2 h-2 rounded-full ${integrationData.sms_ready ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">SMS</span>
-                          </div>
-                          <p className="text-sm font-black text-slate-800">{integrationData.sms_ready ? 'Ready' : 'Not Configured'}</p>
-                          <p className="text-[11px] text-slate-500 font-semibold mt-1">Managed by GymVault</p>
                         </div>
                       </div>
 
-                      {/* Test message */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        <div className={`rounded-2xl p-4 border ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).card}`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`w-2 h-2 rounded-full ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).dot}`} />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">WhatsApp Connection</span>
+                          </div>
+                          <p className={`text-sm font-black ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).text}`}>{getWhatsAppConnectionMeta(integrationData.whatsapp_status).label}</p>
+                          <p className="text-[11px] text-slate-600 font-semibold mt-1">{getWhatsAppConnectionMeta(integrationData.whatsapp_status).note}</p>
+                        </div>
+
+                        <div className={`rounded-2xl p-4 border ${integrationData.platform_otp_mode === 'msg91' ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`w-2 h-2 rounded-full ${integrationData.platform_otp_mode === 'msg91' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Owner Login OTP</span>
+                          </div>
+                          <p className={`text-sm font-black ${integrationData.platform_otp_mode === 'msg91' ? 'text-emerald-700' : 'text-amber-700'}`}>{getOtpModeLabel(integrationData.platform_otp_mode)}</p>
+                          <p className="text-[11px] text-slate-600 font-semibold mt-1">
+                            {integrationData.platform_otp_mode === 'msg91' ? 'Live SMS delivery is configured for owner and staff login.' : 'Preview OTPs are shown in the login screen until production SMS is enabled.'}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl p-4 border bg-slate-50 border-slate-200">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 rounded-full bg-slate-400" />
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Template Sync</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-black text-slate-800">{getTemplateSyncMeta(integrationData.whatsapp_templates_status).label}</p>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${getTemplateSyncMeta(integrationData.whatsapp_templates_status).pill}`}>
+                              {integrationData.approved_template_count} approved
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 font-semibold mt-1">Templates must be approved in MSG91 before campaigns can send.</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm mb-1">Connection Details</h4>
+                            <p className="text-xs text-slate-500 font-medium">Use refresh after completing verification in MSG91.</p>
+                          </div>
+                          <button type="button" onClick={loadIntegrations}
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-black hover:bg-slate-50 transition-colors">
+                            <RefreshCw size={14} /> Refresh Status
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Display Name</p>
+                            <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_display_name || 'Waiting for MSG91 sync'}</p>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Business Category</p>
+                            <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_category || 'Not available yet'}</p>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Last Checked</p>
+                            <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_last_checked_at ? new Date(integrationData.whatsapp_last_checked_at).toLocaleString() : 'Not checked yet'}</p>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Templates Synced</p>
+                            <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_templates_last_synced_at ? new Date(integrationData.whatsapp_templates_last_synced_at).toLocaleString() : 'Not synced yet'}</p>
+                          </div>
+                        </div>
+
+                        {integrationData.whatsapp_last_error && (
+                          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                            <p className="text-xs font-black text-rose-700 uppercase tracking-wider mb-1">Latest Sync Note</p>
+                            <p className="text-sm font-semibold text-rose-700">{integrationData.whatsapp_last_error}</p>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
-                        <h4 className="font-black text-slate-900 text-sm mb-1">Send Test Message</h4>
-                        <p className="text-xs text-slate-500 mb-4 font-medium">Verify your messaging setup is working correctly</p>
+                        <h4 className="font-black text-slate-900 text-sm mb-1">Send Test Template</h4>
+                        <p className="text-xs text-slate-500 mb-4 font-medium">GymVault sends an approved WhatsApp template from your connected business number.</p>
                         <form onSubmit={handleTestMessage} className="space-y-3">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
-                              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Channel</label>
-                              <select value={integrationTest.channel}
-                                onChange={(e) => setIntegrationTest(prev => ({ ...prev, channel: e.target.value }))}
+                              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Approved Template</label>
+                              <select value={integrationTest.template_key}
+                                onChange={(e) => setIntegrationTest(prev => ({ ...prev, template_key: e.target.value }))}
                                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none">
-                                <option value="WHATSAPP">WhatsApp</option>
-                                <option value="SMS">SMS</option>
+                                <option value="">Use first approved template</option>
+                                {(integrationData.templates || [])
+                                  .filter((template) => template.is_active !== false && normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'APPROVED')
+                                  .map((template) => (
+                                    <option key={template.template_key} value={template.template_key}>{template.title}</option>
+                                  ))}
                               </select>
                             </div>
                             <div>
@@ -2009,13 +2171,14 @@ const loadRazorpayScript = () => {
                                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
                             </div>
                           </div>
-                          <textarea rows={3} value={integrationTest.message}
-                            onChange={(e) => setIntegrationTest(prev => ({ ...prev, message: e.target.value }))}
-                            placeholder="Type your test message here..."
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold resize-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
-                          <button type="submit" disabled={testSending}
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                            <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">
+                              Test sends use placeholder values like Test Member, Elite Plan, and 3 days left so you can confirm the template formatting before real campaigns.
+                            </p>
+                          </div>
+                          <button type="submit" disabled={testSending || Number(integrationData.approved_template_count || 0) === 0}
                             className="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-                            <Send size={14} /> {testSending ? 'Sending...' : 'Send Test Message'}
+                            <Send size={14} /> {testSending ? 'Sending...' : 'Send Test Template'}
                           </button>
                         </form>
                       </div>
@@ -2023,7 +2186,7 @@ const loadRazorpayScript = () => {
                       <div className="flex justify-stretch sm:justify-end">
                         <button type="button" onClick={handleIntegrationSave} disabled={integrationSaving}
                           className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-                          <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save Messaging Settings'}
+                          <Save size={15} /> {integrationSaving ? 'Saving...' : 'Save WhatsApp Setup'}
                         </button>
                       </div>
                     </div>
@@ -2079,22 +2242,15 @@ const loadRazorpayScript = () => {
                           </div>
                         </div>
 
-                        {/* Channel toggles */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-                            <span className="text-sm font-bold text-slate-700">WhatsApp</span>
-                            <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { ...prev.bulk_channels, whatsapp: !prev.bulk_channels?.whatsapp } }))}
-                              className={`relative w-9 h-5 rounded-full transition-colors ${integrationData.bulk_channels?.whatsapp ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_channels?.whatsapp ? 'translate-x-4' : ''}`} />
-                            </button>
+                        <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-slate-700">WhatsApp Campaigns</p>
+                            <p className="text-[11px] text-slate-500 font-medium mt-0.5">Campaign sending is template-first and WhatsApp-only for now.</p>
                           </div>
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-                            <span className="text-sm font-bold text-slate-700">SMS</span>
-                            <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { ...prev.bulk_channels, sms: !prev.bulk_channels?.sms } }))}
-                              className={`relative w-9 h-5 rounded-full transition-colors ${integrationData.bulk_channels?.sms ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_channels?.sms ? 'translate-x-4' : ''}`} />
-                            </button>
-                          </div>
+                          <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { whatsapp: !prev.bulk_channels?.whatsapp, sms: false } }))}
+                            className={`relative w-9 h-5 rounded-full transition-colors ${integrationData.bulk_channels?.whatsapp ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_channels?.whatsapp ? 'translate-x-4' : ''}`} />
+                          </button>
                         </div>
                       </div>
 
@@ -2112,7 +2268,12 @@ const loadRazorpayScript = () => {
                                 className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors text-left">
                                 <div className="flex items-center gap-3">
                                   <div className={`w-2 h-2 rounded-full shrink-0 ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                  <span className="text-sm font-bold text-slate-800">{template.title}</span>
+                                  <div>
+                                    <span className="text-sm font-bold text-slate-800 block">{template.title}</span>
+                                    <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${getTemplateSyncMeta(normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'APPROVED' ? 'READY' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'PENDING' ? 'PENDING_APPROVAL' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'REJECTED' || normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'FAILED' ? 'ERROR' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'DISABLED' ? 'NOT_SYNCED' : 'NOT_SYNCED').pill}`}>
+                                      {normalizeTemplateSyncStatus(template.whatsapp_template_status).replace(/_/g, ' ')}
+                                    </span>
+                                  </div>
                                 </div>
                                 <ChevronDown size={15} className={`text-slate-400 transition-transform duration-200 shrink-0 ${expandedTemplate === template.template_key ? 'rotate-180' : ''}`} />
                               </button>
@@ -2132,16 +2293,27 @@ const loadRazorpayScript = () => {
                                   </div>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div>
-                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">WhatsApp</label>
-                                      <textarea rows={3} value={template.whatsapp_text}
+                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">WhatsApp Template Copy</label>
+                                      <textarea rows={4} value={template.whatsapp_text}
                                         onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], whatsapp_text: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
                                         className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
                                     </div>
-                                    <div>
-                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">SMS</label>
-                                      <textarea rows={3} value={template.sms_text}
-                                        onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], sms_text: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
-                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                                    <div className="space-y-3">
+                                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Provider Template Name</p>
+                                        <p className="mt-1 text-xs font-bold text-slate-700 break-all">{template.whatsapp_template_name || 'Generated after first save'}</p>
+                                      </div>
+                                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Sync Status</p>
+                                        <p className="mt-1 text-xs font-bold text-slate-700">{normalizeTemplateSyncStatus(template.whatsapp_template_status).replace(/_/g, ' ')}</p>
+                                        {template.whatsapp_template_error && (
+                                          <p className="mt-2 text-[11px] font-semibold text-rose-600 leading-relaxed">{template.whatsapp_template_error}</p>
+                                        )}
+                                      </div>
+                                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Notes</p>
+                                        <p className="mt-1 text-[11px] font-semibold text-slate-600 leading-relaxed">Use placeholders like {'{{name}}'}, {'{{plan}}'}, {'{{days_left}}'}, and {'{{gym_name}}'}. Changing the copy creates a new provider template version for approval.</p>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>

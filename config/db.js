@@ -52,6 +52,74 @@ const connectDB = async () => {
                 ON password_reset_otps (email, purpose, expires_at DESC);
         `);
         await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_login_otps (
+                id                  SERIAL PRIMARY KEY,
+                user_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                phone               VARCHAR(20) NOT NULL,
+                purpose             VARCHAR(40) NOT NULL DEFAULT 'ADMIN_LOGIN',
+                otp_hash            TEXT,
+                delivery_mode       VARCHAR(20) NOT NULL DEFAULT 'PREVIEW',
+                provider_request_id VARCHAR(120),
+                attempts            INTEGER NOT NULL DEFAULT 0,
+                expires_at          TIMESTAMPTZ NOT NULL,
+                consumed_at         TIMESTAMPTZ,
+                created_at          TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_login_otps_user_purpose
+                ON user_login_otps (user_id, purpose, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_user_login_otps_phone_active
+                ON user_login_otps (phone, purpose, expires_at DESC);
+        `);
+        await pool.query(`
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_owner_mobile VARCHAR(30);
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_number VARCHAR(30);
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_display_name VARCHAR(120);
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_category VARCHAR(60);
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_status VARCHAR(30) DEFAULT 'NOT_CONFIGURED';
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_connected_at TIMESTAMPTZ;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_last_checked_at TIMESTAMPTZ;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_last_error TEXT;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_templates_status VARCHAR(30) DEFAULT 'NOT_SYNCED';
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS messaging_whatsapp_templates_last_synced_at TIMESTAMPTZ;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_enabled BOOLEAN DEFAULT FALSE;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_monthly_limit INTEGER DEFAULT 500;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_per_campaign_limit INTEGER DEFAULT 50;
+            ALTER TABLE gyms ADD COLUMN IF NOT EXISTS bulk_channels JSONB DEFAULT '{"whatsapp": true, "sms": false}'::jsonb;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_gyms_messaging_whatsapp_number_unique
+                ON gyms (messaging_whatsapp_number)
+                WHERE messaging_whatsapp_number IS NOT NULL;
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS gym_message_templates (
+                id                       SERIAL PRIMARY KEY,
+                gym_id                   INT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE,
+                template_key             VARCHAR(60) NOT NULL,
+                title                    VARCHAR(120) NOT NULL,
+                whatsapp_text            TEXT NOT NULL,
+                sms_text                 TEXT NOT NULL,
+                whatsapp_template_name   VARCHAR(120),
+                whatsapp_template_language VARCHAR(20) DEFAULT 'en_US',
+                whatsapp_template_category VARCHAR(30) DEFAULT 'UTILITY',
+                whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_SYNCED',
+                whatsapp_template_error  TEXT,
+                is_active                BOOLEAN DEFAULT TRUE,
+                updated_at               TIMESTAMP DEFAULT NOW(),
+                UNIQUE(gym_id, template_key)
+            );
+
+            ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_name VARCHAR(120);
+            ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_language VARCHAR(20) DEFAULT 'en_US';
+            ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_category VARCHAR(30) DEFAULT 'UTILITY';
+            ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_SYNCED';
+            ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_error TEXT;
+
+            CREATE INDEX IF NOT EXISTS idx_gym_message_templates_gym_id
+                ON gym_message_templates(gym_id);
+        `);
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id          SERIAL PRIMARY KEY,
                 gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,

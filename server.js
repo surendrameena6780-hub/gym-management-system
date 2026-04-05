@@ -137,6 +137,8 @@ app.use('/api/', (req, res, next) => {
     return apiLimiter(req, res, next);
 });
 app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/admin/send-otp', authLimiter);
+app.use('/api/auth/admin/verify-otp', authLimiter);
 app.use('/api/superadmin/login', authLimiter);
 app.use('/api/auth/member/send-otp', authLimiter);
 app.use('/api/auth/member/verify-otp', authLimiter);

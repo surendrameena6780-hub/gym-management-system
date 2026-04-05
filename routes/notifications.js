@@ -4,8 +4,12 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
-const twilio = require('twilio');
 const { ok, fail } = require('../utils/apiResponse');
+const {
+    buildTemplateBodyVariables,
+    normalizeLocalIndianPhone,
+    sendWhatsAppTemplate,
+} = require('../utils/msg91');
 
 const AUDIENCE_MAP = {
     All: 'ALL',
@@ -88,58 +92,65 @@ let ensureMessagingSchemaPromise;
 
 const ensureMessagingSchema = async () => {
     if (!ensureMessagingSchemaPromise) {
-        ensureMessagingSchemaPromise = pool.query(`
-            ALTER TABLE gyms
-            ADD COLUMN IF NOT EXISTS messaging_owner_mobile VARCHAR(30),
-            ADD COLUMN IF NOT EXISTS bulk_enabled BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS bulk_monthly_limit INTEGER DEFAULT 500,
-            ADD COLUMN IF NOT EXISTS bulk_per_campaign_limit INTEGER DEFAULT 50,
-            ADD COLUMN IF NOT EXISTS bulk_channels JSONB DEFAULT '{"whatsapp": true, "sms": false}'::jsonb;
-        `);
+        ensureMessagingSchemaPromise = (async () => {
+            await pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS messaging_owner_mobile VARCHAR(30),
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_number VARCHAR(30),
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_display_name VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_category VARCHAR(60),
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_status VARCHAR(30) DEFAULT 'NOT_CONFIGURED',
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_connected_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_last_checked_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_last_error TEXT,
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_templates_status VARCHAR(30) DEFAULT 'NOT_SYNCED',
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_templates_last_synced_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS bulk_enabled BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS bulk_monthly_limit INTEGER DEFAULT 500,
+                ADD COLUMN IF NOT EXISTS bulk_per_campaign_limit INTEGER DEFAULT 50,
+                ADD COLUMN IF NOT EXISTS bulk_channels JSONB DEFAULT '{"whatsapp": true, "sms": false}'::jsonb;
+            `);
+
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS gym_message_templates (
+                    id SERIAL PRIMARY KEY,
+                    gym_id INT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE,
+                    template_key VARCHAR(60) NOT NULL,
+                    title VARCHAR(120) NOT NULL,
+                    whatsapp_text TEXT NOT NULL,
+                    sms_text TEXT NOT NULL,
+                    whatsapp_template_name VARCHAR(120),
+                    whatsapp_template_language VARCHAR(20) DEFAULT 'en_US',
+                    whatsapp_template_category VARCHAR(30) DEFAULT 'UTILITY',
+                    whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_SYNCED',
+                    whatsapp_template_error TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(gym_id, template_key)
+                );
+            `);
+
+            await pool.query(`
+                ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_name VARCHAR(120);
+                ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_language VARCHAR(20) DEFAULT 'en_US';
+                ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_category VARCHAR(30) DEFAULT 'UTILITY';
+                ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_SYNCED';
+                ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_error TEXT;
+            `);
+        })();
     }
     await ensureMessagingSchemaPromise;
 };
 
-const normalizePhone = (value) => {
-    const digits = String(value || '').replace(/\D/g, '');
-    if (!digits) return '';
-    if (digits.length === 10) return `+91${digits}`;
-    if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
-    if (digits.length >= 11) return `+${digits}`;
-    return '';
-};
-
-const formatWhatsAppAddress = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    if (raw.startsWith('whatsapp:')) {
-        const normalized = normalizePhone(raw.replace('whatsapp:', ''));
-        return normalized ? `whatsapp:${normalized}` : '';
-    }
-    const normalized = normalizePhone(raw);
-    return normalized ? `whatsapp:${normalized}` : '';
-};
-
-const isSandboxWhatsAppSender = (value) => {
-    const sender = String(value || '').trim().toLowerCase();
-    return sender === 'whatsapp:+14155238886';
-};
-
-const shouldFallbackToSms = (err) => {
-    const code = Number(err?.code || 0);
-    const message = String(err?.message || '').toLowerCase();
-    return code === 63015 || code === 63016 || code === 21608 || message.includes('sandbox') || message.includes('join');
-};
-
-const fillTemplate = (text, member, gymName) => {
-    const source = String(text || '');
-    const daysLeft = Number.isFinite(Number(member.days_to_expiry)) ? Number(member.days_to_expiry) : 0;
-
-    return source
-        .replace(/{{\s*name\s*}}/gi, member.full_name || 'Member')
-        .replace(/{{\s*plan\s*}}/gi, member.plan_name || 'your plan')
-        .replace(/{{\s*days_left\s*}}/gi, `${daysLeft}`)
-        .replace(/{{\s*gym_name\s*}}/gi, gymName || 'your gym');
+const normalizeTemplateStatus = (value) => {
+    const status = String(value || '').trim().toUpperCase();
+    if (!status) return 'NOT_SYNCED';
+    if (status.includes('APPROVED') || status === 'ACTIVE') return 'APPROVED';
+    if (status.includes('PENDING') || status.includes('PROCESS') || status.includes('QUEUE') || status.includes('REVIEW') || status.includes('REQUESTED')) return 'PENDING';
+    if (status.includes('REJECT')) return 'REJECTED';
+    if (status.includes('DISABLE') || status.includes('INACTIVE')) return 'DISABLED';
+    if (status.includes('FAIL') || status.includes('ERROR')) return 'FAILED';
+    return status;
 };
 
 async function getSegmentMembers(gymId, segment, limit = 200) {
@@ -311,16 +322,18 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         const segment = AUDIENCE_MAP[segmentInput] || String(segmentInput).toUpperCase();
         const customMemberIds = Array.isArray(req.body.member_ids) ? req.body.member_ids : [];
         const templateKey = String(req.body.template_key || '').trim().toUpperCase();
-        let message = String(req.body.message || '').trim();
-        const channel = String(req.body.channel || 'WHATSAPP').toUpperCase();
+        const channel = 'WHATSAPP';
 
-        if (!['WHATSAPP', 'SMS'].includes(channel)) {
-            return fail(res, 400, 'INVALID_CAMPAIGN_CHANNEL', 'Campaign channel must be WHATSAPP or SMS.');
+        if (!templateKey) {
+            return fail(res, 400, 'WHATSAPP_TEMPLATE_REQUIRED', 'Select an approved WhatsApp template before launching the campaign.');
         }
 
         const gymConfigRes = await pool.query(
             `SELECT
                 name,
+                messaging_whatsapp_number,
+                messaging_whatsapp_status,
+                messaging_whatsapp_templates_status,
                 bulk_enabled,
                 bulk_monthly_limit,
                 bulk_per_campaign_limit,
@@ -336,20 +349,12 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         }
 
         const allowedChannels = gymConfig.bulk_channels || { whatsapp: true, sms: false };
-        if (channel === 'WHATSAPP' && !allowedChannels.whatsapp) {
+        if (!allowedChannels.whatsapp) {
             return fail(res, 403, 'WHATSAPP_CHANNEL_DISABLED', 'WhatsApp channel is disabled in integrations settings.');
         }
-        if (channel === 'SMS' && !allowedChannels.sms) {
-            return fail(res, 403, 'SMS_CHANNEL_DISABLED', 'SMS channel is disabled in integrations settings.');
-        }
 
-        const accountSid = String(process.env.TWILIO_ACCOUNT_SID || '').trim();
-        const authToken = String(process.env.TWILIO_AUTH_TOKEN || '').trim();
-        const platformWhatsAppFrom = String(process.env.TWILIO_WHATSAPP_FROM || '').trim();
-        const platformSmsFrom = String(process.env.TWILIO_SMS_FROM || '').trim();
-
-        if (!accountSid || !authToken) {
-            return fail(res, 400, 'TWILIO_NOT_CONFIGURED', 'Platform Twilio gateway is missing. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in backend env.');
+        if (String(gymConfig.messaging_whatsapp_status || '').toUpperCase() !== 'CONNECTED' || !gymConfig.messaging_whatsapp_number) {
+            return fail(res, 400, 'WHATSAPP_NOT_CONNECTED', 'Connect and verify your gym WhatsApp number in Settings before sending campaigns.');
         }
 
         const monthlyLimit = Math.max(10, parseInt(gymConfig.bulk_monthly_limit || 500, 10));
@@ -370,9 +375,16 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         }
 
         let selectedTemplate = null;
-        if (templateKey) {
+        {
             const templateRes = await pool.query(
-                `SELECT template_key, title, whatsapp_text, sms_text, is_active
+                `SELECT
+                    template_key,
+                    title,
+                    whatsapp_text,
+                    whatsapp_template_name,
+                    whatsapp_template_language,
+                    whatsapp_template_status,
+                    is_active
                  FROM gym_message_templates
                  WHERE gym_id = $1 AND template_key = $2
                  LIMIT 1`,
@@ -385,14 +397,20 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
             if (!selectedTemplate.is_active) {
                 return fail(res, 400, 'TEMPLATE_DISABLED', 'Selected template is disabled.');
             }
-            if (!message) {
-                message = channel === 'SMS' ? selectedTemplate.sms_text : selectedTemplate.whatsapp_text;
+            if (!selectedTemplate.whatsapp_template_name) {
+                return fail(res, 400, 'TEMPLATE_NOT_SYNCED', 'This template is not synced to MSG91 yet. Refresh it in Settings and wait for approval.');
+            }
+
+            const templateStatus = normalizeTemplateStatus(selectedTemplate.whatsapp_template_status);
+            if (templateStatus === 'PENDING') {
+                return fail(res, 400, 'TEMPLATE_PENDING_APPROVAL', 'This WhatsApp template is still pending approval in MSG91.');
+            }
+            if (templateStatus !== 'APPROVED') {
+                return fail(res, 400, 'TEMPLATE_NOT_APPROVED', 'This WhatsApp template is not approved yet.');
             }
         }
 
-        if (!message || message.length < 5) {
-            return fail(res, 400, 'INVALID_CAMPAIGN_MESSAGE', 'Campaign message must be at least 5 characters.');
-        }
+        const message = String(selectedTemplate.whatsapp_text || '').trim();
 
         const sendLimit = Math.min(remainingThisMonth, perCampaignLimit, 500);
         const members = customMemberIds.length > 0
@@ -402,62 +420,28 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
             return fail(res, 400, 'EMPTY_CAMPAIGN_SEGMENT', customMemberIds.length > 0 ? 'No members found in selected list.' : 'No members found in selected segment.');
         }
 
-        const client = twilio(accountSid, authToken);
         const targetMembers = members
-            .filter((member) => normalizePhone(member.phone))
+            .filter((member) => normalizeLocalIndianPhone(member.phone))
             .slice(0, sendLimit);
 
         if (targetMembers.length === 0) {
             return fail(res, 400, 'NO_VALID_PHONES', 'No valid member phone numbers found for selected segment.');
         }
 
-        const fromWhatsApp = formatWhatsAppAddress(platformWhatsAppFrom);
-        const fromSms = normalizePhone(platformSmsFrom);
-        const whatsappSandboxMode = isSandboxWhatsAppSender(platformWhatsAppFrom);
-        const smsFallbackAllowed = whatsappSandboxMode && allowedChannels.sms && Boolean(fromSms);
-
-        if (channel === 'WHATSAPP' && !fromWhatsApp) {
-            return fail(res, 400, 'WHATSAPP_FROM_MISSING', 'TWILIO_WHATSAPP_FROM is missing in backend env.');
-        }
-        if (channel === 'SMS' && !fromSms) {
-            return fail(res, 400, 'SMS_FROM_MISSING', 'TWILIO_SMS_FROM is missing in backend env.');
-        }
-
         let successCount = 0;
         let failedCount = 0;
-        let fallbackSmsCount = 0;
         const failures = [];
 
         for (const member of targetMembers) {
-            const toPhone = normalizePhone(member.phone);
-            const personalizedMessage = fillTemplate(message, member, gymConfig.name || 'GymVault');
+            const toPhone = normalizeLocalIndianPhone(member.phone);
             try {
-                if (channel === 'SMS') {
-                    await client.messages.create({
-                        from: fromSms,
-                        to: toPhone,
-                        body: personalizedMessage,
-                    });
-                } else {
-                    try {
-                        await client.messages.create({
-                            from: fromWhatsApp,
-                            to: `whatsapp:${toPhone}`,
-                            body: personalizedMessage,
-                        });
-                    } catch (whatsErr) {
-                        if (smsFallbackAllowed && shouldFallbackToSms(whatsErr)) {
-                            await client.messages.create({
-                                from: fromSms,
-                                to: toPhone,
-                                body: personalizedMessage,
-                            });
-                            fallbackSmsCount += 1;
-                        } else {
-                            throw whatsErr;
-                        }
-                    }
-                }
+                await sendWhatsAppTemplate({
+                    integratedNumber: gymConfig.messaging_whatsapp_number,
+                    templateName: selectedTemplate.whatsapp_template_name,
+                    language: selectedTemplate.whatsapp_template_language || 'en_US',
+                    recipientNumber: toPhone,
+                    variables: buildTemplateBodyVariables(message, member, gymConfig.name || 'GymVault'),
+                });
                 successCount += 1;
             } catch (sendErr) {
                 failedCount += 1;
@@ -500,7 +484,6 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
             monthly_limit: monthlyLimit,
             monthly_used: monthlyUsed + successCount,
             monthly_remaining: Math.max(0, monthlyLimit - (monthlyUsed + successCount)),
-            fallback_sms_count: fallbackSmsCount,
             failures: failures.slice(0, 25),
         });
     } catch (err) {

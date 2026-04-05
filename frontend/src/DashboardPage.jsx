@@ -51,6 +51,15 @@ const DEFAULT_BROADCAST_MESSAGES = {
 
 const resolveBroadcastAudienceMessage = (audience) => DEFAULT_BROADCAST_MESSAGES[audience] || DEFAULT_BROADCAST_MESSAGES.All;
 
+const resolveBroadcastTemplateSuggestion = (audience) => ({
+  All: 'SALES_OFFER',
+  Active: 'SALES_OFFER',
+  Expiring: 'RENEWAL_REMINDER',
+  Expired: 'EXPIRED',
+  Ghosts: 'INACTIVE',
+  HighChurn: 'INACTIVE',
+}[audience] || 'SALES_OFFER');
+
 
 // ─── Animation Keyframes ──────────────────────────────────────────────────────
 const animationStyles = (
@@ -807,11 +816,15 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         ]);
         if (intRes.status === 'fulfilled') {
           const data = intRes.value.data || {};
-          const templates = Array.isArray(data.templates) ? data.templates.filter((item) => item.is_active !== false) : [];
+          const templates = Array.isArray(data.templates)
+            ? data.templates.filter((item) => item.is_active !== false && String(item.whatsapp_template_status || '').toUpperCase() === 'APPROVED')
+            : [];
           setBroadcastTemplates(templates);
-          const isSandbox = String(data.whatsapp_mode || '') === 'SANDBOX';
-          const smsReady = Boolean(data.sms_ready);
-          if (isSandbox && smsReady) setBroadcastChannel('SMS');
+          if (!broadcastTemplateKey) {
+            const suggestedKey = resolveBroadcastTemplateSuggestion(broadcastAudience);
+            const nextTemplate = templates.find((item) => item.template_key === suggestedKey) || templates[0] || null;
+            setBroadcastTemplateKey(nextTemplate?.template_key || '');
+          }
         } else {
           setBroadcastTemplates([]);
         }
@@ -827,40 +840,36 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       }
     };
     loadTemplatesAndGymName();
-  }, [showBroadcastModal]);
+  }, [broadcastAudience, broadcastTemplateKey, showBroadcastModal]);
 
   useEffect(() => {
-    if (!broadcastTemplateKey) return;
+    if (!broadcastTemplateKey) {
+      setBroadcastMessage('');
+      return;
+    }
     const selected = broadcastTemplates.find((item) => item.template_key === broadcastTemplateKey);
-    if (!selected) return;
-    const content = broadcastChannel === 'SMS' ? selected.sms_text : selected.whatsapp_text;
+    if (!selected) {
+      setBroadcastMessage('');
+      return;
+    }
+    const content = selected.whatsapp_text;
     let resolved = String(content || '');
     if (gymName) resolved = resolved.replace(/\{\{gym_name\}\}/gi, gymName);
     setBroadcastMessage(resolved);
-  }, [broadcastTemplateKey, broadcastChannel, broadcastTemplates]);
-
-  useEffect(() => {
-    if (!showBroadcastModal || broadcastTemplateKey || broadcastCustomIds.length > 0) return;
-    if (String(broadcastMessage || '').trim()) return;
-    setBroadcastMessage(resolveBroadcastAudienceMessage(broadcastAudience));
-  }, [showBroadcastModal, broadcastAudience, broadcastTemplateKey, broadcastCustomIds.length, broadcastMessage]);
-
-  // If gym name loads after template was already selected, resolve {{gym_name}} in-place
-  useEffect(() => {
-    if (!gymName) return;
-    setBroadcastMessage((prev) =>
-      prev.includes('{{gym_name}}') ? prev.replace(/\{\{gym_name\}\}/gi, gymName) : prev
-    );
-  }, [gymName]);
+  }, [broadcastTemplateKey, broadcastTemplates, gymName]);
 
   const handleBroadcast = async (e) => {
     e.preventDefault();
+    if (!broadcastTemplateKey) {
+      toast('Select an approved WhatsApp template before launching the broadcast.', 'warning');
+      return;
+    }
     try {
       setIsAutomating(true);
       const segment = audienceToSegment(broadcastAudience);
       const res = await axios.post('/api/notifications/campaign/run', {
         segment,
-        channel: broadcastChannel,
+        channel: 'WHATSAPP',
         template_key: broadcastTemplateKey || undefined,
         message: broadcastMessage,
         member_ids: broadcastCustomIds,
@@ -869,16 +878,11 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       const payload = unwrapApiData(res.data) || {};
       const failed = Number(payload.failed_count || 0);
       const delivered = Number(payload.sent_to_count || 0);
-      const fallbackSms = Number(payload.fallback_sms_count || 0);
       const statusLine = failed > 0
         ? `Campaign delivered to ${delivered} members, ${failed} failed.`
         : `Campaign delivered to ${delivered} members.`;
 
-      const fullStatus = fallbackSms > 0
-        ? `${statusLine} ${fallbackSms} sent via SMS fallback.`
-        : statusLine;
-
-      toast(fullStatus, failed > 0 ? 'warning' : 'success');
+      toast(statusLine, failed > 0 ? 'warning' : 'success');
       setShowBroadcastModal(false);
       setBroadcastTemplateKey('');
       setBroadcastMessage('');
@@ -912,10 +916,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   const openBroadcastDraft = (audience, message) => {
     setBroadcastAudience(audience);
-    setBroadcastTemplateKey('');
+    setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
     setBroadcastSearch('');
     setBroadcastCustomIds([]);
-    setBroadcastMessage(message);
+    setBroadcastMessage('');
     setShowBroadcastModal(true);
   };
 
@@ -926,10 +930,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         .filter((id) => Number.isInteger(id))
     ));
     setBroadcastAudience(audience);
-    setBroadcastTemplateKey('');
+    setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
     setBroadcastSearch('');
     setBroadcastCustomIds(normalizedIds);
-    setBroadcastMessage(message);
+    setBroadcastMessage('');
     setShowBroadcastModal(true);
   };
 
@@ -1953,7 +1957,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     !setup.steps?.profile && { label: 'Complete gym profile', sub: 'Add your gym name, logo & address', onClick: () => navigateTo('Settings', 'account') },
                     !setup.steps?.plans   && { label: 'Create a pricing plan', sub: 'Set up your first membership plan', onClick: () => navigateTo('Plans') },
                     !setup.steps?.members && { label: 'Add your first member', sub: 'Register a member to get started', onClick: () => setShowAddModal(true) },
-                    setup.steps?.profile && setup.steps?.plans && { label: 'Set up WhatsApp / SMS messaging', sub: 'Enable automated member alerts', onClick: () => navigateTo('Settings', 'automation') },
+                    setup.steps?.profile && setup.steps?.plans && { label: 'Set up WhatsApp messaging', sub: 'Enable automated member alerts', onClick: () => navigateTo('Settings', 'automation') },
                     setup.steps?.profile && { label: 'Connect payment gateway', sub: 'Integrate Razorpay for online payments', onClick: () => navigateTo('Settings', 'integrations') },
                   ].filter(Boolean).slice(0, 4);
                   return (
@@ -2608,8 +2612,10 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                       type="button"
                       onClick={() => {
                         setBroadcastAudience(value)
-                        if (broadcastSelectedMembers.length === 0 && !broadcastTemplateKey) {
-                          setBroadcastMessage(resolveBroadcastAudienceMessage(value))
+                        if (broadcastSelectedMembers.length === 0) {
+                          const suggestedKey = resolveBroadcastTemplateSuggestion(value)
+                          const nextTemplate = broadcastTemplates.find((item) => item.template_key === suggestedKey) || broadcastTemplates[0] || null
+                          setBroadcastTemplateKey(nextTemplate?.template_key || '')
                         }
                       }}
                       className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-150 ${
@@ -2626,46 +2632,36 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   {campaignPreviewLoading ? 'Loading preview...' : `Estimated reach: ${(broadcastSelectedMembers.length || campaignPreviewCount)} member${(broadcastSelectedMembers.length || campaignPreviewCount) !== 1 ? 's' : ''}`}
                 </p>
               </div>
-              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Channel</label>
-                  <select
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                    value={broadcastChannel}
-                    onChange={(e) => setBroadcastChannel(e.target.value)}
-                  >
-                    <option value="WHATSAPP">WhatsApp</option>
-                    <option value="SMS">SMS</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Template</label>
-                  <select
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                    value={broadcastTemplateKey}
-                    onChange={(e) => setBroadcastTemplateKey(e.target.value)}
-                  >
-                    <option value="">Custom Message</option>
-                    {broadcastTemplates.map((template) => (
-                      <option key={template.template_key} value={template.template_key}>{template.title}</option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Approved Template</label>
+                <select
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                  value={broadcastTemplateKey}
+                  onChange={(e) => setBroadcastTemplateKey(e.target.value)}
+                >
+                  <option value="">Select template</option>
+                  {broadcastTemplates.map((template) => (
+                    <option key={template.template_key} value={template.template_key}>{template.title}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">
+                  Campaigns use approved WhatsApp templates only. Configure or approve more templates from Settings if this list is empty.
+                </p>
               </div>
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Campaign Message</label>
-                <textarea required rows={3}
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Template Preview</label>
+                <textarea rows={4} readOnly
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-none"
-                  placeholder="Type your message here..."
-                  value={broadcastMessage} onChange={e => setBroadcastMessage(e.target.value)} />
-                <p className="text-[10px] text-slate-400 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name &middot; {'{{gym_name}}'} fills your gym name.</p>
+                  placeholder={broadcastTemplates.length === 0 ? 'No approved WhatsApp templates available yet.' : 'Select a template to preview it here.'}
+                  value={broadcastMessage} />
+                <p className="text-[10px] text-slate-400 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name, {'{{plan}}'} fills the plan name, and {'{{gym_name}}'} fills your gym name.</p>
               </div>
               </div>
               <div className="dashboard-broadcast-footer shrink-0 border-t border-slate-100 bg-white px-4 pt-3">
-                <button type="submit"
+                <button type="submit" disabled={isAutomating || !broadcastTemplateKey || broadcastTemplates.length === 0}
                   className="w-full py-3 rounded-xl font-black text-sm text-white transition-all hover:opacity-90 active:scale-98"
-                  style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)' }}>
-                  Launch Broadcast
+                  style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)', opacity: (isAutomating || !broadcastTemplateKey || broadcastTemplates.length === 0) ? 0.6 : 1 }}>
+                  {isAutomating ? 'Launching...' : 'Launch Broadcast'}
                 </button>
               </div>
             </form>

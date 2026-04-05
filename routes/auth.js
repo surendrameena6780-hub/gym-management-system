@@ -5,6 +5,14 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { getDefaultPermissionsByStaffRole } = require('../middleware/rbac');
+const {
+    OTP_MODES,
+    getMsg91OtpMode,
+    maskPhone,
+    normalizeLocalIndianPhone,
+    requestMsg91Otp,
+    verifyMsg91Otp,
+} = require('../utils/msg91');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
@@ -46,6 +54,10 @@ const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
 const PASSWORD_RESET_OTP_TTL_MINUTES = 10;
 const PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60;
 const PASSWORD_RESET_MAX_VERIFY_ATTEMPTS = 5;
+const ADMIN_LOGIN_PURPOSE = 'ADMIN_LOGIN';
+const ADMIN_LOGIN_OTP_TTL_MINUTES = 10;
+const ADMIN_LOGIN_RESEND_COOLDOWN_SECONDS = 60;
+const ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS = 5;
 
 const AUTH_CONTEXT_SELECT = `
     SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
@@ -121,7 +133,7 @@ const issueAuthToken = (user) => {
     const permissions = getAuthPermissions(user);
     const token = jwt.sign(
         {
-            user: {
+            user: { 
                 id: user.id,
                 gym_id: user.gym_id,
                 role: user.role,
@@ -135,6 +147,29 @@ const issueAuthToken = (user) => {
     );
 
     return { token, permissions };
+};
+const buildAuthSuccessPayload = (user, message = 'Login successful!') => {
+    const { token, permissions } = issueAuthToken(user);
+
+    return {
+        token,
+        message,
+        user: {
+            id: user.id,
+            full_name: user.full_name,
+            email: user.email,
+            gym_id: user.gym_id,
+            role: user.role,
+            staff_role: user.staff_role,
+            is_active: user.is_active,
+            permissions,
+        },
+        saas: {
+            status: user.saas_status || 'ACTIVE',
+            valid_until: user.saas_valid_until,
+            plan: user.current_plan,
+        },
+    };
 };
 
 const getPasswordlessProviderMessage = (user) => {
@@ -189,6 +224,21 @@ const loadUserAuthContextByEmail = async (email) => {
     return result.rows[0] || null;
 };
 
+const loadAdminAuthContextByPhone = async (phone) => {
+    const normalizedPhone = normalizeLocalIndianPhone(phone);
+    if (!normalizedPhone) return null;
+
+    const result = await pool.query(
+        `${AUTH_CONTEXT_SELECT}
+                 WHERE RIGHT(REGEXP_REPLACE(COALESCE(u.phone, ''), '[^0-9]', '', 'g'), 10) = $1
+           AND UPPER(COALESCE(u.role, 'OWNER')) IN ('OWNER', 'STAFF')
+         ORDER BY CASE WHEN UPPER(COALESCE(u.role, 'OWNER')) = 'OWNER' THEN 0 ELSE 1 END, u.id ASC
+         LIMIT 1`,
+        [normalizedPhone]
+    );
+
+    return result.rows[0] || null;
+};
 const loadUserAuthContextByProvider = async (providerField, providerValue) => {
     const allowedFields = {
         google_id: 'u.google_id',
@@ -197,6 +247,15 @@ const loadUserAuthContextByProvider = async (providerField, providerValue) => {
 
     const fieldSql = allowedFields[providerField];
     if (!fieldSql) {
+const generateAdminLoginOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
+const cleanupExpiredAdminLoginOtps = async () => {
+    await pool.query(`
+        DELETE FROM user_login_otps
+        WHERE expires_at < NOW()
+           OR (consumed_at IS NOT NULL AND created_at < NOW() - INTERVAL '2 days')
+    `);
+};
         throw new Error(`Unsupported auth provider field: ${providerField}`);
     }
 
@@ -445,34 +504,226 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ message: "Invalid email or password." });
         }
 
-        // 3. Issue the JWT Token ONLY if the password is correct
-        const { token, permissions } = issueAuthToken(user);
-
         await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
-        return res.json({
-            token,
-            message: "Login successful!",
-            user: {
-                id: user.id,
-                full_name: user.full_name,
-                email: user.email,
-                gym_id: user.gym_id,
-                role: user.role,
-                staff_role: user.staff_role,
-                is_active: user.is_active,
-                permissions,
-            },
-            saas: {
-                status: user.saas_status || 'ACTIVE',
-                valid_until: user.saas_valid_until,
-                plan: user.current_plan,
-            }
-        });
+        return res.json(buildAuthSuccessPayload(user, 'Login successful!'));
 
     } catch (err) {
         console.error("LOGIN ERROR:", err.message);
         return res.status(500).json({ message: "Server Error" });
+    }
+});
+
+router.post('/admin/send-otp', async (req, res) => {
+    const phone = normalizeLocalIndianPhone(req.body?.phone);
+
+    if (!phone) {
+        return res.status(400).json({ message: 'Please enter the registered 10-digit mobile number.' });
+    }
+
+    try {
+        await cleanupExpiredAdminLoginOtps();
+
+        const user = await loadAdminAuthContextByPhone(phone);
+        if (!user) {
+            return res.status(404).json({ message: 'No owner or staff account was found with that mobile number.' });
+        }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
+        }
+
+        const activeOtp = await pool.query(
+            `SELECT created_at
+             FROM user_login_otps
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.id, ADMIN_LOGIN_PURPOSE]
+        );
+
+        if (activeOtp.rows[0]?.created_at) {
+            const elapsedSeconds = Math.floor((Date.now() - new Date(activeOtp.rows[0].created_at).getTime()) / 1000);
+            const retryAfterSeconds = Math.max(0, ADMIN_LOGIN_RESEND_COOLDOWN_SECONDS - elapsedSeconds);
+            if (retryAfterSeconds > 0) {
+                return res.status(429).json({
+                    message: `Please wait ${retryAfterSeconds} seconds before requesting a new OTP.`,
+                    retry_after_seconds: retryAfterSeconds,
+                });
+            }
+        }
+
+        const deliveryMode = getMsg91OtpMode();
+        const previewOtp = deliveryMode === OTP_MODES.PREVIEW ? generateAdminLoginOtp() : '';
+        const otpHash = previewOtp ? await bcrypt.hash(previewOtp, await bcrypt.genSalt(10)) : null;
+        let providerRequestId = null;
+
+        if (deliveryMode === OTP_MODES.MSG91) {
+            try {
+                const providerResponse = await requestMsg91Otp(phone);
+                providerRequestId = providerResponse?.request_id || providerResponse?.data?.request_id || null;
+            } catch (providerErr) {
+                console.error('ADMIN SEND OTP PROVIDER ERROR:', providerErr.message);
+                return res.status(502).json({ message: 'Could not send the OTP right now. Please try again shortly.' });
+            }
+        }
+
+        await pool.query('BEGIN');
+        await pool.query(
+            `UPDATE user_login_otps
+             SET consumed_at = NOW()
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [user.id, ADMIN_LOGIN_PURPOSE]
+        );
+        await pool.query(
+            `INSERT INTO user_login_otps (user_id, phone, purpose, otp_hash, delivery_mode, provider_request_id, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW() + ($7 || ' minutes')::interval)`,
+            [user.id, phone, ADMIN_LOGIN_PURPOSE, otpHash, deliveryMode, providerRequestId, ADMIN_LOGIN_OTP_TTL_MINUTES]
+        );
+        await pool.query('COMMIT');
+
+        return res.json({
+            message: deliveryMode === OTP_MODES.PREVIEW
+                ? 'Preview OTP prepared for your owner login.'
+                : 'OTP sent to your registered mobile number.',
+            delivery_mode: deliveryMode.toLowerCase(),
+            masked_phone: maskPhone(phone),
+            expires_in_minutes: ADMIN_LOGIN_OTP_TTL_MINUTES,
+            preview_otp: previewOtp,
+            preview_notice: deliveryMode === OTP_MODES.PREVIEW
+                ? 'MSG91 owner OTP is still in preview mode, so the code is shown directly here.'
+                : '',
+            user_name: String(user.full_name || '').trim().split(/\s+/)[0] || '',
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('ADMIN SEND OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not prepare login OTP. Please try again.' });
+    }
+});
+
+router.post('/admin/verify-otp', async (req, res) => {
+    const phone = normalizeLocalIndianPhone(req.body?.phone);
+    const otp = String(req.body?.otp || '').replace(/\D/g, '').slice(0, 6);
+
+    if (!phone) {
+        return res.status(400).json({ message: 'Please enter the registered 10-digit mobile number.' });
+    }
+    if (otp.length !== 6) {
+        return res.status(400).json({ message: 'Please enter the 6-digit OTP.' });
+    }
+
+    try {
+        await cleanupExpiredAdminLoginOtps();
+
+        const user = await loadAdminAuthContextByPhone(phone);
+        if (!user) {
+            return res.status(400).json({ message: 'The OTP is invalid or expired. Request a new one.' });
+        }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
+        }
+
+        const activeOtp = await pool.query(
+            `SELECT id, otp_hash, attempts, delivery_mode
+             FROM user_login_otps
+             WHERE user_id = $1
+               AND phone = $2
+               AND purpose = $3
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.id, phone, ADMIN_LOGIN_PURPOSE]
+        );
+
+        const otpRow = activeOtp.rows[0];
+        if (!otpRow) {
+            return res.status(400).json({ message: 'The OTP is invalid or expired. Request a new one.' });
+        }
+
+        const previousAttempts = Number(otpRow.attempts || 0);
+        if (previousAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) {
+            await pool.query('UPDATE user_login_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
+            return res.status(400).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+        }
+
+        let isValidOtp = false;
+        let invalidMessage = 'Invalid OTP. Please try again.';
+        let shouldConsumeOtp = false;
+
+        if (String(otpRow.delivery_mode || OTP_MODES.PREVIEW).toUpperCase() === OTP_MODES.MSG91) {
+            let verifyResult;
+            try {
+                verifyResult = await verifyMsg91Otp(phone, otp);
+            } catch (providerErr) {
+                console.error('ADMIN VERIFY OTP PROVIDER ERROR:', providerErr.message);
+                return res.status(502).json({ message: 'Could not verify the OTP right now. Please try again.' });
+            }
+            isValidOtp = Boolean(verifyResult.verified);
+            shouldConsumeOtp = Boolean(verifyResult.expired);
+            invalidMessage = verifyResult.expired
+                ? 'OTP expired. Request a new OTP.'
+                : (verifyResult.message || 'Invalid OTP. Please try again.');
+        } else {
+            isValidOtp = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
+        }
+
+        if (!isValidOtp) {
+            const nextAttempts = previousAttempts + 1;
+            await pool.query(
+                `UPDATE user_login_otps
+                 SET attempts = $1,
+                     consumed_at = CASE WHEN $1 >= $2 OR $3 THEN NOW() ELSE consumed_at END
+                 WHERE id = $4`,
+                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, shouldConsumeOtp, otpRow.id]
+            );
+
+            if (shouldConsumeOtp) {
+                return res.status(400).json({ message: invalidMessage });
+            }
+
+            const attemptsLeft = Math.max(0, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS - nextAttempts);
+            return res.status(400).json({
+                message: attemptsLeft > 0
+                    ? `${invalidMessage} ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
+                    : 'Too many invalid attempts. Request a new OTP.',
+            });
+        }
+
+        await pool.query('BEGIN');
+        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        await pool.query(
+            `UPDATE user_login_otps
+             SET consumed_at = NOW()
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [user.id, ADMIN_LOGIN_PURPOSE]
+        );
+        await pool.query('COMMIT');
+
+        return res.json(buildAuthSuccessPayload(user, 'OTP verified. Login successful!'));
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('ADMIN VERIFY OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not complete OTP login. Please try again.' });
     }
 });
 
@@ -679,6 +930,8 @@ router.get('/config', (req, res) => {
     res.json({
         google_auth_enabled: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
         apple_client_id: process.env.APPLE_CLIENT_ID || null,
+        admin_phone_otp_enabled: true,
+        admin_phone_otp_mode: getMsg91OtpMode().toLowerCase(),
     });
 });
 
