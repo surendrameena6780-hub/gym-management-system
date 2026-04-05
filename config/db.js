@@ -33,6 +33,25 @@ const connectDB = async () => {
             ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) DEFAULT 'local';
         `);
         await pool.query(`
+            CREATE TABLE IF NOT EXISTS password_reset_otps (
+                id          SERIAL PRIMARY KEY,
+                user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                email       VARCHAR(100) NOT NULL,
+                purpose     VARCHAR(40) NOT NULL DEFAULT 'PASSWORD_RESET',
+                otp_hash    TEXT NOT NULL,
+                attempts    INTEGER NOT NULL DEFAULT 0,
+                expires_at  TIMESTAMPTZ NOT NULL,
+                consumed_at TIMESTAMPTZ,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_password_reset_otps_user_purpose
+                ON password_reset_otps (user_id, purpose, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_password_reset_otps_email_active
+                ON password_reset_otps (email, purpose, expires_at DESC);
+        `);
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id          SERIAL PRIMARY KEY,
                 gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,

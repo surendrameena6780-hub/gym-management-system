@@ -140,6 +140,8 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/superadmin/login', authLimiter);
 app.use('/api/auth/member/send-otp', authLimiter);
 app.use('/api/auth/member/verify-otp', authLimiter);
+app.use('/api/auth/password-reset/request', authLimiter);
+app.use('/api/auth/password-reset/confirm', authLimiter);
 
 app.use(
     '/uploads/profiles',

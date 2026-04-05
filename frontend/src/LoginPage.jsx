@@ -53,6 +53,246 @@ function SocialBtn({ icon, label, onClick }) {
   );
 }
 
+function PasswordResetModal({
+  open,
+  step,
+  email,
+  setEmail,
+  otp,
+  setOtp,
+  newPassword,
+  setNewPassword,
+  confirmPassword,
+  setConfirmPassword,
+  showNewPassword,
+  setShowNewPassword,
+  showConfirmPassword,
+  setShowConfirmPassword,
+  loading,
+  error,
+  notice,
+  delivery,
+  onClose,
+  onRequestOtp,
+  onConfirmReset,
+  onResendOtp,
+  onCopyPreviewOtp,
+}) {
+  if (!open) return null;
+
+  const isConfirmStep = step === 'confirm';
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center p-4"
+      style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(12px)' }}
+    >
+      <div
+        className="w-full max-w-md rounded-[28px] p-6 relative"
+        style={{
+          background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(9,12,24,0.98) 100%)',
+          border: '1px solid rgba(129,140,248,0.16)',
+          boxShadow: '0 24px 80px rgba(2,6,23,0.55)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+          aria-label="Close password reset"
+        >
+          <X size={16} />
+        </button>
+
+        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-300 mb-2">
+          {isConfirmStep ? 'Verify OTP' : 'Forgot Password'}
+        </p>
+        <h3 className="text-white text-[1.45rem] font-black leading-tight pr-10">
+          {isConfirmStep ? 'Reset your password' : 'Recover your account'}
+        </h3>
+        <p className="text-slate-400 text-sm font-medium mt-2 leading-relaxed">
+          {isConfirmStep
+            ? `Enter the 6-digit code prepared for ${delivery?.maskedEmail || email}, then choose a new password.`
+            : 'Enter your registered email address and GymVault will prepare a reset OTP for you.'}
+        </p>
+
+        {notice && (
+          <div
+            className="mt-5 px-4 py-3 rounded-2xl text-sm font-semibold text-emerald-100"
+            style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.22)' }}
+          >
+            {notice}
+          </div>
+        )}
+
+        {error && (
+          <div
+            className="mt-5 px-4 py-3 rounded-2xl text-sm font-semibold text-rose-200"
+            style={{ background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.22)' }}
+          >
+            {error}
+          </div>
+        )}
+
+        {delivery?.previewOtp && (
+          <div
+            className="mt-5 p-4 rounded-2xl"
+            style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.22)' }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">Preview OTP</p>
+                <p className="text-white text-2xl font-black tracking-[0.3em] mt-1">{delivery.previewOtp}</p>
+                <p className="text-amber-100/90 text-xs font-medium mt-2 leading-relaxed">
+                  {delivery.previewNotice || 'Email delivery is not configured yet, so this preview code is shown directly.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onCopyPreviewOtp}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-amber-200 hover:text-white transition-colors shrink-0"
+                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}
+                aria-label="Copy preview OTP"
+              >
+                <Copy size={15} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isConfirmStep ? (
+          <form onSubmit={onRequestOtp} className="space-y-4 mt-6">
+            <div>
+              <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Registered Email</label>
+              <div className="relative">
+                <Mail size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                <input
+                  required
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="admin@mygym.com"
+                  className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
+                  style={iBase}
+                  onFocus={iFocus}
+                  onBlur={iBlur}
+                />
+              </div>
+            </div>
+
+            <button
+              disabled={loading}
+              className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+              style={{
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                boxShadow: loading ? 'none' : '0 8px 28px rgba(99,102,241,0.5)',
+                opacity: loading ? 0.72 : 1,
+              }}
+            >
+              {loading
+                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Preparing...</>
+                : <><span>Send OTP</span><ArrowRight size={16} /></>}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={onConfirmReset} className="space-y-4 mt-6">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400">
+              <span>Code expires in about {delivery?.expiresInMinutes || 10} minutes</span>
+              <button type="button" onClick={onResendOtp} className="text-indigo-300 hover:text-indigo-200 transition-colors">
+                Resend code
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">OTP Code</label>
+              <div className="relative">
+                <Mail size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                <input
+                  required
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6-digit code"
+                  className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all tracking-[0.35em]"
+                  style={iBase}
+                  onFocus={iFocus}
+                  onBlur={iBlur}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">New Password</label>
+              <div className="relative">
+                <Lock size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                <input
+                  required
+                  type={showNewPassword ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="Minimum 8 characters"
+                  className="w-full pl-11 pr-12 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
+                  style={iBase}
+                  onFocus={iFocus}
+                  onBlur={iBlur}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((value) => !value)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400 transition-colors"
+                >
+                  {showNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Confirm New Password</label>
+              <div className="relative">
+                <Lock size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                <input
+                  required
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Repeat new password"
+                  className="w-full pl-11 pr-12 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
+                  style={iBase}
+                  onFocus={iFocus}
+                  onBlur={iBlur}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((value) => !value)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400 transition-colors"
+                >
+                  {showConfirmPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              disabled={loading}
+              className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+              style={{
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                boxShadow: loading ? 'none' : '0 8px 28px rgba(99,102,241,0.5)',
+                opacity: loading ? 0.72 : 1,
+              }}
+            >
+              {loading
+                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Updating...</>
+                : <><span>Update Password</span><ArrowRight size={16} /></>}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Full-screen Member Portal Dashboard (shown after OTP verification) ──────
 function MemberPortalDashboard({ member, token, onSignOut }) {
   const qrScannerRef = useRef(null);
@@ -1085,7 +1325,21 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [showPwd, setShowPwd]       = useState(false);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState('');
+  const [notice, setNotice]         = useState('');
   const [googleAuthEnabled, setGoogleAuthEnabled] = useState(null);
+  const [showForgotEmailHint, setShowForgotEmailHint] = useState(false);
+  const [passwordResetOpen, setPasswordResetOpen] = useState(false);
+  const [passwordResetStep, setPasswordResetStep] = useState('request');
+  const [passwordResetEmail, setPasswordResetEmail] = useState('');
+  const [passwordResetOtp, setPasswordResetOtp] = useState('');
+  const [passwordResetNewPassword, setPasswordResetNewPassword] = useState('');
+  const [passwordResetConfirmPassword, setPasswordResetConfirmPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+  const [passwordResetLoading, setPasswordResetLoading] = useState(false);
+  const [passwordResetError, setPasswordResetError] = useState('');
+  const [passwordResetNotice, setPasswordResetNotice] = useState('');
+  const [passwordResetDelivery, setPasswordResetDelivery] = useState(null);
 
   // Member portal state
   const [phone, setPhone]           = useState('');
@@ -1135,10 +1389,38 @@ export default function LoginPage({ setToken, onShowSignup }) {
     window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
+  const resetPasswordRecoveryState = () => {
+    setPasswordResetStep('request');
+    setPasswordResetEmail('');
+    setPasswordResetOtp('');
+    setPasswordResetNewPassword('');
+    setPasswordResetConfirmPassword('');
+    setShowResetPassword(false);
+    setShowResetConfirmPassword(false);
+    setPasswordResetLoading(false);
+    setPasswordResetError('');
+    setPasswordResetNotice('');
+    setPasswordResetDelivery(null);
+  };
+
+  const closePasswordReset = () => {
+    setPasswordResetOpen(false);
+    resetPasswordRecoveryState();
+  };
+
+  const openPasswordReset = () => {
+    resetPasswordRecoveryState();
+    setPasswordResetEmail(String(email || '').trim().toLowerCase());
+    setPasswordResetOpen(true);
+    setShowForgotEmailHint(false);
+    setError('');
+    setNotice('');
+  };
+
   // ── Owner email login ──────────────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setNotice('');
     try {
       const res = await axios.post('/api/auth/login', { email, password });
       setToken(res.data.token, res.data.user);
@@ -1154,6 +1436,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   };
 
   const handleGoogle = () => {
+    setNotice('');
     if (googleAuthEnabled === false) {
       setError('Google Sign-In is not set up on this server. Use email & password.');
       return;
@@ -1163,6 +1446,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   };
 
   const handleApple = () => {
+    setNotice('');
     if (!window.AppleID) {
       setError('Apple Sign-In is not configured. Use email or Google instead.');
       return;
@@ -1183,7 +1467,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   // ── Member OTP ─────────────────────────────────────────────────────────────
   const handleSendOTP = async (e) => {
     e.preventDefault();
-    setOtpLoading(true); setError('');
+    setOtpLoading(true); setError(''); setNotice('');
     try {
       const res = await axios.post('/api/auth/member/send-otp', { phone });
       setFirstName(res.data.member_name || '');
@@ -1201,7 +1485,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
   const handleVerifyOTP = async (e) => {
     e.preventDefault();
-    setOtpLoading(true); setError('');
+    setOtpLoading(true); setError(''); setNotice('');
     try {
       const res = await axios.post('/api/auth/member/verify-otp', { phone, otp });
       setMemberData(res.data.member);
@@ -1210,7 +1494,97 @@ export default function LoginPage({ setToken, onShowSignup }) {
     finally { setOtpLoading(false); }
   };
 
-  const switchTab = (t) => { setTab(t); setError(''); setOtpSent(false); setOtp(''); setMemberData(null); setMemberToken(null); };
+  const handlePasswordResetRequest = async (e) => {
+    e.preventDefault();
+    const normalizedEmail = String(passwordResetEmail || '').trim().toLowerCase();
+
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setPasswordResetError('Please enter a valid email address.');
+      return;
+    }
+
+    setPasswordResetLoading(true);
+    setPasswordResetError('');
+    setPasswordResetNotice('');
+
+    try {
+      const res = await axios.post('/api/auth/password-reset/request', { email: normalizedEmail });
+      setPasswordResetEmail(normalizedEmail);
+      setPasswordResetStep('confirm');
+      setPasswordResetDelivery({
+        channel: res.data?.delivery_channel || 'preview',
+        maskedEmail: res.data?.masked_email || normalizedEmail,
+        expiresInMinutes: res.data?.expires_in_minutes || 10,
+        previewOtp: res.data?.preview_otp || '',
+        previewNotice: res.data?.preview_notice || '',
+      });
+      setPasswordResetNotice(res.data?.message || 'A reset code is ready.');
+    } catch (err) {
+      const retry = err?.response?.data?.retry_after_seconds;
+      const apiMessage = err?.response?.data?.message || err?.response?.data?.error || 'Could not start password recovery.';
+      setPasswordResetError(retry ? `Please wait ${retry}s before requesting another code.` : apiMessage);
+    } finally {
+      setPasswordResetLoading(false);
+    }
+  };
+
+  const handlePasswordResetConfirm = async (e) => {
+    e.preventDefault();
+
+    if (passwordResetNewPassword.length < 8) {
+      setPasswordResetError('New password must be at least 8 characters.');
+      return;
+    }
+    if (passwordResetNewPassword !== passwordResetConfirmPassword) {
+      setPasswordResetError('New passwords do not match.');
+      return;
+    }
+
+    setPasswordResetLoading(true);
+    setPasswordResetError('');
+    setPasswordResetNotice('');
+
+    try {
+      const res = await axios.post('/api/auth/password-reset/confirm', {
+        email: passwordResetEmail,
+        otp: passwordResetOtp,
+        new_password: passwordResetNewPassword,
+      });
+      setEmail(passwordResetEmail);
+      setPassword('');
+      closePasswordReset();
+      setNotice(res.data?.message || 'Password updated successfully. Sign in with your new password.');
+    } catch (err) {
+      setPasswordResetError(err?.response?.data?.message || err?.response?.data?.error || 'Could not reset password.');
+    } finally {
+      setPasswordResetLoading(false);
+    }
+  };
+
+  const handleCopyPreviewOtp = async () => {
+    if (!passwordResetDelivery?.previewOtp) return;
+
+    try {
+      await navigator.clipboard.writeText(passwordResetDelivery.previewOtp);
+      setPasswordResetNotice('Preview OTP copied.');
+      setPasswordResetError('');
+    } catch (_err) {
+      setPasswordResetError('Could not copy the preview OTP.');
+    }
+  };
+
+  const switchTab = (t) => {
+    setTab(t);
+    setError('');
+    setNotice('');
+    setOtpSent(false);
+    setOtp('');
+    setMemberData(null);
+    setMemberToken(null);
+    setShowForgotEmailHint(false);
+    setPasswordResetOpen(false);
+    resetPasswordRecoveryState();
+  };
 
   // Full-screen member portal — takes over the entire page after OTP verification
   if (tab === 'MEMBER' && memberData && memberToken) {
@@ -1359,6 +1733,13 @@ export default function LoginPage({ setToken, onShowSignup }) {
             </div>
           )}
 
+          {notice && (
+            <div className="mb-5 px-4 py-3 rounded-xl text-sm font-semibold text-emerald-100 gv-fade-in"
+              style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
+              {notice}
+            </div>
+          )}
+
           {/* Error banner */}
           {error && (
             <div className="mb-5 px-4 py-3 rounded-xl text-sm font-semibold text-rose-300 gv-fade-in"
@@ -1409,6 +1790,31 @@ export default function LoginPage({ setToken, onShowSignup }) {
                       {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
+                </div>
+
+                <div className="-mt-1 space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={openPasswordReset}
+                      className="text-indigo-300 hover:text-indigo-200 transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotEmailHint((value) => !value)}
+                      className="text-slate-500 hover:text-slate-300 transition-colors"
+                    >
+                      Forgot email?
+                    </button>
+                  </div>
+                  {showForgotEmailHint && (
+                    <div className="px-3.5 py-3 rounded-xl text-[11px] font-medium text-slate-300 leading-relaxed"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      If you originally signed up with Google or Apple, use that provider. Otherwise ask your gym owner or GymVault support to confirm the email registered on your account.
+                    </div>
+                  )}
                 </div>
 
                 <button disabled={loading}
@@ -1511,6 +1917,32 @@ export default function LoginPage({ setToken, onShowSignup }) {
           </p>
         </div>
       </div>
+
+      <PasswordResetModal
+        open={passwordResetOpen}
+        step={passwordResetStep}
+        email={passwordResetEmail}
+        setEmail={setPasswordResetEmail}
+        otp={passwordResetOtp}
+        setOtp={setPasswordResetOtp}
+        newPassword={passwordResetNewPassword}
+        setNewPassword={setPasswordResetNewPassword}
+        confirmPassword={passwordResetConfirmPassword}
+        setConfirmPassword={setPasswordResetConfirmPassword}
+        showNewPassword={showResetPassword}
+        setShowNewPassword={setShowResetPassword}
+        showConfirmPassword={showResetConfirmPassword}
+        setShowConfirmPassword={setShowResetConfirmPassword}
+        loading={passwordResetLoading}
+        error={passwordResetError}
+        notice={passwordResetNotice}
+        delivery={passwordResetDelivery}
+        onClose={closePasswordReset}
+        onRequestOtp={handlePasswordResetRequest}
+        onConfirmReset={handlePasswordResetConfirm}
+        onResendOtp={handlePasswordResetRequest}
+        onCopyPreviewOtp={handleCopyPreviewOtp}
+      />
     </div>
   );
 }

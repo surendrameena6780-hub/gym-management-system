@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { getDefaultPermissionsByStaffRole } = require('../middleware/rbac');
@@ -41,6 +42,10 @@ const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', sou
 };
 
 const GOOGLE_SIGNUP_TOKEN_TTL_SECONDS = 15 * 60;
+const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
+const PASSWORD_RESET_OTP_TTL_MINUTES = 10;
+const PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60;
+const PASSWORD_RESET_MAX_VERIFY_ATTEMPTS = 5;
 
 const AUTH_CONTEXT_SELECT = `
     SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
@@ -58,6 +63,50 @@ const buildOAuthOwnerName = (fullName, email) => {
 const buildOAuthGymName = (ownerName) => {
     const firstToken = String(ownerName || 'My Gym').trim().split(/\s+/)[0] || 'My';
     return truncateText(`${firstToken}'s Gym`, 100) || 'My Gym';
+};
+
+const maskEmailAddress = (email) => {
+    const [localPart, domainPart] = String(email || '').trim().toLowerCase().split('@');
+    if (!localPart || !domainPart) return '';
+
+    const safeLocal = localPart.length <= 2
+        ? `${localPart[0] || ''}*`
+        : `${localPart.slice(0, 2)}${'*'.repeat(Math.max(1, localPart.length - 2))}`;
+
+    const [domainName, ...domainRest] = domainPart.split('.');
+    const safeDomain = domainName
+        ? `${domainName.slice(0, 1)}${'*'.repeat(Math.max(1, domainName.length - 1))}`
+        : '***';
+
+    return `${safeLocal}@${[safeDomain, ...domainRest].filter(Boolean).join('.')}`;
+};
+
+const getPasswordResetDeliveryMode = () => {
+    const mode = String(process.env.PASSWORD_RESET_DELIVERY_MODE || 'preview').trim().toLowerCase();
+    return mode === 'email' ? 'email' : 'preview';
+};
+
+const generatePasswordResetOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
+const buildPasswordResetDelivery = ({ email, otp }) => {
+    const requestedMode = getPasswordResetDeliveryMode();
+    const maskedEmail = maskEmailAddress(email);
+
+    if (requestedMode === 'email') {
+        return {
+            channel: 'preview',
+            masked_email: maskedEmail,
+            preview_otp: otp,
+            preview_notice: 'Email delivery mode is not wired yet, so a preview OTP is shown for now.',
+        };
+    }
+
+    return {
+        channel: 'preview',
+        masked_email: maskedEmail,
+        preview_otp: otp,
+        preview_notice: 'Email delivery is not configured yet. Use this preview OTP for now.',
+    };
 };
 
 const getAuthPermissions = (user) => (
@@ -132,6 +181,11 @@ const getOauthAccountError = (user) => {
 
 const loadUserAuthContextById = async (userId) => {
     const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE u.id = $1`, [userId]);
+    return result.rows[0] || null;
+};
+
+const loadUserAuthContextByEmail = async (email) => {
+    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE LOWER(u.email) = LOWER($1) LIMIT 1`, [email]);
     return result.rows[0] || null;
 };
 
@@ -419,6 +473,203 @@ router.post('/login', async (req, res) => {
     } catch (err) {
         console.error("LOGIN ERROR:", err.message);
         return res.status(500).json({ message: "Server Error" });
+    }
+});
+
+router.post('/password-reset/request', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+        return res.status(400).json({ message: 'Please enter a valid email address.' });
+    }
+
+    try {
+        await pool.query(`
+            DELETE FROM password_reset_otps
+            WHERE expires_at < NOW()
+               OR (consumed_at IS NOT NULL AND created_at < NOW() - INTERVAL '2 days')
+        `);
+
+        const user = await loadUserAuthContextByEmail(email);
+        if (!user) {
+            return res.status(404).json({ message: 'No account was found with that email address.' });
+        }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
+        }
+
+        if (String(user.password_hash || '') === 'OAUTH_NO_PASSWORD') {
+            return res.status(400).json({ message: getPasswordlessProviderMessage(user) });
+        }
+
+        const activeReset = await pool.query(
+            `SELECT id, created_at
+             FROM password_reset_otps
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.id, PASSWORD_RESET_PURPOSE]
+        );
+
+        if (activeReset.rows[0]?.created_at) {
+            const elapsedSeconds = Math.floor((Date.now() - new Date(activeReset.rows[0].created_at).getTime()) / 1000);
+            const retryAfterSeconds = Math.max(0, PASSWORD_RESET_RESEND_COOLDOWN_SECONDS - elapsedSeconds);
+            if (retryAfterSeconds > 0) {
+                return res.status(429).json({
+                    message: `Please wait ${retryAfterSeconds} seconds before requesting a new code.`,
+                    retry_after_seconds: retryAfterSeconds,
+                });
+            }
+        }
+
+        const otp = generatePasswordResetOtp();
+        const salt = await bcrypt.genSalt(10);
+        const otpHash = await bcrypt.hash(otp, salt);
+
+        await pool.query('BEGIN');
+        await pool.query(
+            `UPDATE password_reset_otps
+             SET consumed_at = NOW()
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [user.id, PASSWORD_RESET_PURPOSE]
+        );
+        await pool.query(
+            `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+             VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
+            [user.id, email, PASSWORD_RESET_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
+        );
+        await pool.query('COMMIT');
+
+        const delivery = buildPasswordResetDelivery({ email, otp });
+        return res.json({
+            message: `A reset code is ready for ${delivery.masked_email}.`,
+            delivery_channel: delivery.channel,
+            masked_email: delivery.masked_email,
+            expires_in_minutes: PASSWORD_RESET_OTP_TTL_MINUTES,
+            preview_otp: delivery.preview_otp,
+            preview_notice: delivery.preview_notice,
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('PASSWORD RESET REQUEST ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not start password recovery. Please try again.' });
+    }
+});
+
+router.post('/password-reset/confirm', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const otp = String(req.body?.otp || '').replace(/\D/g, '').slice(0, 6);
+    const newPassword = String(req.body?.new_password || '');
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+        return res.status(400).json({ message: 'Please enter a valid email address.' });
+    }
+    if (!otp || otp.length !== 6) {
+        return res.status(400).json({ message: 'Please enter the 6-digit OTP.' });
+    }
+    if (newPassword.length < 8) {
+        return res.status(400).json({ message: 'New password must be at least 8 characters.' });
+    }
+
+    try {
+        const user = await loadUserAuthContextByEmail(email);
+        if (!user) {
+            return res.status(400).json({ message: 'The reset code is invalid or expired. Request a new one.' });
+        }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
+        }
+
+        if (String(user.password_hash || '') === 'OAUTH_NO_PASSWORD') {
+            return res.status(400).json({ message: getPasswordlessProviderMessage(user) });
+        }
+
+        const activeReset = await pool.query(
+            `SELECT id, otp_hash, attempts
+             FROM password_reset_otps
+             WHERE user_id = $1
+               AND email = $2
+               AND purpose = $3
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.id, email, PASSWORD_RESET_PURPOSE]
+        );
+
+        const resetRow = activeReset.rows[0];
+        if (!resetRow) {
+            return res.status(400).json({ message: 'The reset code is invalid or expired. Request a new one.' });
+        }
+
+        const previousAttempts = Number(resetRow.attempts || 0);
+        if (previousAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS) {
+            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [resetRow.id]);
+            return res.status(400).json({ message: 'Too many invalid attempts. Request a new code.' });
+        }
+
+        const isMatch = await bcrypt.compare(otp, resetRow.otp_hash);
+        if (!isMatch) {
+            const nextAttempts = previousAttempts + 1;
+            await pool.query(
+                `UPDATE password_reset_otps
+                 SET attempts = $1,
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                 WHERE id = $3`,
+                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, resetRow.id]
+            );
+
+            const attemptsLeft = Math.max(0, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS - nextAttempts);
+            return res.status(400).json({
+                message: attemptsLeft > 0
+                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
+                    : 'Too many invalid attempts. Request a new code.',
+            });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        await pool.query('BEGIN');
+        await pool.query(
+            `UPDATE users
+             SET password_hash = $1,
+                 auth_provider = COALESCE(NULLIF(auth_provider, ''), 'local')
+             WHERE id = $2`,
+            [hashedPassword, user.id]
+        );
+        await pool.query(
+            `UPDATE password_reset_otps
+             SET consumed_at = NOW()
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [user.id, PASSWORD_RESET_PURPOSE]
+        );
+        await pool.query('COMMIT');
+
+        return res.json({ message: 'Password updated successfully. Sign in with your new password.' });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('PASSWORD RESET CONFIRM ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not reset password. Please try again.' });
     }
 });
 
