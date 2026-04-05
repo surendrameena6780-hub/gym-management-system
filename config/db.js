@@ -27,6 +27,12 @@ const connectDB = async () => {
             ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_expires_at  TIMESTAMP;
         `);
         await pool.query(`
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_id VARCHAR(255);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) DEFAULT 'local';
+        `);
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id          SERIAL PRIMARY KEY,
                 gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
@@ -397,6 +403,15 @@ const connectDB = async () => {
             CREATE UNIQUE INDEX IF NOT EXISTS idx_members_rfid_tag_unique
             ON members(gym_id, rfid_tag_id)
             WHERE rfid_tag_id IS NOT NULL;
+        `);
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id
+            ON users(google_id)
+            WHERE google_id IS NOT NULL;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_id
+            ON users(apple_id)
+            WHERE apple_id IS NOT NULL;
         `);
         await pool.query(`
             CREATE INDEX IF NOT EXISTS idx_payment_collections_payment_id ON payment_collections(payment_id);
