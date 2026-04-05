@@ -35,6 +35,117 @@ const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', sou
     return `${getFrontendUrl()}${targetPath}${query ? `?${query}` : ''}`;
 };
 
+const AUTH_CONTEXT_SELECT = `
+    SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
+    FROM users u
+    JOIN gyms g ON u.gym_id = g.id
+`;
+
+const truncateText = (value, maxLength) => String(value || '').trim().slice(0, maxLength);
+
+const buildOAuthOwnerName = (fullName, email) => {
+    const fallbackName = String(email || '').includes('@') ? String(email).split('@')[0] : 'GymVault Owner';
+    return truncateText(fullName || fallbackName, 100) || 'GymVault Owner';
+};
+
+const buildOAuthGymName = (ownerName) => {
+    const firstToken = String(ownerName || 'My Gym').trim().split(/\s+/)[0] || 'My';
+    return truncateText(`${firstToken}'s Gym`, 100) || 'My Gym';
+};
+
+const getAuthPermissions = (user) => (
+    String(user?.role || '').toUpperCase() === 'OWNER'
+        ? ['*']
+        : (Array.isArray(user?.permissions)
+            ? user.permissions
+            : getDefaultPermissionsByStaffRole(user?.staff_role))
+);
+
+const getOauthAccountError = (user) => {
+    if (!user) return 'server_error';
+    if (user.gym_is_active === false || user.is_active === false) return 'account_suspended';
+
+    const accessStatus = String(user.gym_access_status || 'ACTIVE').toUpperCase();
+    if (accessStatus === 'BLOCKED' || accessStatus === 'SUSPENDED') {
+        return 'account_suspended';
+    }
+
+    return null;
+};
+
+const loadUserAuthContextById = async (userId) => {
+    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE u.id = $1`, [userId]);
+    return result.rows[0] || null;
+};
+
+const loadUserAuthContextByProvider = async (providerField, providerValue) => {
+    const allowedFields = {
+        google_id: 'u.google_id',
+        apple_id: 'u.apple_id',
+    };
+
+    const fieldSql = allowedFields[providerField];
+    if (!fieldSql) {
+        throw new Error(`Unsupported auth provider field: ${providerField}`);
+    }
+
+    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE ${fieldSql} = $1`, [providerValue]);
+    return result.rows[0] || null;
+};
+
+const findExistingOauthEmailUser = async (email) => {
+    const existing = await pool.query('SELECT id, gym_id FROM users WHERE email = $1', [email]);
+    if (existing.rows.length === 0) return null;
+
+    const userId = existing.rows[0].id;
+    const gymId = existing.rows[0].gym_id;
+
+    if (!gymId) {
+        await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+        return null;
+    }
+
+    const gymExists = await pool.query('SELECT id FROM gyms WHERE id = $1', [gymId]);
+    if (gymExists.rows.length === 0) {
+        await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+        return null;
+    }
+
+    return loadUserAuthContextById(userId);
+};
+
+const createOauthOwnerAccount = async ({ email, fullName, authProvider, providerField, providerValue, avatarUrl = null }) => {
+    if (!['google_id', 'apple_id'].includes(providerField)) {
+        throw new Error(`Unsupported OAuth provider field: ${providerField}`);
+    }
+
+    const ownerName = buildOAuthOwnerName(fullName, email);
+    const gymName = buildOAuthGymName(ownerName);
+
+    const newGym = await pool.query(
+        `INSERT INTO gyms (name, address, city, branches_count, current_plan, saas_status)
+         VALUES ($1, $2, $3, $4, $5, 'FREE_TRIAL') RETURNING id`,
+        [gymName, null, null, 1, 'pro']
+    );
+    const gymId = newGym.rows[0].id;
+
+    const providerColumns = providerField === 'google_id'
+        ? 'google_id, avatar_url, auth_provider'
+        : 'apple_id, auth_provider';
+    const providerValues = providerField === 'google_id'
+        ? [providerValue, avatarUrl || null, authProvider]
+        : [providerValue, authProvider];
+
+    const newUser = await pool.query(
+        `INSERT INTO users (gym_id, full_name, email, phone, password_hash, role, staff_role, is_active, ${providerColumns})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${providerField === 'google_id' ? '$9, $10, $11' : '$9, $10'})
+         RETURNING id`,
+        [gymId, ownerName, email, null, 'OAUTH_NO_PASSWORD', 'OWNER', 'OWNER', true, ...providerValues]
+    );
+
+    return loadUserAuthContextById(newUser.rows[0].id);
+};
+
 // POST /api/auth/check-email — real-time duplicate check (called on blur during signup)
 router.post('/check-email', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
@@ -325,55 +436,46 @@ router.get('/google/callback', async (req, res) => {
 
         await pool.query('BEGIN');
 
-        // 1. Check existing Google user
-        let userResult = await pool.query(
-            `SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status
-             FROM users u JOIN gyms g ON u.gym_id = g.id
-             WHERE u.google_id = $1`,
-            [googleId]
-        );
-
-        let user;
-        if (userResult.rows.length > 0) {
-            user = userResult.rows[0];
-            if (!user.gym_is_active) {
+        let user = await loadUserAuthContextByProvider('google_id', googleId);
+        if (user) {
+            const authError = getOauthAccountError(user);
+            if (authError) {
                 await pool.query('ROLLBACK');
-                return res.redirect(buildFrontendAuthRedirect({ mode, error: 'account_suspended' }));
+                return res.redirect(buildFrontendAuthRedirect({ mode, error: authError }));
             }
             await pool.query(
                 'UPDATE users SET avatar_url = $1, last_login_at = NOW() WHERE id = $2',
                 [avatarUrl, user.id]
             );
+            user = await loadUserAuthContextById(user.id);
         } else {
-            // 2. Check if email already has a local account
-            const emailResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-            if (emailResult.rows.length > 0) {
-                // Link Google to existing account
-                user = emailResult.rows[0];
+            const emailUser = await findExistingOauthEmailUser(email);
+            if (emailUser) {
+                const authError = getOauthAccountError(emailUser);
+                if (authError) {
+                    await pool.query('ROLLBACK');
+                    return res.redirect(buildFrontendAuthRedirect({ mode, error: authError }));
+                }
                 await pool.query(
                     'UPDATE users SET google_id = $1, avatar_url = $2, auth_provider = $3, last_login_at = NOW() WHERE id = $4',
-                    [googleId, avatarUrl, 'google', user.id]
+                    [googleId, avatarUrl, 'google', emailUser.id]
                 );
+                user = await loadUserAuthContextById(emailUser.id);
             } else {
-                // 3. Brand new user — auto-create gym + owner account
-                const gymName = fullName ? `${fullName.split(' ')[0]}'s Gym` : 'My Gym';
-                const newGym = await pool.query('INSERT INTO gyms (name) VALUES ($1) RETURNING id', [gymName]);
-                const gymId = newGym.rows[0].id;
-
-                const newUser = await pool.query(
-                    `INSERT INTO users (gym_id, full_name, email, password_hash, role, staff_role, is_active, google_id, avatar_url, auth_provider)
-                     VALUES ($1, $2, $3, 'OAUTH_NO_PASSWORD', 'OWNER', 'OWNER', true, $4, $5, 'google')
-                     RETURNING *`,
-                    [gymId, fullName || email.split('@')[0], email, googleId, avatarUrl]
-                );
-                user = newUser.rows[0];
-                user.gym_id = gymId;
+                user = await createOauthOwnerAccount({
+                    email,
+                    fullName,
+                    authProvider: 'google',
+                    providerField: 'google_id',
+                    providerValue: googleId,
+                    avatarUrl,
+                });
             }
         }
 
         await pool.query('COMMIT');
 
-        const permissions = user.role === 'OWNER' ? ['*'] : (Array.isArray(user.permissions) ? user.permissions : []);
+        const permissions = getAuthPermissions(user);
         const token = jwt.sign(
             { user: { id: user.id, gym_id: user.gym_id, role: user.role || 'OWNER', staff_role: user.staff_role || 'OWNER', permissions, is_active: true } },
             process.env.JWT_SECRET,
@@ -383,7 +485,7 @@ router.get('/google/callback', async (req, res) => {
         res.redirect(buildFrontendAuthRedirect({ mode, token, source: 'google' }));
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
-        console.error('GOOGLE OAUTH ERROR:', err.message);
+        console.error('GOOGLE OAUTH ERROR:', err);
         res.redirect(buildFrontendAuthRedirect({ mode, error: 'server_error' }));
     }
 });
@@ -418,33 +520,37 @@ router.post('/apple', async (req, res) => {
 
         await pool.query('BEGIN');
 
-        let userResult = await pool.query('SELECT * FROM users WHERE apple_id = $1', [appleId]);
-        let user;
+        let user = await loadUserAuthContextByProvider('apple_id', appleId);
 
-        if (userResult.rows.length > 0) {
-            user = userResult.rows[0];
+        if (user) {
+            const authError = getOauthAccountError(user);
+            if (authError) {
+                await pool.query('ROLLBACK');
+                return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+            }
             await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+            user = await loadUserAuthContextById(user.id);
         } else if (email) {
-            const emailResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-            if (emailResult.rows.length > 0) {
-                user = emailResult.rows[0];
+            const emailUser = await findExistingOauthEmailUser(email);
+            if (emailUser) {
+                const authError = getOauthAccountError(emailUser);
+                if (authError) {
+                    await pool.query('ROLLBACK');
+                    return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+                }
                 await pool.query(
                     'UPDATE users SET apple_id = $1, auth_provider = $2, last_login_at = NOW() WHERE id = $3',
-                    [appleId, 'apple', user.id]
+                    [appleId, 'apple', emailUser.id]
                 );
+                user = await loadUserAuthContextById(emailUser.id);
             } else {
-                const gymName = fullName ? `${fullName.split(' ')[0]}'s Gym` : 'My Gym';
-                const newGym = await pool.query('INSERT INTO gyms (name) VALUES ($1) RETURNING id', [gymName]);
-                const gymId = newGym.rows[0].id;
-
-                const newUser = await pool.query(
-                    `INSERT INTO users (gym_id, full_name, email, password_hash, role, staff_role, is_active, apple_id, auth_provider)
-                     VALUES ($1, $2, $3, 'OAUTH_NO_PASSWORD', 'OWNER', 'OWNER', true, $4, 'apple')
-                     RETURNING *`,
-                    [gymId, fullName || email.split('@')[0], email, appleId]
-                );
-                user = newUser.rows[0];
-                user.gym_id = gymId;
+                user = await createOauthOwnerAccount({
+                    email,
+                    fullName,
+                    authProvider: 'apple',
+                    providerField: 'apple_id',
+                    providerValue: appleId,
+                });
             }
         } else {
             await pool.query('ROLLBACK');
@@ -453,7 +559,7 @@ router.post('/apple', async (req, res) => {
 
         await pool.query('COMMIT');
 
-        const permissions = user.role === 'OWNER' ? ['*'] : (Array.isArray(user.permissions) ? user.permissions : []);
+        const permissions = getAuthPermissions(user);
         const token = jwt.sign(
             { user: { id: user.id, gym_id: user.gym_id, role: user.role || 'OWNER', staff_role: user.staff_role || 'OWNER', permissions, is_active: true } },
             process.env.JWT_SECRET,
@@ -466,7 +572,7 @@ router.post('/apple', async (req, res) => {
         });
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
-        console.error('APPLE AUTH ERROR:', err.message);
+        console.error('APPLE AUTH ERROR:', err);
         return res.status(500).json({ message: 'Apple Sign-In failed. Please try again.' });
     }
 });
