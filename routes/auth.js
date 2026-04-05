@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { getDefaultPermissionsByStaffRole } = require('../middleware/rbac');
+const { isEmailTransportConfigured, sendTransactionalEmail } = require('../utils/email');
 const {
     OTP_MODES,
     getMsg91OtpMode,
@@ -51,13 +52,16 @@ const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', sou
 
 const GOOGLE_SIGNUP_TOKEN_TTL_SECONDS = 15 * 60;
 const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
+const SIGNUP_EMAIL_VERIFY_PURPOSE = 'SIGNUP_EMAIL_VERIFY';
 const PASSWORD_RESET_OTP_TTL_MINUTES = 10;
 const PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60;
 const PASSWORD_RESET_MAX_VERIFY_ATTEMPTS = 5;
 const ADMIN_LOGIN_PURPOSE = 'ADMIN_LOGIN';
+const ADMIN_EMAIL_LOGIN_PURPOSE = 'ADMIN_EMAIL_LOGIN';
 const ADMIN_LOGIN_OTP_TTL_MINUTES = 10;
 const ADMIN_LOGIN_RESEND_COOLDOWN_SECONDS = 60;
 const ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS = 5;
+const SIGNUP_EMAIL_VERIFY_TOKEN_TTL = '30m';
 
 const AUTH_CONTEXT_SELECT = `
     SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
@@ -66,6 +70,13 @@ const AUTH_CONTEXT_SELECT = `
 `;
 
 const truncateText = (value, maxLength) => String(value || '').trim().slice(0, maxLength);
+const isValidEmailAddress = (value) => /^\S+@\S+\.\S+$/.test(String(value || '').trim().toLowerCase());
+const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const buildOAuthOwnerName = (fullName, email) => {
     const fallbackName = String(email || '').includes('@') ? String(email).split('@')[0] : 'GymVault Owner';
@@ -95,21 +106,61 @@ const maskEmailAddress = (email) => {
 
 const getPasswordResetDeliveryMode = () => {
     const mode = String(process.env.PASSWORD_RESET_DELIVERY_MODE || 'preview').trim().toLowerCase();
-    return mode === 'email' ? 'email' : 'preview';
+    return mode === 'email' && isEmailTransportConfigured() ? 'email' : 'preview';
 };
+
+const getAdminEmailOtpMode = () => (isEmailTransportConfigured() ? 'email' : 'preview');
+const getSignupEmailOtpMode = () => (isEmailTransportConfigured() ? 'email' : 'preview');
 
 const generatePasswordResetOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 
-const buildPasswordResetDelivery = ({ email, otp }) => {
-    const requestedMode = getPasswordResetDeliveryMode();
+const sendOtpEmail = async ({ to, subject, title, intro, otp, footer }) => {
+    const safeTitle = escapeHtml(title);
+    const safeIntro = escapeHtml(intro);
+    const safeOtp = escapeHtml(otp);
+    const safeFooter = escapeHtml(footer);
+
+    return sendTransactionalEmail({
+        to,
+        subject,
+        text: `${title}\n\n${intro}\n\nOTP: ${otp}\n\n${footer}`,
+        html: `
+            <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px;color:#0f172a;">
+                <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;padding:28px;">
+                    <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6366f1;">GymVault</p>
+                    <h1 style="margin:0 0 12px;font-size:24px;line-height:1.2;">${safeTitle}</h1>
+                    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#475569;">${safeIntro}</p>
+                    <div style="margin:0 0 20px;padding:18px;border-radius:16px;background:#0f172a;text-align:center;">
+                        <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:#94a3b8;">One-Time Password</p>
+                        <p style="margin:10px 0 0;font-size:32px;font-weight:800;letter-spacing:0.35em;color:#ffffff;">${safeOtp}</p>
+                    </div>
+                    <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">${safeFooter}</p>
+                </div>
+            </div>
+        `,
+    });
+};
+
+const buildPasswordResetDelivery = async ({ email, otp, userName }) => {
+    const requestedMode = String(process.env.PASSWORD_RESET_DELIVERY_MODE || 'preview').trim().toLowerCase();
     const maskedEmail = maskEmailAddress(email);
 
-    if (requestedMode === 'email') {
+    if (requestedMode === 'email' && isEmailTransportConfigured()) {
+        const greetingName = String(userName || '').trim().split(/\s+/)[0] || 'there';
+        await sendOtpEmail({
+            to: email,
+            subject: 'GymVault password reset code',
+            title: 'Password reset code',
+            intro: `Hi ${greetingName}, use this code to reset your GymVault password. It expires in 10 minutes.`,
+            otp,
+            footer: 'If you did not request this password reset, you can ignore this email.',
+        });
+
         return {
-            channel: 'preview',
+            channel: 'email',
             masked_email: maskedEmail,
-            preview_otp: otp,
-            preview_notice: 'Email delivery mode is not wired yet, so a preview OTP is shown for now.',
+            preview_otp: '',
+            preview_notice: '',
         };
     }
 
@@ -117,8 +168,89 @@ const buildPasswordResetDelivery = ({ email, otp }) => {
         channel: 'preview',
         masked_email: maskedEmail,
         preview_otp: otp,
-        preview_notice: 'Email delivery is not configured yet. Use this preview OTP for now.',
+        preview_notice: requestedMode === 'email'
+            ? 'Email delivery mode is enabled, but SMTP is not configured yet, so a preview OTP is shown for now.'
+            : 'Email delivery is not configured yet. Use this preview OTP for now.',
     };
+};
+
+const buildAdminEmailOtpDelivery = async ({ email, otp, userName }) => {
+    const maskedEmail = maskEmailAddress(email);
+
+    if (isEmailTransportConfigured()) {
+        const greetingName = String(userName || '').trim().split(/\s+/)[0] || 'there';
+        await sendOtpEmail({
+            to: email,
+            subject: 'Your GymVault sign-in code',
+            title: 'Sign in to GymVault',
+            intro: `Hi ${greetingName}, use this one-time code to sign in to your GymVault owner or staff account. It expires in 10 minutes.`,
+            otp,
+            footer: 'If you did not request this sign-in code, you can ignore this email.',
+        });
+
+        return {
+            channel: 'email',
+            masked_email: maskedEmail,
+            preview_otp: '',
+            preview_notice: '',
+        };
+    }
+
+    return {
+        channel: 'preview',
+        masked_email: maskedEmail,
+        preview_otp: otp,
+        preview_notice: 'SMTP is not configured yet, so the login code is shown directly here for preview.',
+    };
+};
+
+const buildSignupEmailOtpDelivery = async ({ email, otp }) => {
+    const maskedEmail = maskEmailAddress(email);
+
+    if (isEmailTransportConfigured()) {
+        await sendOtpEmail({
+            to: email,
+            subject: 'Verify your GymVault email',
+            title: 'Verify your email address',
+            intro: 'Use this one-time code to verify your email before creating your GymVault account. It expires in 10 minutes.',
+            otp,
+            footer: 'If you did not start a GymVault signup, you can ignore this email.',
+        });
+
+        return {
+            channel: 'email',
+            masked_email: maskedEmail,
+            preview_otp: '',
+            preview_notice: '',
+        };
+    }
+
+    return {
+        channel: 'preview',
+        masked_email: maskedEmail,
+        preview_otp: otp,
+        preview_notice: 'SMTP is not configured yet, so the signup verification code is shown directly here for preview.',
+    };
+};
+
+const createSignupEmailVerificationToken = (email) => jwt.sign(
+    {
+        type: 'signup_email_verified',
+        email: String(email || '').trim().toLowerCase(),
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: SIGNUP_EMAIL_VERIFY_TOKEN_TTL }
+);
+
+const assertSignupEmailVerificationToken = (token, email) => {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded || decoded.type !== 'signup_email_verified') {
+        throw new Error('invalid_signup_email_verification_token');
+    }
+    if (String(decoded.email || '').trim().toLowerCase() !== String(email || '').trim().toLowerCase()) {
+        throw new Error('signup_email_mismatch');
+    }
+    return decoded;
 };
 
 const getAuthPermissions = (user) => (
@@ -224,6 +356,22 @@ const loadUserAuthContextByEmail = async (email) => {
     return result.rows[0] || null;
 };
 
+const loadAdminAuthContextByEmail = async (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!isValidEmailAddress(normalizedEmail)) return null;
+
+    const result = await pool.query(
+        `${AUTH_CONTEXT_SELECT}
+                 WHERE LOWER(u.email) = LOWER($1)
+           AND UPPER(COALESCE(u.role, 'OWNER')) IN ('OWNER', 'STAFF')
+         ORDER BY CASE WHEN UPPER(COALESCE(u.role, 'OWNER')) = 'OWNER' THEN 0 ELSE 1 END, u.id ASC
+         LIMIT 1`,
+        [normalizedEmail]
+    );
+
+    return result.rows[0] || null;
+};
+
 const loadAdminAuthContextByPhone = async (phone) => {
     const normalizedPhone = normalizeLocalIndianPhone(phone);
     if (!normalizedPhone) return null;
@@ -239,6 +387,7 @@ const loadAdminAuthContextByPhone = async (phone) => {
 
     return result.rows[0] || null;
 };
+
 const loadUserAuthContextByProvider = async (providerField, providerValue) => {
     const allowedFields = {
         google_id: 'u.google_id',
@@ -247,6 +396,13 @@ const loadUserAuthContextByProvider = async (providerField, providerValue) => {
 
     const fieldSql = allowedFields[providerField];
     if (!fieldSql) {
+        throw new Error(`Unsupported auth provider field: ${providerField}`);
+    }
+
+    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE ${fieldSql} = $1`, [providerValue]);
+    return result.rows[0] || null;
+};
+
 const generateAdminLoginOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 
 const cleanupExpiredAdminLoginOtps = async () => {
@@ -256,11 +412,27 @@ const cleanupExpiredAdminLoginOtps = async () => {
            OR (consumed_at IS NOT NULL AND created_at < NOW() - INTERVAL '2 days')
     `);
 };
-        throw new Error(`Unsupported auth provider field: ${providerField}`);
-    }
 
-    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE ${fieldSql} = $1`, [providerValue]);
-    return result.rows[0] || null;
+const cleanupExpiredEmailOtps = async () => {
+    await pool.query(`
+        DELETE FROM password_reset_otps
+        WHERE expires_at < NOW()
+           OR (consumed_at IS NOT NULL AND created_at < NOW() - INTERVAL '2 days')
+    `);
+};
+
+const isSignupEmailAvailable = async (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!isValidEmailAddress(normalizedEmail)) return false;
+
+    const existing = await pool.query('SELECT id, gym_id FROM users WHERE email = $1', [normalizedEmail]);
+    if (existing.rows.length === 0) return true;
+
+    const gymId = existing.rows[0].gym_id;
+    if (!gymId) return true;
+
+    const gymExists = await pool.query('SELECT id FROM gyms WHERE id = $1', [gymId]);
+    return gymExists.rows.length === 0;
 };
 
 const findExistingOauthEmailUser = async (email) => {
@@ -339,16 +511,157 @@ router.post('/check-email', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!email) return res.status(400).json({ message: 'Email required.' });
     try {
-        const existing = await pool.query('SELECT id, gym_id FROM users WHERE email = $1', [email]);
-        if (existing.rows.length === 0) return res.json({ available: true });
-        // Ghost check: if their gym was deleted treat account as available
-        const gymId = existing.rows[0].gym_id;
-        if (!gymId) return res.json({ available: true });
-        const gymExists = await pool.query('SELECT id FROM gyms WHERE id = $1', [gymId]);
-        if (gymExists.rows.length === 0) return res.json({ available: true });
+        const available = await isSignupEmailAvailable(email);
+        if (available) return res.json({ available: true });
         return res.status(409).json({ message: 'An account with this email already exists.' });
     } catch (err) {
         return res.status(500).json({ message: 'Check failed.' });
+    }
+});
+
+router.post('/signup/send-email-otp', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+
+    if (!isValidEmailAddress(email)) {
+        return res.status(400).json({ message: 'Please enter a valid email address.' });
+    }
+
+    try {
+        await cleanupExpiredEmailOtps();
+
+        if (!(await isSignupEmailAvailable(email))) {
+            return res.status(409).json({ message: 'An account with this email already exists.' });
+        }
+
+        const activeOtp = await pool.query(
+            `SELECT created_at
+             FROM password_reset_otps
+             WHERE email = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [email, SIGNUP_EMAIL_VERIFY_PURPOSE]
+        );
+
+        if (activeOtp.rows[0]?.created_at) {
+            const elapsedSeconds = Math.floor((Date.now() - new Date(activeOtp.rows[0].created_at).getTime()) / 1000);
+            const retryAfterSeconds = Math.max(0, PASSWORD_RESET_RESEND_COOLDOWN_SECONDS - elapsedSeconds);
+            if (retryAfterSeconds > 0) {
+                return res.status(429).json({
+                    message: `Please wait ${retryAfterSeconds} seconds before requesting a new code.`,
+                    retry_after_seconds: retryAfterSeconds,
+                });
+            }
+        }
+
+        const otp = generatePasswordResetOtp();
+        const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+
+        await pool.query('BEGIN');
+        await pool.query(
+            `UPDATE password_reset_otps
+             SET consumed_at = NOW()
+             WHERE email = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [email, SIGNUP_EMAIL_VERIFY_PURPOSE]
+        );
+        await pool.query(
+            `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+             VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
+            [email, SIGNUP_EMAIL_VERIFY_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
+        );
+        await pool.query('COMMIT');
+
+        const delivery = await buildSignupEmailOtpDelivery({ email, otp });
+        return res.json({
+            message: delivery.channel === 'email'
+                ? `A verification code was sent to ${delivery.masked_email}.`
+                : `A preview verification code is ready for ${delivery.masked_email}.`,
+            delivery_mode: delivery.channel,
+            masked_email: delivery.masked_email,
+            expires_in_minutes: PASSWORD_RESET_OTP_TTL_MINUTES,
+            preview_otp: delivery.preview_otp,
+            preview_notice: delivery.preview_notice,
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('SIGNUP SEND EMAIL OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not prepare signup verification. Please try again.' });
+    }
+});
+
+router.post('/signup/verify-email-otp', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const otp = String(req.body?.otp || '').replace(/\D/g, '').slice(0, 6);
+
+    if (!isValidEmailAddress(email)) {
+        return res.status(400).json({ message: 'Please enter a valid email address.' });
+    }
+    if (otp.length !== 6) {
+        return res.status(400).json({ message: 'Please enter the 6-digit OTP.' });
+    }
+
+    try {
+        await cleanupExpiredEmailOtps();
+
+        if (!(await isSignupEmailAvailable(email))) {
+            return res.status(409).json({ message: 'An account with this email already exists.' });
+        }
+
+        const activeOtp = await pool.query(
+            `SELECT id, otp_hash, attempts
+             FROM password_reset_otps
+             WHERE email = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [email, SIGNUP_EMAIL_VERIFY_PURPOSE]
+        );
+
+        const otpRow = activeOtp.rows[0];
+        if (!otpRow) {
+            return res.status(400).json({ message: 'The verification code is invalid or expired. Request a new one.' });
+        }
+
+        const previousAttempts = Number(otpRow.attempts || 0);
+        if (previousAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS) {
+            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
+            return res.status(400).json({ message: 'Too many invalid attempts. Request a new code.' });
+        }
+
+        const isMatch = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
+        if (!isMatch) {
+            const nextAttempts = previousAttempts + 1;
+            await pool.query(
+                `UPDATE password_reset_otps
+                 SET attempts = $1,
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                 WHERE id = $3`,
+                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, otpRow.id]
+            );
+
+            const attemptsLeft = Math.max(0, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS - nextAttempts);
+            return res.status(400).json({
+                message: attemptsLeft > 0
+                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
+                    : 'Too many invalid attempts. Request a new code.',
+            });
+        }
+
+        await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
+
+        return res.json({
+            message: 'Email verified successfully.',
+            email_verification_token: createSignupEmailVerificationToken(email),
+        });
+    } catch (err) {
+        console.error('SIGNUP VERIFY EMAIL OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not verify signup email OTP. Please try again.' });
     }
 });
 
@@ -372,6 +685,7 @@ router.post('/register-owner', async (req, res) => {
     const full_name     = String(req.body?.full_name || '').trim();
     const email         = String(req.body?.email     || '').trim().toLowerCase();
     const password      = String(req.body?.password  || '');
+    const email_verification_token = String(req.body?.email_verification_token || '').trim();
     const owner_phone   = String(req.body?.owner_phone   || '').replace(/\D/g, '').slice(-10);
     const gym_address   = req.body?.gym_address   ? String(req.body.gym_address).trim()   : null;
     const gym_city      = req.body?.gym_city      ? String(req.body.gym_city).trim()      : null;
@@ -383,6 +697,15 @@ router.post('/register-owner', async (req, res) => {
     }
     if (password.length < 8) {
         return res.status(400).json({ message: "Password must be at least 8 characters." });
+    }
+    if (!email_verification_token) {
+        return res.status(400).json({ message: 'Please verify your email before creating your gym account.' });
+    }
+
+    try {
+        assertSignupEmailVerificationToken(email_verification_token, email);
+    } catch (_err) {
+        return res.status(400).json({ message: 'Your email verification has expired. Verify your email again.' });
     }
 
     try {
@@ -727,19 +1050,191 @@ router.post('/admin/verify-otp', async (req, res) => {
     }
 });
 
+router.post('/admin/send-email-otp', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+
+    if (!isValidEmailAddress(email)) {
+        return res.status(400).json({ message: 'Please enter the registered email address.' });
+    }
+
+    try {
+        await cleanupExpiredEmailOtps();
+
+        const user = await loadAdminAuthContextByEmail(email);
+        if (!user) {
+            return res.status(404).json({ message: 'No owner or staff account was found with that email address.' });
+        }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
+        }
+
+        const activeOtp = await pool.query(
+            `SELECT created_at
+             FROM password_reset_otps
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
+        );
+
+        if (activeOtp.rows[0]?.created_at) {
+            const elapsedSeconds = Math.floor((Date.now() - new Date(activeOtp.rows[0].created_at).getTime()) / 1000);
+            const retryAfterSeconds = Math.max(0, ADMIN_LOGIN_RESEND_COOLDOWN_SECONDS - elapsedSeconds);
+            if (retryAfterSeconds > 0) {
+                return res.status(429).json({
+                    message: `Please wait ${retryAfterSeconds} seconds before requesting a new OTP.`,
+                    retry_after_seconds: retryAfterSeconds,
+                });
+            }
+        }
+
+        const otp = generateAdminLoginOtp();
+        const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+
+        await pool.query('BEGIN');
+        await pool.query(
+            `UPDATE password_reset_otps
+             SET consumed_at = NOW()
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
+        );
+        await pool.query(
+            `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+             VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
+            [user.id, email, ADMIN_EMAIL_LOGIN_PURPOSE, otpHash, ADMIN_LOGIN_OTP_TTL_MINUTES]
+        );
+        await pool.query('COMMIT');
+
+        const delivery = await buildAdminEmailOtpDelivery({ email, otp, userName: user.full_name });
+        return res.json({
+            message: delivery.channel === 'email'
+                ? `A sign-in code was sent to ${delivery.masked_email}.`
+                : `A preview sign-in code is ready for ${delivery.masked_email}.`,
+            delivery_mode: delivery.channel,
+            masked_email: delivery.masked_email,
+            expires_in_minutes: ADMIN_LOGIN_OTP_TTL_MINUTES,
+            preview_otp: delivery.preview_otp,
+            preview_notice: delivery.preview_notice,
+            user_name: String(user.full_name || '').trim().split(/\s+/)[0] || '',
+        });
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('ADMIN SEND EMAIL OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not prepare email OTP login. Please try again.' });
+    }
+});
+
+router.post('/admin/verify-email-otp', async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const otp = String(req.body?.otp || '').replace(/\D/g, '').slice(0, 6);
+
+    if (!isValidEmailAddress(email)) {
+        return res.status(400).json({ message: 'Please enter the registered email address.' });
+    }
+    if (otp.length !== 6) {
+        return res.status(400).json({ message: 'Please enter the 6-digit OTP.' });
+    }
+
+    try {
+        await cleanupExpiredEmailOtps();
+
+        const user = await loadAdminAuthContextByEmail(email);
+        if (!user) {
+            return res.status(400).json({ message: 'The OTP is invalid or expired. Request a new one.' });
+        }
+
+        const authError = getOauthAccountError(user);
+        if (authError) {
+            return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+        }
+
+        if (user.is_active === false) {
+            return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
+        }
+
+        const activeOtp = await pool.query(
+            `SELECT id, otp_hash, attempts
+             FROM password_reset_otps
+             WHERE user_id = $1
+               AND email = $2
+               AND purpose = $3
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.id, email, ADMIN_EMAIL_LOGIN_PURPOSE]
+        );
+
+        const otpRow = activeOtp.rows[0];
+        if (!otpRow) {
+            return res.status(400).json({ message: 'The OTP is invalid or expired. Request a new one.' });
+        }
+
+        const previousAttempts = Number(otpRow.attempts || 0);
+        if (previousAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) {
+            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
+            return res.status(400).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+        }
+
+        const isMatch = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
+        if (!isMatch) {
+            const nextAttempts = previousAttempts + 1;
+            await pool.query(
+                `UPDATE password_reset_otps
+                 SET attempts = $1,
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                 WHERE id = $3`,
+                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id]
+            );
+
+            const attemptsLeft = Math.max(0, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS - nextAttempts);
+            return res.status(400).json({
+                message: attemptsLeft > 0
+                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
+                    : 'Too many invalid attempts. Request a new OTP.',
+            });
+        }
+
+        await pool.query('BEGIN');
+        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        await pool.query(
+            `UPDATE password_reset_otps
+             SET consumed_at = NOW()
+             WHERE user_id = $1
+               AND purpose = $2
+               AND consumed_at IS NULL`,
+            [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
+        );
+        await pool.query('COMMIT');
+
+        return res.json(buildAuthSuccessPayload(user, 'OTP verified. Login successful!'));
+    } catch (err) {
+        await pool.query('ROLLBACK').catch(() => {});
+        console.error('ADMIN VERIFY EMAIL OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not complete email OTP login. Please try again.' });
+    }
+});
+
 router.post('/password-reset/request', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
 
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    if (!isValidEmailAddress(email)) {
         return res.status(400).json({ message: 'Please enter a valid email address.' });
     }
 
     try {
-        await pool.query(`
-            DELETE FROM password_reset_otps
-            WHERE expires_at < NOW()
-               OR (consumed_at IS NOT NULL AND created_at < NOW() - INTERVAL '2 days')
-        `);
+        await cleanupExpiredEmailOtps();
 
         const user = await loadUserAuthContextByEmail(email);
         if (!user) {
@@ -802,7 +1297,7 @@ router.post('/password-reset/request', async (req, res) => {
         );
         await pool.query('COMMIT');
 
-        const delivery = buildPasswordResetDelivery({ email, otp });
+        const delivery = await buildPasswordResetDelivery({ email, otp, userName: user.full_name });
         return res.json({
             message: `A reset code is ready for ${delivery.masked_email}.`,
             delivery_channel: delivery.channel,
@@ -930,6 +1425,10 @@ router.get('/config', (req, res) => {
     res.json({
         google_auth_enabled: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
         apple_client_id: process.env.APPLE_CLIENT_ID || null,
+        signup_email_otp_enabled: true,
+        signup_email_otp_mode: getSignupEmailOtpMode(),
+        admin_email_otp_enabled: true,
+        admin_email_otp_mode: getAdminEmailOtpMode(),
         admin_phone_otp_enabled: true,
         admin_phone_otp_mode: getMsg91OtpMode().toLowerCase(),
     });

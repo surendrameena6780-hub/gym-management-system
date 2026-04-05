@@ -192,6 +192,46 @@ const getRazorpayCheckoutImageUrl = () => {
   return new URL('/gymvault-app-icon-192.png', window.location.origin).toString();
 };
 
+const DEFAULT_WHATSAPP_ONBOARDING = {
+  login_url: 'https://control.msg91.com/signin/',
+  launch_url: 'https://control.msg91.com/signin/',
+  guide_url: 'https://msg91.com/help/whatsapp/whatsapp-number-integration---onboarding',
+  meta_business_url: 'https://business.facebook.com/',
+  support_url: 'https://calendly.com/onbording-msg91/20-min-onbording',
+  requires_msg91_login: true,
+  requires_meta_verification: true,
+  embed_mode: 'iframe',
+};
+
+const WHATSAPP_ONBOARDING_VIEWS = {
+  msg91: {
+    label: 'MSG91 Portal',
+    description: 'Sign in to MSG91, then open WhatsApp setup for this business number.',
+    icon: Blocks,
+  },
+  meta: {
+    label: 'Meta Business',
+    description: 'Complete Meta Business and WhatsApp number verification when MSG91 asks for it.',
+    icon: Building2,
+  },
+  guide: {
+    label: 'Setup Guide',
+    description: 'Keep the official onboarding guide open inside GymVault while you work through verification.',
+    icon: FileText,
+  },
+};
+
+const normalizeWhatsAppOnboardingConfig = (value) => ({
+  ...DEFAULT_WHATSAPP_ONBOARDING,
+  ...(value && typeof value === 'object' ? value : {}),
+});
+
+const getWhatsAppOnboardingUrl = (view, onboardingConfig = DEFAULT_WHATSAPP_ONBOARDING) => {
+  if (view === 'meta') return onboardingConfig.meta_business_url || DEFAULT_WHATSAPP_ONBOARDING.meta_business_url;
+  if (view === 'guide') return onboardingConfig.guide_url || DEFAULT_WHATSAPP_ONBOARDING.guide_url;
+  return onboardingConfig.launch_url || onboardingConfig.login_url || DEFAULT_WHATSAPP_ONBOARDING.launch_url;
+};
+
   let razorpayScriptPromise = null;
 
 const loadRazorpayScript = () => {
@@ -375,6 +415,13 @@ const loadRazorpayScript = () => {
     to: '',
     template_key: '',
   });
+  const [whatsappOnboarding, setWhatsAppOnboarding] = useState(DEFAULT_WHATSAPP_ONBOARDING);
+  const [whatsappOnboardingOpen, setWhatsAppOnboardingOpen] = useState(false);
+  const [whatsappOnboardingView, setWhatsAppOnboardingView] = useState('msg91');
+  const [whatsappOnboardingLaunching, setWhatsAppOnboardingLaunching] = useState(false);
+  const [whatsappOnboardingRefreshing, setWhatsAppOnboardingRefreshing] = useState(false);
+  const [whatsappOnboardingFrameLoading, setWhatsAppOnboardingFrameLoading] = useState(false);
+  const [whatsappOnboardingFrameKey, setWhatsAppOnboardingFrameKey] = useState(0);
 
   const [interfacePreferences, setInterfacePreferences] = useState({
     reduce_motion: false,
@@ -396,6 +443,8 @@ const loadRazorpayScript = () => {
   const [staffPasswordReset, setStaffPasswordReset] = useState({});
 
   const headers = { headers: { 'x-auth-token': token } };
+  const activeWhatsAppOnboardingView = WHATSAPP_ONBOARDING_VIEWS[whatsappOnboardingView] || WHATSAPP_ONBOARDING_VIEWS.msg91;
+  const activeWhatsAppOnboardingUrl = getWhatsAppOnboardingUrl(whatsappOnboardingView, whatsappOnboarding);
 
   const fetchSettings = async () => {
     try {
@@ -539,6 +588,7 @@ const loadRazorpayScript = () => {
           upi_id: String(payload.member_payments?.upi_id || ''),
         },
       }));
+      setWhatsAppOnboarding(normalizeWhatsAppOnboardingConfig(payload.whatsapp_onboarding));
 
       setIntegrationTest((prev) => ({
         ...prev,
@@ -802,19 +852,7 @@ const loadRazorpayScript = () => {
     e.preventDefault();
     setIntegrationSaving(true);
     try {
-      const res = await axios.put('/api/settings/integrations', {
-        save_scope: integSubTab,
-        ...integrationData,
-        templates: integrationData.templates,
-        member_payments: {
-          enabled: Boolean(integrationData.member_payments?.enabled),
-          connect_mode: String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
-          razorpay_key_id: String(integrationData.member_payments?.razorpay_key_id || '').trim(),
-          razorpay_key_secret: String(integrationData.member_payments?.razorpay_key_secret || '').trim(),
-          has_razorpay_secret: Boolean(integrationData.member_payments?.has_razorpay_secret),
-          upi_id: String(integrationData.member_payments?.upi_id || '').trim(),
-        },
-      }, headers);
+      const res = await saveIntegrationSection(integSubTab);
       toast(res.data?.message || 'Integration settings saved successfully.', 'success');
       await loadIntegrations();
     } catch (err) {
@@ -839,6 +877,69 @@ const loadRazorpayScript = () => {
       toast(err?.response?.data?.error || 'Failed to send test message.', 'error');
     } finally {
       setTestSending(false);
+    }
+  };
+
+  const saveIntegrationSection = (saveScope = integSubTab) => axios.put('/api/settings/integrations', {
+    save_scope: saveScope,
+    ...integrationData,
+    templates: integrationData.templates,
+    member_payments: {
+      enabled: Boolean(integrationData.member_payments?.enabled),
+      connect_mode: String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
+      razorpay_key_id: String(integrationData.member_payments?.razorpay_key_id || '').trim(),
+      razorpay_key_secret: String(integrationData.member_payments?.razorpay_key_secret || '').trim(),
+      has_razorpay_secret: Boolean(integrationData.member_payments?.has_razorpay_secret),
+      upi_id: String(integrationData.member_payments?.upi_id || '').trim(),
+    },
+  }, headers);
+
+  const switchWhatsAppOnboardingView = (nextView) => {
+    setWhatsAppOnboardingView(nextView);
+    setWhatsAppOnboardingFrameLoading(true);
+    setWhatsAppOnboardingFrameKey((prev) => prev + 1);
+  };
+
+  const openWhatsAppOnboardingPopup = () => {
+    const popup = window.open(activeWhatsAppOnboardingUrl, 'gymvault_whatsapp_onboarding', 'width=1280,height=840');
+    if (!popup) {
+      window.location.assign(activeWhatsAppOnboardingUrl);
+      return;
+    }
+
+    const poll = window.setInterval(() => {
+      if (!popup.closed) return;
+      window.clearInterval(poll);
+      loadIntegrations();
+    }, 700);
+  };
+
+  const handleLaunchWhatsAppOnboarding = async () => {
+    if (!String(integrationData.whatsapp_number || '').trim()) {
+      toast('Enter the gym business WhatsApp number first.', 'warning');
+      return;
+    }
+
+    setWhatsAppOnboardingLaunching(true);
+    try {
+      const res = await saveIntegrationSection('messaging');
+      await loadIntegrations();
+      setWhatsAppOnboardingOpen(true);
+      switchWhatsAppOnboardingView('msg91');
+      toast(res.data?.message || 'Business number saved. Continue setup in the in-app WhatsApp workspace.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to start WhatsApp onboarding.', 'error');
+    } finally {
+      setWhatsAppOnboardingLaunching(false);
+    }
+  };
+
+  const handleRefreshWhatsAppOnboarding = async () => {
+    setWhatsAppOnboardingRefreshing(true);
+    try {
+      await loadIntegrations();
+    } finally {
+      setWhatsAppOnboardingRefreshing(false);
     }
   };
 
@@ -2068,6 +2169,35 @@ const loadRazorpayScript = () => {
                             Gym owners still log in using the phone saved on their account. This business number is only for member-facing WhatsApp templates and reminders.
                           </p>
                         </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In-App Setup Workspace</p>
+                            <p className="text-sm font-semibold text-slate-700 mt-1">Save the business number here, then launch MSG91 and Meta inside GymVault to finish onboarding.</p>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <button
+                              type="button"
+                              onClick={handleLaunchWhatsAppOnboarding}
+                              disabled={whatsappOnboardingLaunching || integrationSaving}
+                              className="flex-1 px-4 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                            >
+                              <Blocks size={15} /> {whatsappOnboardingLaunching ? 'Opening Workspace...' : integrationData.whatsapp_status === 'CONNECTED' ? 'Open WhatsApp Workspace' : 'Start In-App Setup'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWhatsAppOnboardingOpen(true);
+                                switchWhatsAppOnboardingView('guide');
+                              }}
+                              className="sm:w-auto px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-black text-sm hover:bg-white transition-all flex items-center justify-center gap-2"
+                            >
+                              <FileText size={15} /> View Guide
+                            </button>
+                          </div>
+                          <p className="text-[11px] font-semibold text-slate-500 leading-relaxed">
+                            GymVault keeps the setup anchored here. If MSG91 blocks embedding in your browser during login, you can still pop the same step out and return here to refresh status.
+                          </p>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -2788,6 +2918,143 @@ const loadRazorpayScript = () => {
           )}
         </div>
       </div>
+
+      {whatsappOnboardingOpen && (
+        <div className="fixed inset-0 z-[90] bg-slate-950/70 backdrop-blur-sm p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="w-full h-full bg-white rounded-[28px] shadow-2xl overflow-hidden flex flex-col xl:flex-row">
+            <div className="w-full xl:w-[360px] border-b xl:border-b-0 xl:border-r border-slate-200 bg-slate-50/80 p-5 sm:p-6 overflow-y-auto">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">WhatsApp Onboarding</p>
+                  <h3 className="text-xl font-black text-slate-900 mt-2">Connect {integrationData.whatsapp_number || 'your business number'}</h3>
+                  <p className="text-sm font-medium text-slate-500 mt-2">MSG91 and Meta stay inside this workspace so the owner can finish setup without leaving GymVault.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWhatsAppOnboardingOpen(false)}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black hover:bg-slate-100 transition-colors"
+                >
+                  <ArrowLeft size={14} /> Back
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-2">
+                {Object.entries(WHATSAPP_ONBOARDING_VIEWS).map(([viewId, viewMeta]) => {
+                  const ViewIcon = viewMeta.icon;
+                  const active = whatsappOnboardingView === viewId;
+                  return (
+                    <button
+                      key={viewId}
+                      type="button"
+                      onClick={() => switchWhatsAppOnboardingView(viewId)}
+                      className={`w-full text-left rounded-2xl border px-4 py-3 transition-all ${active ? 'bg-slate-900 border-slate-900 text-white shadow-lg shadow-slate-900/10' : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-100'}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${active ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <ViewIcon size={18} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black">{viewMeta.label}</p>
+                          <p className={`text-xs mt-1 leading-relaxed ${active ? 'text-white/75' : 'text-slate-500'}`}>{viewMeta.description}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {[
+                  {
+                    label: 'Business number saved in GymVault',
+                    done: Boolean(String(integrationData.whatsapp_number || '').trim()),
+                  },
+                  {
+                    label: 'MSG91 login and number onboarding',
+                    done: ['PENDING_CONNECTION', 'CONNECTED'].includes(String(integrationData.whatsapp_status || '').toUpperCase()),
+                  },
+                  {
+                    label: 'Meta verification completed',
+                    done: String(integrationData.whatsapp_status || '').toUpperCase() === 'CONNECTED',
+                  },
+                  {
+                    label: 'GymVault status refreshed',
+                    done: String(integrationData.whatsapp_status || '').toUpperCase() === 'CONNECTED',
+                  },
+                ].map((step) => (
+                  <div key={step.label} className={`rounded-2xl border px-4 py-3 ${step.done ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle size={16} className={step.done ? 'text-emerald-600' : 'text-slate-300'} />
+                      <p className={`text-sm font-semibold ${step.done ? 'text-emerald-700' : 'text-slate-600'}`}>{step.label}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <button
+                  type="button"
+                  onClick={handleRefreshWhatsAppOnboarding}
+                  disabled={whatsappOnboardingRefreshing}
+                  className="w-full px-4 py-3 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={15} className={whatsappOnboardingRefreshing ? 'animate-spin' : ''} /> {whatsappOnboardingRefreshing ? 'Refreshing...' : 'Refresh Connection Status'}
+                </button>
+                <button
+                  type="button"
+                  onClick={openWhatsAppOnboardingPopup}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 font-black text-sm hover:bg-slate-100 transition-all flex items-center justify-center gap-2"
+                >
+                  <Link size={15} /> Open Current Step In Popup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.open(whatsappOnboarding.support_url, 'gymvault_whatsapp_support', 'width=1080,height=760')}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-100 text-slate-700 font-black text-sm hover:bg-slate-200 transition-all"
+                >
+                  Provider Support Slot
+                </button>
+                <p className="text-[11px] font-semibold text-slate-500 leading-relaxed">
+                  {integrationData.whatsapp_status === 'CONNECTED'
+                    ? 'This business number is already connected. You can still use the workspace to review MSG91 or Meta settings.'
+                    : 'Meta and MSG91 may still ask for one-time verification, OTP confirmation, or business details. Finish those steps here, then refresh the GymVault status.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 flex flex-col bg-white">
+              <div className="px-4 sm:px-6 py-4 border-b border-slate-200 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Embedded Provider View</p>
+                  <h4 className="text-base font-black text-slate-900 mt-1">{activeWhatsAppOnboardingView.label}</h4>
+                  <p className="text-xs font-medium text-slate-500 mt-1 break-all">{activeWhatsAppOnboardingUrl}</p>
+                </div>
+                <span className={`inline-flex items-center gap-2 px-3 py-2 rounded-full text-xs font-black uppercase tracking-wider ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).card} ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).text}`}>
+                  <span className={`w-2 h-2 rounded-full ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).dot}`} />
+                  {getWhatsAppConnectionMeta(integrationData.whatsapp_status).label}
+                </span>
+              </div>
+
+              <div className="relative flex-1 bg-slate-100 min-h-[420px]">
+                {whatsappOnboardingFrameLoading && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-100/90 text-slate-500">
+                    <RefreshCw size={22} className="animate-spin" />
+                    <p className="text-sm font-semibold text-center px-6">Loading the provider workspace inside GymVault.</p>
+                  </div>
+                )}
+                <iframe
+                  key={whatsappOnboardingFrameKey}
+                  title={activeWhatsAppOnboardingView.label}
+                  src={activeWhatsAppOnboardingUrl}
+                  onLoad={() => setWhatsAppOnboardingFrameLoading(false)}
+                  className="w-full h-full border-0 bg-white"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }`}} />
     </div>

@@ -2,6 +2,10 @@ const crypto = require('crypto');
 
 const MSG91_CONTROL_BASE = 'https://control.msg91.com';
 const MSG91_API_BASE = 'https://api.msg91.com';
+const DEFAULT_MSG91_PORTAL_SIGNIN_URL = 'https://control.msg91.com/signin/';
+const DEFAULT_MSG91_WHATSAPP_GUIDE_URL = 'https://msg91.com/help/whatsapp/whatsapp-number-integration---onboarding';
+const DEFAULT_META_BUSINESS_URL = 'https://business.facebook.com/';
+const DEFAULT_MSG91_WHATSAPP_SUPPORT_URL = 'https://calendly.com/onbording-msg91/20-min-onbording';
 
 const OTP_MODES = {
     PREVIEW: 'PREVIEW',
@@ -27,6 +31,16 @@ const TEMPLATE_PLACEHOLDER_DEFAULTS = {
 };
 
 const toTrimmedString = (value) => String(value || '').trim();
+
+const normalizeAbsoluteUrl = (value, fallback) => {
+    const raw = toTrimmedString(value);
+    if (!raw) return fallback;
+    try {
+        return new URL(raw).toString();
+    } catch (_err) {
+        return fallback;
+    }
+};
 
 const normalizeLocalIndianPhone = (value) => {
     const digits = String(value || '').replace(/\D/g, '');
@@ -57,6 +71,11 @@ const maskPhone = (value) => {
 const getMsg91OtpAuthKey = () => toTrimmedString(process.env.MSG91_OTP_AUTH_KEY || process.env.MSG91_AUTH_KEY);
 const getMsg91OtpTemplateId = () => toTrimmedString(process.env.MSG91_OWNER_LOGIN_OTP_TEMPLATE_ID || process.env.MSG91_OTP_TEMPLATE_ID);
 const getMsg91WhatsAppAuthKey = () => toTrimmedString(process.env.MSG91_WHATSAPP_AUTH_KEY || process.env.MSG91_AUTH_KEY);
+const getMsg91PortalSignInUrl = () => normalizeAbsoluteUrl(process.env.MSG91_PORTAL_SIGNIN_URL, DEFAULT_MSG91_PORTAL_SIGNIN_URL);
+const getMsg91WhatsAppOnboardingUrl = () => normalizeAbsoluteUrl(process.env.MSG91_WHATSAPP_ONBOARDING_URL, getMsg91PortalSignInUrl());
+const getMsg91WhatsAppGuideUrl = () => normalizeAbsoluteUrl(process.env.MSG91_WHATSAPP_GUIDE_URL, DEFAULT_MSG91_WHATSAPP_GUIDE_URL);
+const getMetaBusinessSuiteUrl = () => normalizeAbsoluteUrl(process.env.MSG91_META_BUSINESS_URL, DEFAULT_META_BUSINESS_URL);
+const getMsg91WhatsAppSupportUrl = () => normalizeAbsoluteUrl(process.env.MSG91_WHATSAPP_SUPPORT_URL, DEFAULT_MSG91_WHATSAPP_SUPPORT_URL);
 
 const isMsg91OtpConfigured = () => Boolean(getMsg91OtpAuthKey() && getMsg91OtpTemplateId());
 const isMsg91WhatsAppConfigured = () => Boolean(getMsg91WhatsAppAuthKey());
@@ -68,6 +87,17 @@ const getMsg91OtpMode = () => {
     }
     return OTP_MODES.PREVIEW;
 };
+
+const getMsg91WhatsAppOnboardingConfig = () => ({
+    login_url: getMsg91PortalSignInUrl(),
+    launch_url: getMsg91WhatsAppOnboardingUrl(),
+    guide_url: getMsg91WhatsAppGuideUrl(),
+    meta_business_url: getMetaBusinessSuiteUrl(),
+    support_url: getMsg91WhatsAppSupportUrl(),
+    requires_msg91_login: true,
+    requires_meta_verification: true,
+    embed_mode: 'iframe',
+});
 
 const appendQueryParams = (url, query) => {
     Object.entries(query || {}).forEach(([key, value]) => {
@@ -447,6 +477,7 @@ module.exports = {
     extractTemplatePlaceholderKeys,
     findIntegratedWhatsAppNumber,
     getMsg91OtpMode,
+    getMsg91WhatsAppOnboardingConfig,
     isMsg91OtpConfigured,
     isMsg91WhatsAppConfigured,
     listIntegratedWhatsAppNumbers,

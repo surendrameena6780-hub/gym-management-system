@@ -1,9 +1,10 @@
 # MSG91 Setup For GymVault
 
-This project now uses MSG91 for two things:
+This project now uses MSG91 for WhatsApp messaging, and can optionally still use MSG91 for SMS OTP.
 
-- owner and admin login OTP
 - per-gym WhatsApp messaging
+
+Owner and staff login no longer has to depend on SMS. GymVault can now use email OTP for owner and staff sign-in, which avoids Indian DLT registration for that login flow.
 
 ## Reality check
 
@@ -15,7 +16,8 @@ What GymVault can do automatically:
 - use one platform MSG91 account for all gyms
 - sync already connected WhatsApp numbers from MSG91
 - send approved WhatsApp templates after the number is active
-- send owner login OTP from one platform OTP setup
+- send owner login OTP through email if SMTP is configured
+- optionally still send owner login OTP from one platform MSG91 OTP setup
 
 What GymVault cannot do silently through the public MSG91 and Meta flow:
 
@@ -32,7 +34,14 @@ So the correct real-world flow is:
 
 ## What you configure once
 
-Do these steps one time in your own MSG91 account.
+For owner and staff login OTP, you now have two choices:
+
+1. Preferred low-cost option: configure SMTP and use email OTP.
+2. Optional SMS option: keep MSG91 OTP if you already want SMS.
+
+See docs/email-otp-setup.md for the email OTP path.
+
+For MSG91, do these steps one time in your own MSG91 account.
 
 1. Sign in to MSG91 Control Panel.
 2. Open the OTP section.
@@ -43,6 +52,8 @@ Do these steps one time in your own MSG91 account.
 7. Copy the WhatsApp auth key.
 
 These are platform-level values. You do not create separate auth keys for every gym owner.
+
+If you only want email OTP login and WhatsApp messaging, you can skip the MSG91 OTP template and OTP auth key entirely.
 
 ## If you are stuck on auth keys
 
@@ -83,6 +94,8 @@ MSG91_OWNER_LOGIN_OTP_MODE=msg91
 
 If you want to keep testing without real SMS, leave `MSG91_OWNER_LOGIN_OTP_MODE=preview`.
 
+If you switch owner login to email OTP, SMTP becomes the important config instead of DLT-backed SMS. See docs/email-otp-setup.md.
+
 ## What happens per gym
 
 Each gym uses its own business WhatsApp number.
@@ -118,22 +131,23 @@ That means:
 
 ## First live test
 
-After OTP and WhatsApp are configured:
+After login OTP and WhatsApp are configured:
 
 1. Restart the backend.
 2. Open the owner login page.
-3. Switch to phone OTP login.
-4. Send OTP and verify that SMS arrives.
+3. Switch to email OTP login if you are avoiding SMS.
+4. Send OTP and verify that email arrives.
 5. Open one gym's Settings page.
 6. Save the business WhatsApp number.
 7. Use the test-send card with an approved template.
 
 ## If something does not work
 
-- OTP not coming: check `MSG91_OWNER_LOGIN_OTP_MODE`, auth key, template ID, and phone format.
+- Email OTP not coming: check SMTP settings and the owner's registered email address.
+- SMS OTP not coming: check `MSG91_OWNER_LOGIN_OTP_MODE`, auth key, template ID, and phone format.
 - WhatsApp number not connecting: the business number is probably not fully verified in MSG91 or Meta yet.
 - Template send blocked: the selected template is still pending or rejected.
-- App still showing preview OTP: backend is still running in preview mode.
+- App still showing preview OTP: SMTP or MSG91 live delivery is not fully configured yet.
 
 ## Important limitation
 

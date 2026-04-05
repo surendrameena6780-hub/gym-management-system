@@ -1327,9 +1327,12 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [error, setError]           = useState('');
   const [notice, setNotice]         = useState('');
   const [googleAuthEnabled, setGoogleAuthEnabled] = useState(null);
+  const [adminEmailOtpEnabled, setAdminEmailOtpEnabled] = useState(true);
+  const [adminEmailOtpMode, setAdminEmailOtpMode] = useState('preview');
   const [adminPhoneOtpEnabled, setAdminPhoneOtpEnabled] = useState(true);
   const [adminPhoneOtpMode, setAdminPhoneOtpMode] = useState('preview');
   const [adminLoginMethod, setAdminLoginMethod] = useState('PASSWORD');
+  const [adminOtpEmail, setAdminOtpEmail] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
   const [adminLoginOtp, setAdminLoginOtp] = useState('');
   const [adminOtpSent, setAdminOtpSent] = useState(false);
@@ -1357,6 +1360,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [firstName, setFirstName]   = useState('');
   const [memberData, setMemberData] = useState(null);
   const [memberToken, setMemberToken] = useState(null);
+  const isValidAdminOtpEmail = /^\S+@\S+\.\S+$/;
 
   useEffect(() => {
     let cancelled = false;
@@ -1365,6 +1369,8 @@ export default function LoginPage({ setToken, onShowSignup }) {
       .then((res) => {
         if (!cancelled) {
           setGoogleAuthEnabled(Boolean(res.data?.google_auth_enabled));
+          setAdminEmailOtpEnabled(Boolean(res.data?.admin_email_otp_enabled ?? true));
+          setAdminEmailOtpMode(String(res.data?.admin_email_otp_mode || 'preview'));
           setAdminPhoneOtpEnabled(Boolean(res.data?.admin_phone_otp_enabled ?? true));
           setAdminPhoneOtpMode(String(res.data?.admin_phone_otp_mode || 'preview'));
         }
@@ -1372,6 +1378,8 @@ export default function LoginPage({ setToken, onShowSignup }) {
       .catch(() => {
         if (!cancelled) {
           setGoogleAuthEnabled(null);
+          setAdminEmailOtpEnabled(true);
+          setAdminEmailOtpMode('preview');
           setAdminPhoneOtpEnabled(true);
           setAdminPhoneOtpMode('preview');
         }
@@ -1421,6 +1429,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
   };
 
   const resetAdminOtpState = () => {
+    setAdminOtpEmail('');
     setAdminPhone('');
     setAdminLoginOtp('');
     setAdminOtpSent(false);
@@ -1453,6 +1462,44 @@ export default function LoginPage({ setToken, onShowSignup }) {
       if (status === 429) { setError(retry ? `Too many attempts. Wait ${retry}s.` : (apiMsg || 'Too many attempts.')); }
       else { setError(apiMsg || 'Invalid credentials. Please try again.'); }
     } finally { setLoading(false); }
+  };
+
+  const handleAdminSendEmailOtp = async (event) => {
+    event?.preventDefault?.();
+    const normalizedEmail = String(adminOtpEmail || '').trim().toLowerCase();
+
+    if (!isValidAdminOtpEmail.test(normalizedEmail)) {
+      setError('Enter the email address registered on your owner or staff account.');
+      return;
+    }
+
+    setAdminOtpLoading(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const res = await axios.post('/api/auth/admin/send-email-otp', { email: normalizedEmail });
+      setAdminOtpEmail(normalizedEmail);
+      setAdminOtpSent(true);
+      setAdminOtpDelivery({
+        mode: String(res.data?.delivery_mode || adminEmailOtpMode || 'preview'),
+        maskedEmail: res.data?.masked_email || normalizedEmail,
+        expiresInMinutes: res.data?.expires_in_minutes || 10,
+        previewOtp: res.data?.preview_otp || '',
+        previewNotice: res.data?.preview_notice || '',
+        userName: res.data?.user_name || '',
+      });
+      if (res.data?.preview_otp) {
+        setAdminLoginOtp(String(res.data.preview_otp));
+      }
+      setNotice(res.data?.message || 'Email OTP prepared successfully.');
+    } catch (err) {
+      const retry = err?.response?.data?.retry_after_seconds;
+      const apiMessage = err?.response?.data?.message || err?.response?.data?.error || 'Failed to send login code.';
+      setError(retry ? `Please wait ${retry}s before requesting another OTP.` : apiMessage);
+    } finally {
+      setAdminOtpLoading(false);
+    }
   };
 
   const handleAdminSendOtp = async (event) => {
@@ -1488,6 +1535,36 @@ export default function LoginPage({ setToken, onShowSignup }) {
       const retry = err?.response?.data?.retry_after_seconds;
       const apiMessage = err?.response?.data?.message || err?.response?.data?.error || 'Failed to send owner login OTP.';
       setError(retry ? `Please wait ${retry}s before requesting another OTP.` : apiMessage);
+    } finally {
+      setAdminOtpLoading(false);
+    }
+  };
+
+  const handleAdminVerifyEmailOtp = async (event) => {
+    event?.preventDefault?.();
+    const normalizedEmail = String(adminOtpEmail || '').trim().toLowerCase();
+    const normalizedOtp = String(adminLoginOtp || '').replace(/\D/g, '').slice(0, 6);
+
+    if (!isValidAdminOtpEmail.test(normalizedEmail)) {
+      setError('Enter the email address registered on your account.');
+      return;
+    }
+    if (normalizedOtp.length !== 6) {
+      setError('Enter the 6-digit OTP.');
+      return;
+    }
+
+    setAdminOtpLoading(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const res = await axios.post('/api/auth/admin/verify-email-otp', { email: normalizedEmail, otp: normalizedOtp });
+      resetAdminOtpState();
+      setToken(res.data.token, res.data.user);
+      window.history.pushState({}, '', '/dashboard');
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.response?.data?.error || 'Invalid OTP. Please try again.');
     } finally {
       setAdminOtpLoading(false);
     }
@@ -1860,9 +1937,9 @@ export default function LoginPage({ setToken, onShowSignup }) {
                 <SocialBtn icon={<AppleIcon />}  label="Continue with Apple"  onClick={handleApple}  />
               </div>
 
-              {adminPhoneOtpEnabled && (
+              {(adminEmailOtpEnabled || adminPhoneOtpEnabled) && (
                 <div
-                  className="mb-6 p-1.5 rounded-2xl grid grid-cols-2 gap-1.5"
+                  className={`mb-6 p-1.5 rounded-2xl grid ${adminEmailOtpEnabled && adminPhoneOtpEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5`}
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
                 >
                   <button
@@ -1883,31 +1960,57 @@ export default function LoginPage({ setToken, onShowSignup }) {
                   >
                     Email Password
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAdminLoginMethod('OTP');
-                      setError('');
-                      setNotice('');
-                      setShowForgotEmailHint(false);
-                      closePasswordReset();
-                    }}
-                    className="py-2.5 rounded-xl text-xs font-black uppercase tracking-[0.16em] transition-all"
-                    style={{
-                      background: adminLoginMethod === 'OTP' ? 'linear-gradient(135deg, #0f766e, #10b981)' : 'transparent',
-                      color: adminLoginMethod === 'OTP' ? '#fff' : '#94a3b8',
-                      boxShadow: adminLoginMethod === 'OTP' ? '0 8px 24px rgba(16,185,129,0.22)' : 'none',
-                    }}
-                  >
-                    Phone OTP
-                  </button>
+                  {adminEmailOtpEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdminLoginMethod('EMAIL_OTP');
+                        setError('');
+                        setNotice('');
+                        setShowForgotEmailHint(false);
+                        closePasswordReset();
+                      }}
+                      className="py-2.5 rounded-xl text-xs font-black uppercase tracking-[0.16em] transition-all"
+                      style={{
+                        background: adminLoginMethod === 'EMAIL_OTP' ? 'linear-gradient(135deg, #1d4ed8, #06b6d4)' : 'transparent',
+                        color: adminLoginMethod === 'EMAIL_OTP' ? '#fff' : '#94a3b8',
+                        boxShadow: adminLoginMethod === 'EMAIL_OTP' ? '0 8px 24px rgba(14,165,233,0.22)' : 'none',
+                      }}
+                    >
+                      Email OTP
+                    </button>
+                  )}
+                  {adminPhoneOtpEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdminLoginMethod('PHONE_OTP');
+                        setError('');
+                        setNotice('');
+                        setShowForgotEmailHint(false);
+                        closePasswordReset();
+                      }}
+                      className="py-2.5 rounded-xl text-xs font-black uppercase tracking-[0.16em] transition-all"
+                      style={{
+                        background: adminLoginMethod === 'PHONE_OTP' ? 'linear-gradient(135deg, #0f766e, #10b981)' : 'transparent',
+                        color: adminLoginMethod === 'PHONE_OTP' ? '#fff' : '#94a3b8',
+                        boxShadow: adminLoginMethod === 'PHONE_OTP' ? '0 8px 24px rgba(16,185,129,0.22)' : 'none',
+                      }}
+                    >
+                      Phone OTP
+                    </button>
+                  )}
                 </div>
               )}
 
               <div className="flex items-center gap-3 mb-6">
                 <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
                 <span className="text-slate-500 text-[11px] font-bold tracking-wide">
-                  {adminLoginMethod === 'OTP' ? 'or sign in with your registered mobile' : 'or sign in with email'}
+                  {adminLoginMethod === 'PHONE_OTP'
+                    ? 'or sign in with your registered mobile'
+                    : adminLoginMethod === 'EMAIL_OTP'
+                      ? 'or sign in with a one-time email code'
+                      : 'or sign in with email'}
                 </span>
                 <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
               </div>
@@ -1978,48 +2081,86 @@ export default function LoginPage({ setToken, onShowSignup }) {
                   </button>
                 </form>
               ) : !adminOtpSent ? (
-                <form onSubmit={handleAdminSendOtp} className="space-y-4">
-                  <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
-                    Enter the owner or staff mobile number already registered on this account. GymVault will prepare a login OTP for it.
-                  </p>
-                  <div>
-                    <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Registered Mobile</label>
-                    <div className="relative">
-                      <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
-                      <input required type="tel" value={adminPhone}
-                        onChange={(e) => setAdminPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                        placeholder="9876543210"
-                        className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
-                        style={iBase} onFocus={iFocus} onBlur={iBlur} />
+                adminLoginMethod === 'EMAIL_OTP' ? (
+                  <form onSubmit={handleAdminSendEmailOtp} className="space-y-4">
+                    <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
+                      Enter the owner or staff email address already registered on this account. GymVault will send a one-time login code there.
+                    </p>
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Registered Email</label>
+                      <div className="relative">
+                        <Mail size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                        <input required type="email" value={adminOtpEmail}
+                          onChange={(e) => setAdminOtpEmail(e.target.value)}
+                          placeholder="owner@mygym.com"
+                          className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
+                          style={iBase} onFocus={iFocus} onBlur={iBlur} />
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="px-3.5 py-3 rounded-xl text-[11px] font-medium leading-relaxed text-slate-300"
-                    style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.14)' }}>
-                    {adminPhoneOtpMode === 'preview'
-                      ? 'Preview mode is active right now, so the OTP will appear on this screen after you request it.'
-                      : 'The platform SMS gateway will send the OTP to that registered number.'}
-                  </div>
+                    <div className="px-3.5 py-3 rounded-xl text-[11px] font-medium leading-relaxed text-slate-300"
+                      style={{ background: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.16)' }}>
+                      {adminEmailOtpMode === 'preview'
+                        ? 'SMTP preview mode is active right now, so the OTP will appear on this screen after you request it.'
+                        : 'GymVault will email the OTP to that registered address. No DLT registration is needed for this email flow.'}
+                    </div>
 
-                  <button disabled={adminOtpLoading || adminPhone.length < 10}
-                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
-                    style={{
-                      background: 'linear-gradient(135deg, #0f766e, #10b981)',
-                      boxShadow: '0 8px 28px rgba(16,185,129,0.32)',
-                      opacity: (adminOtpLoading || adminPhone.length < 10) ? 0.65 : 1,
-                    }}>
-                    {adminOtpLoading
-                      ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending...</>
-                      : <>Send Owner OTP <ArrowRight size={16} /></>}
-                  </button>
-                </form>
+                    <button disabled={adminOtpLoading || !isValidAdminOtpEmail.test(String(adminOtpEmail || '').trim().toLowerCase())}
+                      className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+                      style={{
+                        background: 'linear-gradient(135deg, #1d4ed8, #06b6d4)',
+                        boxShadow: '0 8px 28px rgba(14,165,233,0.32)',
+                        opacity: (adminOtpLoading || !isValidAdminOtpEmail.test(String(adminOtpEmail || '').trim().toLowerCase())) ? 0.65 : 1,
+                      }}>
+                      {adminOtpLoading
+                        ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending...</>
+                        : <>Send Email OTP <ArrowRight size={16} /></>}
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleAdminSendOtp} className="space-y-4">
+                    <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
+                      Enter the owner or staff mobile number already registered on this account. GymVault will prepare a login OTP for it.
+                    </p>
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Registered Mobile</label>
+                      <div className="relative">
+                        <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                        <input required type="tel" value={adminPhone}
+                          onChange={(e) => setAdminPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                          placeholder="9876543210"
+                          className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
+                          style={iBase} onFocus={iFocus} onBlur={iBlur} />
+                      </div>
+                    </div>
+
+                    <div className="px-3.5 py-3 rounded-xl text-[11px] font-medium leading-relaxed text-slate-300"
+                      style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.14)' }}>
+                      {adminPhoneOtpMode === 'preview'
+                        ? 'Preview mode is active right now, so the OTP will appear on this screen after you request it.'
+                        : 'The platform SMS gateway will send the OTP to that registered number.'}
+                    </div>
+
+                    <button disabled={adminOtpLoading || adminPhone.length < 10}
+                      className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+                      style={{
+                        background: 'linear-gradient(135deg, #0f766e, #10b981)',
+                        boxShadow: '0 8px 28px rgba(16,185,129,0.32)',
+                        opacity: (adminOtpLoading || adminPhone.length < 10) ? 0.65 : 1,
+                      }}>
+                      {adminOtpLoading
+                        ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending...</>
+                        : <>Send Owner OTP <ArrowRight size={16} /></>}
+                    </button>
+                  </form>
+                )
               ) : (
-                <form onSubmit={handleAdminVerifyOtp} className="space-y-4">
+                <form onSubmit={adminLoginMethod === 'EMAIL_OTP' ? handleAdminVerifyEmailOtp : handleAdminVerifyOtp} className="space-y-4">
                   <div className="flex items-center gap-2.5 p-3.5 rounded-xl mb-4"
                     style={{ background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.2)' }}>
                     <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
                     <p className="text-emerald-300 text-sm font-semibold">
-                      OTP ready for {adminOtpDelivery?.maskedPhone || adminPhone}{adminOtpDelivery?.userName ? ` · Hi, ${adminOtpDelivery.userName}!` : ''}
+                      OTP ready for {adminLoginMethod === 'EMAIL_OTP' ? (adminOtpDelivery?.maskedEmail || adminOtpEmail) : (adminOtpDelivery?.maskedPhone || adminPhone)}{adminOtpDelivery?.userName ? ` · Hi, ${adminOtpDelivery.userName}!` : ''}
                     </p>
                   </div>
 
@@ -2033,7 +2174,9 @@ export default function LoginPage({ setToken, onShowSignup }) {
                           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">Preview Owner OTP</p>
                           <p className="text-white text-2xl font-black tracking-[0.3em] mt-1">{adminOtpDelivery.previewOtp}</p>
                           <p className="text-amber-100/90 text-xs font-medium mt-2 leading-relaxed">
-                            {adminOtpDelivery.previewNotice || 'Production SMS is not wired yet, so the OTP is shown directly here.'}
+                            {adminOtpDelivery.previewNotice || (adminLoginMethod === 'EMAIL_OTP'
+                              ? 'Production email is not wired yet, so the OTP is shown directly here.'
+                              : 'Production SMS is not wired yet, so the OTP is shown directly here.')}
                           </p>
                         </div>
                         <button
@@ -2051,7 +2194,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
                   <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400">
                     <span>Code expires in about {adminOtpDelivery?.expiresInMinutes || 10} minutes</span>
-                    <button type="button" onClick={handleAdminSendOtp} className="text-emerald-300 hover:text-emerald-200 transition-colors">
+                    <button type="button" onClick={adminLoginMethod === 'EMAIL_OTP' ? handleAdminSendEmailOtp : handleAdminSendOtp} className="text-emerald-300 hover:text-emerald-200 transition-colors">
                       Resend code
                     </button>
                   </div>
@@ -2078,7 +2221,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
                   </button>
                   <button type="button" onClick={() => { resetAdminOtpState(); setError(''); setNotice(''); }}
                     className="w-full py-2.5 text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors">
-                    ← Use a different number
+                    ← Use a different {adminLoginMethod === 'EMAIL_OTP' ? 'email' : 'number'}
                   </button>
                 </form>
               )}

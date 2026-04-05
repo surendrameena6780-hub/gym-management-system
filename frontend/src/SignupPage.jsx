@@ -3,7 +3,7 @@ import axios from 'axios';
 import { buildApiUrl } from './utils/apiUrl';
 import {
   Dumbbell, Mail, Lock, ArrowRight, ArrowLeft, User, Building2,
-  Eye, EyeOff, Check, Phone, MapPin, Sun, Moon, Loader2, AlertCircle,
+  Eye, EyeOff, Check, Phone, MapPin, Sun, Moon, Loader2, AlertCircle, Copy,
 } from 'lucide-react';
 
 // â”€â”€â”€ Plans (14-day trial automatic on all  -  no "Test Drive" option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -126,6 +126,12 @@ export default function SignupPage({ onShowLogin, setToken }) {
   // Step 0
   const [email, setEmail]     = useState('');
   const [emailSt, setEmailSt] = useState(null); // null|'checking'|'ok'|'taken'
+  const [signupEmailOtpMode, setSignupEmailOtpMode] = useState('preview');
+  const [signupEmailOtp, setSignupEmailOtp] = useState('');
+  const [signupEmailOtpSent, setSignupEmailOtpSent] = useState(false);
+  const [signupEmailOtpVerified, setSignupEmailOtpVerified] = useState(false);
+  const [signupEmailOtpDelivery, setSignupEmailOtpDelivery] = useState(null);
+  const [signupEmailVerificationToken, setSignupEmailVerificationToken] = useState('');
 
   // Step 1
   const [fullName, setFullName]       = useState('');
@@ -173,11 +179,13 @@ export default function SignupPage({ onShowLogin, setToken }) {
       .then((res) => {
         if (!cancelled) {
           setGoogleAuthEnabled(Boolean(res.data?.google_auth_enabled));
+          setSignupEmailOtpMode(String(res.data?.signup_email_otp_mode || 'preview'));
         }
       })
       .catch(() => {
         if (!cancelled) {
           setGoogleAuthEnabled(null);
+          setSignupEmailOtpMode('preview');
         }
       });
 
@@ -185,6 +193,14 @@ export default function SignupPage({ onShowLogin, setToken }) {
       cancelled = true;
     };
   }, []);
+
+  const resetSignupEmailOtpState = () => {
+    setSignupEmailOtp('');
+    setSignupEmailOtpSent(false);
+    setSignupEmailOtpVerified(false);
+    setSignupEmailOtpDelivery(null);
+    setSignupEmailVerificationToken('');
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -298,6 +314,73 @@ export default function SignupPage({ onShowLogin, setToken }) {
       .catch(() => {});
   };
 
+  const handleSendSignupEmailOtp = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) { setError('Email address is required.'); return false; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) { setError('Please enter a valid email address.'); return false; }
+
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.post('/api/auth/signup/send-email-otp', { email: normalizedEmail });
+      setEmail(normalizedEmail);
+      setEmailSt('ok');
+      setSignupEmailOtpSent(true);
+      setSignupEmailOtpVerified(false);
+      setSignupEmailVerificationToken('');
+      setSignupEmailOtp('');
+      setSignupEmailOtpDelivery({
+        mode: String(res.data?.delivery_mode || signupEmailOtpMode || 'preview'),
+        maskedEmail: res.data?.masked_email || normalizedEmail,
+        expiresInMinutes: res.data?.expires_in_minutes || 10,
+        previewOtp: res.data?.preview_otp || '',
+        previewNotice: res.data?.preview_notice || '',
+      });
+      return true;
+    } catch (err) {
+      if (err?.response?.status === 409) setEmailSt('taken');
+      setError(err?.response?.data?.message || 'Could not send email verification code.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifySignupEmailOtp = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedOtp = signupEmailOtp.replace(/\D/g, '').slice(0, 6);
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) { setError('Please enter a valid email address.'); return false; }
+    if (normalizedOtp.length !== 6) { setError('Enter the 6-digit code sent to your email.'); return false; }
+
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.post('/api/auth/signup/verify-email-otp', { email: normalizedEmail, otp: normalizedOtp });
+      setSignupEmailOtp(normalizedOtp);
+      setSignupEmailOtpVerified(true);
+      setSignupEmailVerificationToken(String(res.data?.email_verification_token || ''));
+      setEmailSt('ok');
+      return true;
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Could not verify email OTP.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopySignupPreviewOtp = async () => {
+    if (!signupEmailOtpDelivery?.previewOtp) return;
+
+    try {
+      await navigator.clipboard.writeText(signupEmailOtpDelivery.previewOtp);
+      setError('');
+    } catch (_err) {
+      setError('Could not copy the preview OTP.');
+    }
+  };
+
   // â”€â”€ Step navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const goNext = async () => {
     setError('');
@@ -305,16 +388,17 @@ export default function SignupPage({ onShowLogin, setToken }) {
       if (!email.trim())                               { setError('Email address is required.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))  { setError('Please enter a valid email address.'); return; }
       if (emailSt === 'taken')                         { setError('An account with this email already exists. Sign in instead.'); return; }
-      if (emailSt !== 'ok') {
-        setLoading(true);
-        try { await axios.post('/api/auth/check-email', { email: email.trim().toLowerCase() }); setEmailSt('ok'); }
-        catch (err) {
-          setLoading(false);
-          if (err?.response?.status === 409) { setEmailSt('taken'); setError('An account with this email already exists. Sign in instead.'); }
-          else setError('Could not verify email. Please try again.');
-          return;
-        }
-        setLoading(false);
+      if (!signupEmailOtpSent) {
+        await handleSendSignupEmailOtp();
+        return;
+      }
+      if (!signupEmailOtpVerified) {
+        const verified = await handleVerifySignupEmailOtp();
+        if (!verified) return;
+      }
+      if (!signupEmailVerificationToken) {
+        setError('Verify your email before continuing.');
+        return;
       }
     }
     if (step === 1) {
@@ -394,6 +478,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
         gym_name:      gymName.trim(),
         full_name:     fullName.trim(),
         email:         email.trim().toLowerCase(),
+        email_verification_token: signupEmailVerificationToken,
         password,
         owner_phone:   ownerPhone.replace(/\D/g, '').slice(-10),
         gym_address:   address.trim() || null,
@@ -418,13 +503,13 @@ export default function SignupPage({ onShowLogin, setToken }) {
   const planObj = PLANS.find(p => p.key === selectedPlan);
 
   const STEP_TITLES = {
-    0: 'Get started',
+    0: 'Verify your email',
     1: 'About you',
     2: 'Your gym',
     3: isGoogleSignup ? 'Choose your plan' : 'Secure your account',
   };
   const STEP_SUBS = {
-    0: 'Quick setup  -  no credit card required',
+    0: 'We will send a 6-digit code before account creation',
     1: 'Tell us a bit about yourself',
     2: 'A few details about your gym',
     3: isGoogleSignup ? 'Finish your Google signup and activate your 14-day trial' : 'Set a strong password and choose your plan',
@@ -520,7 +605,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                     <Mail size={15} className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: T.icon }} />
                     <input
                       type="email" value={email}
-                      onChange={e => { setEmail(e.target.value); setEmailSt(null); }}
+                      onChange={e => { setEmail(e.target.value); setEmailSt(null); resetSignupEmailOtpState(); }}
                       onBlur={e => { iBlur(e); checkEmail(e.target.value); }}
                       onFocus={iFocus}
                       onKeyDown={e => e.key === 'Enter' && goNext()}
@@ -542,10 +627,97 @@ export default function SignupPage({ onShowLogin, setToken }) {
                   )}
                 </div>
 
+                <div className="rounded-2xl p-4 space-y-3" style={{ background: T.social.background, border: T.social.border }}>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: '#818cf8' }}>Email verification</p>
+                    <p className="text-xs font-medium mt-1 leading-relaxed" style={{ color: T.sub }}>
+                      Step 1: send code. Step 2: type the 6-digit code. Step 3: continue signup.
+                    </p>
+                  </div>
+
+                  {!signupEmailOtpSent ? (
+                    <p className="text-[11px] font-medium leading-relaxed" style={{ color: T.sub }}>
+                      {signupEmailOtpMode === 'preview'
+                        ? 'SMTP preview mode is active. The verification code will appear on this screen after you request it.'
+                        : 'GymVault will send the verification code to this email automatically.'}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2.5 p-3 rounded-xl" style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                        <Check size={14} className="text-indigo-400 flex-shrink-0" strokeWidth={3} />
+                        <p className="text-xs font-semibold" style={{ color: T.text }}>
+                          Code ready for {signupEmailOtpDelivery?.maskedEmail || email}
+                        </p>
+                      </div>
+
+                      {signupEmailOtpDelivery?.previewOtp && (
+                        <div className="p-4 rounded-2xl" style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.22)' }}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">Preview signup OTP</p>
+                              <p className="text-white text-2xl font-black tracking-[0.3em] mt-1">{signupEmailOtpDelivery.previewOtp}</p>
+                              <p className="text-amber-100/90 text-xs font-medium mt-2 leading-relaxed">
+                                {signupEmailOtpDelivery.previewNotice || 'SMTP is not wired yet, so the signup OTP is shown directly here.'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleCopySignupPreviewOtp}
+                              className="w-10 h-10 rounded-xl flex items-center justify-center text-amber-200 hover:text-white transition-colors shrink-0"
+                              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}
+                              aria-label="Copy preview signup OTP"
+                            >
+                              <Copy size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2" style={{ color: T.label }}>
+                          6-Digit Email OTP
+                        </label>
+                        <input
+                          type="text"
+                          value={signupEmailOtp}
+                          onChange={(e) => setSignupEmailOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          placeholder="● ● ● ● ● ●"
+                          className="w-full px-4 py-4 rounded-xl text-center text-2xl font-black tracking-[0.55em] outline-none transition-all"
+                          style={{ ...iBase, color: T.text }}
+                          onFocus={iFocus}
+                          onBlur={iBlur}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-semibold" style={{ color: T.sub }}>
+                        <span>Code expires in about {signupEmailOtpDelivery?.expiresInMinutes || 10} minutes</span>
+                        <button type="button" onClick={handleSendSignupEmailOtp} className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                          Resend code
+                        </button>
+                      </div>
+
+                      {signupEmailOtpVerified && (
+                        <div className="flex items-center gap-2.5 p-3 rounded-xl" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.22)' }}>
+                          <Check size={14} className="text-emerald-400 flex-shrink-0" strokeWidth={3} />
+                          <p className="text-xs font-semibold text-emerald-300">Email verified. You can continue now.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <button type="button" onClick={goNext} disabled={loading}
                   className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-70"
                   style={primaryBtn}>
-                  {loading ? <><Loader2 size={15} className="animate-spin" /> Checking...</> : <>Continue <ArrowRight size={16} /></>}
+                  {loading ? (
+                    <><Loader2 size={15} className="animate-spin" /> {signupEmailOtpSent && !signupEmailOtpVerified ? 'Verifying...' : 'Sending...'}</>
+                  ) : signupEmailOtpVerified ? (
+                    <>Continue <ArrowRight size={16} /></>
+                  ) : signupEmailOtpSent ? (
+                    <>Verify Email <ArrowRight size={16} /></>
+                  ) : (
+                    <>Send Verification Code <ArrowRight size={16} /></>
+                  )}
                 </button>
               </div>
             )}
