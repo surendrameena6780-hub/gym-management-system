@@ -138,7 +138,7 @@ router.post('/login', async (req, res) => {
     try {
         // 1. Verify email AND fetch the gym's is_active status (THE KILL SWITCH CHECK)
         const userResult = await pool.query(
-            `SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status
+            `SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
              FROM users u 
              JOIN gyms g ON u.gym_id = g.id 
              WHERE u.email = $1`, 
@@ -211,6 +211,11 @@ router.post('/login', async (req, res) => {
                 staff_role: user.staff_role,
                 is_active: user.is_active,
                 permissions,
+            },
+            saas: {
+                status: user.saas_status || 'ACTIVE',
+                valid_until: user.saas_valid_until,
+                plan: user.current_plan,
             }
         });
 

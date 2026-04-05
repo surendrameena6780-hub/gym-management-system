@@ -924,7 +924,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
           <Shield size={18} className="text-indigo-500" />
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Attendance Mode</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 desktop:grid-cols-2 xl:grid-cols-4 gap-3">
           {Object.entries(MODE_META).map(([key, item]) => {
             const Icon = item.icon;
             const active = key === LOCKED_ATTENDANCE_MODE;
@@ -1456,7 +1456,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
             </div>
 
             <form onSubmit={savePolicy} className="app-modal-scroll p-6 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Policy Name</label>
                   <input type="text" required value={policyForm.name} onChange={(event) => setPolicyForm((prev) => ({ ...prev, name: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="Morning Access" />
@@ -1486,7 +1486,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 desktop:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Allowed From</label>
                   <input type="time" value={policyForm.allowed_from} onChange={(event) => setPolicyForm((prev) => ({ ...prev, allowed_from: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" />
@@ -1501,7 +1501,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 desktop:grid-cols-3 gap-3">
                 <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50">
                   <span className="text-sm font-bold text-slate-700">Off-peak only</span>
                   <input type="checkbox" checked={policyForm.is_offpeak_only} onChange={(event) => setPolicyForm((prev) => ({ ...prev, is_offpeak_only: event.target.checked }))} />

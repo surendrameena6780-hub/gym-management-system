@@ -1,9 +1,10 @@
 ﻿import React, { useState } from 'react';
 import axios from 'axios';
 import {
-  Dumbbell, Mail, Lock, ArrowRight, ArrowLeft, User, Building2,
+  Mail, Lock, ArrowRight, ArrowLeft, User, Building2,
   Eye, EyeOff, Check, Phone, MapPin, Sun, Moon, Loader2, AlertCircle,
 } from 'lucide-react';
+import GymVaultLogo from './GymVaultLogo';
 
 // â”€â”€â”€ Plans (14-day trial automatic on all  -  no "Test Drive" option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PLANS = [
@@ -299,8 +300,8 @@ export default function SignupPage({ onShowLogin, setToken }) {
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 24px rgba(99,102,241,0.5)' }}>
-              <Dumbbell size={20} className="text-white" strokeWidth={2.5} />
+              style={{ boxShadow: '0 8px 24px rgba(99,102,241,0.5)' }}>
+              <GymVaultLogo size={40} />
             </div>
             <span className="font-black text-xl tracking-tight" style={{ color: T.logo }}>GymVault</span>
           </div>

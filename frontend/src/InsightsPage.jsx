@@ -218,7 +218,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
   return (
     <div className="min-h-full p-0 space-y-8 font-inter text-slate-900">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col desktop:flex-row justify-between items-start desktop:items-center gap-4">
         <div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
           <p className="text-slate-500 font-medium mt-1">Simple numbers from real payments, memberships, and attendance.</p>
@@ -254,7 +254,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
       {/* ── Plain Summary ── */}
       <div className="bg-white/80 backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
         <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Quick Summary</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
+        <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
           <div className="space-y-2">
             <p>
               <span className="font-bold text-slate-900">Money:</span>{' '}
@@ -312,7 +312,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
         {activeTab === 'revenue' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 desktop:grid-cols-3 gap-4">
               <Card className="p-5 border-l-4 border-l-blue-500">
                 <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><Target size={12} /> Average Per Member (30D)</p>
                 <div className="flex items-end gap-2">
@@ -474,7 +474,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
         {activeTab === 'risk' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 desktop:grid-cols-3 gap-4">
               <div className="bg-rose-50 border border-rose-100 p-6 rounded-2xl">
                 <div className="flex items-center gap-2 text-rose-600 mb-2 font-bold uppercase text-xs tracking-wider">
                   <AlertTriangle size={14} /> Immediate Attention
@@ -579,7 +579,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
         {activeTab === 'retention' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 desktop:grid-cols-3 gap-4">
               <Card className="p-5 border-l-4 border-l-violet-500">
                 <p className="text-slate-400 text-[11px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5"><UserCheck size={12} /> Active Members</p>
                 <h3 className="text-2xl font-black text-slate-900">{analytics.health.active}</h3>

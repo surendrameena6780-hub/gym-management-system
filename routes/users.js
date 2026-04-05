@@ -5,6 +5,8 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware'); // Added Auth Check
 const { requireOwner, getDefaultPermissionsByStaffRole } = require('../middleware/rbac');
 
+const saasMiddleware = require('../middleware/saasMiddleware');
+
 const normalizeStaffRole = (role) => {
     const value = String(role || 'STAFF').trim().toUpperCase();
     const allowed = new Set(['MANAGER', 'RECEPTION', 'TRAINER', 'WORKER', 'CLEANER', 'ACCOUNTANT', 'STAFF']);
@@ -54,7 +56,7 @@ router.get('/staff', auth, requireOwner, async (req, res) => {
 });
 
 // POST /api/users/staff — Owner adds staff with email + password
-router.post('/staff', auth, requireOwner, async (req, res) => {
+router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
     const { full_name, email, password, staff_role, permissions } = req.body;
 
     if (!full_name || !email || !password) {
@@ -98,7 +100,7 @@ router.post('/staff', auth, requireOwner, async (req, res) => {
 });
 
 // PUT /api/users/staff/:id — Owner updates staff role, permissions, profile, status
-router.put('/staff/:id', auth, requireOwner, async (req, res) => {
+router.put('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) => {
     const staffId = parseInt(req.params.id, 10);
     const { full_name, staff_role, is_active, permissions } = req.body;
 
@@ -151,7 +153,7 @@ router.put('/staff/:id', auth, requireOwner, async (req, res) => {
 });
 
 // POST /api/users/staff/:id/reset-password — Owner resets staff password
-router.post('/staff/:id/reset-password', auth, requireOwner, async (req, res) => {
+router.post('/staff/:id/reset-password', auth, requireOwner, saasMiddleware, async (req, res) => {
     const staffId = parseInt(req.params.id, 10);
     const { new_password } = req.body;
 

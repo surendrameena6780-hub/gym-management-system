@@ -239,7 +239,7 @@ const loadRazorpayScript = () => {
     monthly_remaining: 500,
     templates: DEFAULT_MESSAGE_TEMPLATES,
     member_payments: {
-      enabled: false,
+      enabled: true,
       connect_mode: 'MANUAL',
       onboarding_status: 'NOT_CONNECTED',
       connected_account_id: '',
@@ -1165,7 +1165,7 @@ const loadRazorpayScript = () => {
   if (isLoading) return <PageLoader className="min-h-[56vh]" />;
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 md:gap-6 md:min-h-[calc(var(--app-viewport-height)-7rem)]">
+    <div className="flex flex-col desktop:flex-row gap-4 desktop:gap-6 desktop:min-h-[calc(var(--app-viewport-height)-7rem)]">
       
       {/* SIDEBAR NAVIGATION */}
       <div className={`w-full md:w-64 flex-shrink-0 ${mobileMenuVisible ? 'flex' : 'hidden'} md:flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar pb-10`}>
@@ -1194,7 +1194,7 @@ const loadRazorpayScript = () => {
                   <Icon size={16} />
                   {tab.label}
                   {isTabDisabled && <Lock size={12} className="ml-auto opacity-50" />}
-                  {!isTabDisabled && <ChevronRight size={14} className="ml-auto opacity-45 md:hidden" />}
+                  {!isTabDisabled && <ChevronRight size={14} className="ml-auto opacity-45 desktop:hidden" />}
                 </button>
               );
             })}
@@ -1203,7 +1203,7 @@ const loadRazorpayScript = () => {
       </div>
 
       <div className={`${mobileMenuVisible ? 'hidden' : 'block'} md:block flex-1 bg-white/80 backdrop-blur-xl border border-white/60 rounded-[28px] shadow-sm overflow-y-auto relative custom-scrollbar`}>
-        <div className="sticky top-0 z-20 md:hidden flex items-center gap-3 px-4 py-4 border-b border-slate-100 bg-white/95 backdrop-blur-xl">
+        <div className="sticky top-0 z-20 desktop:hidden flex items-center gap-3 px-4 py-4 border-b border-slate-100 bg-white/95 backdrop-blur-xl">
           <button
             type="button"
             onClick={() => setMobileMenuVisible(true)}
@@ -1245,7 +1245,7 @@ const loadRazorpayScript = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 desktop:grid-cols-2 gap-5">
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Owner Name</label><div className="relative"><User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input required type="text" value={accountData.full_name} onChange={e => setAccountData({...accountData, full_name: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Login Email</label><div className="relative"><Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input required type="email" value={accountData.email} onChange={e => setAccountData({...accountData, email: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Personal Phone</label><div className="relative"><Smartphone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="+91 00000 00000" value={accountData.phone} onChange={e => setAccountData({...accountData, phone: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all" /></div></div>
@@ -1255,7 +1255,7 @@ const loadRazorpayScript = () => {
 
                 <div className="space-y-5">
                   <h3 className="text-xs font-black text-rose-500 uppercase tracking-widest flex items-center gap-2 border-b border-rose-50 pb-3"><Fingerprint size={14} /> Security Updates</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  <div className="grid grid-cols-1 desktop:grid-cols-2 lg:grid-cols-3 gap-5">
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Current Password</label><div className="relative"><Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="password" placeholder="Verify identity" value={accountData.current_password} onChange={e => setAccountData({...accountData, current_password: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-rose-500/10 focus:border-rose-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">New Password</label><div className="relative"><Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="password" placeholder="New password" value={accountData.new_password} onChange={e => setAccountData({...accountData, new_password: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-rose-500/10 focus:border-rose-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Confirm Password</label><div className="relative"><CheckCircle size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="password" placeholder="Confirm new password" value={accountData.confirm_password} onChange={e => setAccountData({...accountData, confirm_password: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-rose-500/10 focus:border-rose-400 transition-all" /></div></div>
@@ -1264,7 +1264,7 @@ const loadRazorpayScript = () => {
 
                 <div className="space-y-5 pt-2">
                   <h3 className="text-xs font-black text-emerald-600 uppercase tracking-widest flex items-center gap-2 border-b border-emerald-50 pb-3"><Building2 size={14} /> Gym Business Information</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 desktop:grid-cols-2 gap-5">
                     <div className="md:col-span-2"><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Registered Gym Name</label><div className="relative"><Building2 size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input required type="text" value={gymData.name} onChange={e => setGymData({...gymData, name: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Support Phone</label><div className="relative"><Phone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" value={gymData.phone} onChange={e => setGymData({...gymData, phone: e.target.value})} placeholder="For member inquiries" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Support Email</label><div className="relative"><Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="email" value={gymData.email} onChange={e => setGymData({...gymData, email: e.target.value})} placeholder="hello@yourgym.com" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-400 transition-all" /></div></div>
@@ -1297,7 +1297,7 @@ const loadRazorpayScript = () => {
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white max-w-5xl mb-5">
                 <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-4">Add Staff Member</h3>
-                <form onSubmit={handleAddStaff} className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <form onSubmit={handleAddStaff} className="grid grid-cols-1 desktop:grid-cols-5 gap-3">
                   <input
                     value={staffForm.full_name}
                     onChange={(e) => setStaffForm((prev) => ({ ...prev, full_name: e.target.value }))}
@@ -1455,7 +1455,7 @@ const loadRazorpayScript = () => {
 
               {/* FREE TRIAL BANNER */}
               {realStatus === 'FREE_TRIAL' && (
-                  <div className="mb-8 p-6 rounded-[28px] border-2 border-dashed border-indigo-300 bg-indigo-50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in slide-in-from-top-4">
+                  <div className="mb-8 p-6 rounded-[28px] border-2 border-dashed border-indigo-300 bg-indigo-50 flex flex-col desktop:flex-row items-start desktop:items-center justify-between gap-4 animate-in slide-in-from-top-4">
                       <div className="flex items-start gap-4">
                           <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center shrink-0">
                               <Zap size={22} className="text-indigo-600" />
@@ -1474,7 +1474,7 @@ const loadRazorpayScript = () => {
 
               {/* PREMIUM ACTIVE BANNER */}
               {realStatus === 'ACTIVE' && (
-                  <div className="mb-8 p-8 bg-slate-900 rounded-[32px] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden border border-slate-800">
+                  <div className="mb-8 p-8 bg-slate-900 rounded-[32px] shadow-2xl flex flex-col desktop:flex-row items-center justify-between gap-6 relative overflow-hidden border border-slate-800">
                       <div className="absolute right-0 top-0 w-96 h-96 bg-emerald-500/10 blur-[100px] pointer-events-none"></div>
                       
                       <div className="relative z-10 flex items-center gap-5">
@@ -1664,7 +1664,7 @@ const loadRazorpayScript = () => {
                       </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 mt-6">
+                  <div className="grid grid-cols-1 desktop:grid-cols-2 gap-x-12 gap-y-8 mt-6">
                       <ProgressBar 
                           label="Total Registered Members" 
                           current={usageData.members} 
@@ -1688,7 +1688,7 @@ const loadRazorpayScript = () => {
               </div>
 
               {/* Dynamic Invoice & Security Layout */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-6 mt-6">
                   <div className="p-6 bg-white border border-slate-200 rounded-[28px] shadow-sm flex flex-col">
                       <div className="flex justify-between items-center mb-6">
                           <h3 className="font-black text-slate-900 text-lg">Recent Invoices</h3>

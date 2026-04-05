@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
 import DashboardPage from './DashboardPage';
 import MembersPage from './MembersPage';
@@ -21,11 +21,12 @@ import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './util
 import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
-  ClipboardCheck, BarChart3, Settings, LogOut, Dumbbell, Lock, Bell, User, LifeBuoy,
-  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- 🚨 ADDED TOUR ICONS
+  ClipboardCheck, BarChart3, Settings, LogOut, Lock, Bell, User, LifeBuoy,
+  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- ðŸš¨ ADDED TOUR ICONS
 } from 'lucide-react';
+import GymVaultLogo from './GymVaultLogo';
 
-// ─── Navigation Config ────────────────────────────────────────────────────────
+// â”€â”€â”€ Navigation Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const NAV_ITEMS = [
   { name: 'Dashboard',  icon: LayoutDashboard },
@@ -55,7 +56,7 @@ const PAGE_PERMISSIONS = {
   'Help & Support': 'support:read',
 };
 
-// ─── Toast System ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Toast System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function useToast() {
   const [toasts, setToasts] = useState([]);
@@ -83,7 +84,7 @@ function ToastItem({ message, type, onRemove }) {
   );
 }
 
-// ─── Confirm Modal ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Confirm Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function useConfirm() {
   const [confirmState, setConfirmState] = useState(null);
@@ -126,13 +127,13 @@ function ConfirmModal({ confirmState, hideConfirm }) {
   );
 }
 
-// ─── Splash Screen ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Splash Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// Single flat colour used everywhere for the splash — must match index.html/body/root pre-React
+// Single flat colour used everywhere for the splash â€” must match index.html/body/root pre-React
 const SPLASH_BG = '#161d4f';
-// iOS black-translucent darkens the status-bar zone by ~30% (result = content × 0.70).
-// So the content behind the status bar must be SPLASH_BG ÷ 0.70 ≈ #1f2971
-// to appear as SPLASH_BG after iOS applies its overlay — making top and bottom match.
+// iOS black-translucent darkens the status-bar zone by ~30% (result = content Ã— 0.70).
+// So the content behind the status bar must be SPLASH_BG Ã· 0.70 â‰ˆ #1f2971
+// to appear as SPLASH_BG after iOS applies its overlay â€” making top and bottom match.
 const SPLASH_STATUS_BAR_BG = '#1f2971';
 
 function SplashScreen({ exiting }) {
@@ -158,12 +159,10 @@ function SplashScreen({ exiting }) {
       <div
         className="relative w-20 h-20 rounded-[22px] flex items-center justify-center mb-6 animate-in zoom-in-50 duration-700"
         style={{
-          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
           boxShadow: '0 0 80px rgba(99,102,241,0.5), 0 0 160px rgba(99,102,241,0.2), 0 20px 40px rgba(0,0,0,0.4)'
         }}
       >
-        <Dumbbell size={36} className="text-white" strokeWidth={2} />
-        <div className="absolute inset-0 rounded-[22px] border border-white/20" />
+        <GymVaultLogo size={80} />
       </div>
 
       <h1 className="text-4xl font-black text-white tracking-tight mb-1.5 animate-in fade-in slide-in-from-bottom-3 duration-700 [animation-delay:200ms] [animation-fill-mode:both]">
@@ -198,7 +197,7 @@ function SplashScreen({ exiting }) {
   );
 }
 
-// ─── iOS-style sliding mobile nav ─────────────────────────────────────────────
+// â”€â”€â”€ iOS-style sliding mobile nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMoreNav, isSuspended, onNav, onMoreToggle }) {
   const colCount = items.length + (moreItems.length > 0 ? 1 : 0);
@@ -282,7 +281,7 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function App() {
   const pathname = String(window.location.pathname || '/');
@@ -308,6 +307,7 @@ function App() {
     }
   });
   const [isSuspended, setIsSuspended] = useState(false); 
+  const [saasGrace, setSaasGrace] = useState(false);
   const [settingsTab, setSettingsTab] = useState('account'); 
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [canInstallApp, setCanInstallApp] = useState(false);
@@ -316,7 +316,7 @@ function App() {
   const [showMobileMoreNav, setShowMobileMoreNav] = useState(false);
   const [showSignup, setShowSignup] = useState(false);
 
-  // 🚨 MASTERCLASS TOUR STATE 🚨
+  // ðŸš¨ MASTERCLASS TOUR STATE ðŸš¨
   const [tour, setTour] = useState({ isActive: false, step: 0, isWaitingForAction: false });
   const [tourRect, setTourRect] = useState(null); // <-- NEW: Tracks element position
 
@@ -456,7 +456,7 @@ function App() {
 
   const availableNavItems = NAV_ITEMS.filter((item) => canAccessPage(item.name));
 
-  // Role-aware mobile primary nav — staff sees their most relevant 4 pages
+  // Role-aware mobile primary nav â€” staff sees their most relevant 4 pages
   const staffRole = String(currentUser?.staff_role || '').toUpperCase();
   const isOwner = currentUser?.role === 'OWNER';
   const mobilePrimary = isOwner ? MOBILE_PRIMARY_NAV : (() => {
@@ -481,6 +481,21 @@ function App() {
         if (user) {
           setCurrentUser(user);
           localStorage.setItem('user', JSON.stringify(user));
+        }
+        // Check SaaS status from auth/me response
+        const saas = res.data?.saas;
+        if (saas) {
+          if (saas.status === 'EXPIRED') {
+            setIsSuspended(true);
+            setCurrentPage('Settings');
+          } else if (saas.status === 'GRACE_PERIOD') {
+            setIsSuspended(false);
+            // Grace period banner handled via saasGrace state
+            setSaasGrace(true);
+          } else {
+            setIsSuspended(false);
+            setSaasGrace(false);
+          }
         }
       })
       .catch(() => {
@@ -558,7 +573,7 @@ function App() {
     return () => clearInterval(intervalId);
   }, [fetchNotifications, token, isHQ, isSuspended]);
 
-  // ── Web Push Subscribe ─────────────────────────────────────────────────────
+  // â”€â”€ Web Push Subscribe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (isHQ || !token || isSuspended) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
@@ -637,7 +652,7 @@ function App() {
   };
 
 
-  // 🚨 REBUILT INTERCEPTOR
+  // ðŸš¨ REBUILT INTERCEPTOR
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
@@ -664,7 +679,7 @@ function App() {
     return () => axios.interceptors.response.eject(interceptor);
   }, [handleLogout, isHQ]);
 
-  // 🚨 NAVIGATION
+  // ðŸš¨ NAVIGATION
   const handleSidebarNav = useCallback((page) => {
     if (!canAccessPage(page)) {
       toast('Access restricted for your role.', 'warning');
@@ -827,19 +842,19 @@ function App() {
     return () => clearTimeout(fallbackTimer);
   }, [token, isHQ, isSuspended, currentUser, currentPage, stats]);
 
-  // ════════════════════════════════════════════════════════════════════════
-  // 🚀 THE MASTERCLASS TOUR ENGINE
-  // ════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ðŸš€ THE MASTERCLASS TOUR ENGINE
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   const TOUR_STEPS = [
-    { targetId: null, page: 'Dashboard', position: 'center', title: 'Welcome to GymVault ✨', desc: 'Let\'s set up your gym in a few steps. I will guide you through the exact workflow.' },
+    { targetId: null, page: 'Dashboard', position: 'center', title: 'Welcome to GymVault âœ¨', desc: 'Let\'s set up your gym in a few steps. I will guide you through the exact workflow.' },
     { targetId: 'tour-dashboard-hero', page: 'Dashboard', position: 'bottom', title: 'Dashboard Overview', desc: 'This is your central command. It tracks revenue, active members, and daily check-ins in real-time.' },
     { targetId: 'nav-Members', page: 'Dashboard', position: 'right', title: 'Members Directory', desc: 'Manage your clients here. You can track their active memberships and contact details.' },
     { targetId: 'btn-add-member', page: 'Dashboard', position: 'top', title: 'Quick Actions', desc: 'Use this button anytime to instantly register a new member, record a payment, or send a WhatsApp broadcast.' },
-    { targetId: 'nav-Plans', page: 'Plans', position: 'right', title: 'Membership Plans', desc: 'Before adding members, you will create Plans here (e.g., Monthly VIP for ₹2000). They dictate pricing and duration.' },
+    { targetId: 'nav-Plans', page: 'Plans', position: 'right', title: 'Membership Plans', desc: 'Before adding members, you will create Plans here (e.g., Monthly VIP for â‚¹2000). They dictate pricing and duration.' },
     { targetId: 'nav-Payments', page: 'Payments', position: 'right', title: 'Financial Ledger', desc: 'Every transaction is recorded safely here for your accounting.' },
     { targetId: 'nav-Settings', page: 'Settings', position: 'right', title: 'Gym Configuration', desc: 'Upload your gym logo, update your address, and configure staff access here.' },
-    { targetId: null, page: 'Dashboard', position: 'center', title: 'You\'re All Set! 🚀', desc: 'Your gym setup is fully complete. You are ready to dominate. Let\'s get to work.' }
+    { targetId: null, page: 'Dashboard', position: 'center', title: 'You\'re All Set! ðŸš€', desc: 'Your gym setup is fully complete. You are ready to dominate. Let\'s get to work.' }
   ];
 
   // The engine that finds the element on the screen and draws the spotlight over it
@@ -881,7 +896,7 @@ function App() {
 
   const endTour = () => { setTour({ isActive: false, step: 0 }); toast("Tour exited.", "info"); };
 
-  // ════════════════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   if (isHQ) {
     if (!superToken) {
@@ -905,9 +920,14 @@ function App() {
   return (
     <>
       {isSuspended && <SuspensionOverlay onLogout={handleLogout} onRenew={() => setIsSuspended(false)} />}
+      {saasGrace && !isSuspended && (
+        <div className="fixed top-0 left-0 right-0 z-[9980] bg-gradient-to-r from-orange-500 to-amber-500 text-white px-4 py-2.5 text-center shadow-lg" style={{ paddingTop: 'calc(var(--safe-area-top) + 0.625rem)' }}>
+          <p className="text-xs font-bold">⚠️ Your subscription has expired. You have a few days of grace period remaining. <button onClick={() => { setSaasGrace(false); setCurrentPage('Settings'); setSettingsTab('billing'); }} className="underline font-extrabold ml-1 hover:text-white/80">Renew Now</button></p>
+        </div>
+      )}
       {showSplash && <SplashScreen exiting={splashExiting} />}
 
-      {/* 🚀 SMART SPOTLIGHT TOUR OVERLAY */}
+      {/* ðŸš€ SMART SPOTLIGHT TOUR OVERLAY */}
       {tour.isActive && (
         <div className="fixed inset-0 z-[9990] pointer-events-none">
           
@@ -980,7 +1000,7 @@ function App() {
         <ConfirmModal confirmState={confirmState} hideConfirm={hideConfirm} />
 
         <aside
-          className="w-64 p-5 hidden md:flex flex-col text-white shadow-2xl relative overflow-hidden z-10 shrink-0"
+          className="w-64 p-5 hidden desktop:flex flex-col text-white shadow-2xl relative overflow-hidden z-10 shrink-0"
           style={{ background: 'linear-gradient(180deg, #0b0f1e 0%, #0f1526 100%)' }}
         >
           <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full pointer-events-none"
@@ -991,10 +1011,9 @@ function App() {
           <div className="flex items-center gap-3 mb-10 px-2 relative">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
               style={{
-                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
                 boxShadow: '0 4px 20px rgba(99,102,241,0.5)'
               }}>
-              <Dumbbell size={17} className="text-white" strokeWidth={2.5} />
+              <GymVaultLogo size={36} />
             </div>
             <div>
               <div className="text-[15px] font-extrabold tracking-tight leading-none text-white">GymVault</div>
@@ -1043,7 +1062,7 @@ function App() {
 
         <div className="flex-1 flex flex-col app-shell-height overflow-hidden">
           <header className="relative z-50 shrink-0 border-b border-white/60 app-header-safe">
-            <div className="app-header-row flex items-center justify-between px-4 md:px-8">
+            <div className="app-header-row flex items-center justify-between px-4 desktop:px-8">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-400">Home</span>
                 {currentPage !== 'Dashboard' && (
@@ -1057,7 +1076,7 @@ function App() {
               {token && !isStandaloneMode && canInstallApp && (
                 <button
                   onClick={handleInstallApp}
-                  className="md:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-600 text-[11px] font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors"
+                  className="desktop:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-600 text-[11px] font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors"
                 >
                   <Download size={13} />
                   Add to Screen
@@ -1187,11 +1206,11 @@ function App() {
             </div>
           </header>
 
-          {/* ── Keep-alive page mounting: each page stays in DOM after first visit ── */}
+          {/* â”€â”€ Keep-alive page mounting: each page stays in DOM after first visit â”€â”€ */}
           <main ref={mainRef} className="app-scroll-shell flex-1 overflow-y-auto">
 
             {/* Dashboard */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Dashboard') && (
                 currentUser?.role === 'OWNER'
                   ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} currentUser={currentUser} showConfirm={showConfirm} isActive={currentPage === 'Dashboard'} />
@@ -1200,28 +1219,28 @@ function App() {
             </div>
 
             {/* Members */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Members') && (
                 <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} />
               )}
             </div>
 
             {/* Leads */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Leads' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Leads' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Leads') && (
                 <LeadsPage token={token} toast={toast} showConfirm={showConfirm} navigateTo={navigateTo} canManage={hasPermission('members:write')} />
               )}
             </div>
 
             {/* Plans */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Plans') && (
                 <PlansPage token={token} toast={toast} showConfirm={showConfirm} />
               )}
             </div>
 
             {/* Payments */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Payments') && (
                 <PaymentsPage
                   token={token}
@@ -1238,7 +1257,7 @@ function App() {
             </div>
 
             {/* Attendance */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Attendance') && (
                 <AttendancePage
                   token={token}
@@ -1253,14 +1272,14 @@ function App() {
             </div>
 
             {/* Classes */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Classes' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Classes' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Classes') && (
                 <ClassesPage token={token} toast={toast} showConfirm={showConfirm} canManage={hasPermission('attendance:write')} />
               )}
             </div>
 
             {/* RFID Setup */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('RFID Setup') && (
                 <RfidSetupPage
                   token={token}
@@ -1272,21 +1291,21 @@ function App() {
             </div>
 
             {/* Insights */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Insights') && (
                 <InsightsPage token={token} toast={toast} currentUser={currentUser} isActive={currentPage === 'Insights'} />
               )}
             </div>
 
             {/* Settings */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Settings') && (
                 <SettingsPage toast={toast} token={token} defaultTab={settingsTab} />
               )}
             </div>
 
             {/* Help & Support */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 md:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Help & Support') && (
                 <HelpSupportPage token={token} toast={toast} />
               )}
@@ -1298,11 +1317,11 @@ function App() {
         {showMobileMoreNav && (
           <>
             <div
-              className="fixed inset-0 z-[115] md:hidden bg-slate-900/25 backdrop-blur-[1px]"
+              className="fixed inset-0 z-[115] desktop:hidden bg-slate-900/25 backdrop-blur-[1px]"
               onClick={() => setShowMobileMoreNav(false)}
             />
             <div
-              className="fixed left-3 right-3 z-[116] md:hidden rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl p-2 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.55)]"
+              className="fixed left-3 right-3 z-[116] desktop:hidden rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl p-2 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.55)]"
               style={{ bottom: 'calc(var(--mobile-nav-offset) + 0.5rem)' }}
             >
               <div className="grid grid-cols-2 gap-1.5">
@@ -1331,7 +1350,7 @@ function App() {
           </>
         )}
 
-        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 md:hidden z-[120] px-3 pt-2">
+        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-2">
           <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
             {/* iOS-style sliding indicator nav */}
             <MobileNav

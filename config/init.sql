@@ -593,7 +593,7 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_code       VARCHAR(10);
 ALTER TABLE members ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP;
 
 -- Gym-level member payment gateway (separate from SaaS billing gateway)
-ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT TRUE;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_razorpay_key_secret_enc TEXT;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120);

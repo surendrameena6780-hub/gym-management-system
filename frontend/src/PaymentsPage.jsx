@@ -120,11 +120,41 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const [payments, setPayments] = useState([]);
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
   const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRange] = useState('all');
+
+  // Date range filter helper
+  const getDateRangeStart = (range) => {
+    if (range === 'all') return null;
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    if (range === '7d') d.setDate(d.getDate() - 7);
+    else if (range === '30d') d.setDate(d.getDate() - 30);
+    else if (range === '90d') d.setDate(d.getDate() - 90);
+    return d;
+  };
+
+  const dateFilteredPayments = useMemo(() => {
+    const start = getDateRangeStart(dateRange);
+    if (!start) return payments;
+    return payments.filter(p => new Date(p.payment_date) >= start);
+  }, [payments, dateRange]);
+
+  // Compute filtered stats from date-filtered payments
+  const filteredStats = useMemo(() => {
+    if (dateRange === 'all') return stats;
+    const filtered = dateFilteredPayments;
+    const total = filtered.reduce((s, p) => s + (parseFloat(p.amount_paid) || 0), 0);
+    const pending = filtered.filter(p => p.status === 'Pending').reduce((s, p) => s + (parseFloat(p.amount_due) || 0), 0);
+    const todayStr = new Date().toDateString();
+    const todayRev = filtered.filter(p => new Date(p.payment_date).toDateString() === todayStr)
+      .reduce((s, p) => s + (parseFloat(p.amount_paid) || 0), 0);
+    return { total_revenue: total, today_revenue: todayRev, pending_dues: pending };
+  }, [dateRange, dateFilteredPayments, stats]);
 
   // Count-up animated values for stat cards
-  const animatedTotalRevenue = useCountUp(parseFloat(stats.total_revenue || 0));
-  const animatedTodayRevenue = useCountUp(parseFloat(stats.today_revenue || 0));
-  const animatedPendingDues  = useCountUp(parseFloat(stats.pending_dues  || 0));
+  const animatedTotalRevenue = useCountUp(parseFloat(filteredStats.total_revenue || 0));
+  const animatedTodayRevenue = useCountUp(parseFloat(filteredStats.today_revenue || 0));
+  const animatedPendingDues  = useCountUp(parseFloat(filteredStats.pending_dues  || 0));
 
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
@@ -453,7 +483,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const filteredPayments = useMemo(() => {
     const query = String(deferredSearchTerm || '').trim().toLowerCase();
 
-    return payments.filter((payment) => {
+    return dateFilteredPayments.filter((payment) => {
       if (!matchesFilter(payment, activeFilter)) {
         return false;
       }
@@ -473,7 +503,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
       return searchableFields.some((field) => String(field || '').toLowerCase().includes(query));
     });
-  }, [activeFilter, deferredSearchTerm, matchesFilter, payments]);
+  }, [activeFilter, deferredSearchTerm, matchesFilter, dateFilteredPayments]);
 
   const fetchData = async () => {
     try {
@@ -907,7 +937,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       return !Number.isNaN(paymentDate.getTime()) && paymentDate.toDateString() === todayKey;
     });
     const onlineShare = Math.round(revenueSplit.onlinePer || 0);
-    const pendingValue = Number(stats.pending_dues || 0);
+    const pendingValue = Number(filteredStats.pending_dues || 0);
     const dominantMode = revenueSplit.online === 0 && revenueSplit.cash === 0
       ? 'No mix yet'
       : revenueSplit.online >= revenueSplit.cash ? 'Online' : 'Cash';
@@ -922,13 +952,13 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
         detail: `₹${pendingValue.toLocaleString()} is still pending across ${pending.length} record${pending.length === 1 ? '' : 's'}.`,
       });
     }
-    if (Number(stats.today_revenue || 0) > 0) {
+    if (Number(filteredStats.today_revenue || 0) > 0) {
       actions.push({
         id: 'today-pace',
         icon: CheckCircle2,
         tone: 'emerald',
         title: `${todayCompleted.length} payment${todayCompleted.length === 1 ? '' : 's'} logged today`,
-        detail: `₹${Number(stats.today_revenue || 0).toLocaleString()} collected so far today.`,
+        detail: `₹${Number(filteredStats.today_revenue || 0).toLocaleString()} collected so far today.`,
       });
     } else {
       actions.push({
@@ -958,7 +988,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       dominantMode,
       actions: actions.slice(0, 2),
     };
-  }, [payments, revenueSplit, stats.pending_dues, stats.today_revenue]);
+  }, [payments, revenueSplit, filteredStats.pending_dues, filteredStats.today_revenue]);
 
   const financeSummary = useMemo(() => {
     const revenue = extractObject(financeOverview?.revenue, {});
@@ -1076,15 +1106,30 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
       {/* ═══════ COLLECTIONS TAB ═══════ */}
       {financeTab === 'collections' && (<>
+      {/* DATE RANGE FILTER */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Period:</span>
+        {[
+          { key: '7d', label: '7 Days' },
+          { key: '30d', label: '30 Days' },
+          { key: '90d', label: '90 Days' },
+          { key: 'all', label: 'All Time' },
+        ].map(r => (
+          <button key={r.key} onClick={() => setDateRange(r.key)}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${dateRange === r.key ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-300'}`}>
+            {r.label}
+          </button>
+        ))}
+      </div>
       {/* STATS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
           <div className="gv-pay-card-emerald relative overflow-hidden rounded-[20px] p-5 sm:p-6 border"
             style={{ gridColumn: '1 / -1', background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">Total Revenue</p>
+                  <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">{dateRange === 'all' ? 'Total Revenue' : `Revenue (${dateRange === '7d' ? 'Last 7 Days' : dateRange === '30d' ? 'Last 30 Days' : 'Last 90 Days'})`}</p>
                   <h3 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">₹{animatedTotalRevenue.toLocaleString()}</h3>
-                  <p className="text-emerald-600 text-xs font-bold mt-1.5">All time earnings</p>
+                  <p className="text-emerald-600 text-xs font-bold mt-1.5">{dateRange === 'all' ? 'All time earnings' : 'Filtered period'}</p>
                 </div>
                 <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: 'rgba(16,185,129,0.12)' }}>
                   <DollarSign size={22} className="text-emerald-600" />
@@ -1216,7 +1261,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
       {/* LEDGER TABLE */}
       <div ref={collectionsLedgerRef} className="bg-white/90 rounded-[24px] border border-slate-100/60 overflow-hidden scroll-mt-28" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
-        <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between gap-4">
+        <div className="p-6 border-b border-slate-100 flex flex-col desktop:flex-row justify-between gap-4">
           <div className="relative flex-1 max-w-md"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} /><input type="text" placeholder="Search..." className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-slate-900/10 transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
           <div className="relative">
             <button onClick={(e) => { e.stopPropagation(); setShowFilterDropdown(!showFilterDropdown); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 flex items-center gap-2 hover:bg-slate-50"><Filter size={16}/> {activeFilter}</button>
@@ -1224,7 +1269,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           </div>
         </div>
         <div className="overflow-x-auto">
-          <div className="md:hidden p-4">
+          <div className="desktop:hidden p-4">
             <div className="relative">
               <div ref={paymentsListRef} className="payments-mobile-list-scroll no-scrollbar">
                 <div className="space-y-3 pb-6">
@@ -1349,7 +1394,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
             </div>
           ) : (
             <>
-              <div className="space-y-3 md:hidden">
+              <div className="space-y-3 desktop:hidden">
                 {expenses.map((expense) => (
                   <div key={`expense-mobile-${expense.id}`} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
                     <div className="flex items-start justify-between gap-3">
@@ -1367,7 +1412,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   </div>
                 ))}
               </div>
-              <div className="hidden md:block overflow-hidden rounded-xl border border-slate-100">
+              <div className="hidden desktop:block overflow-hidden rounded-xl border border-slate-100">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
@@ -1408,7 +1453,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
             </div>
           ) : (
             <>
-              <div className="space-y-3 md:hidden">
+              <div className="space-y-3 desktop:hidden">
                 {payrollEntries.map((entry) => (
                   <div key={`payroll-mobile-${entry.id}`} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
                     <div className="flex items-start justify-between gap-3">
@@ -1449,7 +1494,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                   </div>
                 ))}
               </div>
-              <div className="hidden md:block overflow-hidden rounded-xl border border-slate-100">
+              <div className="hidden desktop:block overflow-hidden rounded-xl border border-slate-100">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
@@ -1516,7 +1561,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                     <p className="text-sm mt-1">Add supplements, merchandise, or other products.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 desktop:grid-cols-2 2xl:grid-cols-3 gap-3">
                     {posProducts.map(p => {
                       const lowStock = Number(p.stock_qty || 0) <= Number(p.low_stock_threshold || 5);
                       return (
@@ -1810,7 +1855,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
               {dueFormData.payment_mode === 'Online' && dueOnlineMode === 'RAZORPAY' && dueRazorpayContext?.payment_link && (
                 <div className="rounded-[26px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-4 py-4 shadow-sm space-y-4">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                  <div className="flex flex-col gap-4 desktop:flex-row desktop:items-center">
                     <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
                       <QRCodeCanvas
                         value={dueRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
@@ -1853,7 +1898,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
               {dueFormData.payment_mode === 'Online' && dueOnlineMode === 'UPI' && dueCollectionContext && (
                 <div className="rounded-[26px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-4 py-4 shadow-sm">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                  <div className="flex flex-col gap-4 desktop:flex-row desktop:items-center">
                     <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-orange-100">
                       <QRCodeCanvas
                         value={buildUpiCollectionUri({

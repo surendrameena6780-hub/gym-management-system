@@ -337,7 +337,7 @@ function RfidSetupPage({ token, toast, currentUser = null, navigateBack }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 desktop:grid-cols-3 gap-4">
         <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Readers Registered</p>
           <p className="mt-2 text-3xl font-black text-slate-900">{rfidDevices.length}</p>
@@ -370,7 +370,7 @@ function RfidSetupPage({ token, toast, currentUser = null, navigateBack }) {
               </div>
             </div>
 
-            <form onSubmit={createReader} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_auto] gap-3 items-end">
+            <form onSubmit={createReader} className="grid grid-cols-1 desktop:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_auto] gap-3 items-end">
               <div>
                 <label className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Reader Name</label>
                 <input

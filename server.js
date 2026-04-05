@@ -198,9 +198,11 @@ app.use('/api/exports', exportRoutes);
 app.get('/api/auth/me', auth, async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT id, gym_id, full_name, email, role, staff_role, is_active, permissions
-             FROM users
-             WHERE id = $1`,
+            `SELECT u.id, u.gym_id, u.full_name, u.email, u.role, u.staff_role, u.is_active, u.permissions,
+                    g.saas_status, g.saas_valid_until, g.current_plan
+             FROM users u
+             LEFT JOIN gyms g ON g.id = u.gym_id
+             WHERE u.id = $1`,
             [req.user.id]
         );
 
@@ -208,8 +210,23 @@ app.get('/api/auth/me', auth, async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
+        const row = result.rows[0];
         return res.json({
-            user: result.rows[0],
+            user: {
+                id: row.id,
+                gym_id: row.gym_id,
+                full_name: row.full_name,
+                email: row.email,
+                role: row.role,
+                staff_role: row.staff_role,
+                is_active: row.is_active,
+                permissions: row.permissions,
+            },
+            saas: {
+                status: row.saas_status || 'ACTIVE',
+                valid_until: row.saas_valid_until,
+                plan: row.current_plan,
+            },
         });
     } catch (err) {
         console.error('AUTH ME ERROR:', err.message);

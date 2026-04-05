@@ -199,7 +199,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
       </div>
 
       {/* PLANS GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-8">
+      <div className="grid grid-cols-1 desktop:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-8">
         {loading && [1,2,3].map(i => <div key={i} className="h-96 bg-white rounded-[32px] animate-pulse border border-slate-100 shadow-sm"></div>)}
 
         {plans.map((plan) => {
@@ -452,14 +452,14 @@ const PlansPage = ({ token, toast, showConfirm }) => {
                         <label className="text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-2 block flex items-center gap-2">
                              <Percent size={12}/> Run Flash Sale (Optional)
                         </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="min-w-0">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="min-w-0 overflow-hidden">
                                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Discount %</label>
-                              <input type="number" placeholder="0" max="100" className="w-full min-w-0 max-w-full px-4 py-2 bg-white border border-rose-200 rounded-xl font-bold text-rose-500 outline-none focus:ring-2 focus:ring-rose-200" value={formData.discount_percent} onChange={e => setFormData({...formData, discount_percent: e.target.value})} />
+                              <input type="number" placeholder="0" max="100" className="w-full min-w-0 px-3 py-2 bg-white border border-rose-200 rounded-xl font-bold text-rose-500 outline-none focus:ring-2 focus:ring-rose-200" value={formData.discount_percent} onChange={e => setFormData({...formData, discount_percent: e.target.value})} />
                              </div>
-                            <div className="min-w-0">
+                            <div className="min-w-0 overflow-hidden">
                                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Valid Until</label>
-                              <input type="date" className="w-full min-w-0 max-w-full px-4 py-2 bg-white border border-rose-200 rounded-xl font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-rose-200" value={formData.discount_valid_until} onChange={e => setFormData({...formData, discount_valid_until: e.target.value})} />
+                              <input type="date" className="w-full min-w-0 px-3 py-2 bg-white border border-rose-200 rounded-xl font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-rose-200 [&::-webkit-calendar-picker-indicator]:opacity-60" value={formData.discount_valid_until} onChange={e => setFormData({...formData, discount_valid_until: e.target.value})} />
                              </div>
                         </div>
                     </div>

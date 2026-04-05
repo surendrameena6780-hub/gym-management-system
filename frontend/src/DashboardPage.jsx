@@ -7,7 +7,7 @@ import {
   Users, DollarSign, Plus, Zap, MessageSquare, ShieldAlert,
   Sparkles, Clock, CheckCircle, CreditCard, Flame, UserMinus, Activity,
   X, TrendingUp, ChevronRight, UserPlus, RefreshCw, Check,
-  Bot, Play, Trash2 // <-- 🚨 ADDED ICONS
+  Bot, Play
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
@@ -50,196 +50,6 @@ const DEFAULT_BROADCAST_MESSAGES = {
 };
 
 const resolveBroadcastAudienceMessage = (audience) => DEFAULT_BROADCAST_MESSAGES[audience] || DEFAULT_BROADCAST_MESSAGES.All;
-
-const ESCALATED_LEAD_DELETE_WIDTH = 96;
-const ESCALATED_LEAD_DELETE_THRESHOLD = 42;
-
-const getEscalatedLeadSwipeOffset = (value) => {
-  if (value > 0) return value * 0.2;
-  if (value < -ESCALATED_LEAD_DELETE_WIDTH) {
-    return -ESCALATED_LEAD_DELETE_WIDTH + (value + ESCALATED_LEAD_DELETE_WIDTH) * 0.18;
-  }
-  return value;
-};
-
-const EscalatedLeadRow = ({
-  lead,
-  canDelete,
-  isOpen,
-  isDeleting,
-  onOpen,
-  onClose,
-  onDelete,
-}) => {
-  const gestureRef = useRef({
-    pointerId: null,
-    startX: 0,
-    startY: 0,
-    baseOffset: 0,
-    dragging: false,
-  });
-  const offsetRef = useRef(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
-  const [dragOffset, setDragOffset] = useState(offsetRef.current);
-  const [isDragging, setIsDragging] = useState(false);
-  const revealProgress = Math.max(0, Math.min(1, Math.abs(dragOffset) / ESCALATED_LEAD_DELETE_WIDTH));
-  const showDeleteAction = canDelete && (isOpen || isDragging || revealProgress > 0.04);
-
-  const setOffset = useCallback((nextOffset) => {
-    offsetRef.current = nextOffset;
-    setDragOffset(nextOffset);
-  }, []);
-
-  useEffect(() => {
-    if (gestureRef.current.dragging) return;
-    setOffset(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
-  }, [canDelete, isOpen, setOffset]);
-
-  const resetGesture = useCallback(() => {
-    gestureRef.current = {
-      pointerId: null,
-      startX: 0,
-      startY: 0,
-      baseOffset: 0,
-      dragging: false,
-    };
-    setIsDragging(false);
-  }, []);
-
-  const finishGesture = useCallback((event) => {
-    const gesture = gestureRef.current;
-    if (gesture.pointerId !== event.pointerId) return;
-
-    if (!gesture.dragging) {
-      resetGesture();
-      return;
-    }
-
-    const shouldOpen = offsetRef.current <= -ESCALATED_LEAD_DELETE_THRESHOLD;
-    setOffset(shouldOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
-
-    if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    resetGesture();
-    if (shouldOpen) {
-      onOpen();
-    } else {
-      onClose();
-    }
-  }, [onClose, onOpen, resetGesture, setOffset]);
-
-  const handlePointerDown = (event) => {
-    if (!canDelete || isDeleting) return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest('button')) return;
-
-    gestureRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      baseOffset: isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0,
-      dragging: false,
-    };
-  };
-
-  const handlePointerMove = (event) => {
-    if (!canDelete || isDeleting) return;
-
-    const gesture = gestureRef.current;
-    if (gesture.pointerId !== event.pointerId) return;
-
-    const deltaX = event.clientX - gesture.startX;
-    const deltaY = event.clientY - gesture.startY;
-
-    if (!gesture.dragging) {
-      if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) return;
-      if (Math.abs(deltaY) > Math.abs(deltaX)) {
-        resetGesture();
-        return;
-      }
-
-      gesture.dragging = true;
-      gestureRef.current = gesture;
-      setIsDragging(true);
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    }
-
-    event.preventDefault();
-    setOffset(getEscalatedLeadSwipeOffset(gesture.baseOffset + deltaX));
-  };
-
-  const handlePointerCancel = (event) => {
-    const gesture = gestureRef.current;
-    if (gesture.pointerId !== event.pointerId) return;
-
-    setOffset(canDelete && isOpen ? -ESCALATED_LEAD_DELETE_WIDTH : 0);
-    if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    resetGesture();
-  };
-
-  return (
-    <div
-      className={`dashboard-escalated-row${canDelete ? ' dashboard-escalated-row--swipable' : ''}${isDragging ? ' dashboard-escalated-row--dragging' : ''}${isOpen ? ' dashboard-escalated-row--open' : ''}${isDeleting ? ' dashboard-escalated-row--busy' : ''}`}
-    >
-      {showDeleteAction && (
-        <div
-          className="dashboard-escalated-delete-rail"
-          aria-hidden={!isOpen && !isDragging}
-          style={{
-            opacity: revealProgress,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => onDelete(lead)}
-            className="dashboard-escalated-delete-btn"
-            disabled={isDeleting}
-            style={{
-              opacity: Math.max(0.82, revealProgress),
-              transform: `translate3d(${(1 - revealProgress) * 12}px, 0, 0) scale(${0.94 + revealProgress * 0.06})`,
-            }}
-          >
-            <Trash2 size={15} />
-            <span>{isDeleting ? 'Deleting' : 'Delete'}</span>
-          </button>
-        </div>
-      )}
-      <div
-        className="dashboard-escalated-surface"
-        style={{ transform: `translate3d(${dragOffset}px, 0, 0)` }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={finishGesture}
-        onPointerCancel={handlePointerCancel}
-        onPointerLeave={(event) => {
-          if (gestureRef.current.dragging) {
-            finishGesture(event);
-          }
-        }}
-        onClick={(event) => {
-          if (isOpen && !(event.target instanceof Element && event.target.closest('button'))) {
-            onClose();
-          }
-        }}
-      >
-        <div className="min-w-0">
-          <p className="dashboard-escalated-name">{lead.full_name}</p>
-          <p className="dashboard-escalated-meta">Unresponsive • {lead.phone}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => window.open(`tel:${lead.phone}`, '_self')}
-          className="dashboard-escalated-call"
-        >
-          <Activity size={14} />
-        </button>
-      </div>
-    </div>
-  );
-};
 
 
 // ─── Animation Keyframes ──────────────────────────────────────────────────────
@@ -328,7 +138,7 @@ const DashboardSkeleton = () => (
       ))}
     </div>
     {/* Bottom row */}
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+    <div className="grid grid-cols-1 desktop:grid-cols-3 gap-5">
       {[0, 1, 2].map(i => (
         <div key={i} className="bg-white/60 backdrop-blur-sm rounded-[24px] border border-white/60 p-5 h-40"
           style={{ opacity: 0, animation: `cardCascade 0.5s ease-out ${750 + i * 60}ms forwards` }}>
@@ -454,7 +264,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const navigateTo = navTo || ((page) => setCurrentPage?.(page));
   const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
   const MAX_WARMUP_RETRIES = 8;
-  const canDeleteEscalatedLeads = String(currentUser?.role || '').toUpperCase() === 'OWNER';
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -464,7 +273,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [attendanceHeatmap, setAttendanceHeatmap] = useState([]);
   const [todayCheckins, setTodayCheckins] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [chartDays, setChartDays] = useState(30);
+  const [chartDays, setChartDays] = useState(7);
   
   // SETUP ONBOARDING STATE
   const [setup, setSetup] = useState({
@@ -475,8 +284,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const [isSkipped, setIsSkipped] = useState(localStorage.getItem('gymvault_skip_setup') === 'true');
   const [showTourBanner, setShowTourBanner] = useState(localStorage.getItem('gymvault_tour_completed') !== 'true');
   const [isWarmupRetrying, setIsWarmupRetrying] = useState(false);
-  const [openEscalatedLeadId, setOpenEscalatedLeadId] = useState(null);
-  const [deletingEscalatedLeadId, setDeletingEscalatedLeadId] = useState(null);
   const warmupRetryTimerRef = useRef(null);
   const warmupRetryCountRef = useRef(0);
 
@@ -632,31 +439,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const asObject = (value, fallback = {}) => (
     value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
   );
-
-  const handleDeleteEscalatedLead = useCallback((lead) => {
-    if (!canDeleteEscalatedLeads) return;
-
-    showConfirm?.({
-      title: 'Delete Member',
-      message: `Delete ${lead.full_name} from GymVault? This cannot be undone.`,
-      confirmLabel: 'Delete Member',
-      variant: 'danger',
-      onConfirm: async () => {
-        try {
-          setDeletingEscalatedLeadId(lead.id);
-          await axios.delete(`/api/members/${lead.id}`, headers);
-          setOpenEscalatedLeadId((current) => (current === lead.id ? null : current));
-          setMembers((prev) => prev.filter((member) => member.id !== lead.id));
-          toast?.('Member deleted.', 'success');
-        } catch (err) {
-          const message = err?.response?.data?.error || err?.response?.data?.message || 'Delete failed.';
-          toast?.(message, 'error');
-        } finally {
-          setDeletingEscalatedLeadId(null);
-        }
-      },
-    });
-  }, [canDeleteEscalatedLeads, headers, showConfirm, toast]);
 
   const fetchData = async () => {
     try {
@@ -1803,7 +1585,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       active: active.length, unpaid: unpaid.length, expired: expired.length,
       expiring7: expiringIn7Days.length, expiring3: expiringIn3Days.length, ghosts: ghosts.length,
       ghostMembers: ghosts,
-      escalated: escalatedLeads, escalatedLeads,
       pendingDuePayments,
       monthlyRevenue, revenueAtRisk, healthScore,
       pendingDueAction: pendingDuePayments.length > 0 ? pendingDueCta.action : () => navigateTo('Payments'),
@@ -1912,19 +1693,19 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
           🚀 AI AUTO-PILOT TOUR INITIALIZATION
       ════════════════════════════════════════ */}
       {showTourBanner && !setup.is_complete && !isSkipped && (
-        <div className="relative overflow-hidden bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-8 md:p-10 mb-8 animate-in fade-in slide-in-from-top-4 duration-700">
+        <div className="relative overflow-hidden bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-8 desktop:p-10 mb-8 animate-in fade-in slide-in-from-top-4 duration-700">
           <div className="absolute -top-24 -right-24 w-96 h-96 bg-indigo-500/20 rounded-full blur-[100px] pointer-events-none" />
           <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-purple-500/20 rounded-full blur-[100px] pointer-events-none" />
           
-          <div className="relative z-10 flex flex-col md:flex-row items-center gap-10">
+          <div className="relative z-10 flex flex-col desktop:flex-row items-center gap-10">
             <div className="w-40 h-40 bg-indigo-500/20 rounded-full flex items-center justify-center border border-indigo-500/30 shadow-[0_0_40px_rgba(99,102,241,0.4)] shrink-0">
                <Bot size={64} className="text-indigo-400 animate-bounce" />
             </div>
-            <div className="flex-1 text-center md:text-left">
+            <div className="flex-1 text-center desktop:text-left">
                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-black uppercase tracking-widest mb-4">
                   <Sparkles size={14} /> Auto-Pilot Initialized
                </div>
-               <h2 className="text-3xl md:text-4xl font-black text-white mb-4 tracking-tight">
+               <h2 className="text-3xl desktop:text-4xl font-black text-white mb-4 tracking-tight">
                  Let's build your Gym, <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">together.</span>
                </h2>
                <p className="text-slate-400 font-medium text-lg leading-relaxed mb-8 max-w-2xl mx-auto md:mx-0">
@@ -1948,7 +1729,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       ════════════════════════════════════════ */}
       <div
         id="tour-dashboard-hero"
-        className="gv-dashboard-hero relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 md:p-8 mb-5 sm:mb-6"
+        className="gv-dashboard-hero relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 desktop:p-8 mb-5 sm:mb-6"
         style={{
           boxShadow: '0 20px 60px rgba(7,10,24,0.34)',
           opacity: 0, animation: 'cardCascade 0.7s cubic-bezier(0.16,1,0.3,1) 0ms forwards, gv-hero-gradient-drift 8s ease-in-out 700ms infinite alternate'
@@ -1966,7 +1747,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               <span className="w-2 h-2 bg-emerald-400 rounded-full inline-block" style={{ animation: 'heroPulse 2s ease-in-out infinite' }} />
               <span className="text-emerald-400/80 text-[10px] font-black uppercase tracking-[0.22em]">Live Dashboard</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl md:text-[2.75rem] font-black text-white tracking-tight leading-none mb-2">
+            <h1 className="text-2xl sm:text-3xl desktop:text-[2.75rem] font-black text-white tracking-tight leading-none mb-2">
               {getGreeting()} 👋
             </h1>
             <p className="text-white/75 font-semibold text-sm mb-1">
@@ -1986,7 +1767,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               <React.Fragment key={m.label}>
                 {i > 0 && <div className="w-[1px] h-10 bg-white/10 hidden sm:block" />}
                 <div>
-                  <p className={`text-2xl md:text-3xl font-black tracking-tight ${m.color}`}>{m.value}</p>
+                  <p className={`text-2xl desktop:text-3xl font-black tracking-tight ${m.color}`}>{m.value}</p>
                   <p className="text-white/35 text-[9px] font-black uppercase tracking-[0.2em] mt-0.5">{m.label === 'Health Score' ? 'Gym Health' : m.label}</p>
                 </div>
               </React.Fragment>
@@ -2109,6 +1890,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   ))}
                 </div>
 
+                {(dashboardData.automations.weeklyRuns > 0 || dashboardData.automations.weeklySent > 0) ? (
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-lg border border-slate-100 bg-slate-50/70 px-2 py-2">
                     <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">7D Runs</p>
@@ -2123,6 +1905,16 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     <p className="text-xs font-black text-slate-800 mt-0.5">₹{dashboardData.automations.estimatedRecoveryValue.toLocaleString()}</p>
                   </div>
                 </div>
+                ) : (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('Dashboard', null, { action: 'broadcast' })}
+                  className="w-full rounded-xl border border-dashed border-indigo-200 bg-indigo-50/50 p-3 text-center hover:bg-indigo-50 transition-colors"
+                >
+                  <p className="text-[10px] font-black uppercase tracking-wider text-indigo-400">No campaigns this week</p>
+                  <p className="text-[11px] font-bold text-indigo-600 mt-1">Run your first broadcast to see stats here</p>
+                </button>
+                )}
 
                 <p className="text-[10px] text-slate-400 font-semibold">
                   Last auto message: {dashboardData.automations.lastAutomationLabel}
@@ -2232,28 +2024,6 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                     </div>
                   );
                 })}
-
-                {dashboardData.escalated.length > 0 && (
-                  <div className="dashboard-escalated-leads">
-                    <div className="dashboard-escalated-header">
-                      <p className="dashboard-escalated-title">
-                        <Flame size={12} fill="currentColor" /> Escalated Leads (Call Now)
-                      </p>
-                    </div>
-                    {dashboardData.escalated.slice(0, 3).map((lead) => (
-                      <EscalatedLeadRow
-                        key={lead.id}
-                        lead={lead}
-                        canDelete={canDeleteEscalatedLeads}
-                        isOpen={openEscalatedLeadId === lead.id}
-                        isDeleting={deletingEscalatedLeadId === lead.id}
-                        onOpen={() => setOpenEscalatedLeadId(lead.id)}
-                        onClose={() => setOpenEscalatedLeadId((current) => (current === lead.id ? null : current))}
-                        onDelete={handleDeleteEscalatedLead}
-                      />
-                    ))}
-                  </div>
-                )}
               </div>
             </Card>
           </div>
@@ -2624,7 +2394,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               )}
               {paymentMode === 'Online' && paymentOnlineMode === 'RAZORPAY' && paymentRazorpayContext?.payment_link && (
                 <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 px-4 py-4 shadow-sm space-y-4">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                  <div className="flex flex-col gap-4 desktop:flex-row desktop:items-center">
                     <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
                       <QRCodeCanvas
                         value={paymentRazorpayContext.payment_link.short_url || 'https://razorpay.com'}
@@ -2666,7 +2436,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
               )}
               {paymentMode === 'Online' && paymentOnlineMode === 'UPI' && paymentCollectionContext && (
                 <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 px-4 py-4 shadow-sm">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                  <div className="flex flex-col gap-4 desktop:flex-row desktop:items-center">
                     <div className="mx-auto md:mx-0 rounded-[24px] bg-white p-3 shadow-sm border border-indigo-100">
                       <QRCodeCanvas
                         value={buildUpiCollectionUri({
@@ -2869,7 +2639,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                   {campaignPreviewLoading ? 'Loading preview...' : `Estimated reach: ${(broadcastSelectedMembers.length || campaignPreviewCount)} member${(broadcastSelectedMembers.length || campaignPreviewCount) !== 1 ? 's' : ''}`}
                 </p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Channel</label>
                   <select

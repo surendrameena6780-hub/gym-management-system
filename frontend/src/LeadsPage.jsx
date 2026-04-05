@@ -401,7 +401,7 @@ const LeadsPage = ({ token, toast, showConfirm, navigateTo, canManage = false })
           </div>
         ) : (
           <>
-            <div className="md:hidden space-y-3">
+            <div className="desktop:hidden space-y-3">
               {leads.map((lead) => {
                 const due = isDueLead(lead);
                 const statusLabel = String(lead.status || 'NEW').toUpperCase();
@@ -467,7 +467,7 @@ const LeadsPage = ({ token, toast, showConfirm, navigateTo, canManage = false })
               })}
             </div>
 
-            <div className="hidden md:block overflow-auto">
+            <div className="hidden desktop:block overflow-auto">
               <table className="w-full text-left border-collapse table-fixed min-w-[1100px]">
                 <thead>
                   <tr className="text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-100">
@@ -560,7 +560,7 @@ const LeadsPage = ({ token, toast, showConfirm, navigateTo, canManage = false })
             </div>
 
             <form onSubmit={handleSaveLead} className="app-modal-scroll p-6 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name *</label>
                   <input type="text" required value={formState.full_name} onChange={(event) => setFormState((prev) => ({ ...prev, full_name: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="e.g. Rahul Sharma" />

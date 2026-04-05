@@ -759,7 +759,7 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
             </div>
 
             <form onSubmit={handleSaveType} className="app-modal-scroll p-6 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Title *</label>
                   <input type="text" required value={typeForm.title} onChange={(event) => setTypeForm((prev) => ({ ...prev, title: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" placeholder="Strength Circuit" />
@@ -854,7 +854,7 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
                 </select>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Start Time *</label>
                   <input type="datetime-local" required value={sessionForm.starts_at} onChange={(event) => setSessionForm((prev) => ({ ...prev, starts_at: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all" />
@@ -889,7 +889,7 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
                     <p className="text-xs font-semibold text-slate-500 mt-1">Turn one session into a clean repeating series for the next few weeks.</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Repeat Pattern</label>
                       <select value={sessionForm.repeat_mode} onChange={(event) => setSessionForm((prev) => ({ ...prev, repeat_mode: event.target.value, repeat_days: event.target.value === 'CUSTOM' ? prev.repeat_days : [] }))} className="w-full px-4 py-2.5 bg-white border border-indigo-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all">
@@ -1004,7 +1004,7 @@ const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 desktop:grid-cols-4 gap-3">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                   <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Booked</p>
                   <p className="text-xl font-black text-slate-900">{selectedSession.booked_count || 0}</p>

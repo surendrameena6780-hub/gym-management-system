@@ -289,7 +289,7 @@ const ensureMemberPaymentsSchema = async () => {
     if (!ensureMemberPaymentsSchemaPromise) {
         ensureMemberPaymentsSchemaPromise = pool.query(`
             ALTER TABLE gyms
-            ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT TRUE,
             ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120),
             ADD COLUMN IF NOT EXISTS member_razorpay_key_secret_enc TEXT,
             ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120),
