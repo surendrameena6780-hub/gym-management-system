@@ -1248,14 +1248,14 @@ function App() {
               {visitedPages.has('Dashboard') && (
                 currentUser?.role === 'OWNER'
                   ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} currentUser={currentUser} showConfirm={showConfirm} isActive={currentPage === 'Dashboard'} />
-                  : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} />
+                  : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} isActive={currentPage === 'Dashboard'} />
               )}
             </div>
 
             {/* Members */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Members') && (
-                <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} />
+                <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} isActive={currentPage === 'Members'} />
               )}
             </div>
 
@@ -1280,6 +1280,7 @@ function App() {
                   token={token}
                   toast={toast}
                   showConfirm={showConfirm}
+                  isActive={currentPage === 'Payments'}
                   defaultFilter={paymentFilter}
                   focusPaymentId={paymentFocus.id}
                   focusAction={paymentFocus.action}

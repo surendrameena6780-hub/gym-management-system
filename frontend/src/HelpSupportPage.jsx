@@ -284,10 +284,10 @@ function HelpSupportPage({ token, toast }) {
   }
 
   const renderChatAssistant = () => {
-    const wrapperClass = 'fixed inset-x-3 bottom-[5.5rem] z-[170] h-[min(34rem,calc(100vh-8rem))] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col sm:inset-x-auto sm:right-6 sm:bottom-20 sm:w-[380px]';
+    const wrapperClass = 'fixed inset-x-3 bottom-[5.5rem] z-[170] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col sm:inset-x-auto sm:right-6 sm:bottom-20 sm:w-[380px]';
 
     return (
-      <div className={wrapperClass}>
+      <div className={wrapperClass} style={{ height: 'min(34rem, calc(var(--app-viewport-height) - 8rem))' }}>
         <div className="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between">
           <div>
             <p className="text-sm font-black uppercase tracking-wider">Support Chat</p>

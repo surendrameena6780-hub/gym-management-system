@@ -116,7 +116,7 @@ const INSIGHT_TONE_STYLES = {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled }) => {
+const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled, isActive = true }) => {
   const [payments, setPayments] = useState([]);
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
   const [loading, setLoading] = useState(true);
@@ -187,6 +187,14 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const paymentsListRef = useRef(null);
   const paymentsScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
   const dueRazorpayPollBusyRef = useRef(false);
+  const fetchDataRef = useRef(null);
+  const checkDueRazorpayStatusRef = useRef(null);
+  const dueResumeStateRef = useRef({
+    dueModalPaymentId: null,
+    paymentMode: 'Online',
+    dueOnlineMode: 'RAZORPAY',
+    paymentLinkId: '',
+  });
   const financeFocusTimerRef = useRef(null);
   const collectionsOverviewRef = useRef(null);
   const collectionsLedgerRef = useRef(null);
@@ -534,10 +542,12 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     }
   };
 
+  fetchDataRef.current = fetchData;
+
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isActive) return;
     fetchData();
-  }, [token]);
+  }, [token, isActive]);
 
   useEffect(() => {
     setActiveFilter(defaultFilter || 'All');
@@ -729,6 +739,51 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       dueRazorpayPollBusyRef.current = false;
     }
   }, [dueFormData.amount, dueFormData.notes, dueModalPayment, dueRazorpayContext, settleDueLocally, toast, token]);
+
+  checkDueRazorpayStatusRef.current = checkDueRazorpayStatus;
+  dueResumeStateRef.current = {
+    dueModalPaymentId: dueModalPayment?.id || null,
+    paymentMode: dueFormData.payment_mode,
+    dueOnlineMode,
+    paymentLinkId: dueRazorpayContext?.payment_link?.id || '',
+  };
+
+  useEffect(() => {
+    if (!token || !isActive) return undefined;
+
+    const refreshPayments = () => {
+      if (document.visibilityState && document.visibilityState === 'hidden') return;
+      fetchDataRef.current?.();
+
+      const resumeState = dueResumeStateRef.current;
+      if (
+        resumeState.dueModalPaymentId
+        && resumeState.paymentMode === 'Online'
+        && resumeState.dueOnlineMode === 'RAZORPAY'
+        && resumeState.paymentLinkId
+      ) {
+        checkDueRazorpayStatusRef.current?.({ manual: false });
+      }
+    };
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPayments();
+      }
+    };
+
+    window.addEventListener('focus', refreshPayments);
+    window.addEventListener('pageshow', refreshPayments);
+    window.addEventListener('gymvault:app-resumed', refreshPayments);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+
+    return () => {
+      window.removeEventListener('focus', refreshPayments);
+      window.removeEventListener('pageshow', refreshPayments);
+      window.removeEventListener('gymvault:app-resumed', refreshPayments);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
+  }, [token, isActive]);
 
   useEffect(() => {
     if (!dueModalPayment?.id || dueFormData.payment_mode !== 'Online' || dueOnlineMode !== 'RAZORPAY' || !dueRazorpayContext?.payment_link?.id) {

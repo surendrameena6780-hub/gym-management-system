@@ -555,9 +555,18 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.toggle('app-modal-open', Boolean(isActive && isAnyDashboardModalOpen));
+    const syncModalClass = () => {
+      root.classList.toggle('app-modal-open', Boolean(isActive && isAnyDashboardModalOpen));
+    };
+
+    syncModalClass();
+
+    window.addEventListener('pageshow', syncModalClass);
+    window.addEventListener('gymvault:app-resumed', syncModalClass);
 
     return () => {
+      window.removeEventListener('pageshow', syncModalClass);
+      window.removeEventListener('gymvault:app-resumed', syncModalClass);
       root.classList.remove('app-modal-open');
     };
   }, [isActive, isAnyDashboardModalOpen]);
@@ -578,12 +587,16 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
     };
 
     window.addEventListener('focus', handleExternalRefresh);
+    window.addEventListener('pageshow', handleExternalRefresh);
     window.addEventListener('gymvault:data-changed', handleExternalRefresh);
+    window.addEventListener('gymvault:app-resumed', handleExternalRefresh);
     document.addEventListener('visibilitychange', handleVisibilityRefresh);
 
     return () => {
       window.removeEventListener('focus', handleExternalRefresh);
+      window.removeEventListener('pageshow', handleExternalRefresh);
       window.removeEventListener('gymvault:data-changed', handleExternalRefresh);
+      window.removeEventListener('gymvault:app-resumed', handleExternalRefresh);
       document.removeEventListener('visibilitychange', handleVisibilityRefresh);
     };
   }, [token, isActive]);

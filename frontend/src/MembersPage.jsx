@@ -270,7 +270,7 @@ const SuccessModal = ({ memberName, onClose, onDownload }) => {
   );
 };
 
-const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, currentUser = null }) => {
+const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, currentUser = null, isActive = true }) => {
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
@@ -328,6 +328,15 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
 
   const membersListRef = useRef(null);
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
+  const fetchMembersRef = useRef(null);
+  const checkActivationRazorpayStatusRef = useRef(null);
+  const activationResumeStateRef = useRef({
+    showActivateModal: false,
+    activationOnlineMode: 'RAZORPAY',
+    paymentLinkId: '',
+    selectedPlanId: '',
+    plans: [],
+  });
   const docCameraInputRef = useRef(null);
   const docGalleryInputRef = useRef(null);
   const memberActionTimerRef = useRef(null);
@@ -737,6 +746,52 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
   };
 
+  checkActivationRazorpayStatusRef.current = checkActivationRazorpayStatus;
+  activationResumeStateRef.current = {
+    showActivateModal,
+    activationOnlineMode,
+    paymentLinkId: activationRazorpayContext?.payment_link?.id || '',
+    selectedPlanId,
+    plans,
+  };
+
+  useEffect(() => {
+    if (!token || !isActive) return undefined;
+
+    const refreshMembers = () => {
+      if (document.visibilityState && document.visibilityState === 'hidden') return;
+      fetchMembersRef.current?.();
+
+      const resumeState = activationResumeStateRef.current;
+      if (!resumeState.showActivateModal || resumeState.activationOnlineMode !== 'RAZORPAY' || !resumeState.paymentLinkId) {
+        return;
+      }
+
+      const selectedPlan = resumeState.plans.find((plan) => plan.id === parseInt(resumeState.selectedPlanId, 10));
+      if (selectedPlan) {
+        checkActivationRazorpayStatusRef.current?.(selectedPlan, { manual: false });
+      }
+    };
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        refreshMembers();
+      }
+    };
+
+    window.addEventListener('focus', refreshMembers);
+    window.addEventListener('pageshow', refreshMembers);
+    window.addEventListener('gymvault:app-resumed', refreshMembers);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+
+    return () => {
+      window.removeEventListener('focus', refreshMembers);
+      window.removeEventListener('pageshow', refreshMembers);
+      window.removeEventListener('gymvault:app-resumed', refreshMembers);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
+  }, [token, isActive]);
+
   useEffect(() => {
     const selectedPlan = plans.find((plan) => plan.id === parseInt(selectedPlanId, 10));
     if (!showActivateModal || activationOnlineMode !== 'RAZORPAY' || !activationRazorpayContext?.payment_link?.id || !selectedPlan) {
@@ -809,6 +864,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     } catch (err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
   };
 
+  fetchMembersRef.current = fetchMembers;
+
   const fetchPlans = async () => {
     try {
       const res = await axios.get('/api/memberships/plans', { headers: { 'x-auth-token': token } });
@@ -822,10 +879,10 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isActive) return;
     setLoading(true);
     fetchMembers();
-  }, [token]);
+  }, [token, isActive]);
 
   // Instantly refresh when dashboard check-in or payment fires the data-changed event
   useEffect(() => {

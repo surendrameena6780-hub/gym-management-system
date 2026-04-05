@@ -123,6 +123,7 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   }
 
   let rafId = 0
+  let resumeSyncTimeoutId = 0
   const queueViewportSync = () => {
     if (rafId) return
     rafId = window.requestAnimationFrame(() => {
@@ -131,9 +132,34 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
     })
   }
 
+  const notifyAppResumed = (source) => {
+    queueViewportSync()
+    if (resumeSyncTimeoutId) {
+      window.clearTimeout(resumeSyncTimeoutId)
+    }
+    resumeSyncTimeoutId = window.setTimeout(() => {
+      queueViewportSync()
+    }, 90)
+    window.dispatchEvent(new CustomEvent('gymvault:app-resumed', {
+      detail: {
+        source,
+        at: Date.now(),
+      },
+    }))
+  }
+
+  const handleVisibilityResume = () => {
+    if (document.visibilityState === 'visible') {
+      notifyAppResumed('visibilitychange')
+    }
+  }
+
   syncViewportVariables()
   window.addEventListener('resize', queueViewportSync, { passive: true })
   window.addEventListener('orientationchange', queueViewportSync, { passive: true })
+  window.addEventListener('focus', () => notifyAppResumed('focus'), { passive: true })
+  window.addEventListener('pageshow', () => notifyAppResumed('pageshow'), { passive: true })
+  document.addEventListener('visibilitychange', handleVisibilityResume, { passive: true })
   window.visualViewport?.addEventListener('resize', queueViewportSync, { passive: true })
   window.visualViewport?.addEventListener('scroll', queueViewportSync, { passive: true })
 }
@@ -239,8 +265,17 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
     resetNestedScrollState()
   }
 
+  const clearNestedScrollStateOnHide = () => {
+    if (document.visibilityState === 'hidden') {
+      resetNestedScrollState()
+    }
+  }
+
   document.addEventListener('touchend', clearNestedScrollState, { passive: true, capture: true })
   document.addEventListener('touchcancel', clearNestedScrollState, { passive: true, capture: true })
+  document.addEventListener('visibilitychange', clearNestedScrollStateOnHide, { passive: true, capture: true })
+  window.addEventListener('pagehide', clearNestedScrollState, { passive: true })
+  window.addEventListener('blur', clearNestedScrollState, { passive: true })
 }
 
 if ('serviceWorker' in navigator) {

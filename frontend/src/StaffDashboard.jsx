@@ -58,7 +58,7 @@ function StaffKPI({ label, value, icon: Icon, gradient, index = 0, onClick, pref
   );
 }
 
-function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
+function StaffDashboard({ navigateTo, currentUser, canAccessPage, token, isActive = true }) {
   const displayRole = String(currentUser?.staff_role || currentUser?.role || 'Staff')
     .toLowerCase()
     .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
@@ -129,7 +129,36 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token }) {
     } finally { setLoading(false); }
   }, [token, canMembers, canAttendance, canPayments]);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => {
+    if (!token || !isActive) return undefined;
+
+    fetchStats();
+
+    const refreshStats = () => {
+      if (document.visibilityState && document.visibilityState === 'hidden') return;
+      fetchStats();
+    };
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        refreshStats();
+      }
+    };
+
+    window.addEventListener('focus', refreshStats);
+    window.addEventListener('pageshow', refreshStats);
+    window.addEventListener('gymvault:data-changed', refreshStats);
+    window.addEventListener('gymvault:app-resumed', refreshStats);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+
+    return () => {
+      window.removeEventListener('focus', refreshStats);
+      window.removeEventListener('pageshow', refreshStats);
+      window.removeEventListener('gymvault:data-changed', refreshStats);
+      window.removeEventListener('gymvault:app-resumed', refreshStats);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
+  }, [fetchStats, isActive, token]);
 
   // Role-specific quick actions
   const isReception = ['RECEPTION', 'MANAGER'].includes(staffRole) || hasPerm('members:write');
