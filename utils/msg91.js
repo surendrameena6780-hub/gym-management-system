@@ -316,13 +316,34 @@ const listWhatsAppTemplates = async (integratedNumber) => {
     walkCollection(payload, (node) => {
         if (!node || typeof node !== 'object' || Array.isArray(node)) return;
         const templateName = toTrimmedString(node.template_name || node.name || node.templateName || node.element_name);
-        if (!templateName || seen.has(templateName.toLowerCase())) return;
+        const templateCategory = toTrimmedString(node.category || node.template_category).toUpperCase();
+
+        if (templateName && Array.isArray(node.languages) && node.languages.length > 0) {
+            node.languages.forEach((languageNode) => {
+                const localizedName = toTrimmedString(languageNode?.template_name || languageNode?.name || templateName);
+                if (!localizedName || seen.has(localizedName.toLowerCase())) return;
+                seen.add(localizedName.toLowerCase());
+                templates.push({
+                    template_name: localizedName,
+                    template_status: toTrimmedString(languageNode?.template_status || languageNode?.status || languageNode?.templateStatus).toUpperCase(),
+                    template_language: toTrimmedString(languageNode?.template_language || languageNode?.language?.code || languageNode?.language || 'en_US'),
+                    template_category: toTrimmedString(languageNode?.category || languageNode?.template_category || templateCategory).toUpperCase(),
+                });
+            });
+            return;
+        }
+
+        const templateStatus = toTrimmedString(node.template_status || node.status || node.templateStatus).toUpperCase();
+        const templateLanguage = toTrimmedString(node.template_language || node.language?.code || node.language || 'en_US');
+        const hasUsefulTemplateState = templateStatus && !['SUCCESS', 'OK'].includes(templateStatus);
+        if (!templateName || !hasUsefulTemplateState || seen.has(templateName.toLowerCase())) return;
+
         seen.add(templateName.toLowerCase());
         templates.push({
             template_name: templateName,
-            template_status: toTrimmedString(node.template_status || node.status || node.templateStatus).toUpperCase(),
-            template_language: toTrimmedString(node.template_language || node.language?.code || node.language || 'en_US'),
-            template_category: toTrimmedString(node.category || node.template_category).toUpperCase(),
+            template_status: templateStatus,
+            template_language: templateLanguage,
+            template_category: templateCategory,
         });
     });
 
