@@ -10,6 +10,7 @@ import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
+import { reportClientError } from './utils/clientErrorReporter';
 
 const AVATAR_GRADIENTS = [
   'from-violet-500 to-purple-600',
@@ -270,7 +271,8 @@ const SuccessModal = ({ memberName, onClose, onDownload }) => {
   );
 };
 
-const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, currentUser = null, isActive = true }) => {
+const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, isActive = true }) => {
+  const { token, toast, showConfirm, currentUser = null } = appRuntime;
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
@@ -872,7 +874,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     try {
       const res = await axios.get('/api/memberships/plans', { headers: { 'x-auth-token': token } });
       setPlans(extractArray(res.data, ['plans', 'rows', 'items']));
-    } catch (err) { console.error('Error fetching plans:', err); }
+    } catch (err) { reportClientError('Members fetch plans', err); }
   };
 
   useEffect(() => {

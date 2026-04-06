@@ -7,10 +7,11 @@
     "dev": "nodemon server.js",
     "dev:all": "node scripts/dev-all.js",
     "backup:db": "node scripts/backup-db.js",
+    "smoke:backend": "node scripts/test-backend.js --runtime",
     "seed:bot-members": "node scripts/seed-bot-members.js",
     "clean:bot-members": "node scripts/remove-bot-members.js",
     "rfid:simulate": "node scripts/rfid-bridge-simulator.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node scripts/test-backend.js"
   },
   "keywords": [],
   "author": "",

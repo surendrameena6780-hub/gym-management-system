@@ -12,6 +12,7 @@ import {
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
+import { reportClientError } from './utils/clientErrorReporter';
 
 const TABS = [
   { id: 'account', label: 'Account & Business', icon: User, group: 'Personal & Business' },
@@ -308,7 +309,8 @@ const loadRazorpayScript = () => {
 };
 
 // FIX: Added defaultTab to the props here!
-  const SettingsPage = ({ toast, token, defaultTab, isActive = false, currentUser = null }) => { 
+  const SettingsPage = ({ appRuntime, defaultTab, isActive = false }) => { 
+    const { toast, token, currentUser = null } = appRuntime;
   const [razorpayKey, setRazorpayKey] = useState('');
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   
@@ -560,7 +562,7 @@ const loadRazorpayScript = () => {
       }
 
     } catch (err) {
-      console.error("Fetch Settings Error:", err);
+      reportClientError('Settings fetch', err);
       toast("Failed to load settings. Please check backend terminal.", "error");
     } finally {
       setIsLoading(false);
@@ -1341,7 +1343,7 @@ const loadRazorpayScript = () => {
                       setTimeout(() => { fetchSettings(); }, 1500);
                       
                   } catch (err) {
-                      console.error("Backend Sync Error:", err);
+                      reportClientError('Settings billing sync', err);
                       toast("Payment received. System is syncing...", "warning");
                       setTimeout(() => { fetchSettings(); }, 2000);
                   } finally {

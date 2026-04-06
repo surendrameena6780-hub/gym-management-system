@@ -307,12 +307,24 @@ app.get('/api/auth/me', auth, async (req, res) => {
     }
 });
 
-app.get('/healthz', (_req, res) => {
-    return res.status(200).json({
-        status: 'ok',
-        service: 'gym-management-system',
-        timestamp: new Date().toISOString(),
-    });
+app.get('/healthz', async (_req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        return res.status(200).json({
+            status: 'ok',
+            service: 'gym-management-system',
+            database: 'reachable',
+            timestamp: new Date().toISOString(),
+        });
+    } catch (err) {
+        console.error('HEALTH CHECK ERROR:', err.message);
+        return res.status(503).json({
+            status: 'degraded',
+            service: 'gym-management-system',
+            database: 'unreachable',
+            timestamp: new Date().toISOString(),
+        });
+    }
 });
 
 app.get('/', (req, res) => {
@@ -332,43 +344,53 @@ const automatedNudgeIntervalMs = 1000 * 60 * 30;
 const retentionMaintenanceIntervalMs = 1000 * 60 * 60 * 12;
 const databaseBackupIntervalMs = Math.max(1, parseInt(process.env.DB_BACKUP_INTERVAL_HOURS || '24', 10) || 24) * 60 * 60 * 1000;
 
+const scheduleRecurringJob = (job, intervalMs, runImmediately = true) => {
+    let timer = null;
+    let stopped = false;
+
+    const run = async () => {
+        if (stopped) {
+            return;
+        }
+
+        try {
+            await Promise.resolve(job());
+        } finally {
+            if (!stopped) {
+                timer = setTimeout(run, intervalMs);
+            }
+        }
+    };
+
+    if (runImmediately) {
+        void run();
+    } else {
+        timer = setTimeout(run, intervalMs);
+    }
+
+    return () => {
+        stopped = true;
+        if (timer) {
+            clearTimeout(timer);
+        }
+    };
+};
+
 const startBackgroundJobs = () => {
-    setInterval(() => {
-        checkExpirations();
-    }, 1000 * 60 * 60);
+    scheduleRecurringJob(() => checkExpirations(), 1000 * 60 * 60);
 
-    checkExpirations();
-
-    setInterval(() => {
-        runAutomatedNotificationNudges().catch((err) => {
-            console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
-        });
-    }, automatedNudgeIntervalMs);
-
-    runAutomatedNotificationNudges().catch((err) => {
+    scheduleRecurringJob(() => runAutomatedNotificationNudges().catch((err) => {
         console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
-    });
+    }), automatedNudgeIntervalMs);
 
-    setInterval(() => {
-        runRetentionMaintenance().catch((err) => {
-            console.error('RETENTION MAINTENANCE ERROR:', err.message);
-        });
-    }, retentionMaintenanceIntervalMs);
-
-    runRetentionMaintenance().catch((err) => {
+    scheduleRecurringJob(() => runRetentionMaintenance().catch((err) => {
         console.error('RETENTION MAINTENANCE ERROR:', err.message);
-    });
+    }), retentionMaintenanceIntervalMs);
 
     if (String(process.env.DB_BACKUP_ENABLED || 'false').trim().toLowerCase() === 'true') {
-        setInterval(() => {
-            runDatabaseBackup().catch((err) => {
-                console.error('DATABASE BACKUP ERROR:', err.message);
-            });
-        }, databaseBackupIntervalMs);
-
-        runDatabaseBackup().catch((err) => {
+        scheduleRecurringJob(() => runDatabaseBackup().catch((err) => {
             console.error('DATABASE BACKUP ERROR:', err.message);
-        });
+        }), databaseBackupIntervalMs);
     }
 };
 

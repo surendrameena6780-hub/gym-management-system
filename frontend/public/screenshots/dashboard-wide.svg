@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">GymVault desktop dashboard preview</title>
+  <desc id="desc">A wide GymVault dashboard mockup showing members, payments, attendance, and notifications.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.94" />
+      <stop offset="100%" stop-color="#eef2ff" stop-opacity="0.96" />
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)" />
+  <circle cx="180" cy="120" r="180" fill="#38bdf8" fill-opacity="0.16" />
+  <circle cx="1080" cy="640" r="220" fill="#a855f7" fill-opacity="0.14" />
+  <rect x="52" y="52" width="220" height="616" rx="28" fill="#0b1220" fill-opacity="0.9" />
+  <rect x="314" y="52" width="914" height="616" rx="34" fill="#f8fafc" fill-opacity="0.96" />
+  <rect x="346" y="92" width="260" height="120" rx="24" fill="#dcfce7" />
+  <rect x="626" y="92" width="260" height="120" rx="24" fill="#dbeafe" />
+  <rect x="906" y="92" width="290" height="120" rx="24" fill="#fef3c7" />
+  <rect x="346" y="240" width="560" height="234" rx="28" fill="url(#card)" />
+  <rect x="930" y="240" width="266" height="234" rx="28" fill="url(#card)" />
+  <rect x="346" y="500" width="850" height="136" rx="28" fill="url(#card)" />
+  <text x="94" y="118" fill="#ffffff" font-size="34" font-family="Arial, sans-serif" font-weight="700">GymVault</text>
+  <text x="94" y="164" fill="#94a3b8" font-size="18" font-family="Arial, sans-serif">Operations dashboard</text>
+  <text x="382" y="132" fill="#065f46" font-size="24" font-family="Arial, sans-serif" font-weight="700">Revenue</text>
+  <text x="382" y="178" fill="#111827" font-size="42" font-family="Arial, sans-serif" font-weight="700">₹4,82,000</text>
+  <text x="662" y="132" fill="#1d4ed8" font-size="24" font-family="Arial, sans-serif" font-weight="700">Members</text>
+  <text x="662" y="178" fill="#111827" font-size="42" font-family="Arial, sans-serif" font-weight="700">1,248</text>
+  <text x="942" y="132" fill="#b45309" font-size="24" font-family="Arial, sans-serif" font-weight="700">Attendance</text>
+  <text x="942" y="178" fill="#111827" font-size="42" font-family="Arial, sans-serif" font-weight="700">318 today</text>
+  <path d="M382 418 L470 348 L546 380 L624 302 L706 334 L790 264 L870 286" fill="none" stroke="#4f46e5" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+  <rect x="970" y="288" width="184" height="18" rx="9" fill="#c7d2fe" />
+  <rect x="970" y="328" width="152" height="18" rx="9" fill="#ddd6fe" />
+  <rect x="970" y="368" width="176" height="18" rx="9" fill="#bfdbfe" />
+  <rect x="970" y="408" width="132" height="18" rx="9" fill="#e9d5ff" />
+  <rect x="382" y="536" width="178" height="64" rx="20" fill="#111827" fill-opacity="0.92" />
+  <rect x="586" y="536" width="178" height="64" rx="20" fill="#111827" fill-opacity="0.86" />
+  <rect x="790" y="536" width="178" height="64" rx="20" fill="#111827" fill-opacity="0.8" />
+  <rect x="994" y="536" width="170" height="64" rx="20" fill="#111827" fill-opacity="0.74" />
+</svg>

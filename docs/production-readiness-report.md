@@ -117,18 +117,7 @@ No open critical production blockers remain.
 
 | # | Issue | Location | Impact |
 |---|-------|----------|--------|
-| M-1 | Missing NOT NULL on `members.phone` | init.sql | SMS delivery fails silently |
-| M-2 | ON DELETE CASCADE deletes all gym data instantly | init.sql | No recovery possible |
-| M-3 | rfid_events.member_id ON DELETE SET NULL | init.sql | Audit trail gaps |
-| M-4 | Retention policy is incomplete across all tables | archive jobs + hot tables | Growth still needs formal retention/partition rules beyond current jobs |
-| M-5 | `console.error(err)` leaks PII in frontend | Multiple JSX files | Dev console exposure |
-| M-6 | viewport `user-scalable=no` | index.html | Blocks accessibility zoom |
-| M-7 | No meta description / OG tags | index.html | Poor link previews when shared |
-| M-8 | Some event listeners still lack cleanup | AttendancePage | Memory leaks on long sessions |
 | M-9 | Frontend components 1000+ lines | Dashboard, Members, Payments | Hard to maintain |
-| M-10 | No code splitting (React.lazy) | App.jsx | Loads all pages upfront |
-| M-11 | No automated backend smoke suite | server/runtime | Manual validation is still required before deploys |
-| M-12 | Background jobs use setInterval | server.js | Drift over time, no error recovery |
 
 ---
 
@@ -136,14 +125,7 @@ No open critical production blockers remain.
 
 | # | Issue | Impact |
 |---|-------|--------|
-| L-1 | No structured health check for DB | healthz doesn't verify DB is reachable |
-| L-2 | Service Worker cache not versioned dynamically | Must manually update version string |
-| L-3 | Missing PWA screenshots in manifest | Install prompt less informative |
-| L-4 | Prop drilling in App.jsx (10+ props) | Code smell, not a bug |
-| L-5 | useCountUp re-runs on every render | Minor performance waste |
 | L-6 | Inconsistent button sizes (h-9 vs h-10) | Visual inconsistency |
-| L-7 | No test suite | `npm test` just echoes error |
-| L-8 | Twilio in dependencies but only MSG91 used | Unnecessary dependency weight |
 
 ---
 
@@ -218,7 +200,7 @@ No open critical production blockers remain.
 |--------|-------|---------|
 | Component Architecture | **C+** | Large monolithic components (1000+ lines) |
 | Error Handling | **B-** | Page error boundaries exist and global auth/API failures surface toasts, though some page-specific async cleanup is still uneven |
-| Performance | **C** | Missing useMemo/useCallback, no code splitting |
+| Performance | **B-** | Route-level lazy loading is now in place, but oversized page modules and hook-dependency debt remain |
 | Accessibility | **D** | Missing ARIA labels, no keyboard navigation |
 | Responsiveness | **B+** | Good mobile design, minor overflow on <450px |
 | PWA | **B+** | Service worker, manifest, install prompt all work |
@@ -255,7 +237,7 @@ The database pool now runs with explicit production-oriented limits and timeouts
 ### Backend (package.json)
 - **Vulnerabilities:** 0
 - **Dependencies:** 16 production, 1 dev
-- **Concern:** `twilio` package is included but only MSG91 is used (unnecessary 30MB+ dependency)
+- **Status:** Dependency footprint is acceptable; `twilio` remains in active OTP fallback paths.
 
 ### Frontend (package.json)
 - **Vulnerabilities:** 0
@@ -294,24 +276,21 @@ The database pool now runs with explicit production-oriented limits and timeouts
 |---|-----|--------|--------|
 | 1 | Add field-level input length validation | 30 min | Reduces DB bloat and malformed payload risk |
 | 2 | Normalize page-specific async error cleanup and retry UX | 1-2 hours | Reduces spinner-stall and partial-state failures |
-| 3 | Split large frontend bundles with route-level code splitting | 30-60 min | Improves load performance |
-| 4 | Expand audit logging beyond notifications into more sensitive admin actions | 1 hour | Improves traceability |
-| 5 | Document backup restore procedures and backup retention policy | 30-60 min | Reduces operational recovery risk |
+| 3 | Expand audit logging beyond notifications into more sensitive admin actions | 1 hour | Improves traceability |
+| 4 | Document backup restore procedures and backup retention policy | 30-60 min | Reduces operational recovery risk |
 
 ### Phase 2: First Week of Production
 | # | Fix | Effort |
 |---|-----|--------|
-| 6 | Add metadata and OG tags for shared links | 15 min |
-| 7 | Remove unused `twilio` dependency if it stays unused | 5 min |
-| 8 | Review long-term partitioning thresholds for attendance and event-heavy tables | 30-60 min |
+| 5 | Review long-term partitioning thresholds for attendance and event-heavy tables | 30-60 min |
+| 6 | Normalize button sizing tokens across common actions | 30-45 min |
 
 ### Phase 3: Month 1 (Hardening)
 | # | Fix | Effort |
 |---|-----|--------|
-| 9 | Split oversized frontend components | 2-3 hours |
-| 10 | Resolve remaining lint warnings and hook dependency debt | 2-4 hours |
-| 11 | Evolve retention / archival into a formal partition policy for very large tables | 1-2 hours |
-| 12 | Add an automated backend test suite and smoke checks | 2-4 hours |
+| 7 | Split oversized frontend components | 2-3 hours |
+| 8 | Resolve remaining lint warnings and hook dependency debt | 2-4 hours |
+| 9 | Evolve retention / archival into a formal partition policy for very large tables | 1-2 hours |
 
 ---
 

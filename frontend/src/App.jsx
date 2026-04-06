@@ -1,25 +1,15 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react'
+﻿import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
-import DashboardPage from './DashboardPage';
-import MembersPage from './MembersPage';
-import LeadsPage from './LeadsPage';
-import PlansPage from './PlansPage';
-import PaymentsPage from "./PaymentsPage";
-import AttendancePage from './AttendancePage';
-import ClassesPage from './ClassesPage';
-import RfidSetupPage from './RfidSetupPage';
-import InsightsPage from './InsightsPage';
-import SettingsPage from './SettingsPage';
-import HelpSupportPage from './HelpSupportPage';
-import StaffDashboard from './StaffDashboard';
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
 import SuperAdminLogin from './SuperAdminLogin';
 import SuperAdminDashboard from './SuperAdminDashboard';
 import PageErrorBoundary from './PageErrorBoundary';
+import PageLoader from './PageLoader';
 import SuspensionOverlay from './SuspensionOverlay'; 
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import { clearSessionToken, getSessionToken, setSessionToken } from './utils/authSession';
+import { reportClientError } from './utils/clientErrorReporter';
 import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
@@ -27,6 +17,19 @@ import {
   Dumbbell,
   Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- ðŸš¨ ADDED TOUR ICONS
 } from 'lucide-react';
+
+const DashboardPage = lazy(() => import('./DashboardPage'));
+const MembersPage = lazy(() => import('./MembersPage'));
+const LeadsPage = lazy(() => import('./LeadsPage'));
+const PlansPage = lazy(() => import('./PlansPage'));
+const PaymentsPage = lazy(() => import('./PaymentsPage'));
+const AttendancePage = lazy(() => import('./AttendancePage'));
+const ClassesPage = lazy(() => import('./ClassesPage'));
+const RfidSetupPage = lazy(() => import('./RfidSetupPage'));
+const InsightsPage = lazy(() => import('./InsightsPage'));
+const SettingsPage = lazy(() => import('./SettingsPage'));
+const HelpSupportPage = lazy(() => import('./HelpSupportPage'));
+const StaffDashboard = lazy(() => import('./StaffDashboard'));
 
 // â”€â”€â”€ Navigation Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -652,7 +655,7 @@ function App() {
       setNotifications(res.data.notifications);
       setUnreadCount(res.data.unread_count);
     } catch (err) {
-      console.error("Notifications Error:", err);
+      reportClientError('Notifications fetch', err);
     }
   }, [token, isHQ, isSuspended]);
 
@@ -732,7 +735,7 @@ function App() {
       });
       fetchNotifications(); 
     } catch (err) {
-      console.error("Mark Read Error:", err);
+      reportClientError('Notifications mark read', err);
     }
   };
 
@@ -744,7 +747,7 @@ function App() {
       fetchNotifications();
       setShowNotifications(false); 
     } catch (err) {
-      console.error("Mark All Read Error:", err);
+      reportClientError('Notifications mark all read', err);
     }
   };
 
@@ -861,6 +864,19 @@ function App() {
     if (page === 'Settings') setSettingsTab(subPath || 'menu');
     setCurrentPage(page);
   }, [isSuspended, canAccessPage]);
+
+  const appRuntime = {
+    token,
+    toast,
+    showConfirm,
+    currentUser,
+    navigateTo,
+    canAccessPage,
+  };
+
+  const renderPageLoader = (label) => (
+    <PageLoader className="mx-auto" label={`Loading ${label}...`} />
+  );
 
   useEffect(() => {
     if (isHQ) {
@@ -1381,9 +1397,11 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Dashboard') && (
                 <PageErrorBoundary pageName="Dashboard" onGoHome={() => navigateTo('Dashboard')}>
-                  {currentUser?.role === 'OWNER'
-                    ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} currentUser={currentUser} showConfirm={showConfirm} isActive={currentPage === 'Dashboard'} />
-                    : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} isActive={currentPage === 'Dashboard'} />}
+                  <Suspense fallback={renderPageLoader('Dashboard')}>
+                    {currentUser?.role === 'OWNER'
+                      ? <DashboardPage appRuntime={appRuntime} setCurrentPage={setCurrentPage} startTour={startTour} isActive={currentPage === 'Dashboard'} />
+                      : <StaffDashboard appRuntime={appRuntime} isActive={currentPage === 'Dashboard'} />}
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1392,7 +1410,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Members') && (
                 <PageErrorBoundary pageName="Members" onGoHome={() => navigateTo('Dashboard')}>
-                  <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} isActive={currentPage === 'Members'} />
+                  <Suspense fallback={renderPageLoader('Members')}>
+                    <MembersPage key={`members-${memberFilter}`} appRuntime={appRuntime} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} isActive={currentPage === 'Members'} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1401,7 +1421,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Leads' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Leads') && (
                 <PageErrorBoundary pageName="Leads" onGoHome={() => navigateTo('Dashboard')}>
-                  <LeadsPage token={token} toast={toast} showConfirm={showConfirm} navigateTo={navigateTo} canManage={hasPermission('members:write')} />
+                  <Suspense fallback={renderPageLoader('Leads')}>
+                    <LeadsPage appRuntime={appRuntime} canManage={hasPermission('members:write')} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1410,7 +1432,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Plans') && (
                 <PageErrorBoundary pageName="Plans" onGoHome={() => navigateTo('Dashboard')}>
-                  <PlansPage token={token} toast={toast} showConfirm={showConfirm} />
+                  <Suspense fallback={renderPageLoader('Plans')}>
+                    <PlansPage appRuntime={appRuntime} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1419,18 +1443,18 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Payments') && (
                 <PageErrorBoundary pageName="Payments" onGoHome={() => navigateTo('Dashboard')}>
-                  <PaymentsPage
-                    token={token}
-                    toast={toast}
-                    showConfirm={showConfirm}
-                    isActive={currentPage === 'Payments'}
-                    defaultFilter={paymentFilter}
-                    focusPaymentId={paymentFocus.id}
-                    focusAction={paymentFocus.action}
-                    onFocusHandled={() => setPaymentFocus({ id: null, action: null })}
-                    focusSection={paymentSectionFocus}
-                    onSectionHandled={() => setPaymentSectionFocus(null)}
-                  />
+                  <Suspense fallback={renderPageLoader('Payments')}>
+                    <PaymentsPage
+                      appRuntime={appRuntime}
+                      isActive={currentPage === 'Payments'}
+                      defaultFilter={paymentFilter}
+                      focusPaymentId={paymentFocus.id}
+                      focusAction={paymentFocus.action}
+                      onFocusHandled={() => setPaymentFocus({ id: null, action: null })}
+                      focusSection={paymentSectionFocus}
+                      onSectionHandled={() => setPaymentSectionFocus(null)}
+                    />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1439,16 +1463,15 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Attendance') && (
                 <PageErrorBoundary pageName="Attendance" onGoHome={() => navigateTo('Dashboard')}>
-                  <AttendancePage
-                    token={token}
-                    toast={toast}
-                    showConfirm={showConfirm}
-                    isActive={currentPage === 'Attendance'}
-                    currentUser={currentUser}
-                    focusSection={attendanceSectionFocus}
-                    onSectionHandled={() => setAttendanceSectionFocus(null)}
-                    onOpenRfidSetup={() => navigateTo('RFID Setup')}
-                  />
+                  <Suspense fallback={renderPageLoader('Attendance')}>
+                    <AttendancePage
+                      appRuntime={appRuntime}
+                      isActive={currentPage === 'Attendance'}
+                      focusSection={attendanceSectionFocus}
+                      onSectionHandled={() => setAttendanceSectionFocus(null)}
+                      onOpenRfidSetup={() => navigateTo('RFID Setup')}
+                    />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1457,7 +1480,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Classes' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Classes') && (
                 <PageErrorBoundary pageName="Classes" onGoHome={() => navigateTo('Dashboard')}>
-                  <ClassesPage token={token} toast={toast} showConfirm={showConfirm} canManage={hasPermission('attendance:write')} />
+                  <Suspense fallback={renderPageLoader('Classes')}>
+                    <ClassesPage appRuntime={appRuntime} canManage={hasPermission('attendance:write')} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1466,12 +1491,12 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('RFID Setup') && (
                 <PageErrorBoundary pageName="RFID Setup" onGoHome={() => navigateTo('Dashboard')}>
-                  <RfidSetupPage
-                    token={token}
-                    toast={toast}
-                    currentUser={currentUser}
-                    navigateBack={() => navigateTo('Attendance')}
-                  />
+                  <Suspense fallback={renderPageLoader('RFID Setup')}>
+                    <RfidSetupPage
+                      appRuntime={appRuntime}
+                      navigateBack={() => navigateTo('Attendance')}
+                    />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1480,7 +1505,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Insights') && (
                 <PageErrorBoundary pageName="Insights" onGoHome={() => navigateTo('Dashboard')}>
-                  <InsightsPage token={token} toast={toast} showConfirm={showConfirm} currentUser={currentUser} isActive={currentPage === 'Insights'} />
+                  <Suspense fallback={renderPageLoader('Insights')}>
+                    <InsightsPage appRuntime={appRuntime} isActive={currentPage === 'Insights'} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1489,7 +1516,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Settings') && (
                 <PageErrorBoundary pageName="Settings" onGoHome={() => navigateTo('Dashboard')}>
-                  <SettingsPage toast={toast} token={token} defaultTab={settingsTab} isActive={currentPage === 'Settings'} currentUser={currentUser} />
+                  <Suspense fallback={renderPageLoader('Settings')}>
+                    <SettingsPage appRuntime={appRuntime} defaultTab={settingsTab} isActive={currentPage === 'Settings'} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>
@@ -1498,7 +1527,9 @@ function App() {
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Help & Support') && (
                 <PageErrorBoundary pageName="Help & Support" onGoHome={() => navigateTo('Dashboard')}>
-                  <HelpSupportPage token={token} toast={toast} />
+                  <Suspense fallback={renderPageLoader('Help & Support')}>
+                    <HelpSupportPage appRuntime={appRuntime} />
+                  </Suspense>
                 </PageErrorBoundary>
               )}
             </div>

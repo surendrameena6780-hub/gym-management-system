@@ -11,6 +11,7 @@ import {
   MessageSquare, Phone, Award, RefreshCw,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 
@@ -39,36 +40,6 @@ const EMPTY_ANALYTICS = {
     topMembers: [],
   },
 };
-
-function useCountUp(target, duration = 900) {
-  const [display, setDisplay] = useState(0);
-  const rafRef = useRef(null);
-  const prevTarget = useRef(null);
-
-  useEffect(() => {
-    const end = Number(target) || 0;
-    if (prevTarget.current === end) return;
-    prevTarget.current = end;
-    const begin = display;
-    const startTime = performance.now();
-
-    const tick = (now) => {
-      const progress = Math.min((now - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(begin + (end - begin) * eased));
-      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [target, duration]);
-
-  return display;
-}
 
 const Card = ({ children, className = '' }) => (
   <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm ${className}`}>
@@ -138,7 +109,8 @@ const normalizeInsightsPayload = (payload) => ({
   },
 });
 
-const InsightsPage = ({ token, toast, showConfirm, currentUser, isActive = true }) => {
+const InsightsPage = ({ appRuntime, isActive = true }) => {
+  const { token, toast, showConfirm, currentUser } = appRuntime;
   const gymName = currentUser?.gym_name || 'GymVault';
   const [activeTab, setActiveTab] = useState('revenue');
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);

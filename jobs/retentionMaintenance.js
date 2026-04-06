@@ -21,6 +21,22 @@ const ARCHIVE_CONFIG = [
         timestampColumn: 'created_at',
         retentionDays: Math.max(30, Number.parseInt(process.env.BROADCAST_LOG_RETENTION_DAYS || '365', 10) || 365),
     },
+    {
+        sourceTable: 'audit_logs',
+        timestampColumn: 'created_at',
+        retentionDays: Math.max(30, Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '365', 10) || 365),
+    },
+    {
+        sourceTable: 'support_ticket_messages',
+        timestampColumn: 'created_at',
+        retentionDays: Math.max(30, Number.parseInt(process.env.SUPPORT_MESSAGE_RETENTION_DAYS || '365', 10) || 365),
+    },
+    {
+        sourceTable: 'support_tickets',
+        timestampColumn: 'updated_at',
+        retentionDays: Math.max(30, Number.parseInt(process.env.SUPPORT_TICKET_RETENTION_DAYS || '365', 10) || 365),
+        filterClause: "status IN ('RESOLVED', 'CLOSED')",
+    },
 ];
 
 const DEFAULT_BATCH_SIZE = Math.max(250, Number.parseInt(process.env.ARCHIVE_BATCH_SIZE || '2000', 10) || 2000);
@@ -51,7 +67,7 @@ const ensureArchiveSchema = async () => {
     await ensureArchiveSchemaPromise;
 };
 
-const archiveSourceTable = async ({ sourceTable, timestampColumn, retentionDays }) => {
+const archiveSourceTable = async ({ sourceTable, timestampColumn, retentionDays, filterClause = 'TRUE' }) => {
     let archivedCount = 0;
 
     for (let pass = 0; pass < MAX_BATCH_PASSES; pass += 1) {
@@ -62,6 +78,7 @@ const archiveSourceTable = async ({ sourceTable, timestampColumn, retentionDays 
                     SELECT id
                     FROM ${sourceTable}
                     WHERE ${timestampColumn} < NOW() - ($1::text || ' days')::interval
+                                            AND (${filterClause})
                     ORDER BY ${timestampColumn} ASC
                     LIMIT $2
                 )

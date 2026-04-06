@@ -1,4 +1,5 @@
-const CACHE_NAME = 'gymvault-v5';
+const BUILD_ID = new URL(self.location.href).searchParams.get('build') || 'dev';
+const CACHE_NAME = `gymvault-${BUILD_ID}`;
 const PRECACHE_URLS = [
   '/',
   '/index.html',

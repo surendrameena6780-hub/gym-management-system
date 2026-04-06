@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "GymVault",
   "short_name": "GymVault",
   "start_url": "/",
@@ -19,6 +20,21 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/dashboard-wide.svg",
+      "sizes": "1280x720",
+      "type": "image/svg+xml",
+      "form_factor": "wide",
+      "label": "GymVault desktop dashboard overview"
+    },
+    {
+      "src": "/screenshots/dashboard-mobile.svg",
+      "sizes": "720x1280",
+      "type": "image/svg+xml",
+      "label": "GymVault mobile dashboard view"
     }
   ]
 }

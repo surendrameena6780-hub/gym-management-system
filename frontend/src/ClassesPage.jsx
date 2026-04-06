@@ -184,7 +184,8 @@ const MemberAvatar = ({ name, profilePic }) => {
   );
 };
 
-const ClassesPage = ({ token, toast, showConfirm, canManage = false }) => {
+const ClassesPage = ({ appRuntime, canManage = false }) => {
+  const { token, toast, showConfirm } = appRuntime;
   const [summary, setSummary] = useState(null);
   const [classTypes, setClassTypes] = useState([]);
   const [sessions, setSessions] = useState([]);

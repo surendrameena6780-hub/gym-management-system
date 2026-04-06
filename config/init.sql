@@ -656,6 +656,9 @@ ALTER TABLE gyms ADD COLUMN IF NOT EXISTS gym_latitude DECIMAL(9,6);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS gym_longitude DECIMAL(9,6);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS gym_radius_meters INTEGER DEFAULT 200;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS allow_expired_checkin BOOLEAN DEFAULT FALSE;
+ALTER TABLE members ALTER COLUMN phone SET NOT NULL;
+ALTER TABLE members DROP CONSTRAINT IF EXISTS members_phone_present;
+ALTER TABLE members ADD CONSTRAINT members_phone_present CHECK (phone IS NOT NULL AND BTRIM(phone) <> '');
 ALTER TABLE members ADD COLUMN IF NOT EXISTS rfid_tag_id VARCHAR(120);
 
 -- Attendance event metadata for operational + analytical usage
@@ -685,6 +688,7 @@ CREATE TABLE IF NOT EXISTS rfid_events (
     gym_id               INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
     reader_id            INTEGER REFERENCES rfid_devices(id) ON DELETE SET NULL,
     member_id            INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    member_snapshot      JSONB DEFAULT '{}'::jsonb,
     tag_id               VARCHAR(120) NOT NULL,
     event_timestamp      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     processed            BOOLEAN DEFAULT FALSE,
@@ -703,6 +707,7 @@ CREATE INDEX IF NOT EXISTS idx_rfid_events_reader_id ON rfid_events(reader_id);
 CREATE INDEX IF NOT EXISTS idx_rfid_events_member_id ON rfid_events(member_id);
 CREATE INDEX IF NOT EXISTS idx_rfid_events_tag_id ON rfid_events(tag_id);
 CREATE INDEX IF NOT EXISTS idx_rfid_events_created_at ON rfid_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_rfid_events_member_snapshot_gin ON rfid_events USING GIN (member_snapshot);
 
 -- =============================================================
 -- HELP & SUPPORT: Ticketing system
@@ -778,6 +783,20 @@ ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS support_profile JSONB DEF
 INSERT INTO platform_settings (id)
 VALUES (1)
 ON CONFLICT (id) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION prevent_gym_hard_delete()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'Hard delete of gyms is disabled. Archive or suspend the gym instead.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_gym_hard_delete ON gyms;
+
+CREATE TRIGGER trg_prevent_gym_hard_delete
+BEFORE DELETE ON gyms
+FOR EACH ROW
+EXECUTE FUNCTION prevent_gym_hard_delete();
 
 -- Tenant-safe uniqueness for phone numbers (safe migration: skip if duplicates exist)
 DO $$

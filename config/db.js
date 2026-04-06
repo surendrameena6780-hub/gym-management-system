@@ -81,6 +81,62 @@ const createOperationalArchiveInfrastructure = async (client) => {
     `);
 };
 
+const protectGymHardDeletes = async (client) => {
+    await client.query(`
+        CREATE OR REPLACE FUNCTION prevent_gym_hard_delete()
+        RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'Hard delete of gyms is disabled. Archive or suspend the gym instead.';
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_prevent_gym_hard_delete ON gyms;
+
+        CREATE TRIGGER trg_prevent_gym_hard_delete
+        BEFORE DELETE ON gyms
+        FOR EACH ROW
+        EXECUTE FUNCTION prevent_gym_hard_delete();
+    `);
+};
+
+const enforceMembersPhonePresence = async (client) => {
+    await client.query(`
+        UPDATE members
+        SET phone = NULL
+        WHERE phone IS NOT NULL AND BTRIM(phone) = '';
+
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_phone_present;
+        ALTER TABLE members ADD CONSTRAINT members_phone_present
+            CHECK (phone IS NOT NULL AND BTRIM(phone) <> '') NOT VALID;
+    `);
+
+    const result = await client.query('SELECT COUNT(*)::INTEGER AS count FROM members WHERE phone IS NULL');
+    if (Number(result.rows[0]?.count || 0) === 0) {
+        await client.query('ALTER TABLE members ALTER COLUMN phone SET NOT NULL');
+    }
+};
+
+const addRfidEventSnapshots = async (client) => {
+    await client.query(`
+        ALTER TABLE rfid_events ADD COLUMN IF NOT EXISTS member_snapshot JSONB DEFAULT '{}'::jsonb;
+
+        UPDATE rfid_events e
+        SET member_snapshot = jsonb_build_object(
+            'id', m.id,
+            'full_name', m.full_name,
+            'phone', m.phone,
+            'email', m.email,
+            'rfid_tag_id', m.rfid_tag_id
+        )
+        FROM members m
+        WHERE e.member_id = m.id
+          AND (e.member_snapshot IS NULL OR e.member_snapshot = '{}'::jsonb);
+
+        CREATE INDEX IF NOT EXISTS idx_rfid_events_member_snapshot_gin
+            ON rfid_events USING GIN (member_snapshot);
+    `);
+};
+
 const runSchemaMigrations = async () => {
     const client = await pool.connect();
 
@@ -90,6 +146,9 @@ const runSchemaMigrations = async () => {
 
         await runNamedMigration(client, '2026-04-06-timestamptz-normalization', normalizeLegacyTimestampColumns);
         await runNamedMigration(client, '2026-04-06-operational-archives', createOperationalArchiveInfrastructure);
+        await runNamedMigration(client, '2026-04-06-protect-gym-hard-deletes', protectGymHardDeletes);
+        await runNamedMigration(client, '2026-04-06-members-phone-required', enforceMembersPhonePresence);
+        await runNamedMigration(client, '2026-04-06-rfid-event-snapshots', addRfidEventSnapshots);
     } finally {
         await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['gymvault-schema-migrations']).catch(() => {});
         client.release();

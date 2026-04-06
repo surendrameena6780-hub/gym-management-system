@@ -100,7 +100,8 @@ const fallbackAssistantReply = (message) => {
   };
 };
 
-function HelpSupportPage({ token, toast }) {
+function HelpSupportPage({ appRuntime }) {
+  const { token, toast } = appRuntime;
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
 
   const [overview, setOverview] = useState({

@@ -80,7 +80,8 @@ const buildRfidSimulatorCommand = (device, sharedSecret) => {
   return `node scripts/rfid-bridge-simulator.js --api ${origin} --serial ${serial} --key ${key}`;
 };
 
-function RfidSetupPage({ token, toast, currentUser = null, navigateBack }) {
+function RfidSetupPage({ appRuntime, navigateBack }) {
+  const { token, toast, currentUser = null } = appRuntime;
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
 

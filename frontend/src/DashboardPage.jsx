@@ -13,30 +13,8 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import PageLoader from './PageLoader';
-
-// ─── Count-Up Hook ─────────────────────────────────────────────────────────────
-function useCountUp(target, duration = 900) {
-  const [display, setDisplay] = useState(0);
-  const rafRef = useRef(null);
-  const prevTarget = useRef(null);
-  useEffect(() => {
-    const end = Number(target) || 0;
-    if (prevTarget.current === end) return;
-    prevTarget.current = end;
-    const begin = display;
-    const startTime = performance.now();
-    const tick = (now) => {
-      const progress = Math.min((now - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(begin + (end - begin) * eased));
-      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
-  return display;
-}
+import useCountUp from './utils/useCountUp';
+import { reportClientError } from './utils/clientErrorReporter';
 
 const buildProfileUrl = (pic) => normalizeProfileImageUrl(pic);
 
@@ -269,7 +247,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 // 🚨 ADDED startTour to props!
-const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startTour, currentUser, showConfirm, isActive = true }) => {
+const DashboardPage = ({ appRuntime, setCurrentPage, startTour, isActive = true }) => {
+  const { token, toast, navigateTo: navTo, currentUser, showConfirm } = appRuntime;
   const navigateTo = navTo || ((page) => setCurrentPage?.(page));
   const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
   const MAX_WARMUP_RETRIES = 8;
@@ -544,7 +523,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
         }
       }
     } catch (err) {
-      console.error('Dashboard fetch error:', err);
+      reportClientError('Dashboard fetch', err);
     } finally {
       setLoading(false);
     }

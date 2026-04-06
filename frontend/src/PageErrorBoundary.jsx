@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, LayoutDashboard, RefreshCw } from 'lucide-react';
+import { reportClientError } from './utils/clientErrorReporter';
 
 class PageErrorBoundary extends React.Component {
   constructor(props) {
@@ -12,7 +13,9 @@ class PageErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error(`${this.props.pageName || 'Page'} render error:`, error, errorInfo);
+    reportClientError(`${this.props.pageName || 'Page'} render`, error, {
+      componentStack: Boolean(errorInfo?.componentStack),
+    });
   }
 
   componentDidUpdate(prevProps) {

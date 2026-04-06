@@ -1,31 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import axios from 'axios';
 import PageLoader from './PageLoader';
 import { QRCodeCanvas } from 'qrcode.react';
+import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
-
-function useCountUp(target, duration = 800) {
-  const [display, setDisplay] = useState(0);
-  const rafRef = useRef(null);
-  const prevTarget = useRef(null);
-  useEffect(() => {
-    const end = Number(target) || 0;
-    if (prevTarget.current === end) return;
-    prevTarget.current = end;
-    const begin = display;
-    const startTime = performance.now();
-    const tick = (now) => {
-      const progress = Math.min((now - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(begin + (end - begin) * eased));
-      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
-  return display;
-}
-import axios from 'axios';
 import {
   Activity,
   AlertTriangle,
@@ -44,7 +22,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-const LOCKED_ATTENDANCE_MODE = 'STAFF';
+const DEFAULT_ATTENDANCE_MODE = 'STAFF';
 const DEFAULT_GYM_RADIUS_METERS = 200;
 
 const MODE_META = {
@@ -160,7 +138,8 @@ const hasPermission = (user, permission) => {
   return Boolean(scope && permissions.includes(`${scope}:*`));
 };
 
-function AttendancePage({ token, toast, showConfirm, isActive = true, currentUser = null, onOpenRfidSetup, focusSection = null, onSectionHandled }) {
+function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSection = null, onSectionHandled }) {
+  const { token, toast, showConfirm, currentUser = null } = appRuntime;
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
@@ -177,7 +156,7 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     peak_hour_count: 0,
   });
   const [modeSettings, setModeSettings] = useState({
-    attendance_mode: LOCKED_ATTENDANCE_MODE,
+    attendance_mode: DEFAULT_ATTENDANCE_MODE,
     attendance_geo_enabled: false,
     gym_latitude: '',
     gym_longitude: '',
@@ -194,7 +173,7 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
   const [searchResults, setSearchResults] = useState([]);
   const [selectedMember, setSelectedMember] = useState(null);
 
-  const checkinMethod = LOCKED_ATTENDANCE_MODE;
+  const checkinMethod = 'STAFF';
   const [checkinNote, setCheckinNote] = useState('');
 
   const [feed, setFeed] = useState([]);
@@ -459,7 +438,7 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     try {
       await axios.put('/api/attendance/mode', {
         ...nextSettings,
-        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        attendance_mode: nextSettings.attendance_mode || DEFAULT_ATTENDANCE_MODE,
         gym_radius_meters: nextSettings.attendance_geo_enabled
           ? nextSettings.gym_radius_meters || DEFAULT_GYM_RADIUS_METERS
           : DEFAULT_GYM_RADIUS_METERS,
@@ -485,7 +464,7 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     if (!enabled) {
       const nextSettings = {
         ...modeSettings,
-        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        attendance_mode: modeSettings.attendance_mode === 'SELF' ? DEFAULT_ATTENDANCE_MODE : modeSettings.attendance_mode,
         attendance_geo_enabled: false,
         gym_latitude: '',
         gym_longitude: '',
@@ -499,7 +478,6 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     setBusyGeoSync(true);
     setModeSettings((prev) => ({
       ...prev,
-      attendance_mode: LOCKED_ATTENDANCE_MODE,
       attendance_geo_enabled: true,
     }));
 
@@ -507,7 +485,7 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
       const position = await readCurrentPosition();
       const nextSettings = {
         ...modeSettings,
-        attendance_mode: LOCKED_ATTENDANCE_MODE,
+        attendance_mode: modeSettings.attendance_mode || DEFAULT_ATTENDANCE_MODE,
         attendance_geo_enabled: true,
         gym_latitude: Number(position.coords.latitude).toFixed(6),
         gym_longitude: Number(position.coords.longitude).toFixed(6),
@@ -519,7 +497,6 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     } catch (err) {
       setModeSettings((prev) => ({
         ...prev,
-        attendance_mode: LOCKED_ATTENDANCE_MODE,
         attendance_geo_enabled: false,
         gym_latitude: '',
         gym_longitude: '',
@@ -629,7 +606,7 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     const modeData = asObject(unwrapApiData(modeRes.data), {});
     setModeSettings((prev) => ({
       ...prev,
-      attendance_mode: LOCKED_ATTENDANCE_MODE,
+      attendance_mode: modeData.attendance_mode || DEFAULT_ATTENDANCE_MODE,
       attendance_geo_enabled: Boolean(modeData.attendance_geo_enabled),
       gym_latitude: modeData.gym_latitude ?? '',
       gym_longitude: modeData.gym_longitude ?? '',
@@ -798,6 +775,11 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
       return;
     }
 
+    if (modeSettings.attendance_mode === 'SELF' && !modeSettings.attendance_geo_enabled) {
+      toast?.('Enable app location check-in before saving Self Check-In mode.', 'warning');
+      return;
+    }
+
     await persistModeSettings(modeSettings);
   };
 
@@ -816,13 +798,13 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
     try {
       const checkinPayload = {
         member_id: selectedMember.id,
-        method: LOCKED_ATTENDANCE_MODE,
+        method: 'STAFF',
         notes: checkinNote,
         allow_override: allowOverride,
       };
 
       const res = await axios.post('/api/attendance/checkin', checkinPayload, headers);
-      handleCheckinSuccess(unwrapApiData(res.data), selectedMember, LOCKED_ATTENDANCE_MODE);
+      handleCheckinSuccess(unwrapApiData(res.data), selectedMember, 'STAFF');
     } catch (err) {
       const errorBody = asObject(err?.response?.data, {});
       const code = errorBody.code;
@@ -985,21 +967,33 @@ function AttendancePage({ token, toast, showConfirm, isActive = true, currentUse
         <div className="grid grid-cols-1 desktop:grid-cols-2 xl:grid-cols-4 gap-3">
           {Object.entries(MODE_META).map(([key, item]) => {
             const Icon = item.icon;
-            const active = key === LOCKED_ATTENDANCE_MODE;
+            const active = key === modeSettings.attendance_mode;
             return (
-              <div
+              <button
                 key={key}
-                className={`text-left p-4 rounded-2xl border ${active ? 'border-indigo-400 bg-indigo-50/70' : 'border-slate-200 bg-white'}`}
+                type="button"
+                disabled={!isOwner}
+                onClick={() => setModeSettings((prev) => ({ ...prev, attendance_mode: key }))}
+                className={`text-left p-4 rounded-2xl border transition-all ${active ? 'border-indigo-400 bg-indigo-50/70 shadow-sm' : 'border-slate-200 bg-white'} ${isOwner ? 'hover:border-slate-300 hover:-translate-y-0.5' : 'cursor-default opacity-90'}`}
               >
                 <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${item.color} text-white flex items-center justify-center mb-3`}>
                   <Icon size={17} />
                 </div>
-                <p className="text-sm font-black text-slate-900">{item.label}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-black text-slate-900">{item.label}</p>
+                  {active && <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">Active</span>}
+                </div>
                 <p className="text-xs text-slate-500 font-medium mt-1">{item.desc}</p>
-              </div>
+                {key === 'SELF' && !modeSettings.attendance_geo_enabled && (
+                  <p className="mt-2 text-[11px] font-semibold text-amber-600">Requires app location check-in to be enabled.</p>
+                )}
+              </button>
             );
           })}
         </div>
+        <p className="mt-3 text-xs font-semibold text-slate-500">
+          Choose the primary attendance workflow. Manual desk check-in, QR tools, and RFID operations stay available across the hub.
+        </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
           <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white">

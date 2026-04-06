@@ -17,7 +17,7 @@ const GYM_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_GYM_QR_TTL_MS || `$
 const RFID_DUPLICATE_WINDOW_SECONDS = Number.parseInt(process.env.RFID_DUPLICATE_WINDOW_SECONDS || '10', 10);
 const ACCESS_ALERT_DEDUP_SECONDS = Number.parseInt(process.env.ATTENDANCE_ALERT_DEDUP_SECONDS || '120', 10);
 const ACCESS_ALERT_ROLES = ['OWNER', 'STAFF'];
-const LOCKED_ATTENDANCE_MODE = 'STAFF';
+const DEFAULT_ATTENDANCE_MODE = 'STAFF';
 const DEFAULT_GYM_RADIUS_METERS = 200;
 
 const METHOD_LABELS = {
@@ -28,8 +28,8 @@ const METHOD_LABELS = {
 };
 
 const normalizeMethod = (value) => {
-    const method = String(value || 'STAFF').toUpperCase().trim();
-    return CHECKIN_METHODS.has(method) ? method : 'STAFF';
+    const method = String(value || DEFAULT_ATTENDANCE_MODE).toUpperCase().trim();
+    return CHECKIN_METHODS.has(method) ? method : DEFAULT_ATTENDANCE_MODE;
 };
 
 const normalizeRfidDeviceStatus = (value) => {
@@ -490,7 +490,7 @@ router.get('/mode', auth, saasMiddleware, requirePermission('attendance:read'), 
         if (gym.rows.length === 0) return res.status(404).json({ error: 'Gym not found' });
         res.json({
             ...gym.rows[0],
-            attendance_mode: LOCKED_ATTENDANCE_MODE,
+            attendance_mode: normalizeMethod(gym.rows[0].attendance_mode),
             gym_radius_meters: Number.parseInt(gym.rows[0].gym_radius_meters || `${DEFAULT_GYM_RADIUS_METERS}`, 10) || DEFAULT_GYM_RADIUS_METERS,
         });
     } catch (err) {
@@ -501,12 +501,16 @@ router.get('/mode', auth, saasMiddleware, requirePermission('attendance:read'), 
 
 router.put('/mode', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
-        const attendance_mode = LOCKED_ATTENDANCE_MODE;
+        const attendance_mode = normalizeMethod(req.body.attendance_mode);
         const attendance_geo_enabled = asBool(req.body.attendance_geo_enabled);
         const allow_expired_checkin = asBool(req.body.allow_expired_checkin);
         let gym_latitude = null;
         let gym_longitude = null;
         let gym_radius_meters = DEFAULT_GYM_RADIUS_METERS;
+
+        if (attendance_mode === 'SELF' && !attendance_geo_enabled) {
+            return res.status(400).json({ error: 'Enable app location check-in before setting Self Check-In mode.' });
+        }
 
         if (attendance_geo_enabled) {
             gym_latitude = Number.parseFloat(req.body.gym_latitude);
@@ -616,7 +620,7 @@ router.get('/member/options', memberAuth, saasMiddleware, async (req, res) => {
                 id: gym.id,
                 name: gym.name,
             },
-            attendance_mode: LOCKED_ATTENDANCE_MODE,
+            attendance_mode: normalizeMethod(gym.attendance_mode),
             attendance_geo_enabled: Boolean(gym.attendance_geo_enabled),
             gym_radius_meters: Number.parseInt(gym.gym_radius_meters || `${DEFAULT_GYM_RADIUS_METERS}`, 10) || DEFAULT_GYM_RADIUS_METERS,
             self_checkin_available: selfCheckinAvailable,
@@ -764,9 +768,9 @@ router.get('/rfid/events', auth, saasMiddleware, requirePermission('attendance:r
                 d.reader_name,
                 d.reader_serial,
                 d.status AS reader_status,
-                m.id AS member_id,
-                m.full_name AS member_name,
-                m.rfid_tag_id,
+                     COALESCE(m.id, NULLIF(e.member_snapshot->>'id', '')::INTEGER) AS member_id,
+                     COALESCE(m.full_name, e.member_snapshot->>'full_name') AS member_name,
+                     COALESCE(m.rfid_tag_id, e.member_snapshot->>'rfid_tag_id', e.tag_id) AS rfid_tag_id,
                 COALESCE(ms_latest.status, 'UNPAID') AS membership_status
              FROM rfid_events e
              LEFT JOIN rfid_devices d ON d.id = e.reader_id
@@ -1021,7 +1025,7 @@ router.post('/rfid/event', async (req, res) => {
         );
 
         const memberResult = await pool.query(
-            `SELECT id, full_name
+            `SELECT id, full_name, phone, email, rfid_tag_id
              FROM members
              WHERE gym_id = $1 AND rfid_tag_id = $2 AND deleted_at IS NULL
              LIMIT 1`,
@@ -1059,12 +1063,25 @@ router.post('/rfid/event', async (req, res) => {
             await pool.query(
                 `UPDATE rfid_events
                  SET member_id = $2,
+                     member_snapshot = $3::jsonb,
                      processed = TRUE,
                      event_status = 'ACCEPTED',
-                     response_message = $3,
-                     attendance_record_id = $4
+                     response_message = $4,
+                     attendance_record_id = $5
                  WHERE id = $1`,
-                [eventId, member.id, result.message || 'RFID check-in accepted.', result.details?.id || null]
+                [
+                    eventId,
+                    member.id,
+                    JSON.stringify({
+                        id: member.id,
+                        full_name: member.full_name,
+                        phone: member.phone,
+                        email: member.email,
+                        rfid_tag_id: member.rfid_tag_id || tagId,
+                    }),
+                    result.message || 'RFID check-in accepted.',
+                    result.details?.id || null,
+                ]
             );
         }
 

@@ -4,6 +4,7 @@ import {
   Check, Plus, Trash2, Edit2, Zap, Crown, X, 
   TrendingUp, Save, BarChart3, Users, PieChart, Percent, Clock 
 } from 'lucide-react';
+import { reportClientError } from './utils/clientErrorReporter';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -14,7 +15,8 @@ const extractArray = (value, keys = []) => {
   return [];
 };
 
-const PlansPage = ({ token, toast, showConfirm }) => {
+const PlansPage = ({ appRuntime }) => {
+  const { token, toast, showConfirm } = appRuntime;
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -58,7 +60,7 @@ const PlansPage = ({ token, toast, showConfirm }) => {
       setPlans(extractArray(res.data, ['plans', 'rows', 'items']));
       setLoading(false);
     } catch (err) {
-      console.error("Error fetching plans:", err);
+      reportClientError('Plans fetch', err);
       setLoading(false);
     }
   };

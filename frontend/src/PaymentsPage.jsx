@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import useCountUp from './utils/useCountUp';
+import { reportClientError } from './utils/clientErrorReporter';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 
@@ -27,33 +29,13 @@ const extractObject = (value, fallback = {}) => {
 
 const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
-// ─── Count-Up Hook ────────────────────────────────────────────────────────────
+const getTodayInputValue = () => new Date().toISOString().slice(0, 10);
 
-function useCountUp(target, duration = 900) {
-  const [display, setDisplay] = useState(0);
-  const rafRef = useRef(null);
-  const prevTarget = useRef(null);
-  useEffect(() => {
-    if (prevTarget.current === target) return;
-    prevTarget.current = target;
-    const start = display;
-    const end = Number(target) || 0;
-    if (start === end) return;
-    const startTime = performance.now();
-    const tick = (now) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      // ease-out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(start + (end - start) * eased));
-      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
-  return display;
-}
+const shiftDateInputValue = (dateValue, days) => {
+  const baseDate = new Date(`${dateValue}T00:00:00`);
+  baseDate.setDate(baseDate.getDate() - days);
+  return baseDate.toISOString().slice(0, 10);
+};
 
 // ─── Skeleton Rows ────────────────────────────────────────────────────────────
 
@@ -122,35 +104,73 @@ const INSIGHT_TONE_STYLES = {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled, isActive = true }) => {
+const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled, isActive = true }) => {
+  const { token, toast, showConfirm } = appRuntime;
   const [payments, setPayments] = useState([]);
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState('all');
+  const [dateRange, setDateRange] = useState('30d');
+  const [customDateRange, setCustomDateRange] = useState(() => {
+    const today = getTodayInputValue();
+    return {
+      from: shiftDateInputValue(today, 30),
+      to: today,
+    };
+  });
 
-  // Date range filter helper
-  const getDateRangeStart = (range) => {
-    if (range === 'all') return null;
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    if (range === '7d') d.setDate(d.getDate() - 7);
-    else if (range === '30d') d.setDate(d.getDate() - 30);
-    else if (range === '90d') d.setDate(d.getDate() - 90);
-    return d;
-  };
+  const resolveDateRangeBounds = useCallback((range, customRange = customDateRange) => {
+    if (range === 'all') {
+      return {
+        start: null,
+        end: null,
+        startInput: '',
+        endInput: '',
+        label: 'All time',
+      };
+    }
 
-  const getDateRangeLabel = (range) => {
-    if (range === '7d') return 'Last 7 days';
-    if (range === '30d') return 'Last 30 days';
-    if (range === '90d') return 'Last 90 days';
-    return 'All time';
-  };
+    if (range === 'custom') {
+      const startInput = customRange.from || '';
+      const endInput = customRange.to || '';
+
+      return {
+        start: startInput ? new Date(`${startInput}T00:00:00`) : null,
+        end: endInput ? new Date(`${endInput}T23:59:59.999`) : null,
+        startInput,
+        endInput,
+        label: startInput && endInput ? `Custom · ${startInput} to ${endInput}` : 'Custom range',
+      };
+    }
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 30);
+
+    return {
+      start,
+      end: null,
+      startInput: start.toISOString().slice(0, 10),
+      endInput: '',
+      label: 'Last 30 days',
+    };
+  }, [customDateRange]);
+
+  const getDateRangeLabel = useCallback((range) => resolveDateRangeBounds(range).label, [resolveDateRangeBounds]);
 
   const dateFilteredPayments = useMemo(() => {
-    const start = getDateRangeStart(dateRange);
-    if (!start) return payments;
-    return payments.filter(p => new Date(p.payment_date) >= start);
-  }, [payments, dateRange]);
+    const { start, end } = resolveDateRangeBounds(dateRange);
+    if (!start && !end) return payments;
+
+    return payments.filter((payment) => {
+      const paymentDate = new Date(payment.payment_date);
+      if (Number.isNaN(paymentDate.getTime())) {
+        return false;
+      }
+      if (start && paymentDate < start) return false;
+      if (end && paymentDate > end) return false;
+      return true;
+    });
+  }, [payments, dateRange, resolveDateRangeBounds]);
 
   // Compute filtered stats from date-filtered payments
   const filteredStats = useMemo(() => {
@@ -234,12 +254,21 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const [showPosModal, setShowPosModal] = useState(false);
   const [posForm, setPosForm] = useState({ name: '', category: 'supplement', price: '', stock_qty: '' });
 
+  const financeOverviewParams = useMemo(() => {
+    const bounds = resolveDateRangeBounds(dateRange);
+    return {
+      period: dateRange,
+      from: bounds.startInput || undefined,
+      to: bounds.endInput || undefined,
+    };
+  }, [dateRange, resolveDateRangeBounds]);
+
   const fetchFinanceOverview = useCallback(async () => {
     setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/overview', {
         headers: { 'x-auth-token': token },
-        params: { period: dateRange },
+        params: financeOverviewParams,
       });
       setFinanceOverview(extractObject(res.data, {}));
     } catch {
@@ -247,7 +276,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     } finally {
       setFinanceLoading(false);
     }
-  }, [dateRange, token]);
+  }, [financeOverviewParams, token]);
 
   const fetchExpenses = useCallback(async () => {
     setFinanceLoading(true);
@@ -596,7 +625,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       setPlans(plansData);
       setLoading(false);
     } catch (err) {
-      console.error("Error loading data:", err);
+      reportClientError('Payments load data', err);
       setLoading(false);
     }
   };
@@ -681,7 +710,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
           window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
           toast?.("Transaction deleted. Member status reset.", "success");
         } catch (err) {
-          console.error("Delete failed", err);
+          reportClientError('Payments delete', err);
           toast?.("Error deleting record.", "error");
         }
       },
@@ -1251,19 +1280,66 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       {/* ═══════ COLLECTIONS TAB ═══════ */}
       {financeTab === 'collections' && (<>
       {/* DATE RANGE FILTER */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Period:</span>
-        {[
-          { key: '7d', label: '7 Days' },
-          { key: '30d', label: '30 Days' },
-          { key: '90d', label: '90 Days' },
-          { key: 'all', label: 'All Time' },
-        ].map(r => (
-          <button key={r.key} onClick={() => setDateRange(r.key)}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${dateRange === r.key ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-300'}`}>
-            {r.label}
-          </button>
-        ))}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1 shrink-0">Period:</span>
+          {[
+            { key: '30d', label: '30 Days' },
+            { key: 'all', label: 'All Time' },
+            { key: 'custom', label: 'Custom' },
+          ].map((rangeOption) => (
+            <button
+              key={rangeOption.key}
+              onClick={() => setDateRange(rangeOption.key)}
+              className={`px-3 py-2 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap ${dateRange === rangeOption.key ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-300'}`}
+            >
+              {rangeOption.label}
+            </button>
+          ))}
+        </div>
+        {dateRange === 'custom' && (
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-[11px] font-bold text-slate-500">
+              From
+              <input
+                type="date"
+                value={customDateRange.from}
+                max={customDateRange.to || undefined}
+                onChange={(e) => setCustomDateRange((prev) => ({
+                  ...prev,
+                  from: e.target.value,
+                  to: prev.to && e.target.value && prev.to < e.target.value ? e.target.value : prev.to,
+                }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition-colors focus:border-slate-400"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] font-bold text-slate-500">
+              To
+              <input
+                type="date"
+                value={customDateRange.to}
+                min={customDateRange.from || undefined}
+                max={getTodayInputValue()}
+                onChange={(e) => setCustomDateRange((prev) => ({
+                  ...prev,
+                  to: e.target.value,
+                  from: prev.from && e.target.value && prev.from > e.target.value ? e.target.value : prev.from,
+                }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition-colors focus:border-slate-400"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                const today = getTodayInputValue();
+                setCustomDateRange({ from: shiftDateInputValue(today, 30), to: today });
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              Reset
+            </button>
+          </div>
+        )}
       </div>
       {/* STATS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">

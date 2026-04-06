@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import { reportClientError } from './utils/clientErrorReporter';
 import {
   Building2,
   Users,
@@ -257,7 +258,7 @@ function SuperAdminDashboard({ token, onLogout }) {
 
   const handleApiError = (err) => {
     if (err?.response?.status === 401) onLogout();
-    console.error(err);
+    reportClientError('Superadmin API', err);
   };
 
   const loadOverview = async () => {

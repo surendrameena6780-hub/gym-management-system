@@ -104,7 +104,8 @@ const requestDataRefresh = (source) => {
   }));
 };
 
-const LeadsPage = ({ token, toast, showConfirm, navigateTo, canManage = false }) => {
+const LeadsPage = ({ appRuntime, canManage = false }) => {
+  const { token, toast, showConfirm, navigateTo } = appRuntime;
   const [summary, setSummary] = useState(null);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);

@@ -1,3 +1,5 @@
+/* global __APP_BUILD_ID__ */
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import axios from 'axios'
@@ -208,15 +210,6 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
 if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
   window.__gymvaultTouchGuardsInstalled = true
 
-  const blockZoomGesture = (event) => {
-    event.preventDefault()
-  }
-
-  document.addEventListener('gesturestart', blockZoomGesture, { passive: false })
-  document.addEventListener('gesturechange', blockZoomGesture, { passive: false })
-  document.addEventListener('gestureend', blockZoomGesture, { passive: false })
-  document.addEventListener('dblclick', blockZoomGesture, { passive: false })
-
   const nestedScrollableSelector = '.payments-mobile-list-scroll, .members-mobile-list-scroll'
   const nestedScrollState = {
     activeElement: null,
@@ -320,8 +313,9 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
 }
 
 if ('serviceWorker' in navigator) {
+  const serviceWorkerBuildId = typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : 'dev'
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
+    navigator.serviceWorker.register(`/sw.js?build=${encodeURIComponent(serviceWorkerBuildId)}`).catch((error) => {
       console.warn('Service worker registration failed:', error)
     })
   })

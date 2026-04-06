@@ -7,21 +7,52 @@ const { requirePermission } = require('../middleware/rbac');
 
 const gymId = (req) => { const v = Number.parseInt(req?.user?.gym_id ?? req?.user?.gymId, 10); return Number.isInteger(v) ? v : null; };
 const posInt = (v, f = null) => { const p = Number.parseInt(v, 10); return Number.isInteger(p) && p > 0 ? p : f; };
-const getFinancePeriodConfig = (value) => {
-    const period = String(value || 'all').trim().toLowerCase();
+const parseDateBoundary = (value, endExclusive = false) => {
+    const normalized = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+        return null;
+    }
+
+    const date = new Date(`${normalized}T00:00:00`);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    if (endExclusive) {
+        date.setDate(date.getDate() + 1);
+    }
+
+    return date;
+};
+
+const getFinancePeriodConfig = (value, fromValue, toValue) => {
+    const period = String(value || '30d').trim().toLowerCase();
     const now = new Date();
 
-    if (period === '7d') {
-        return { key: '7d', label: 'Last 7 days', startAt: new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000)) };
-    }
     if (period === '30d') {
-        return { key: '30d', label: 'Last 30 days', startAt: new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)) };
-    }
-    if (period === '90d') {
-        return { key: '90d', label: 'Last 90 days', startAt: new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)) };
+        return {
+            key: '30d',
+            label: 'Last 30 days',
+            startAt: new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)),
+            endAt: null,
+        };
     }
 
-    return { key: 'all', label: 'All time', startAt: null };
+    if (period === 'custom') {
+        const startAt = parseDateBoundary(fromValue, false);
+        const endAt = parseDateBoundary(toValue, true);
+
+        if (startAt && endAt && startAt < endAt) {
+            return {
+                key: 'custom',
+                label: 'Custom range',
+                startAt,
+                endAt,
+            };
+        }
+    }
+
+    return { key: 'all', label: 'All time', startAt: null, endAt: null };
 };
 
 router.use(auth, saasMiddleware);
@@ -32,8 +63,9 @@ router.use(auth, saasMiddleware);
 router.get('/overview', requirePermission('payments:read'), async (req, res) => {
     try {
         const gid = gymId(req);
-        const periodConfig = getFinancePeriodConfig(req.query.period);
+        const periodConfig = getFinancePeriodConfig(req.query.period, req.query.from, req.query.to);
         const periodStart = periodConfig.startAt ? periodConfig.startAt.toISOString() : null;
+        const periodEnd = periodConfig.endAt ? periodConfig.endAt.toISOString() : null;
         const [revRes, expRes, payrollRes, posRes, pendingRes] = await Promise.all([
             pool.query(`WITH collection_totals AS (
                             SELECT
@@ -50,6 +82,7 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
                             WHERE p.gym_id = $1
                               AND p.deleted_at IS NULL
                               AND ($2::timestamptz IS NULL OR p.payment_date >= $2::timestamptz)
+                                AND ($3::timestamptz IS NULL OR p.payment_date < $3::timestamptz)
                         ), due_revenue AS (
                             SELECT COALESCE(SUM(pc.collected_amount), 0)::NUMERIC AS total
                             FROM payment_collections pc
@@ -57,28 +90,32 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
                             WHERE pc.gym_id = $1
                               AND p.deleted_at IS NULL
                               AND ($2::timestamptz IS NULL OR pc.created_at >= $2::timestamptz)
+                                AND ($3::timestamptz IS NULL OR pc.created_at < $3::timestamptz)
                         )
                         SELECT COALESCE(SUM(amount_paid),0)::NUMERIC AS total_revenue,
                                COALESCE(SUM(amount_paid) FILTER (WHERE payment_date::date = CURRENT_DATE),0)::NUMERIC AS today_revenue,
                                COALESCE(SUM(amount_due),0)::NUMERIC AS total_pending,
                                COALESCE((SELECT total FROM initial_revenue), 0) + COALESCE((SELECT total FROM due_revenue), 0) AS period_revenue
                         FROM payments
-                        WHERE gym_id=$1 AND deleted_at IS NULL`, [gid, periodStart]),
+                            WHERE gym_id=$1 AND deleted_at IS NULL`, [gid, periodStart, periodEnd]),
             pool.query(`SELECT COALESCE(SUM(amount),0)::NUMERIC AS total_expenses,
                         COALESCE(SUM(amount) FILTER (WHERE bill_date >= DATE_TRUNC('month', CURRENT_DATE)),0)::NUMERIC AS month_expenses,
-                        COALESCE(SUM(amount) FILTER (WHERE $2::timestamptz IS NULL OR bill_date::timestamptz >= $2::timestamptz),0)::NUMERIC AS period_expenses,
+                            COALESCE(SUM(amount) FILTER (WHERE ($2::timestamptz IS NULL OR bill_date::timestamptz >= $2::timestamptz)
+                                                 AND ($3::timestamptz IS NULL OR bill_date::timestamptz < $3::timestamptz)),0)::NUMERIC AS period_expenses,
                         COUNT(*)::INTEGER AS expense_count
-                        FROM expenses WHERE gym_id=$1 AND deleted_at IS NULL`, [gid, periodStart]),
+                            FROM expenses WHERE gym_id=$1 AND deleted_at IS NULL`, [gid, periodStart, periodEnd]),
             pool.query(`SELECT COALESCE(SUM(net_pay),0)::NUMERIC AS total_payroll,
                         COALESCE(SUM(net_pay) FILTER (WHERE status='PENDING'),0)::NUMERIC AS pending_payroll,
-                        COALESCE(SUM(net_pay) FILTER (WHERE $2::timestamptz IS NULL OR COALESCE(paid_at, created_at) >= $2::timestamptz),0)::NUMERIC AS period_payroll,
+                            COALESCE(SUM(net_pay) FILTER (WHERE ($2::timestamptz IS NULL OR COALESCE(paid_at, created_at) >= $2::timestamptz)
+                                                  AND ($3::timestamptz IS NULL OR COALESCE(paid_at, created_at) < $3::timestamptz)),0)::NUMERIC AS period_payroll,
                         COUNT(*) FILTER (WHERE status='PENDING')::INTEGER AS pending_count
-                        FROM payroll_entries WHERE gym_id=$1`, [gid, periodStart]),
+                            FROM payroll_entries WHERE gym_id=$1`, [gid, periodStart, periodEnd]),
             pool.query(`SELECT COALESCE(SUM(total_amount),0)::NUMERIC AS pos_revenue,
                         COALESCE(SUM(total_amount) FILTER (WHERE created_at::date = CURRENT_DATE),0)::NUMERIC AS pos_today,
-                        COALESCE(SUM(total_amount) FILTER (WHERE $2::timestamptz IS NULL OR created_at >= $2::timestamptz),0)::NUMERIC AS period_revenue,
+                            COALESCE(SUM(total_amount) FILTER (WHERE ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)
+                                                     AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)),0)::NUMERIC AS period_revenue,
                         COUNT(*)::INTEGER AS pos_count
-                        FROM pos_sales WHERE gym_id=$1`, [gid, periodStart]),
+                            FROM pos_sales WHERE gym_id=$1`, [gid, periodStart, periodEnd]),
             pool.query(`SELECT COUNT(*)::INTEGER AS overdue_count,
                         COALESCE(SUM(amount_due),0)::NUMERIC AS overdue_amount
                         FROM payments WHERE gym_id=$1 AND deleted_at IS NULL AND amount_due > 0

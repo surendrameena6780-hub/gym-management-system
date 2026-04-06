@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
   Users, ClipboardCheck, MessageSquare, UserPlus, Target, CreditCard,
@@ -6,32 +6,10 @@ import {
   BarChart3, Dumbbell, ShieldCheck, Bell, ChevronRight, RefreshCw,
   CheckCircle, Activity, Zap, Sparkles
 } from 'lucide-react';
+import useCountUp from './utils/useCountUp';
+import { reportClientError } from './utils/clientErrorReporter';
 
 const API = import.meta.env.VITE_API_URL || '';
-
-// ─── Count-Up Hook ──────────────────────────────────────────────────────────
-function useCountUp(target, duration = 800) {
-  const [display, setDisplay] = useState(0);
-  const rafRef = useRef(null);
-  const prevTarget = useRef(null);
-  useEffect(() => {
-    const end = Number(target) || 0;
-    if (prevTarget.current === end) return;
-    prevTarget.current = end;
-    const begin = display;
-    const startTime = performance.now();
-    const tick = (now) => {
-      const progress = Math.min((now - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(begin + (end - begin) * eased));
-      if (progress < 1) rafRef.current = requestAnimationFrame(tick);
-    };
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
-  return display;
-}
 
 // ─── Animated KPI Card ──────────────────────────────────────────────────────
 function StaffKPI({ label, value, icon: Icon, gradient, index = 0, onClick, prefix = '', suffix = '' }) {
@@ -58,7 +36,8 @@ function StaffKPI({ label, value, icon: Icon, gradient, index = 0, onClick, pref
   );
 }
 
-function StaffDashboard({ navigateTo, currentUser, canAccessPage, token, isActive = true }) {
+function StaffDashboard({ appRuntime, isActive = true }) {
+  const { navigateTo, currentUser, canAccessPage, token } = appRuntime;
   const displayRole = String(currentUser?.staff_role || currentUser?.role || 'Staff')
     .toLowerCase()
     .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
@@ -125,7 +104,7 @@ function StaffDashboard({ navigateTo, currentUser, canAccessPage, token, isActiv
         expiringMembers: expiringMembers.slice(0, 5),
       });
     } catch (err) {
-      console.error('Staff stats fetch error:', err);
+      reportClientError('Staff stats fetch', err);
     } finally { setLoading(false); }
   }, [token, canMembers, canAttendance, canPayments]);
 
