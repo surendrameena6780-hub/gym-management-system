@@ -1,3 +1,6 @@
+import { apiFetch } from './apiFetch';
+import { getSessionToken } from './authSession';
+
 const normalizeErrorPayload = (scope, error, extra) => ({
   scope,
   message: error?.message || String(error || 'Unknown client error'),
@@ -21,11 +24,18 @@ export const reportClientError = (scope, error, extra = null) => {
     return;
   }
 
+  const authToken = getSessionToken();
+  if (!authToken) {
+    return;
+  }
+
   window.setTimeout(() => {
-    fetch('/api/support/client-errors', {
+    apiFetch('/api/support/client-errors', {
       method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-token': authToken,
+      },
       keepalive: true,
       body: JSON.stringify(payload),
     }).catch(() => {});

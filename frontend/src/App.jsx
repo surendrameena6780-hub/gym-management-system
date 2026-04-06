@@ -63,6 +63,17 @@ const PAGE_PERMISSIONS = {
   'Help & Support': 'support:read',
 };
 
+const isIgnoredRuntimeIssue = (message, source = '') => {
+  const normalizedMessage = String(message || '').trim().toLowerCase();
+  const normalizedSource = String(source || '').trim().toLowerCase();
+
+  return normalizedMessage.includes('resizeobserver loop limit exceeded')
+    || normalizedMessage === 'script error.'
+    || normalizedSource.startsWith('chrome-extension://')
+    || normalizedSource.startsWith('moz-extension://')
+    || normalizedSource.startsWith('safari-web-extension://');
+};
+
 const getAuthStorage = () => {
   if (typeof window === 'undefined') return null;
 
@@ -396,6 +407,7 @@ function App() {
   const { confirmState, showConfirm, hideConfirm } = useConfirm();
   const toastRef = useRef(toast);
   const apiErrorToastRef = useRef({ message: '', at: 0 });
+  const runtimeIssueReportRef = useRef({ key: '', at: 0 });
   const dashboardFallbackNotifiedRef = useRef(false);
   const mainRef = useRef(null);
   const [visitedPages, setVisitedPages] = useState(() => new Set(['Dashboard']));
@@ -855,6 +867,66 @@ function App() {
       window.removeEventListener('gymvault:api-error', handleApiError);
     };
   }, [handleLogout, isHQ]);
+
+  useEffect(() => {
+    const shouldReportRuntimeIssue = (key) => {
+      const now = Date.now();
+      if (runtimeIssueReportRef.current.key === key && now - runtimeIssueReportRef.current.at < 5000) {
+        return false;
+      }
+
+      runtimeIssueReportRef.current = { key, at: now };
+      return true;
+    };
+
+    const handleWindowError = (event) => {
+      const source = String(event?.filename || '').trim();
+      const message = String(event?.error?.message || event?.message || 'Uncaught browser error').trim();
+
+      if (!message || isIgnoredRuntimeIssue(message, source)) {
+        return;
+      }
+
+      const signature = `window:${source}:${message}`;
+      if (!shouldReportRuntimeIssue(signature)) {
+        return;
+      }
+
+      const error = event?.error instanceof Error ? event.error : new Error(message);
+      reportClientError('Window error', error, {
+        source,
+        line: Number(event?.lineno || 0),
+        column: Number(event?.colno || 0),
+      });
+    };
+
+    const handleUnhandledRejection = (event) => {
+      const reason = event?.reason;
+      const message = String(reason?.message || reason || 'Unhandled promise rejection').trim();
+
+      if (!message || isIgnoredRuntimeIssue(message)) {
+        return;
+      }
+
+      const signature = `rejection:${message}`;
+      if (!shouldReportRuntimeIssue(signature)) {
+        return;
+      }
+
+      const error = reason instanceof Error ? reason : new Error(message);
+      reportClientError('Unhandled rejection', error, {
+        reasonType: typeof reason,
+      });
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
 
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(

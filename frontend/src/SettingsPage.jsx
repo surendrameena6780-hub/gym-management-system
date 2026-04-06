@@ -12,6 +12,7 @@ import {
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
+import { apiFetch } from './utils/apiFetch';
 import { reportClientError } from './utils/clientErrorReporter';
 
 const TABS = [
@@ -340,6 +341,28 @@ const loadRazorpayScript = () => {
     try { const s = localStorage.getItem(invoiceStorageKey); return s ? JSON.parse(s) : null; } catch { return null; }
   });
   const setLocalInvoice = (inv) => { setLocalInvoiceState(inv); try { if (inv) localStorage.setItem(invoiceStorageKey, JSON.stringify(inv)); else localStorage.removeItem(invoiceStorageKey); } catch (_err) { return null; } };
+
+  const downloadExport = useCallback(async (path, fileName) => {
+    try {
+      const response = await apiFetch(path, {
+        headers: token ? { 'x-auth-token': token } : undefined,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Export request failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = fileName;
+      anchor.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch (_err) {
+      toast?.('Export failed', 'error');
+    }
+  }, [toast, token]);
   
   const [billingCycle, setBillingCycle] = useState('monthly');
   const [autoRenew, setAutoRenew] = useState(true);
@@ -966,19 +989,21 @@ const loadRazorpayScript = () => {
     }
   };
 
-  const saveIntegrationSection = (saveScope = integSubTab) => axios.put('/api/settings/integrations', {
-    save_scope: saveScope,
-    ...integrationData,
-    templates: integrationData.templates,
-    member_payments: {
-      enabled: Boolean(integrationData.member_payments?.enabled),
-      connect_mode: String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
-      razorpay_key_id: String(integrationData.member_payments?.razorpay_key_id || '').trim(),
-      razorpay_key_secret: String(integrationData.member_payments?.razorpay_key_secret || '').trim(),
-      has_razorpay_secret: Boolean(integrationData.member_payments?.has_razorpay_secret),
-      upi_id: String(integrationData.member_payments?.upi_id || '').trim(),
-    },
-  }, headers);
+  function saveIntegrationSection(saveScope = integSubTab) {
+    return axios.put('/api/settings/integrations', {
+      save_scope: saveScope,
+      ...integrationData,
+      templates: integrationData.templates,
+      member_payments: {
+        enabled: Boolean(integrationData.member_payments?.enabled),
+        connect_mode: String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
+        razorpay_key_id: String(integrationData.member_payments?.razorpay_key_id || '').trim(),
+        razorpay_key_secret: String(integrationData.member_payments?.razorpay_key_secret || '').trim(),
+        has_razorpay_secret: Boolean(integrationData.member_payments?.has_razorpay_secret),
+        upi_id: String(integrationData.member_payments?.upi_id || '').trim(),
+      },
+    }, headers);
+  }
 
   const switchWhatsAppOnboardingView = (nextView) => {
     setWhatsAppOnboardingView(nextView);
@@ -3053,23 +3078,23 @@ const loadRazorpayScript = () => {
 
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Members List</h3><p className="text-xs text-slate-500 mt-1">Download a full CSV of all active, expired, and unpaid members.</p></div>
-                  <button onClick={() => { const a = document.createElement('a'); a.href = `/api/exports/members`; fetch(a.href, { headers: { 'x-auth-token': token } }).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); a.href = url; a.download = 'members-export.csv'; a.click(); URL.revokeObjectURL(url); }).catch(() => toast?.('Export failed', 'error')); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
+                  <button onClick={() => downloadExport('/api/exports/members', 'members-export.csv')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Payment History</h3><p className="text-xs text-slate-500 mt-1">Download all financial transactions for accounting purposes.</p></div>
-                  <button onClick={() => { fetch('/api/exports/payments', { headers: { 'x-auth-token': token } }).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href = url; a.download = 'payments-export.csv'; a.click(); URL.revokeObjectURL(url); }).catch(() => toast?.('Export failed', 'error')); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
+                  <button onClick={() => downloadExport('/api/exports/payments', 'payments-export.csv')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Attendance Records</h3><p className="text-xs text-slate-500 mt-1">Download check-in history (last 5000 records).</p></div>
-                  <button onClick={() => { fetch('/api/exports/attendance', { headers: { 'x-auth-token': token } }).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href = url; a.download = 'attendance-export.csv'; a.click(); URL.revokeObjectURL(url); }).catch(() => toast?.('Export failed', 'error')); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
+                  <button onClick={() => downloadExport('/api/exports/attendance', 'attendance-export.csv')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Leads</h3><p className="text-xs text-slate-500 mt-1">Download all lead enquiries and follow-up data.</p></div>
-                  <button onClick={() => { fetch('/api/exports/leads', { headers: { 'x-auth-token': token } }).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href = url; a.download = 'leads-export.csv'; a.click(); URL.revokeObjectURL(url); }).catch(() => toast?.('Export failed', 'error')); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
+                  <button onClick={() => downloadExport('/api/exports/leads', 'leads-export.csv')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-5 border border-slate-200 rounded-2xl bg-white hover:border-indigo-300 transition-colors">
                   <div><h3 className="font-bold text-slate-800">Export Expenses</h3><p className="text-xs text-slate-500 mt-1">Download all expense records for bookkeeping.</p></div>
-                  <button onClick={() => { fetch('/api/exports/expenses', { headers: { 'x-auth-token': token } }).then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href = url; a.download = 'expenses-export.csv'; a.click(); URL.revokeObjectURL(url); }).catch(() => toast?.('Export failed', 'error')); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
+                  <button onClick={() => downloadExport('/api/exports/expenses', 'expenses-export.csv')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100"><Download size={16} /> CSV</button>
                 </div>
               </div>
             </div>

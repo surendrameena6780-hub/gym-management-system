@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   AreaChart, Area,
 } from 'recharts';
 import {
@@ -11,6 +11,7 @@ import {
   MessageSquare, Phone, Award, RefreshCw,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import SafeResponsiveContainer from './components/SafeResponsiveContainer';
 import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
@@ -372,8 +373,10 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
                 </div>
                 <div className="h-[250px] w-full">
                   {hasRevenueGraph ? (
-                    isActive ? (
-                      <ResponsiveContainer width="100%" height="100%">
+                    <SafeResponsiveContainer
+                      isActive={isActive}
+                      fallback={<div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
+                    >
                         <AreaChart data={analytics.revenue.graphData}>
                           <defs>
                             <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -387,8 +390,7 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
                           <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} formatter={(val) => [`₹${val}`, 'Revenue']} />
                           <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={4} fillOpacity={1} fill="url(#colorRev)" />
                         </AreaChart>
-                      </ResponsiveContainer>
-                    ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />
+                    </SafeResponsiveContainer>
                   ) : (
                     <div className="flex h-full items-center justify-center text-slate-400 font-bold">No payment activity yet for this range.</div>
                   )}
@@ -449,16 +451,17 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
               </div>
               <div className="h-[300px] w-full">
                 {hasPeakHourData ? (
-                  isActive ? (
-                    <ResponsiveContainer width="100%" height="100%">
+                  <SafeResponsiveContainer
+                    isActive={isActive}
+                    fallback={<div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
+                  >
                       <BarChart data={insightsPeakHours}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                         <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
                         <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none' }} />
                         <Bar dataKey="count" fill="#6366f1" radius={[6, 6, 0, 0]} barSize={40} name="Check-ins" />
                       </BarChart>
-                    </ResponsiveContainer>
-                  ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />
+                  </SafeResponsiveContainer>
                 ) : (
                   <div className="flex items-center justify-center h-full text-slate-400 font-bold">No attendance data yet for this period.</div>
                 )}

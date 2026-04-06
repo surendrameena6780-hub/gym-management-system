@@ -2,11 +2,11 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
+import SafeResponsiveContainer from '../components/SafeResponsiveContainer';
 import {
   Activity,
   Bot,
@@ -488,8 +488,10 @@ const DashboardPageView = ({ controller, isActive = true }) => {
             </div>
             <div className="flex-1 min-h-[220px]">
               {displayChartData.length > 0 ? (
-                isActive ? (
-                  <ResponsiveContainer width="100%" height="100%">
+                <SafeResponsiveContainer
+                  isActive={isActive}
+                  fallback={<div className="h-full rounded-2xl border border-slate-100 bg-slate-50" />}
+                >
                     <AreaChart data={displayChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
@@ -524,8 +526,7 @@ const DashboardPageView = ({ controller, isActive = true }) => {
                         activeDot={{ r: 5, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }}
                       />
                     </AreaChart>
-                  </ResponsiveContainer>
-                ) : <div className="h-full rounded-2xl border border-slate-100 bg-slate-50" />
+                </SafeResponsiveContainer>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-3">
                   <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center">

@@ -540,7 +540,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     try {
       await axios.patch(`/api/members/${selectedMember.id}/onboarding`, onboardingForm, { headers: { 'x-auth-token': token } });
       await loadMemberDetails(selectedMember.id);
-      await fetchMembers();
+      await fetchMembersRef.current?.();
       toast?.('Onboarding details saved', 'success');
     } catch {
       toast?.('Failed to save onboarding details', 'error');
@@ -556,7 +556,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       setShowCancelModal(false);
       setCancelReason('');
       setShowDetailsModal(false);
-      fetchMembers();
+      fetchMembersRef.current?.();
       notifyDashboardDataChanged();
     } catch { toast?.('Failed to cancel member', 'error'); }
   };
@@ -755,7 +755,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       }
 
       setActivatingMode('verifying');
-      await fetchMembers();
+      await fetchMembersRef.current?.();
       notifyDashboardDataChanged();
       await finishActivationSuccess(plan, statusRes.data?.payment_id || paymentLinkId);
       return true;
@@ -1188,7 +1188,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     }
   };
 
-  const processActivation = async (plan, paymentId, mode = 'Cash') => {
+  async function processActivation(plan, paymentId, mode = 'Cash') {
     try {
       setActivatingMode(mode === 'Online' ? 'verifying' : 'cash');
       await axios.post('/api/memberships/activate', { member_id: selectedMember.id, plan_id: plan.id, payment_id: paymentId, payment_mode: mode }, { headers: { 'x-auth-token': token } });
@@ -1200,7 +1200,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     } finally {
       setActivatingMode('');
     }
-  };
+  }
 
   const confirmAndSendReminders = async ({ memberIds, templateKey, loadingSetter, loadingValue, summaryLabel = 'Reminder' }) => {
     if (!Array.isArray(memberIds) || memberIds.length === 0) {

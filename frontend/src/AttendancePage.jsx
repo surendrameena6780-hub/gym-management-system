@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import PageLoader from './PageLoader';
 import PaginationControls from './components/PaginationControls';
+import SafeResponsiveContainer from './components/SafeResponsiveContainer';
 import { QRCodeCanvas } from 'qrcode.react';
 import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
@@ -21,7 +22,7 @@ import {
   MessageSquare,
   X,
 } from 'lucide-react';
-import { BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { BarChart, Bar, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
 
 const DEFAULT_ATTENDANCE_MODE = 'STAFF';
 const DEFAULT_GYM_RADIUS_METERS = 200;
@@ -149,6 +150,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   const inactiveRequestSeqRef = useRef(0);
   const checkinOpsRef = useRef(null);
   const liveFeedRef = useRef(null);
+  const refreshAttendanceViewsRef = useRef(() => Promise.resolve());
+  const loadOverviewBundleRef = useRef(() => Promise.resolve());
 
   const [overview, setOverview] = useState({
     today_checkins: 0,
@@ -348,14 +351,6 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     ? '—'
     : `${String(overview.peak_hour_today).padStart(2, '0')}:00`;
 
-  const refreshAttendanceViews = useCallback(() => Promise.all([
-    loadOverviewBundle(),
-    loadPeakHours(peakHoursDays),
-    loadRecords(),
-    loadInactive(inactiveDays),
-    loadLeaderboard(),
-  ]), [inactiveDays, loadInactive, loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, peakHoursDays]);
-
   const handleCheckinSuccess = useCallback((payload, fallbackMember = null, fallbackMethod = null) => {
     const body = asObject(payload, {});
     const detail = asObject(body.details, {});
@@ -394,9 +389,9 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       active_members_today: (Number(prev.active_members_today) || 0) + 1,
     }));
 
-    refreshAttendanceViews().catch(() => {});
+    refreshAttendanceViewsRef.current().catch(() => {});
     window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'attendance' } }));
-  }, [checkinMethod, currentUser?.full_name, currentUser?.name, refreshAttendanceViews, toast]);
+  }, [checkinMethod, currentUser?.full_name, currentUser?.name, toast]);
 
   const copyText = async (value, successMessage, errorMessage) => {
     if (!value || typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -447,11 +442,11 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
           : DEFAULT_GYM_RADIUS_METERS,
       }, headers);
       toast?.(successMessage, 'success');
-      await loadOverviewBundle();
+      await loadOverviewBundleRef.current();
       return true;
     } catch (_err) {
       toast?.(errorMessage, 'error');
-      await loadOverviewBundle().catch(() => {});
+      await loadOverviewBundleRef.current().catch(() => {});
       return false;
     } finally {
       setBusySaveMode(false);
@@ -618,6 +613,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     }));
   }, [headers]);
 
+  loadOverviewBundleRef.current = loadOverviewBundle;
+
   const loadPeakHours = useCallback(async (period) => {
     const url = period === 'today'
       ? '/api/attendance/peak-hours?today=true'
@@ -666,6 +663,18 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     const res = await axios.get('/api/attendance/leaderboard?days=30&limit=6', headers);
     setLeaderboard(asArray(unwrapApiData(res.data)));
   }, [headers]);
+
+  const refreshAttendanceViews = useCallback(() => Promise.all([
+    loadOverviewBundle(),
+    loadPeakHours(peakHoursDays),
+    loadRecords(),
+    loadInactive(inactiveDays),
+    loadLeaderboard(),
+  ]), [inactiveDays, loadInactive, loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, peakHoursDays]);
+
+  useEffect(() => {
+    refreshAttendanceViewsRef.current = refreshAttendanceViews;
+  }, [refreshAttendanceViews]);
 
   const loadAll = useCallback(async () => {
     if (!token) return;
@@ -1303,8 +1312,10 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px] gap-4">
           <div className="min-w-0 h-[240px] sm:h-[280px] xl:h-[260px]">
             {hasPeakHoursData ? (
-              isActive ? (
-                <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer
+                isActive={isActive}
+                fallback={<div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
+              >
                   <BarChart data={peakHours} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef2ff" />
                     <XAxis dataKey="hourLabel" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }} axisLine={false} tickLine={false} />
@@ -1312,8 +1323,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                     <Tooltip />
                     <Bar dataKey="count" fill="#6366f1" radius={[5, 5, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
-              ) : <div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />
+              </SafeResponsiveContainer>
             ) : (
               <div className="flex h-full items-center justify-center rounded-2xl border border-slate-100 bg-slate-50 text-center text-sm font-bold text-slate-400">
                 No attendance traffic recorded for this period.
