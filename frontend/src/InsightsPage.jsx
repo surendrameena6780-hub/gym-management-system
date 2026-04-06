@@ -8,10 +8,10 @@ import {
   TrendingUp, Users, Activity, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Download,
   UserMinus, UserCheck, Clock, Target, ShieldCheck,
-  MessageSquare, Phone, Award,
+  MessageSquare, Phone, Award, RefreshCw,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
-import { openWhatsAppConversation } from './utils/externalNavigation';
+import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 
 const EMPTY_ANALYTICS = {
@@ -146,20 +146,36 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
   const [dateRange, setDateRange] = useState('6M');
   const [insightsPeakDays, setInsightsPeakDays] = useState('today');
   const [insightsPeakHours, setInsightsPeakHours] = useState([]);
+  const [reminderLoadingKey, setReminderLoadingKey] = useState('');
   const cacheRef = useRef(new Map());
 
-  const sendWhatsApp = (member, type) => {
-    let message = '';
-
-    if (type === 'expiring') {
-      message = `Hi ${member.full_name}, your membership at ${gymName} is expiring in ${member.days_left} days. Renew now to keep your fitness journey going.`;
-    } else if (type === 'expired') {
-      message = `Hi ${member.full_name}, your membership at ${gymName} has expired. We would love to have you back. Renew your plan today.`;
-    } else {
-      message = `Hi ${member.full_name}, we missed you at ${gymName}. It's been a while since your last visit. Hope to see you back in the gym soon.`;
+  const sendWhatsApp = async (member, type) => {
+    if (!member?.id) {
+      toast?.('Member details are incomplete for this reminder.', 'warning');
+      return;
     }
 
-    openWhatsAppConversation({ phone: member.phone, message });
+    const templateKey = type === 'expiring'
+      ? 'EXPIRING_SOON'
+      : type === 'expired'
+        ? 'EXPIRED'
+        : 'INACTIVE';
+    const loadingKey = `${type}-${member.id}`;
+
+    try {
+      setReminderLoadingKey(loadingKey);
+      const payload = await sendWhatsAppReminders({
+        token,
+        memberIds: [member.id],
+        templateKey,
+      });
+      const summary = summarizeReminderResult(payload, 'Reminder');
+      toast?.(summary.message, summary.tone);
+    } catch (err) {
+      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to send WhatsApp reminder.', 'error');
+    } finally {
+      setReminderLoadingKey('');
+    }
   };
 
   const handleCall = (phoneNumber) => window.open(`tel:${phoneNumber}`, '_self');
@@ -523,7 +539,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
                           <td className="py-3 text-right">
                             <div className="flex justify-end gap-2">
                               <button onClick={() => handleCall(member.phone)} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"><Phone size={14} /></button>
-                              <button onClick={() => sendWhatsApp(member, Number(member.days_left) <= 0 ? 'expired' : 'expiring')} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-500 hover:text-white transition-colors"><MessageSquare size={14} /></button>
+                              <button onClick={() => sendWhatsApp(member, Number(member.days_left) <= 0 ? 'expired' : 'expiring')} disabled={reminderLoadingKey === `${Number(member.days_left) <= 0 ? 'expired' : 'expiring'}-${member.id}`} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-500 hover:text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `${Number(member.days_left) <= 0 ? 'expired' : 'expiring'}-${member.id}` ? <RefreshCw size={14} className="animate-spin" /> : <MessageSquare size={14} />}</button>
                             </div>
                           </td>
                         </tr>
@@ -562,7 +578,7 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
                           <td className="py-3 text-right">
                             <div className="flex justify-end gap-2">
                               <button onClick={() => handleCall(member.phone)} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"><Phone size={14} /></button>
-                              <button onClick={() => sendWhatsApp(member, 'inactive')} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-500 hover:text-white transition-colors"><MessageSquare size={14} /></button>
+                              <button onClick={() => sendWhatsApp(member, 'inactive')} disabled={reminderLoadingKey === `inactive-${member.id}`} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-500 hover:text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `inactive-${member.id}` ? <RefreshCw size={14} className="animate-spin" /> : <MessageSquare size={14} />}</button>
                             </div>
                           </td>
                         </tr>

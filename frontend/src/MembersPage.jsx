@@ -7,8 +7,8 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
-import { openWhatsAppConversation } from './utils/externalNavigation';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
+import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
@@ -290,6 +290,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
   const [activationRazorpayContext, setActivationRazorpayContext] = useState(null);
   const [activationReference, setActivationReference] = useState('');
   const [memberActionLoading, setMemberActionLoading] = useState(null);
+  const [reminderLoadingKey, setReminderLoadingKey] = useState('');
+  const [bulkActionLoading, setBulkActionLoading] = useState('');
   const activationRazorpayPollBusyRef = useRef(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -1139,17 +1141,123 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
   };
 
-  const sendWhatsApp = (member, type) => {
-    const gymName = 'GymVault';
-    const message = type === 'reminder' ? `Hi ${member.full_name}, your membership at ${gymName} is expiring in ${member.days_left} days. Please renew to continue your fitness journey!` : `Hi ${member.full_name}, we missed you at ${gymName}! Hope to see you back soon!`;
-    openWhatsAppConversation({ phone: member.phone, message });
+  const sendWhatsAppReminder = async (member, type) => {
+    if (!member?.id) {
+      toast?.('Member details are incomplete for this reminder.', 'warning');
+      return;
+    }
+
+    const templateKey = type === 'reminder'
+      ? 'EXPIRING_SOON'
+      : type === 'followup'
+        ? 'INACTIVE'
+        : undefined;
+    const loadingKey = `member-reminder-${member.id}`;
+
+    try {
+      setReminderLoadingKey(loadingKey);
+      const payload = await sendWhatsAppReminders({
+        token,
+        memberIds: [member.id],
+        templateKey,
+      });
+      const summary = summarizeReminderResult(payload, 'Reminder');
+      toast?.(summary.message, summary.tone);
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to send WhatsApp reminder.'), 'error');
+    } finally {
+      setReminderLoadingKey('');
+    }
   };
 
   const handleCall = (phoneNumber) => window.open(`tel:${phoneNumber}`, '_self');
 
-  const handleBulkReminder = () => {
+  const handleBulkReminder = async () => {
     const selected = members.filter((m) => selectedIds.includes(m.id));
-    selected.forEach((m, index) => setTimeout(() => sendWhatsApp(m, 'reminder'), index * 1000));
+    if (selected.length === 0) {
+      toast?.('Select at least one member first.', 'warning');
+      return;
+    }
+
+    try {
+      setBulkActionLoading('reminder');
+      const payload = await sendWhatsAppReminders({
+        token,
+        memberIds: selected.map((member) => member.id),
+      });
+      const summary = summarizeReminderResult(payload, 'Reminder');
+      toast?.(summary.message, summary.tone);
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to send WhatsApp reminders.'), 'error');
+    } finally {
+      setBulkActionLoading('');
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (!canWriteMembers) {
+      toast?.('You do not have permission to delete members.', 'warning');
+      return;
+    }
+
+    const selected = members.filter((member) => selectedIds.includes(member.id));
+    if (selected.length === 0) {
+      toast?.('Select at least one member first.', 'warning');
+      return;
+    }
+
+    const runDelete = async () => {
+      try {
+        setBulkActionLoading('delete');
+        const results = await Promise.allSettled(
+          selected.map((member) => axios.delete(`/api/members/${member.id}`, { headers: { 'x-auth-token': token } }))
+        );
+
+        const failed = results.filter((result) => result.status === 'rejected');
+        const deletedCount = results.length - failed.length;
+
+        if (deletedCount > 0) {
+          setSelectedIds([]);
+          setIsBulkMode(false);
+          await fetchMembers();
+          notifyDashboardDataChanged();
+        }
+
+        if (failed.length === 0) {
+          toast?.(deletedCount === 1 ? 'Member deleted.' : `${deletedCount} members deleted.`, 'success');
+          return;
+        }
+
+        if (deletedCount > 0) {
+          toast?.(`${deletedCount} members deleted, ${failed.length} failed.`, 'warning');
+          return;
+        }
+
+        const failure = failed[0]?.reason;
+        toast?.(getApiErrorMessage(failure, 'Failed to delete selected members.'), 'error');
+      } catch (err) {
+        toast?.(getApiErrorMessage(err, 'Failed to delete selected members.'), 'error');
+      } finally {
+        setBulkActionLoading('');
+      }
+    };
+
+    if (showConfirm) {
+      showConfirm({
+        title: selected.length === 1 ? 'Delete Member' : 'Delete Selected Members',
+        message: selected.length === 1
+          ? 'This action cannot be undone.'
+          : `This will permanently archive ${selected.length} selected members and their related records.`,
+        confirmLabel: selected.length === 1 ? 'Yes, Delete' : `Delete ${selected.length} Members`,
+        variant: 'danger',
+        onConfirm: runDelete,
+      });
+      return;
+    }
+
+    if (window.confirm(`Delete ${selected.length} selected member${selected.length === 1 ? '' : 's'}?`)) {
+      runDelete();
+    }
   };
 
   const handleQuickExtend = async (days) => {
@@ -1595,7 +1703,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                           <div className="flex justify-end items-center gap-1.5">
                             {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
                             {canWritePayments && (statusInfo.label === 'EXPIRED' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
-                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => sendWhatsApp(member, statusInfo.label === 'INACTIVE' ? 'followup' : 'reminder')} className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm"><MessageSquare size={10} fill="currentColor" /> Remind</button>}
+                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => sendWhatsAppReminder(member, statusInfo.label === 'INACTIVE' ? 'followup' : 'reminder')} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
                             {canWriteAttendance && canCheckMemberIn(member) && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
                             {canWriteMembers && <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
                           </div>
@@ -1617,8 +1725,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
         <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 w-[calc(100%-1rem)] max-w-[560px] bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-3 z-[100] border border-slate-700 backdrop-blur-md bg-opacity-95 animate-in slide-in-from-bottom-10">
           <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">Bulk Actions</span><span className="text-sm font-black">{selectedIds.length} Selected</span></div>
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={handleBulkReminder} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all"><Zap size={14} fill="currentColor" /> Send Reminders</button>
-            <button className="flex items-center gap-2 text-xs font-bold bg-rose-500/10 text-rose-400 px-4 py-2 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all"><Trash2 size={14} /> Delete</button>
+            <button onClick={handleBulkReminder} disabled={bulkActionLoading !== ''} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">{bulkActionLoading === 'reminder' ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} fill="currentColor" />} Send Reminders</button>
+            <button onClick={handleBulkDelete} disabled={bulkActionLoading !== ''} className="flex items-center gap-2 text-xs font-bold bg-rose-500/10 text-rose-400 px-4 py-2 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">{bulkActionLoading === 'delete' ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete</button>
             <button onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white ml-1"><X size={18} /></button>
           </div>
         </div>
@@ -1677,7 +1785,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button onClick={() => handleCall(selectedMember.phone)} className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm"><Phone size={10} fill="currentColor" /></button>
-                  <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"><MessageSquare size={10} fill="currentColor" /></button>
+                  <button onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />}</button>
                 </div>
               </div>
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center gap-2">
@@ -1904,8 +2012,8 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                 {memberActionLoading === 'details-activate' ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} fill="currentColor" />}{getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'EXPIRING SOON' ? 'Renew' : 'Activate'}
               </button>
             )}
-            <button onClick={() => sendWhatsApp(selectedMember, 'reminder')} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95">
-              <MessageSquare size={13} fill="currentColor" /> WhatsApp
+            <button onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed">
+              {reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={13} className="animate-spin" /> : <MessageSquare size={13} fill="currentColor" />} WhatsApp
             </button>
             {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
               <Edit2 size={13} /> Edit

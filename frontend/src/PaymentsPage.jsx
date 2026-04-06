@@ -4,12 +4,12 @@ import {
   Search, Filter, Download, Plus, DollarSign, 
   AlertCircle, FileText, CheckCircle2, 
   Clock, X, ChevronDown, User, ArrowDownToLine, History, Wallet, CreditCard, Trash2,
-  Phone, MessageCircle
+  Phone, MessageCircle, RefreshCw
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
-import { openWhatsAppConversation } from './utils/externalNavigation';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
+import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -175,6 +175,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const [dueOnlineMode, setDueOnlineMode] = useState('RAZORPAY');
   const [dueCollectionContext, setDueCollectionContext] = useState(null);
   const [dueRazorpayContext, setDueRazorpayContext] = useState(null);
+  const [dueReminderLoadingId, setDueReminderLoadingId] = useState(null);
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -417,28 +418,27 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   const getImageUrl = (path) => normalizeProfileImageUrl(path);
 
-  const buildDueReminderMessage = useCallback((payment) => {
-    const memberName = String(payment?.member_name || 'there').trim();
-    const amountDue = roundMoney(payment?.amount_due || 0).toLocaleString('en-IN');
-    const planName = String(payment?.plan_name || 'membership').trim();
-    return `Hi ${memberName}, this is a reminder that ₹${amountDue} is still pending for your ${planName}. Please clear the due amount today.`;
-  }, []);
-
-  const handleDueWhatsApp = useCallback((payment) => {
-    if (!payment?.member_phone) {
-      toast?.('Phone number not available for this member.', 'warning');
+  const handleDueWhatsApp = useCallback(async (payment) => {
+    if (!payment?.user_id) {
+      toast?.('Member details are incomplete for this reminder.', 'warning');
       return;
     }
 
-    const opened = openWhatsAppConversation({
-      phone: payment.member_phone,
-      message: buildDueReminderMessage(payment),
-    });
-
-    if (!opened) {
-      toast?.('Unable to open WhatsApp for this member.', 'error');
+    try {
+      setDueReminderLoadingId(payment.id);
+      const payload = await sendWhatsAppReminders({
+        token,
+        memberIds: [payment.user_id],
+        templateKey: 'PAYMENT_DUE',
+      });
+      const summary = summarizeReminderResult(payload, 'Due reminder');
+      toast?.(summary.message, summary.tone);
+    } catch (err) {
+      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to send WhatsApp reminder.', 'error');
+    } finally {
+      setDueReminderLoadingId(null);
     }
-  }, [buildDueReminderMessage, toast]);
+  }, [toast, token]);
 
   const handleDueCall = useCallback((payment) => {
     const digits = String(payment?.member_phone || '').replace(/\D/g, '');
@@ -1350,11 +1350,12 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
                             <button
                               type="button"
                               onClick={() => handleDueWhatsApp(payment)}
-                              className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center"
+                              disabled={dueReminderLoadingId === payment.id}
+                              className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
                               aria-label={`Send WhatsApp reminder to ${payment.member_name}`}
                               title="Send WhatsApp reminder"
                             >
-                              <MessageCircle size={13} />
+                              {dueReminderLoadingId === payment.id ? <RefreshCw size={13} className="animate-spin" /> : <MessageCircle size={13} />}
                             </button>
                             <button
                               type="button"
@@ -1423,7 +1424,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
               ) : (
                 filteredPayments.map((payment) => (
                   <tr key={payment.id} className="group hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-100">{payment.profile_pic ? (<img src={getImageUrl(payment.profile_pic)} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} alt="Member" className="w-full h-full object-cover" />) : (<div className="w-full h-full flex items-center justify-center font-black text-xs text-slate-500 bg-slate-200">{(payment.member_name || '?').charAt(0).toUpperCase()}</div>)}</div><div><div className="flex items-center gap-2"><div className="font-bold text-slate-900">{payment.member_name}</div>{parseFloat(payment.amount_due) > 0 && (<div className="flex items-center gap-1"><button type="button" onClick={() => handleDueWhatsApp(payment)} className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center" title="Send WhatsApp reminder"><MessageCircle size={13} /></button><button type="button" onClick={() => handleDueCall(payment)} className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center" title="Call member"><Phone size={13} /></button></div>)}</div><div className="text-xs font-bold text-slate-400">{payment.plan_name}</div></div></div></td>
+                    <td className="p-6"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-100">{payment.profile_pic ? (<img src={getImageUrl(payment.profile_pic)} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} alt="Member" className="w-full h-full object-cover" />) : (<div className="w-full h-full flex items-center justify-center font-black text-xs text-slate-500 bg-slate-200">{(payment.member_name || '?').charAt(0).toUpperCase()}</div>)}</div><div><div className="flex items-center gap-2"><div className="font-bold text-slate-900">{payment.member_name}</div>{parseFloat(payment.amount_due) > 0 && (<div className="flex items-center gap-1"><button type="button" onClick={() => handleDueWhatsApp(payment)} disabled={dueReminderLoadingId === payment.id} className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed" title="Send WhatsApp reminder">{dueReminderLoadingId === payment.id ? <RefreshCw size={13} className="animate-spin" /> : <MessageCircle size={13} />}</button><button type="button" onClick={() => handleDueCall(payment)} className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center" title="Call member"><Phone size={13} /></button></div>)}</div><div className="text-xs font-bold text-slate-400">{payment.plan_name}</div></div></div></td>
                     <td className="p-6"><div className={`font-mono text-xs font-bold px-2 py-1 rounded w-fit ${payment.transaction_id || payment.invoice_id ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400'}`}>{(payment.transaction_id && payment.transaction_id.trim() !== "" && payment.transaction_id !== "Processing...") ? payment.transaction_id : (payment.invoice_id || `ID-${payment.id}`)}</div></td>
                     <td className="p-6"><div className="text-sm font-bold text-slate-600">{new Date(payment.payment_date).toLocaleDateString()}</div><div className="text-xs font-bold text-slate-400 mt-0.5">{new Date(payment.payment_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></td>
                     <td className="p-6"><div className="font-black text-slate-900">₹{parseFloat(payment.amount_paid).toLocaleString()}</div>{parseFloat(payment.amount_due) > 0 && (<div className="text-[10px] font-bold text-orange-500">Due: ₹{payment.amount_due}</div>)}</td>

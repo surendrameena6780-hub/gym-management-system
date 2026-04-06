@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
-const { requireOwner } = require('../middleware/rbac');
+const { hasPermission, requireOwner } = require('../middleware/rbac');
 const { ok, fail } = require('../utils/apiResponse');
 const {
     buildTemplateBodyVariables,
@@ -231,6 +231,55 @@ async function getMembersByIds(gymId, memberIds = []) {
     return result.rows;
 }
 
+const canSendManualReminder = (user = {}) => {
+    const role = String(user?.role || '').trim().toUpperCase();
+    if (role === 'OWNER') return true;
+
+    return hasPermission(user, 'members:write')
+        || hasPermission(user, 'attendance:write')
+        || hasPermission(user, 'payments:write');
+};
+
+const pickReminderTemplateCandidates = (member = {}, requestedTemplateKey = '') => {
+    const explicitKey = String(requestedTemplateKey || '').trim().toUpperCase();
+    if (explicitKey) {
+        return [explicitKey];
+    }
+
+    const membershipStatus = String(member.membership_status || '').trim().toUpperCase();
+    const amountDue = Number(member.amount_due || 0);
+    const daysToExpiry = Number(member.days_to_expiry);
+    const daysInactive = Number(member.days_inactive || 0);
+
+    if (amountDue > 0 || membershipStatus === 'UNPAID') {
+        return ['PAYMENT_DUE', 'UNPAID', 'RENEWAL_REMINDER'];
+    }
+
+    if (membershipStatus === 'EXPIRED' || (Number.isFinite(daysToExpiry) && daysToExpiry < 0)) {
+        return ['EXPIRED', 'RENEWAL_REMINDER'];
+    }
+
+    if (membershipStatus === 'ACTIVE' && Number.isFinite(daysToExpiry) && daysToExpiry <= 7) {
+        return ['EXPIRING_SOON', 'RENEWAL_REMINDER'];
+    }
+
+    if (daysInactive >= 7) {
+        return ['INACTIVE', 'SALES_OFFER', 'RENEWAL_REMINDER'];
+    }
+
+    return ['RENEWAL_REMINDER', 'EXPIRING_SOON', 'PAYMENT_DUE', 'INACTIVE', 'EXPIRED'];
+};
+
+const pickApprovedTemplate = (templateMap, candidateKeys = []) => {
+    for (const candidate of candidateKeys) {
+        const normalizedKey = String(candidate || '').trim().toUpperCase();
+        if (normalizedKey && templateMap.has(normalizedKey)) {
+            return templateMap.get(normalizedKey);
+        }
+    }
+    return null;
+};
+
 // --- 1. GET ALL NOTIFICATIONS & UNREAD COUNT ---
 router.get('/', auth, saasMiddleware, async (req, res) => {
     try {
@@ -291,7 +340,167 @@ router.put('/read-all', auth, saasMiddleware, async (req, res) => {
     }
 });
 
-// --- 4. SEGMENT PREVIEW (automation pipeline) ---
+// --- 4. SEND DIRECT MEMBER REMINDERS ---
+router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
+    try {
+        await ensureMessagingSchema();
+
+        if (!canSendManualReminder(req.user)) {
+            return fail(res, 403, 'FORBIDDEN_REMINDER_SEND', 'You do not have permission to send WhatsApp reminders.');
+        }
+
+        const gymId = req.user.gym_id;
+        const memberIds = Array.from(new Set(
+            (Array.isArray(req.body.member_ids) ? req.body.member_ids : [req.body.member_id])
+                .map((value) => Number.parseInt(value, 10))
+                .filter((value) => Number.isInteger(value) && value > 0)
+        ));
+        const requestedTemplateKey = String(req.body.template_key || '').trim().toUpperCase();
+
+        if (memberIds.length === 0) {
+            return fail(res, 400, 'REMINDER_MEMBERS_REQUIRED', 'Select at least one member before sending a reminder.');
+        }
+
+        const gymConfigRes = await pool.query(
+            `SELECT
+                name,
+                messaging_whatsapp_number,
+                messaging_whatsapp_status,
+                bulk_per_campaign_limit
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [gymId]
+        );
+        const gymConfig = gymConfigRes.rows[0] || {};
+
+        if (String(gymConfig.messaging_whatsapp_status || '').toUpperCase() !== 'CONNECTED' || !gymConfig.messaging_whatsapp_number) {
+            return fail(res, 400, 'WHATSAPP_NOT_CONNECTED', 'Connect and verify your gym WhatsApp number in Settings before sending reminders.');
+        }
+
+        const bulkLimit = Math.max(1, parseInt(gymConfig.bulk_per_campaign_limit || 50, 10));
+        if (memberIds.length > bulkLimit) {
+            return fail(res, 400, 'REMINDER_LIMIT_EXCEEDED', `Select up to ${bulkLimit} members at a time for WhatsApp reminders.`);
+        }
+
+        const templateRes = await pool.query(
+            `SELECT
+                template_key,
+                title,
+                whatsapp_text,
+                whatsapp_template_name,
+                whatsapp_template_language,
+                whatsapp_template_status,
+                is_active
+             FROM gym_message_templates
+             WHERE gym_id = $1 AND is_active = TRUE`,
+            [gymId]
+        );
+
+        const approvedTemplates = new Map();
+        for (const template of templateRes.rows) {
+            const templateKey = String(template.template_key || '').trim().toUpperCase();
+            if (!templateKey || !template.whatsapp_template_name) continue;
+            if (normalizeTemplateStatus(template.whatsapp_template_status) !== 'APPROVED') continue;
+            approvedTemplates.set(templateKey, template);
+        }
+
+        if (approvedTemplates.size === 0) {
+            return fail(res, 400, 'NO_APPROVED_TEMPLATES', 'No approved WhatsApp templates are available. Approve a template in Settings first.');
+        }
+
+        if (requestedTemplateKey && !approvedTemplates.has(requestedTemplateKey)) {
+            return fail(res, 400, 'TEMPLATE_NOT_APPROVED', 'The selected WhatsApp template is not approved yet. Approve it in Settings first.');
+        }
+
+        const members = await getMembersByIds(gymId, memberIds);
+        if (members.length === 0) {
+            return fail(res, 400, 'REMINDER_MEMBERS_NOT_FOUND', 'No valid members were found for this reminder request.');
+        }
+
+        let successCount = 0;
+        let failedCount = 0;
+        const failures = [];
+        const templateKeysUsed = new Set();
+
+        for (const member of members) {
+            const toPhone = normalizeLocalIndianPhone(member.phone);
+            if (!toPhone) {
+                failedCount += 1;
+                failures.push({
+                    member_id: member.id,
+                    full_name: member.full_name,
+                    phone: member.phone,
+                    reason: 'Valid phone number not available.',
+                });
+                continue;
+            }
+
+            const selectedTemplate = pickApprovedTemplate(
+                approvedTemplates,
+                pickReminderTemplateCandidates(member, requestedTemplateKey)
+            );
+
+            if (!selectedTemplate) {
+                failedCount += 1;
+                failures.push({
+                    member_id: member.id,
+                    full_name: member.full_name,
+                    phone: member.phone,
+                    reason: requestedTemplateKey
+                        ? `Template ${requestedTemplateKey} is not approved for sending.`
+                        : 'No approved reminder template is available for this member.',
+                });
+                continue;
+            }
+
+            try {
+                await sendWhatsAppTemplate({
+                    integratedNumber: gymConfig.messaging_whatsapp_number,
+                    templateName: selectedTemplate.whatsapp_template_name,
+                    language: selectedTemplate.whatsapp_template_language || 'en_US',
+                    recipientNumber: toPhone,
+                    variables: buildTemplateBodyVariables(selectedTemplate.whatsapp_text, member, gymConfig.name || 'GymVault'),
+                });
+                successCount += 1;
+                templateKeysUsed.add(String(selectedTemplate.template_key || '').trim().toUpperCase());
+            } catch (sendErr) {
+                failedCount += 1;
+                failures.push({
+                    member_id: member.id,
+                    full_name: member.full_name,
+                    phone: member.phone,
+                    reason: sendErr?.message || 'Send failed',
+                });
+            }
+        }
+
+        if (successCount > 0) {
+            await pool.query(
+                `INSERT INTO notifications (gym_id, title, message)
+                 VALUES ($1, $2, $3)`,
+                [
+                    gymId,
+                    successCount > 1 ? 'WhatsApp reminders sent' : 'WhatsApp reminder sent',
+                    `${successCount} delivered${failedCount > 0 ? `, ${failedCount} failed` : ''}`,
+                ]
+            );
+        }
+
+        return ok(res, {
+            attempted_count: members.length,
+            sent_to_count: successCount,
+            failed_count: failedCount,
+            template_keys_used: Array.from(templateKeysUsed),
+            failures: failures.slice(0, 25),
+        });
+    } catch (err) {
+        console.error('REMINDER SEND ERROR:', err.message);
+        return fail(res, 500, 'REMINDER_SEND_FAILED', 'Failed to send WhatsApp reminders.');
+    }
+});
+
+// --- 5. SEGMENT PREVIEW (automation pipeline) ---
 router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
@@ -311,7 +520,7 @@ router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req,
     }
 });
 
-// --- 5. RUN CAMPAIGN (returns links + writes audit log) ---
+// --- 6. RUN CAMPAIGN (returns links + writes audit log) ---
 router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMessagingSchema();
@@ -492,7 +701,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
     }
 });
 
-// --- 6. CAMPAIGN HISTORY LOG ---
+// --- 7. CAMPAIGN HISTORY LOG ---
 router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
@@ -513,7 +722,7 @@ router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res
     }
 });
 
-// --- 7. DEEPER CHURN SCORES ---
+// --- 8. DEEPER CHURN SCORES ---
 router.get('/campaign/churn-scores', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;

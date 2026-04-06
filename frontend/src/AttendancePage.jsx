@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PageLoader from './PageLoader';
 import { QRCodeCanvas } from 'qrcode.react';
-import { openWhatsAppConversation } from './utils/externalNavigation';
+import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 
 function useCountUp(target, duration = 800) {
   const [display, setDisplay] = useState(0);
@@ -210,6 +210,7 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
   const [inactiveDays, setInactiveDays] = useState(7);
   const [inactiveMembers, setInactiveMembers] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [reminderLoadingId, setReminderLoadingId] = useState(null);
 
   const [warningState, setWarningState] = useState(null);
   const [qrModalState, setQrModalState] = useState(null);
@@ -839,9 +840,27 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
     }
   };
 
-  const sendReminder = (member) => {
-    const msg = `Hi ${member.full_name}, we missed you at the gym. It has been ${member.days_inactive} days since your last visit. Come back and continue your fitness streak!`;
-    openWhatsAppConversation({ phone: member.phone, message: msg });
+  const sendReminder = async (member) => {
+    if (!member?.id) {
+      toast?.('Member details are incomplete for this reminder.', 'warning');
+      return;
+    }
+
+    try {
+      setReminderLoadingId(member.id);
+      const payload = await sendWhatsAppReminders({
+        token,
+        memberIds: [member.id],
+        templateKey: 'INACTIVE',
+      });
+      const summary = summarizeReminderResult(payload, 'Reminder');
+      toast?.(summary.message, summary.tone);
+    } catch (err) {
+      const payload = asObject(err?.response?.data, {});
+      toast?.(payload.message || payload.error || 'Failed to send WhatsApp reminder.', 'error');
+    } finally {
+      setReminderLoadingId(null);
+    }
   };
 
   const weekdayPerformance = useMemo(() => {
@@ -1306,9 +1325,10 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
                 </div>
                 <button
                   onClick={() => sendReminder(m)}
-                  className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-black hover:bg-emerald-100 flex items-center gap-1"
+                  disabled={reminderLoadingId === m.id}
+                  className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-black hover:bg-emerald-100 flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <MessageSquare size={12} /> Remind
+                  {reminderLoadingId === m.id ? <RefreshCw size={12} className="animate-spin" /> : <MessageSquare size={12} />} Remind
                 </button>
               </div>
             ))
