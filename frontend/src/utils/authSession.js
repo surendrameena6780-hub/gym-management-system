@@ -1,6 +1,7 @@
 let sessionToken = '';
 let legacyTokenHydrated = false;
 
+const AUTH_TOKEN_STORAGE_KEY = 'gv_auth_token';
 const LEGACY_TOKEN_STORAGE_KEY = 'token';
 
 const getLocalStorage = () => {
@@ -10,6 +11,26 @@ const getLocalStorage = () => {
     return window.localStorage;
   } catch (_err) {
     return null;
+  }
+};
+
+const readStorageValue = (storage, key) => {
+  try {
+    return String(storage?.getItem(key) || '').trim();
+  } catch (_err) {
+    return '';
+  }
+};
+
+const writeStorageValue = (storage, key, value) => {
+  try {
+    if (value) {
+      storage?.setItem(key, value);
+    } else {
+      storage?.removeItem(key);
+    }
+  } catch (_err) {
+    // Ignore storage write failures and keep the in-memory token alive.
   }
 };
 
@@ -25,9 +46,16 @@ const readLegacyTokenOnce = () => {
     return '';
   }
 
-  const token = String(storage.getItem(LEGACY_TOKEN_STORAGE_KEY) || '').trim();
+  const persistedToken = readStorageValue(storage, AUTH_TOKEN_STORAGE_KEY);
+  if (persistedToken) {
+    writeStorageValue(storage, LEGACY_TOKEN_STORAGE_KEY, '');
+    return persistedToken;
+  }
+
+  const token = readStorageValue(storage, LEGACY_TOKEN_STORAGE_KEY);
   if (token) {
-    storage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+    writeStorageValue(storage, AUTH_TOKEN_STORAGE_KEY, token);
+    writeStorageValue(storage, LEGACY_TOKEN_STORAGE_KEY, '');
   }
 
   return token;
@@ -44,11 +72,15 @@ export const getSessionToken = () => {
 
 export const setSessionToken = (token) => {
   sessionToken = String(token || '').trim();
-  getLocalStorage()?.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+  const storage = getLocalStorage();
+  writeStorageValue(storage, AUTH_TOKEN_STORAGE_KEY, sessionToken);
+  writeStorageValue(storage, LEGACY_TOKEN_STORAGE_KEY, '');
   return sessionToken;
 };
 
 export const clearSessionToken = () => {
   sessionToken = '';
-  getLocalStorage()?.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+  const storage = getLocalStorage();
+  writeStorageValue(storage, AUTH_TOKEN_STORAGE_KEY, '');
+  writeStorageValue(storage, LEGACY_TOKEN_STORAGE_KEY, '');
 };

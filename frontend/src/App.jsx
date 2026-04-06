@@ -46,6 +46,7 @@ const NAV_ITEMS = [
 ];
 
 const MOBILE_PRIMARY_NAV = ['Dashboard', 'Members', 'Plans', 'Payments'];
+const AUTH_USER_STORAGE_KEY = 'user';
 
 const PAGE_PERMISSIONS = {
   Dashboard: null,
@@ -59,6 +60,56 @@ const PAGE_PERMISSIONS = {
   Insights: 'insights:read',
   Settings: 'owner:only',
   'Help & Support': 'support:read',
+};
+
+const getAuthStorage = () => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    return window.localStorage;
+  } catch (_err) {
+    return null;
+  }
+};
+
+const readStoredUser = () => {
+  const storage = getAuthStorage();
+  if (!storage) return null;
+
+  try {
+    const raw = String(storage.getItem(AUTH_USER_STORAGE_KEY) || '').trim();
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_err) {
+    try {
+      storage.removeItem(AUTH_USER_STORAGE_KEY);
+    } catch (_storageErr) {
+      // Ignore storage cleanup failures.
+    }
+    return null;
+  }
+};
+
+const writeStoredUser = (user) => {
+  const storage = getAuthStorage();
+  if (!storage) return;
+
+  if (!user || typeof user !== 'object') {
+    try {
+      storage.removeItem(AUTH_USER_STORAGE_KEY);
+    } catch (_err) {
+      // Ignore storage cleanup failures and fall back to in-memory state.
+    }
+    return;
+  }
+
+  try {
+    storage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(user));
+  } catch (_err) {
+    // Ignore storage write failures and fall back to in-memory state.
+  }
 };
 
 const TOUR_STEPS = [
@@ -318,7 +369,7 @@ function App() {
   const [attendanceSectionFocus, setAttendanceSectionFocus] = useState(null);
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(() => getSessionToken());
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => readStoredUser());
   const [isAuthChecking, setIsAuthChecking] = useState(!isHQ);
   const [isSuspended, setIsSuspended] = useState(false); 
   const [saasGrace, setSaasGrace] = useState(false);
@@ -391,7 +442,7 @@ function App() {
     if (!urlToken) return;
     stabilizeViewportAfterAuth();
     setSessionToken(urlToken);
-    localStorage.removeItem('user');
+    writeStoredUser(null);
     setCurrentUser(null);
     setToken(urlToken);
     setIsAuthChecking(true);
@@ -466,7 +517,7 @@ function App() {
 
   const clearAuthState = useCallback(({ redirectToLogin = true } = {}) => {
     clearSessionToken();
-    localStorage.removeItem('user');
+    writeStoredUser(null);
     localStorage.removeItem('gv_saas_grace_dismissed');
     
     // Wipe tour memory on logout
@@ -567,7 +618,11 @@ function App() {
         }
 
         if (user) {
+          writeStoredUser(user);
           setCurrentUser(user);
+        } else {
+          writeStoredUser(null);
+          setCurrentUser(null);
         }
         // Check SaaS status from auth/me response
         const saas = res.data?.saas;
@@ -592,8 +647,25 @@ function App() {
 
         setIsAuthChecking(false);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
+
+        const status = Number(err?.response?.status || 0);
+        const code = String(err?.response?.data?.code || '').trim().toUpperCase();
+        const shouldClearSession = status === 401
+          || status === 403
+          || status === 404
+          || code === 'AUTH_INVALID'
+          || code === 'AUTH_MISSING';
+
+        if (!shouldClearSession) {
+          const cachedUser = readStoredUser();
+          if (cachedUser) {
+            setCurrentUser(cachedUser);
+          }
+          setIsAuthChecking(false);
+          return;
+        }
 
         const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
         const shouldRedirectToLogin = Boolean(token) || !['/login', '/signup'].includes(currentPath);
@@ -1050,9 +1122,10 @@ function App() {
       setIsAuthChecking(false);
       setToken(nextToken);
       if (user) {
+        writeStoredUser(user);
         setCurrentUser(user);
       } else {
-        localStorage.removeItem('user');
+        writeStoredUser(null);
         setCurrentUser(null);
       }
         setVisitedPages(new Set(['Dashboard']));
