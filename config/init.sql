@@ -721,6 +721,7 @@ CREATE INDEX IF NOT EXISTS idx_rfid_events_reader_id ON rfid_events(reader_id);
 CREATE INDEX IF NOT EXISTS idx_rfid_events_member_id ON rfid_events(member_id);
 CREATE INDEX IF NOT EXISTS idx_rfid_events_tag_id ON rfid_events(tag_id);
 CREATE INDEX IF NOT EXISTS idx_rfid_events_created_at ON rfid_events(created_at);
+ALTER TABLE rfid_events ADD COLUMN IF NOT EXISTS member_snapshot JSONB DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_rfid_events_member_snapshot_gin ON rfid_events USING GIN (member_snapshot);
 
 -- =============================================================

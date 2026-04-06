@@ -195,6 +195,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [activeFilter, setActiveFilter] = useState(defaultFilter || 'All');
 
   const [showModal, setShowModal] = useState(false);
+  const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
   const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
@@ -676,6 +677,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const handleRecordPayment = async (e) => {
     if (e) e.preventDefault();
+    if (recordSubmitting) return;
+    setRecordSubmitting(true);
     try {
       const finalPayload = {
         ...formData,
@@ -691,6 +694,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       toast?.("Payment recorded successfully!", "success");
     } catch (err) {
       toast?.("Error recording payment. Please try again.", "error");
+    } finally {
+      setRecordSubmitting(false);
     }
   };
 
@@ -1990,7 +1995,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               </div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Payment Mode</label><div className="flex gap-2">{['Cash', 'Online'].map(mode => (<button key={mode} type="button" onClick={() => setFormData({...formData, payment_mode: mode})} className={`flex-1 py-3 rounded-xl text-xs font-bold border-2 transition-all ${formData.payment_mode === mode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-300'}`}>{mode}</button>))}</div></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Razorpay / UPI Reference ID</label><input type="text" className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10" placeholder="e.g. pay_Lw82..." value={formData.transaction_id} onChange={e => setFormData({...formData, transaction_id: e.target.value})} /></div>
-              <button type="submit" className="w-full py-4 bg-emerald-500 text-white rounded-xl font-black text-sm uppercase tracking-wider hover:bg-emerald-600 shadow-lg shadow-emerald-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2"><CheckCircle2 size={18} /> Confirm Payment</button>
+              <button type="submit" disabled={recordSubmitting} className="w-full py-4 bg-emerald-500 text-white rounded-xl font-black text-sm uppercase tracking-wider hover:bg-emerald-600 shadow-lg shadow-emerald-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"><CheckCircle2 size={18} /> {recordSubmitting ? 'Saving...' : 'Confirm Payment'}</button>
             </form>
           </div>
         </div>

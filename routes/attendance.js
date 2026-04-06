@@ -39,6 +39,15 @@ const normalizeRfidDeviceStatus = (value) => {
 
 const asBool = (value) => value === true || value === 'true' || value === 1 || value === '1';
 
+const safeCompareSecret = (expected, provided) => {
+    const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
+    const providedBuffer = Buffer.from(String(provided || ''), 'utf8');
+    if (expectedBuffer.length === 0 || providedBuffer.length === 0 || expectedBuffer.length !== providedBuffer.length) {
+        return false;
+    }
+    return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+};
+
 const haversineDistanceMeters = (lat1, lng1, lat2, lng2) => {
     const toRad = (degree) => (degree * Math.PI) / 180;
     const earthRadius = 6371000;
@@ -52,8 +61,8 @@ const haversineDistanceMeters = (lat1, lng1, lat2, lng2) => {
     return earthRadius * c;
 };
 
-const getMemberSnapshot = async (gym_id, member_id) => {
-    const result = await pool.query(
+const getMemberSnapshot = async (gym_id, member_id, db = pool) => {
+    const result = await db.query(
         `SELECT
             m.id,
             m.full_name,
@@ -100,8 +109,8 @@ const sendAttendanceError = (res, err) => {
     return res.status(500).json({ error: 'Server Error' });
 };
 
-const getGymAttendanceConfig = async (gym_id) => {
-    const gymConfigRes = await pool.query(
+const getGymAttendanceConfig = async (gym_id, db = pool) => {
+    const gymConfigRes = await db.query(
         `SELECT id, name, attendance_mode, attendance_geo_enabled, gym_latitude, gym_longitude, gym_radius_meters, allow_expired_checkin
          FROM gyms WHERE id = $1`,
         [gym_id]
@@ -206,8 +215,8 @@ const isTimeWithinWindow = (currentTime, startTime, endTime) => {
     return current >= start || current <= end;
 };
 
-const getGymLocalTimeContext = async (gym_id) => {
-    const timezone = await getGymTimezone(pool, gym_id);
+const getGymLocalTimeContext = async (gym_id, db = pool) => {
+    const timezone = await getGymTimezone(db, gym_id);
     const formatter = new Intl.DateTimeFormat('en-GB', {
         timeZone: timezone,
         weekday: 'short',
@@ -227,9 +236,9 @@ const getGymLocalTimeContext = async (gym_id) => {
     };
 };
 
-const getApplicableAccessPolicy = async ({ gym_id, plan_id }) => {
+const getApplicableAccessPolicy = async ({ gym_id, plan_id, db = pool }) => {
     if (!plan_id) return null;
-    const result = await pool.query(
+    const result = await db.query(
         `SELECT *
          FROM access_policies
          WHERE gym_id = $1
@@ -242,10 +251,10 @@ const getApplicableAccessPolicy = async ({ gym_id, plan_id }) => {
     return result.rows[0] || null;
 };
 
-const evaluateAccessPolicy = async ({ gym_id, member, policy, allow_override }) => {
+const evaluateAccessPolicy = async ({ gym_id, member, policy, allow_override, db = pool }) => {
     if (!policy) return null;
 
-    const localTime = await getGymLocalTimeContext(gym_id);
+    const localTime = await getGymLocalTimeContext(gym_id, db);
     const allowedDays = normalizeAllowedDays(policy.allowed_days);
     if (allowedDays.length > 0 && !allowedDays.includes(localTime.dayCode)) {
         return { reason: `Allowed days are ${allowedDays.join(', ')}.`, policy };
@@ -264,7 +273,7 @@ const evaluateAccessPolicy = async ({ gym_id, member, policy, allow_override }) 
 
     const maxDailyVisits = Number.parseInt(policy.max_daily_visits, 10) || 0;
     if (maxDailyVisits > 0) {
-        const visitsRes = await pool.query(
+        const visitsRes = await db.query(
             `SELECT COUNT(*)::INTEGER AS count
              FROM attendance
              WHERE gym_id = $1
@@ -301,160 +310,187 @@ const processAttendanceCheckin = async ({
     duplicateWindowSeconds = 600,
 }) => {
     const checkinMethod = normalizeMethod(method);
-    const gymConfig = await getGymAttendanceConfig(gym_id);
-    if (!gymConfig) {
-        throw createAttendanceError(404, { message: 'Gym not found.' });
-    }
+    const client = await pool.connect();
+    let transactionFinished = false;
 
-    const member = await getMemberSnapshot(gym_id, member_id);
-    if (!member) {
-        throw createAttendanceError(404, { message: 'Member not found.' });
-    }
+    try {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`attendance-checkin:${gym_id}:${member_id}`]);
 
-    const hasValidCoordinates = Number.isFinite(Number.parseFloat(latitude)) && Number.isFinite(Number.parseFloat(longitude));
-    const hasGeoConfig = Boolean(gymConfig.attendance_geo_enabled && gymConfig.gym_latitude && gymConfig.gym_longitude);
-
-    if (checkinMethod === 'SELF') {
-        if (!gymConfig.attendance_geo_enabled) {
-            throw createAttendanceError(403, {
-                code: 'SELF_CHECKIN_DISABLED',
-                message: 'Self check-in is not enabled for this gym yet.',
-            });
+        const gymConfig = await getGymAttendanceConfig(gym_id, client);
+        if (!gymConfig) {
+            throw createAttendanceError(404, { message: 'Gym not found.' });
         }
 
-        if (!hasGeoConfig) {
-            throw createAttendanceError(409, {
-                code: 'SELF_CHECKIN_NOT_CONFIGURED',
-                message: 'Gym location has not been configured yet. Ask the gym owner to finish attendance setup.',
-            });
+        const member = await getMemberSnapshot(gym_id, member_id, client);
+        if (!member) {
+            throw createAttendanceError(404, { message: 'Member not found.' });
         }
 
-        if (!hasValidCoordinates) {
-            throw createAttendanceError(400, {
-                code: 'LOCATION_REQUIRED',
-                message: 'Location is required for self check-in.',
-            });
+        const hasValidCoordinates = Number.isFinite(Number.parseFloat(latitude)) && Number.isFinite(Number.parseFloat(longitude));
+        const hasGeoConfig = Boolean(gymConfig.attendance_geo_enabled && gymConfig.gym_latitude && gymConfig.gym_longitude);
+
+        if (checkinMethod === 'SELF') {
+            if (!gymConfig.attendance_geo_enabled) {
+                throw createAttendanceError(403, {
+                    code: 'SELF_CHECKIN_DISABLED',
+                    message: 'Self check-in is not enabled for this gym yet.',
+                });
+            }
+
+            if (!hasGeoConfig) {
+                throw createAttendanceError(409, {
+                    code: 'SELF_CHECKIN_NOT_CONFIGURED',
+                    message: 'Gym location has not been configured yet. Ask the gym owner to finish attendance setup.',
+                });
+            }
+
+            if (!hasValidCoordinates) {
+                throw createAttendanceError(400, {
+                    code: 'LOCATION_REQUIRED',
+                    message: 'Location is required for self check-in.',
+                });
+            }
         }
-    }
 
-    const membershipStatus = String(member.membership_status || 'UNPAID').toUpperCase();
-    const isActiveMembership = membershipStatus === 'ACTIVE';
-    const canOverrideMembershipRule = !isActiveMembership && allow_override && gymConfig.allow_expired_checkin === true;
+        const membershipStatus = String(member.membership_status || 'UNPAID').toUpperCase();
+        const isActiveMembership = membershipStatus === 'ACTIVE';
+        const canOverrideMembershipRule = !isActiveMembership && allow_override && gymConfig.allow_expired_checkin === true;
 
-    if (!isActiveMembership && !canOverrideMembershipRule) {
-        await notifyBlockedMembershipAttempt({
-            gym: gymConfig,
-            member,
-            method: checkinMethod,
-            membershipStatus,
-        });
-        throw createAttendanceError(403, {
-            code: 'ATTENDANCE_BLOCKED',
-            message: `Access Denied: Membership is ${membershipStatus}`,
-            warning: 'Membership is not active. Override can be allowed by gym settings.',
-            member,
-        });
-    }
-
-    const accessPolicy = await getApplicableAccessPolicy({ gym_id, plan_id: member.plan_id });
-    const accessPolicyViolation = await evaluateAccessPolicy({
-        gym_id,
-        member,
-        policy: accessPolicy,
-        allow_override: Boolean(allow_override),
-    });
-    if (accessPolicyViolation) {
-        await notifyAccessPolicyBlockedAttempt({
-            gym: gymConfig,
-            member,
-            policyName: accessPolicyViolation.policy?.name,
-            reason: accessPolicyViolation.reason,
-        });
-        throw createAttendanceError(403, {
-            code: 'ACCESS_POLICY_BLOCKED',
-            message: `Access blocked by ${accessPolicyViolation.policy?.name || 'policy'}`,
-            warning: accessPolicyViolation.reason,
-            member,
-            policy: accessPolicyViolation.policy,
-        });
-    }
-
-    const recentDuplicate = await pool.query(
-        `SELECT id, check_in_time
-         FROM attendance
-         WHERE gym_id = $1 AND member_id = $2 AND deleted_at IS NULL AND check_in_time > NOW() - ($3 || ' seconds')::interval
-         ORDER BY check_in_time DESC
-         LIMIT 1`,
-        [gym_id, member_id, Math.max(1, duplicateWindowSeconds)]
-    );
-
-    if (recentDuplicate.rows.length > 0 && !allow_override) {
-        throw createAttendanceError(429, {
-            code: 'DUPLICATE_CHECKIN',
-            message: 'Check-in blocked: member already checked in very recently.',
-            last_checkin_time: recentDuplicate.rows[0].check_in_time,
-            member,
-        });
-    }
-
-    if (checkinMethod === 'SELF') {
-        const distanceMeters = haversineDistanceMeters(
-            parseFloat(gymConfig.gym_latitude),
-            parseFloat(gymConfig.gym_longitude),
-            parseFloat(latitude),
-            parseFloat(longitude)
-        );
-        const radius = parseInt(gymConfig.gym_radius_meters || 200, 10);
-
-        if (distanceMeters > radius && !allow_override) {
-            await notifyGeoBlockedAttempt({
+        if (!isActiveMembership && !canOverrideMembershipRule) {
+            await client.query('ROLLBACK');
+            transactionFinished = true;
+            await notifyBlockedMembershipAttempt({
                 gym: gymConfig,
                 member,
-                distance_meters: Math.round(distanceMeters),
-                allowed_radius_meters: radius,
+                method: checkinMethod,
+                membershipStatus,
             });
             throw createAttendanceError(403, {
-                code: 'GEO_BLOCKED',
-                message: 'Check-in blocked: device is outside gym location radius.',
-                distance_meters: Math.round(distanceMeters),
-                allowed_radius_meters: radius,
+                code: 'ATTENDANCE_BLOCKED',
+                message: `Access Denied: Membership is ${membershipStatus}`,
+                warning: 'Membership is not active. Override can be allowed by gym settings.',
                 member,
             });
         }
-    }
 
-    const checkinStatus = isActiveMembership ? 'ALLOWED' : 'OVERRIDE';
-
-    const newRecord = await pool.query(
-        `INSERT INTO attendance
-         (gym_id, member_id, check_in_time, checkin_method, staff_user_id, checkin_status, was_override, notes, latitude, longitude)
-         VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)
-         RETURNING *`,
-        [
+        const accessPolicy = await getApplicableAccessPolicy({ gym_id, plan_id: member.plan_id, db: client });
+        const accessPolicyViolation = await evaluateAccessPolicy({
             gym_id,
-            member_id,
-            checkinMethod,
-            staff_user_id,
-            checkinStatus,
-            checkinStatus === 'OVERRIDE',
-            notes || '',
-            latitude ? parseFloat(latitude) : null,
-            longitude ? parseFloat(longitude) : null,
-        ]
-    );
+            member,
+            policy: accessPolicy,
+            allow_override: Boolean(allow_override),
+            db: client,
+        });
+        if (accessPolicyViolation) {
+            await client.query('ROLLBACK');
+            transactionFinished = true;
+            await notifyAccessPolicyBlockedAttempt({
+                gym: gymConfig,
+                member,
+                policyName: accessPolicyViolation.policy?.name,
+                reason: accessPolicyViolation.reason,
+            });
+            throw createAttendanceError(403, {
+                code: 'ACCESS_POLICY_BLOCKED',
+                message: `Access blocked by ${accessPolicyViolation.policy?.name || 'policy'}`,
+                warning: accessPolicyViolation.reason,
+                member,
+                policy: accessPolicyViolation.policy,
+            });
+        }
 
-    await pool.query(
-        'UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2',
-        [member_id, gym_id]
-    );
+        const recentDuplicate = await client.query(
+            `SELECT id, check_in_time
+             FROM attendance
+             WHERE gym_id = $1 AND member_id = $2 AND deleted_at IS NULL AND check_in_time > NOW() - ($3 || ' seconds')::interval
+             ORDER BY check_in_time DESC
+             LIMIT 1`,
+            [gym_id, member_id, Math.max(1, duplicateWindowSeconds)]
+        );
 
-    return {
-        message: checkinStatus === 'OVERRIDE' ? 'Check-in recorded with override.' : 'Check-in Successful!',
-        details: newRecord.rows[0],
-        member,
-        warning: checkinStatus === 'OVERRIDE' ? `Member is ${membershipStatus}. Override recorded.` : null,
-        gym: { id: gymConfig.id, name: gymConfig.name },
-    };
+        if (recentDuplicate.rows.length > 0 && !allow_override) {
+            await client.query('ROLLBACK');
+            transactionFinished = true;
+            throw createAttendanceError(429, {
+                code: 'DUPLICATE_CHECKIN',
+                message: 'Check-in blocked: member already checked in very recently.',
+                last_checkin_time: recentDuplicate.rows[0].check_in_time,
+                member,
+            });
+        }
+
+        if (checkinMethod === 'SELF') {
+            const distanceMeters = haversineDistanceMeters(
+                parseFloat(gymConfig.gym_latitude),
+                parseFloat(gymConfig.gym_longitude),
+                parseFloat(latitude),
+                parseFloat(longitude)
+            );
+            const radius = parseInt(gymConfig.gym_radius_meters || 200, 10);
+
+            if (distanceMeters > radius && !allow_override) {
+                await client.query('ROLLBACK');
+                transactionFinished = true;
+                await notifyGeoBlockedAttempt({
+                    gym: gymConfig,
+                    member,
+                    distance_meters: Math.round(distanceMeters),
+                    allowed_radius_meters: radius,
+                });
+                throw createAttendanceError(403, {
+                    code: 'GEO_BLOCKED',
+                    message: 'Check-in blocked: device is outside gym location radius.',
+                    distance_meters: Math.round(distanceMeters),
+                    allowed_radius_meters: radius,
+                    member,
+                });
+            }
+        }
+
+        const checkinStatus = isActiveMembership ? 'ALLOWED' : 'OVERRIDE';
+
+        const newRecord = await client.query(
+            `INSERT INTO attendance
+             (gym_id, member_id, check_in_time, checkin_method, staff_user_id, checkin_status, was_override, notes, latitude, longitude)
+             VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)
+             RETURNING *`,
+            [
+                gym_id,
+                member_id,
+                checkinMethod,
+                staff_user_id,
+                checkinStatus,
+                checkinStatus === 'OVERRIDE',
+                notes || '',
+                latitude ? parseFloat(latitude) : null,
+                longitude ? parseFloat(longitude) : null,
+            ]
+        );
+
+        await client.query(
+            'UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2',
+            [member_id, gym_id]
+        );
+
+        await client.query('COMMIT');
+        transactionFinished = true;
+
+        return {
+            message: checkinStatus === 'OVERRIDE' ? 'Check-in recorded with override.' : 'Check-in Successful!',
+            details: newRecord.rows[0],
+            member,
+            warning: checkinStatus === 'OVERRIDE' ? `Member is ${membershipStatus}. Override recorded.` : null,
+            gym: { id: gymConfig.id, name: gymConfig.name },
+        };
+    } catch (err) {
+        if (!transactionFinished) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        throw err;
+    } finally {
+        client.release();
+    }
 };
 
 const buildMemberQrPayload = (gym_id, member_id) => {
@@ -1007,7 +1043,7 @@ router.post('/rfid/event', async (req, res) => {
             [readerSerial]
         );
         const device = deviceResult.rows[0];
-        if (!device || device.status !== 'ACTIVE' || device.shared_secret !== readerKey) {
+        if (!device || device.status !== 'ACTIVE' || !safeCompareSecret(device.shared_secret, readerKey)) {
             return res.status(403).json({ error: 'RFID reader authentication failed.' });
         }
 

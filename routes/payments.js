@@ -13,6 +13,7 @@ router.use(auth, saasMiddleware, requireOwner);
 
 const DUE_ZERO_THRESHOLD = 0.009;
 const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY_COLLECTION_LINK_TTL_SECONDS || '86400', 10));
+const PAYMENT_DEDUPE_WINDOW_SECONDS = Math.max(10, parseInt(process.env.PAYMENT_DEDUPE_WINDOW_SECONDS || '45', 10));
 let ensurePaymentCollectionsSchemaPromise;
 
 const ensurePaymentCollectionsSchema = async () => {
@@ -57,6 +58,55 @@ const formatCurrency = (value) => roundMoney(value).toLocaleString('en-IN', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
 });
+
+const buildAutoPaymentReference = (prefix, gymId, userId) => {
+    const safePrefix = String(prefix || 'INV').trim().toUpperCase() || 'INV';
+    const stamp = Date.now().toString(36).toUpperCase();
+    const entropy = crypto.randomBytes(2).toString('hex').toUpperCase();
+    return [safePrefix, gymId, userId, stamp, entropy].filter(Boolean).join('-');
+};
+
+const findRecentMatchingPayment = async (db, {
+    gymId,
+    userId,
+    planId,
+    amountPaid,
+    totalAmount,
+    paymentMode,
+    transactionId,
+    notes,
+    dedupeSeconds = PAYMENT_DEDUPE_WINDOW_SECONDS,
+}) => {
+    const result = await db.query(
+        `SELECT *
+         FROM payments
+         WHERE gym_id = $1
+           AND user_id = $2
+           AND plan_id = $3
+           AND deleted_at IS NULL
+           AND amount_paid = $4
+           AND total_amount = $5
+           AND LOWER(COALESCE(payment_mode, '')) = LOWER($6)
+           AND ($7 = '' OR COALESCE(transaction_id, '') = $7)
+           AND COALESCE(notes, '') = $8
+           AND payment_date > NOW() - ($9 || ' seconds')::interval
+         ORDER BY payment_date DESC
+         LIMIT 1`,
+        [
+            gymId,
+            userId,
+            planId,
+            amountPaid,
+            totalAmount,
+            String(paymentMode || ''),
+            String(transactionId || ''),
+            String(notes || ''),
+            Math.max(10, dedupeSeconds),
+        ]
+    );
+
+    return result.rows[0] || null;
+};
 
 const normalizeCollectionMode = (value) => {
     const raw = String(value || '').trim().toUpperCase();
@@ -590,32 +640,35 @@ router.get('/', async (req, res) => {
 router.post('/record', async (req, res) => {
     const { user_id, plan_id, amount_paid, total_amount, payment_mode, notes, transaction_id } = req.body;
     const gym_id = req.user.gym_id;
-    const client = await pool.connect();
 
     if (!user_id || !plan_id) {
-        client.release();
         return res.status(400).json({ error: 'user_id and plan_id are required.' });
     }
 
-    const parsedAmountPaid = parseFloat(amount_paid);
-    const parsedTotalAmount = parseFloat(total_amount ?? amount_paid);
-    if (isNaN(parsedAmountPaid) || parsedAmountPaid < 0) {
-        client.release();
+    const parsedAmountPaid = parseAmount(amount_paid);
+    const parsedTotalAmount = parseAmount(total_amount ?? amount_paid);
+    if (!Number.isFinite(parsedAmountPaid) || parsedAmountPaid < 0) {
         return res.status(400).json({ error: 'amount_paid must be a valid non-negative number.' });
     }
-    if (isNaN(parsedTotalAmount) || parsedTotalAmount < 0) {
-        client.release();
+    if (!Number.isFinite(parsedTotalAmount) || parsedTotalAmount < 0) {
         return res.status(400).json({ error: 'total_amount must be a valid non-negative number.' });
     }
+    if (parsedAmountPaid - parsedTotalAmount > DUE_ZERO_THRESHOLD) {
+        return res.status(400).json({ error: 'amount_paid cannot be greater than total_amount.' });
+    }
+
+    const client = await pool.connect();
 
     try {
-        const amount_due = parsedTotalAmount - parsedAmountPaid;
-        const status = amount_due > 0 ? 'Pending' : 'Completed';
-        const auto_inv_id = `INV-${Date.now().toString().slice(-6)}`;
+        const amount_due = roundMoney(parsedTotalAmount - parsedAmountPaid);
+        const status = amount_due > DUE_ZERO_THRESHOLD ? 'Pending' : 'Completed';
+        const normalizedTransactionId = String(transaction_id || '').trim();
+        const normalizedNotes = String(notes || '').trim();
+        const auto_inv_id = buildAutoPaymentReference('INV', gym_id, user_id);
 
-        const final_txn_id = (transaction_id && transaction_id.trim()) ? transaction_id : auto_inv_id;
-        const final_invoice_id = (transaction_id && transaction_id.startsWith('pay_')) ? transaction_id : auto_inv_id;
-        const final_mode = (transaction_id && transaction_id.startsWith('pay_')) ? 'Online' : (payment_mode || 'Cash');
+        const final_txn_id = normalizedTransactionId || auto_inv_id;
+        const final_invoice_id = normalizedTransactionId.startsWith('pay_') ? normalizedTransactionId : auto_inv_id;
+        const final_mode = normalizedTransactionId.startsWith('pay_') ? 'Online' : normalizeCollectionMode(payment_mode);
 
         const [memberResult, planResult] = await Promise.all([
             client.query(
@@ -637,6 +690,27 @@ router.post('/record', async (req, res) => {
         }
 
         await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payment-record:${gym_id}:${user_id}:${plan_id}`]);
+
+        const existingPayment = await findRecentMatchingPayment(client, {
+            gymId: gym_id,
+            userId: user_id,
+            planId: plan_id,
+            amountPaid: parsedAmountPaid,
+            totalAmount: parsedTotalAmount,
+            paymentMode: final_mode,
+            transactionId: normalizedTransactionId,
+            notes: normalizedNotes,
+        });
+
+        if (existingPayment) {
+            await client.query('ROLLBACK');
+            return res.json({
+                msg: 'Payment already recorded. Ignoring duplicate submit.',
+                payment: existingPayment,
+                duplicate: true,
+            });
+        }
 
         const newPayment = await client.query(
             `INSERT INTO payments
@@ -647,7 +721,7 @@ router.post('/record', async (req, res) => {
             [
                 gym_id, user_id, plan_id,
                 parsedAmountPaid, amount_due, parsedTotalAmount,
-                final_mode, status, final_invoice_id, final_txn_id, notes || '',
+                final_mode, status, final_invoice_id, final_txn_id, normalizedNotes,
             ]
         );
 

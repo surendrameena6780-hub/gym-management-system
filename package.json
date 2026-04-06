@@ -23,6 +23,7 @@
   "dependencies": {
     "apple-signin-auth": "^2.0.0",
     "bcryptjs": "^3.0.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.4",

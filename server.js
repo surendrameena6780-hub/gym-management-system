@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const helmet = require('helmet');
@@ -39,6 +40,9 @@ const exportRoutes = require('./routes/exports');
 
 dotenv.config();
 const app = express();
+let httpServer = null;
+let stopBackgroundJobRunner = null;
+let shuttingDown = false;
 
 const parseTrustProxySetting = (value) => {
     const raw = String(value || '').trim();
@@ -96,6 +100,7 @@ app.use(helmet({
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use(cors(corsOptions));
+app.use(compression({ threshold: 1024 }));
 app.use(enforceRequestPayloadLimits);
 
 const apiLimiter = rateLimit({
@@ -192,6 +197,14 @@ const exportLimiter = buildScopedLimiter({
     description: 'exports',
 });
 
+const rfidEventLimiter = buildScopedLimiter({
+    windowMs: 5 * 60 * 1000,
+    productionMax: 1200,
+    developmentMax: 12000,
+    code: 'RFID_EVENT_RATE_LIMITED',
+    description: 'RFID events',
+});
+
 app.use('/api/', (req, res, next) => {
     if (req.path === '/auth/login' || req.path === '/superadmin/login') {
         return next();
@@ -211,6 +224,7 @@ app.use('/api/leads', limitMethods(['POST'], leadCreateLimiter));
 app.use('/api/notifications/reminders/send', limitMethods(['POST'], notificationSendLimiter));
 app.use('/api/notifications/campaign/run', limitMethods(['POST'], notificationSendLimiter));
 app.use('/api/exports', limitMethods(['GET'], exportLimiter));
+app.use('/api/attendance/rfid/event', limitMethods(['POST'], rfidEventLimiter));
 
 app.use(
     '/uploads/profiles',
@@ -343,6 +357,7 @@ const PORT = process.env.PORT || 5000;
 const automatedNudgeIntervalMs = 1000 * 60 * 30;
 const retentionMaintenanceIntervalMs = 1000 * 60 * 60 * 12;
 const databaseBackupIntervalMs = Math.max(1, parseInt(process.env.DB_BACKUP_INTERVAL_HOURS || '24', 10) || 24) * 60 * 60 * 1000;
+const shutdownTimeoutMs = Math.max(5000, parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '20000', 10) || 20000);
 
 const scheduleRecurringJob = (job, intervalMs, runImmediately = true) => {
     let timer = null;
@@ -377,32 +392,110 @@ const scheduleRecurringJob = (job, intervalMs, runImmediately = true) => {
 };
 
 const startBackgroundJobs = () => {
-    scheduleRecurringJob(() => checkExpirations(), 1000 * 60 * 60);
+    const stopJobs = [];
 
-    scheduleRecurringJob(() => runAutomatedNotificationNudges().catch((err) => {
+    stopJobs.push(scheduleRecurringJob(() => checkExpirations().catch((err) => {
+        console.error('EXPIRY CHECK ERROR:', err.message);
+    }), 1000 * 60 * 60));
+
+    stopJobs.push(scheduleRecurringJob(() => runAutomatedNotificationNudges().catch((err) => {
         console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
-    }), automatedNudgeIntervalMs);
+    }), automatedNudgeIntervalMs));
 
-    scheduleRecurringJob(() => runRetentionMaintenance().catch((err) => {
+    stopJobs.push(scheduleRecurringJob(() => runRetentionMaintenance().catch((err) => {
         console.error('RETENTION MAINTENANCE ERROR:', err.message);
-    }), retentionMaintenanceIntervalMs);
+    }), retentionMaintenanceIntervalMs));
 
     if (String(process.env.DB_BACKUP_ENABLED || 'false').trim().toLowerCase() === 'true') {
-        scheduleRecurringJob(() => runDatabaseBackup().catch((err) => {
+        stopJobs.push(scheduleRecurringJob(() => runDatabaseBackup().catch((err) => {
             console.error('DATABASE BACKUP ERROR:', err.message);
-        }), databaseBackupIntervalMs);
+        }), databaseBackupIntervalMs));
+    }
+
+    return () => {
+        for (const stopJob of stopJobs) {
+            try {
+                stopJob();
+            } catch (err) {
+                console.error('BACKGROUND JOB STOP ERROR:', err.message);
+            }
+        }
+    };
+};
+
+const closeHttpServer = () => new Promise((resolve) => {
+    if (!httpServer) {
+        resolve();
+        return;
+    }
+
+    httpServer.close((err) => {
+        if (err) {
+            console.error('HTTP SERVER CLOSE ERROR:', err.message);
+        }
+        resolve();
+    });
+});
+
+const initiateShutdown = async (reason, exitCode = 0) => {
+    if (shuttingDown) {
+        return;
+    }
+
+    shuttingDown = true;
+    console.log(`Shutdown requested: ${reason}`);
+
+    if (typeof stopBackgroundJobRunner === 'function') {
+        stopBackgroundJobRunner();
+        stopBackgroundJobRunner = null;
+    }
+
+    const forceExitTimer = setTimeout(() => {
+        console.error('Shutdown timed out. Exiting forcefully.');
+        process.exit(exitCode || 1);
+    }, shutdownTimeoutMs);
+    if (typeof forceExitTimer.unref === 'function') {
+        forceExitTimer.unref();
+    }
+
+    try {
+        await closeHttpServer();
+        await pool.end();
+    } catch (err) {
+        console.error('SHUTDOWN ERROR:', err.message);
+        exitCode = exitCode || 1;
+    } finally {
+        clearTimeout(forceExitTimer);
+        process.exit(exitCode);
     }
 };
+
+process.on('SIGTERM', () => {
+    void initiateShutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+    void initiateShutdown('SIGINT');
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION:', err);
+    void initiateShutdown('uncaughtException', 1);
+});
 
 const bootstrap = async () => {
     try {
         await connectDB();
 
-        app.listen(PORT, () => {
+        httpServer = app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });
 
-        startBackgroundJobs();
+        stopBackgroundJobRunner = startBackgroundJobs();
     } catch (err) {
         console.error('STARTUP ERROR:', err.message);
         process.exit(1);

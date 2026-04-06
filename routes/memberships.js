@@ -12,6 +12,7 @@ const { decryptSecret } = require('../utils/secretCrypto');
 let ensureMemberPaymentsSchemaPromise;
 const MEMBER_CONNECT_STATE_TTL_MS = Math.max(60, parseInt(process.env.RAZORPAY_PARTNER_STATE_TTL_SECONDS || '600', 10)) * 1000;
 const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY_COLLECTION_LINK_TTL_SECONDS || '86400', 10));
+const ACTIVATION_DEDUPE_WINDOW_SECONDS = Math.max(10, parseInt(process.env.PAYMENT_DEDUPE_WINDOW_SECONDS || '45', 10));
 
 const ensureMemberPaymentsSchema = async () => {
     if (!ensureMemberPaymentsSchemaPromise) {
@@ -37,8 +38,38 @@ const ensureMemberPaymentsSchema = async () => {
 const buildDeskCollectionReference = (prefix, entityId) => {
     const safePrefix = String(prefix || 'COL').trim().toUpperCase() || 'COL';
     const safeEntityId = String(entityId || '').trim();
-    const timeStamp = Date.now().toString().slice(-6);
-    return safeEntityId ? `${safePrefix}-${safeEntityId}-${timeStamp}` : `${safePrefix}-${timeStamp}`;
+    const timeStamp = Date.now().toString(36).toUpperCase();
+    const entropy = crypto.randomBytes(2).toString('hex').toUpperCase();
+    return safeEntityId ? `${safePrefix}-${safeEntityId}-${timeStamp}-${entropy}` : `${safePrefix}-${timeStamp}-${entropy}`;
+};
+
+const findRecentActivationPayment = async (db, { gymId, memberId, planId, amount, paymentMode, transactionId }) => {
+    const result = await db.query(
+        `SELECT id, transaction_id, payment_date
+         FROM payments
+         WHERE gym_id = $1
+           AND user_id = $2
+           AND plan_id = $3
+           AND deleted_at IS NULL
+           AND amount_paid = $4
+           AND total_amount = $4
+           AND LOWER(COALESCE(payment_mode, '')) = LOWER($5)
+           AND ($6 = '' OR COALESCE(transaction_id, '') = $6)
+           AND payment_date > NOW() - ($7 || ' seconds')::interval
+         ORDER BY payment_date DESC
+         LIMIT 1`,
+        [
+            gymId,
+            memberId,
+            planId,
+            amount,
+            String(paymentMode || ''),
+            String(transactionId || ''),
+            ACTIVATION_DEDUPE_WINDOW_SECONDS,
+        ]
+    );
+
+    return result.rows[0] || null;
 };
 
 const normalizeCollectionContact = (value) => {
@@ -390,66 +421,99 @@ const verifySignedState = (stateValue) => {
 };
 
 const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentMode, paymentId }) => {
-    const planResult = await pool.query(
-        'SELECT * FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL',
-        [planId, gymId]
-    );
-    if (planResult.rows.length === 0) {
-        return { ok: false, status: 404, error: 'Plan not found' };
-    }
+    const client = await pool.connect();
 
-    const memberResult = await pool.query(
-        'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-        [memberId, gymId]
-    );
-    if (memberResult.rows.length === 0) {
-        return { ok: false, status: 404, error: 'Member not found' };
-    }
-
-    const plan = planResult.rows[0];
-    const days = plan.duration_days || (plan.duration_months * 30) || 30;
-    const price = parseFloat(plan.price) || 0;
-
-    const finalMode = paymentMode || (paymentId && String(paymentId).startsWith('pay_') ? 'Online' : 'Cash');
-    const finalTxnId = paymentId || `INV-${Date.now()}`;
-
-    await pool.query('BEGIN');
     try {
-        await pool.query(
+        const [planResult, memberResult] = await Promise.all([
+            client.query(
+                'SELECT * FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL',
+                [planId, gymId]
+            ),
+            client.query(
+                'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                [memberId, gymId]
+            ),
+        ]);
+
+        if (planResult.rows.length === 0) {
+            return { ok: false, status: 404, error: 'Plan not found' };
+        }
+
+        if (memberResult.rows.length === 0) {
+            return { ok: false, status: 404, error: 'Member not found' };
+        }
+
+        const plan = planResult.rows[0];
+        const days = plan.duration_days || (plan.duration_months * 30) || 30;
+        const price = parseFloat(plan.price) || 0;
+        const normalizedPaymentId = String(paymentId || '').trim();
+        const finalMode = paymentMode || (normalizedPaymentId.startsWith('pay_') ? 'Online' : 'Cash');
+        const finalTxnId = normalizedPaymentId || buildDeskCollectionReference('INV', memberId);
+
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`membership-activate:${gymId}:${memberId}:${planId}`]);
+
+        const existingPayment = await findRecentActivationPayment(client, {
+            gymId,
+            memberId,
+            planId,
+            amount: price,
+            paymentMode: finalMode,
+            transactionId: normalizedPaymentId,
+        });
+
+        if (existingPayment) {
+            await client.query('ROLLBACK');
+            return {
+                ok: true,
+                data: {
+                    message: 'Membership was already activated. Ignoring duplicate submit.',
+                    payment_mode: finalMode,
+                    transaction_id: existingPayment.transaction_id || finalTxnId,
+                    amount: price,
+                    plan_name: plan.name,
+                    duplicate: true,
+                },
+            };
+        }
+
+        await client.query(
             "UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL",
             [memberId, gymId]
         );
-        await pool.query(
+        await client.query(
             "UPDATE members SET status = 'ACTIVE', joining_date = COALESCE(joining_date, CURRENT_DATE) WHERE id = $1 AND gym_id = $2",
             [memberId, gymId]
         );
-        await pool.query(
+        await client.query(
             `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
              VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
             [gymId, memberId, planId, days]
         );
-        await pool.query(
+        await client.query(
             `INSERT INTO payments
              (gym_id, user_id, plan_id, amount_paid, total_amount, payment_date, status, payment_mode, transaction_id, invoice_id)
              VALUES ($1, $2, $3, $4, $5, NOW(), 'Completed', $6, $7, $8)`,
             [gymId, memberId, planId, price, price, finalMode, finalTxnId, finalTxnId]
         );
-        await pool.query('COMMIT');
-    } catch (err) {
-        await pool.query('ROLLBACK');
-        throw err;
-    }
+        await client.query('COMMIT');
 
-    return {
-        ok: true,
-        data: {
-            message: 'Subscription Activated/Renewed Successfully!',
-            payment_mode: finalMode,
-            transaction_id: finalTxnId,
-            amount: price,
-            plan_name: plan.name,
-        },
-    };
+        return {
+            ok: true,
+            data: {
+                message: 'Subscription Activated/Renewed Successfully!',
+                payment_mode: finalMode,
+                transaction_id: finalTxnId,
+                amount: price,
+                plan_name: plan.name,
+            },
+        };
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
 };
 
 // --- 1. ACTIVATE / RENEW ---

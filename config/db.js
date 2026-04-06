@@ -118,8 +118,10 @@ const enforceMembersPhonePresence = async (client) => {
 
 const addRfidEventSnapshots = async (client) => {
     await client.query(`
-        ALTER TABLE rfid_events ADD COLUMN IF NOT EXISTS member_snapshot JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE rfid_events ADD COLUMN IF NOT EXISTS member_snapshot JSONB DEFAULT '{}'::jsonb
+    `);
 
+    await client.query(`
         UPDATE rfid_events e
         SET member_snapshot = jsonb_build_object(
             'id', m.id,
@@ -130,10 +132,31 @@ const addRfidEventSnapshots = async (client) => {
         )
         FROM members m
         WHERE e.member_id = m.id
-          AND (e.member_snapshot IS NULL OR e.member_snapshot = '{}'::jsonb);
+          AND (e.member_snapshot IS NULL OR e.member_snapshot = '{}'::jsonb)
+    `);
 
+    await client.query(`
         CREATE INDEX IF NOT EXISTS idx_rfid_events_member_snapshot_gin
-            ON rfid_events USING GIN (member_snapshot);
+            ON rfid_events USING GIN (member_snapshot)
+    `);
+};
+
+const createPerformanceIndexes = async (client) => {
+    await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_memberships_member_gym_end_active
+            ON memberships(member_id, gym_id, end_date DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_gym_member_time_active
+            ON attendance(gym_id, member_id, check_in_time DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_payments_gym_user_plan_date_active
+            ON payments(gym_id, user_id, plan_id, payment_date DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_rfid_events_gym_processed_event_time
+            ON rfid_events(gym_id, processed, event_timestamp DESC);
     `);
 };
 
@@ -149,6 +172,7 @@ const runSchemaMigrations = async () => {
         await runNamedMigration(client, '2026-04-06-protect-gym-hard-deletes', protectGymHardDeletes);
         await runNamedMigration(client, '2026-04-06-members-phone-required', enforceMembersPhonePresence);
         await runNamedMigration(client, '2026-04-06-rfid-event-snapshots', addRfidEventSnapshots);
+        await runNamedMigration(client, '2026-04-07-performance-indexes', createPerformanceIndexes);
     } finally {
         await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['gymvault-schema-migrations']).catch(() => {});
         client.release();
@@ -161,7 +185,7 @@ const pool = new Pool({
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     database: process.env.DB_NAME,
-    max: parsePositiveInt(process.env.DB_POOL_MAX, 30),
+    max: parsePositiveInt(process.env.DB_POOL_MAX, 60),
     min: parsePositiveInt(process.env.DB_POOL_MIN, 5),
     idleTimeoutMillis: parsePositiveInt(process.env.DB_IDLE_TIMEOUT_MS, 60000),
     connectionTimeoutMillis: parsePositiveInt(process.env.DB_CONNECTION_TIMEOUT_MS, 5000),
@@ -339,6 +363,9 @@ const connectDB = async () => {
                 attendance_record_id INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
                 created_at           TIMESTAMPTZ DEFAULT NOW()
             );
+        `);
+        await pool.query(`
+            ALTER TABLE rfid_events ADD COLUMN IF NOT EXISTS member_snapshot JSONB DEFAULT '{}'::jsonb;
         `);
         await pool.query(`
             ALTER TABLE memberships ADD COLUMN IF NOT EXISTS freeze_start_date DATE;
