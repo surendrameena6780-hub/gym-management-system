@@ -861,7 +861,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   const handleBroadcast = async (e) => {
     e.preventDefault();
     if (!broadcastTemplateKey) {
-      toast('Select an approved WhatsApp template before launching the broadcast.', 'warning');
+      toast('Select an approved WhatsApp template before sending the broadcast.', 'warning');
       return;
     }
     try {
@@ -890,7 +890,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
       setBroadcastCustomIds([]);
       fetchData();
     } catch (err) {
-      toast(err?.response?.data?.error || 'Broadcast launch failed.', 'error');
+      toast(err?.response?.data?.error || 'Broadcast send failed.', 'error');
     } finally {
       setIsAutomating(false);
     }
@@ -2661,7 +2661,7 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
                 <button type="submit" disabled={isAutomating || !broadcastTemplateKey || broadcastTemplates.length === 0}
                   className="w-full py-3 rounded-xl font-black text-sm text-white transition-all hover:opacity-90 active:scale-98"
                   style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(16,185,129,0.35)', opacity: (isAutomating || !broadcastTemplateKey || broadcastTemplates.length === 0) ? 0.6 : 1 }}>
-                  {isAutomating ? 'Launching...' : 'Launch Broadcast'}
+                  {isAutomating ? 'Sending...' : 'Send Broadcast'}
                 </button>
               </div>
             </form>

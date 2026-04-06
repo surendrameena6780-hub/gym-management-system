@@ -20,6 +20,8 @@ const AUDIENCE_MAP = {
     HighChurn: 'HIGH_CHURN',
 };
 
+const WHATSAPP_SEND_CONCURRENCY = Math.max(1, Math.min(10, parseInt(process.env.MSG91_SEND_CONCURRENCY || '5', 10) || 5));
+
 const CHURN_SCORE_SQL = `
 WITH latest_membership AS (
     SELECT DISTINCT ON (ms.member_id)
@@ -280,6 +282,24 @@ const pickApprovedTemplate = (templateMap, candidateKeys = []) => {
     return null;
 };
 
+const runWithConcurrency = async (items, concurrency, worker) => {
+    const queue = Array.isArray(items) ? items : [];
+    if (queue.length === 0) return;
+
+    let nextIndex = 0;
+    const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, queue.length));
+
+    const runners = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < queue.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            await worker(queue[currentIndex], currentIndex);
+        }
+    });
+
+    await Promise.all(runners);
+};
+
 // --- 1. GET ALL NOTIFICATIONS & UNREAD COUNT ---
 router.get('/', auth, saasMiddleware, async (req, res) => {
     try {
@@ -423,7 +443,7 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
         const failures = [];
         const templateKeysUsed = new Set();
 
-        for (const member of members) {
+        await runWithConcurrency(members, WHATSAPP_SEND_CONCURRENCY, async (member) => {
             const toPhone = normalizeLocalIndianPhone(member.phone);
             if (!toPhone) {
                 failedCount += 1;
@@ -433,7 +453,7 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
                     phone: member.phone,
                     reason: 'Valid phone number not available.',
                 });
-                continue;
+                return;
             }
 
             const selectedTemplate = pickApprovedTemplate(
@@ -451,7 +471,7 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
                         ? `Template ${requestedTemplateKey} is not approved for sending.`
                         : 'No approved reminder template is available for this member.',
                 });
-                continue;
+                return;
             }
 
             try {
@@ -473,7 +493,7 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
                     reason: sendErr?.message || 'Send failed',
                 });
             }
-        }
+        });
 
         if (successCount > 0) {
             await pool.query(
@@ -641,7 +661,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         let failedCount = 0;
         const failures = [];
 
-        for (const member of targetMembers) {
+        await runWithConcurrency(targetMembers, WHATSAPP_SEND_CONCURRENCY, async (member) => {
             const toPhone = normalizeLocalIndianPhone(member.phone);
             try {
                 await sendWhatsAppTemplate({
@@ -661,7 +681,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
                     reason: sendErr?.message || 'Send failed',
                 });
             }
-        }
+        });
 
         const status = successCount === 0 ? 'FAILED' : failedCount > 0 ? 'PARTIAL' : 'SENT';
 

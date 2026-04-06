@@ -396,7 +396,8 @@ const syncGymWhatsAppState = async (gymId) => {
 
         let providerTemplates = await listWhatsAppTemplates(matchedNumber.integrated_number);
         const providerTemplateMap = new Map(providerTemplates.map((template) => [String(template.template_name || '').toLowerCase(), template]));
-        let createdTemplate = false;
+        let shouldRefreshProviderTemplates = false;
+        const submittedTemplateNames = new Set();
 
         for (const template of initialState.templates) {
             const desiredName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
@@ -427,8 +428,15 @@ const syncGymWhatsAppState = async (gymId) => {
                         category: desiredCategory,
                         whatsappText: template.whatsapp_text,
                     });
-                    createdTemplate = true;
+                    shouldRefreshProviderTemplates = true;
+                    submittedTemplateNames.add(desiredName.toLowerCase());
                 } catch (templateErr) {
+                    if (looksLikeMsg91TemplateDuplicate(templateErr)) {
+                        shouldRefreshProviderTemplates = true;
+                        submittedTemplateNames.add(desiredName.toLowerCase());
+                        continue;
+                    }
+
                     if (!looksLikeMsg91TemplateDuplicate(templateErr)) {
                         await pool.query(
                             `UPDATE gym_message_templates
@@ -447,7 +455,7 @@ const syncGymWhatsAppState = async (gymId) => {
             }
         }
 
-        if (createdTemplate) {
+        if (shouldRefreshProviderTemplates) {
             providerTemplates = await listWhatsAppTemplates(matchedNumber.integrated_number);
         }
 
@@ -458,16 +466,21 @@ const syncGymWhatsAppState = async (gymId) => {
             const desiredName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
             const desiredCategory = pickTemplateCategory(template.template_key);
             const providerTemplate = refreshedProviderMap.get(desiredName.toLowerCase());
+            const currentStatus = normalizeTemplateStatus(template.whatsapp_template_status || 'NOT_SYNCED');
             const nextStatus = template.is_active === false
                 ? 'DISABLED'
                 : providerTemplate
                     ? normalizeTemplateStatus(providerTemplate.template_status)
-                    : normalizeTemplateStatus(template.whatsapp_template_status || 'NOT_SYNCED');
+                    : submittedTemplateNames.has(desiredName.toLowerCase())
+                        ? 'PENDING'
+                        : currentStatus;
             const nextError = template.is_active === false
                 ? null
                 : providerTemplate
                     ? null
-                    : template.whatsapp_template_error || null;
+                    : submittedTemplateNames.has(desiredName.toLowerCase())
+                        ? null
+                        : template.whatsapp_template_error || null;
 
             await pool.query(
                 `UPDATE gym_message_templates
