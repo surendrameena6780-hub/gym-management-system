@@ -81,6 +81,18 @@ const normalizeDocumentUrl = (value) => {
     }
 };
 
+const buildMemberLifecycleStatusCase = (alias) => `
+    CASE
+        WHEN UPPER(COALESCE(${alias}.membership_status, 'UNPAID')) = 'FROZEN' THEN 'FROZEN'
+        WHEN UPPER(COALESCE(${alias}.membership_status, 'UNPAID')) = 'UNPAID' OR ${alias}.plan_name IS NULL THEN 'UNPAID'
+        WHEN COALESCE(${alias}.days_left, 0) <= 0 THEN 'EXPIRED'
+        WHEN COALESCE(${alias}.days_left, 0) <= 7 THEN 'EXPIRING SOON'
+        WHEN CURRENT_DATE - COALESCE(COALESCE(${alias}.latest_payment_date::date, ${alias}.joining_date::date), CURRENT_DATE) <= 14 THEN 'ACTIVE'
+        WHEN CURRENT_DATE - COALESCE(COALESCE(${alias}.last_visit::date, ${alias}.latest_payment_date::date, ${alias}.joining_date::date), CURRENT_DATE) > 14 THEN 'INACTIVE'
+        ELSE 'ACTIVE'
+    END
+`;
+
 // --- 1. GET ALL MEMBERS ---
 router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
@@ -90,7 +102,7 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
         const offset = (page - 1) * limit;
         const search = String(req.query.search || '').trim();
         const status = String(req.query.status || '').trim().toUpperCase();
-        const paginate = String(req.query.paginate || '').toLowerCase() === 'true';
+        const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
 
         const queryParams = [gym_id];
         let whereClause = 'WHERE m.gym_id = $1 AND m.deleted_at IS NULL';
@@ -98,11 +110,6 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
         if (search) {
             queryParams.push(`%${search}%`);
             whereClause += ` AND (m.full_name ILIKE $${queryParams.length} OR m.email ILIKE $${queryParams.length} OR m.phone ILIKE $${queryParams.length})`;
-        }
-
-        if (status) {
-            queryParams.push(status);
-            whereClause += ` AND COALESCE(ms_latest.status, 'UNPAID') = $${queryParams.length}`;
         }
 
         const baseQuery = `
@@ -140,44 +147,37 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
                 ORDER BY ms.end_date DESC, ms.id DESC
                 LIMIT 1
             ) ms_latest ON true
-            ${whereClause}
-            ORDER BY m.id DESC`;
+            ${whereClause}`;
+
+        const labeledQuery = `
+            SELECT members_base.*, ${buildMemberLifecycleStatusCase('members_base')} AS member_lifecycle_status
+            FROM (${baseQuery}) members_base
+        `;
+
+        const filteredParams = [...queryParams];
+        let filteredQuery = labeledQuery;
+
+        if (status && status !== 'ALL') {
+            filteredParams.push(status);
+            filteredQuery = `
+                SELECT *
+                FROM (${labeledQuery}) filtered_members
+                WHERE member_lifecycle_status = $${filteredParams.length}
+            `;
+        }
+
+        const orderedQuery = `${filteredQuery} ORDER BY id DESC`;
 
         if (!paginate) {
-            const result = await pool.query(baseQuery, queryParams);
+            const result = await pool.query(orderedQuery, filteredParams);
             return res.json(result.rows);
         }
 
-        const pagedParams = [...queryParams, limit, offset];
-        const pagedResult = await pool.query(`${baseQuery} LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}`, pagedParams);
-
-        // Count query must mirror the exact same WHERE clause (including status filter)
-        // so pagination totals are accurate when filtering by membership status.
-        const countParams = [gym_id];
-        let countWhere = 'WHERE m.gym_id = $1 AND m.deleted_at IS NULL';
-
-        if (search) {
-            countParams.push(`%${search}%`);
-            countWhere += ` AND (m.full_name ILIKE $${countParams.length} OR m.email ILIKE $${countParams.length} OR m.phone ILIKE $${countParams.length})`;
-        }
-
-        if (status) {
-            countParams.push(status);
-            countWhere += ` AND COALESCE(ms_count.status, 'UNPAID') = $${countParams.length}`;
-        }
-
+        const pagedParams = [...filteredParams, limit, offset];
+        const pagedResult = await pool.query(`${orderedQuery} LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}`, pagedParams);
         const countResult = await pool.query(
-            `SELECT COUNT(*)::INTEGER AS total
-             FROM members m
-             LEFT JOIN LATERAL (
-                 SELECT ms.status
-                 FROM memberships ms
-                 WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
-                 ORDER BY ms.end_date DESC
-                 LIMIT 1
-             ) ms_count ON true
-             ${countWhere}`,
-            countParams
+            `SELECT COUNT(*)::INTEGER AS total FROM (${filteredQuery}) counted_members`,
+            filteredParams
         );
 
         const total = countResult.rows[0]?.total || 0;
@@ -197,6 +197,95 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
     } catch (err) {
         console.error("MEMBER LIST ERROR:", err.message);
         res.status(500).json({ error: "Server Error" });
+    }
+});
+
+router.get('/summary', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const result = await pool.query(
+            `SELECT
+                COUNT(*)::INTEGER AS total,
+                COUNT(*) FILTER (WHERE member_lifecycle_status = 'ACTIVE')::INTEGER AS active,
+                COUNT(*) FILTER (WHERE member_lifecycle_status = 'INACTIVE')::INTEGER AS inactive,
+                COUNT(*) FILTER (WHERE member_lifecycle_status = 'EXPIRING SOON')::INTEGER AS expiring_soon,
+                COUNT(*) FILTER (WHERE member_lifecycle_status = 'EXPIRED')::INTEGER AS expired,
+                COUNT(*) FILTER (WHERE member_lifecycle_status = 'UNPAID')::INTEGER AS unpaid,
+                COUNT(*) FILTER (WHERE member_lifecycle_status = 'FROZEN')::INTEGER AS frozen
+             FROM (
+                SELECT ${buildMemberLifecycleStatusCase('members_base')} AS member_lifecycle_status
+                FROM (
+                    SELECT
+                        m.id,
+                        m.joining_date,
+                        m.last_visit,
+                        COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
+                        CASE
+                            WHEN ms_latest.end_date IS NULL THEN 0
+                            ELSE GREATEST(0, (ms_latest.end_date::date - CURRENT_DATE::date))
+                        END AS days_left,
+                        (
+                            SELECT MAX(pay.payment_date)
+                            FROM payments pay WHERE pay.user_id = m.id AND gym_id = $1 AND pay.deleted_at IS NULL
+                        ) AS latest_payment_date,
+                        ms_latest.plan_name
+                    FROM members m
+                    LEFT JOIN LATERAL (
+                        SELECT ms.status, ms.end_date, p.name AS plan_name
+                        FROM memberships ms
+                        LEFT JOIN plans p ON ms.plan_id = p.id
+                        WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
+                        ORDER BY ms.end_date DESC, ms.id DESC
+                        LIMIT 1
+                    ) ms_latest ON true
+                    WHERE m.gym_id = $1 AND m.deleted_at IS NULL
+                ) members_base
+             ) member_summary`,
+            [gym_id]
+        );
+
+        return res.json(result.rows[0] || {
+            total: 0,
+            active: 0,
+            inactive: 0,
+            expiring_soon: 0,
+            expired: 0,
+            unpaid: 0,
+            frozen: 0,
+        });
+    } catch (err) {
+        console.error('MEMBER SUMMARY ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.get('/options', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const search = String(req.query.search || '').trim();
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '20', 10) || 20, 1), 50);
+        const params = [gym_id];
+        let whereClause = 'WHERE gym_id = $1 AND deleted_at IS NULL';
+
+        if (search) {
+            params.push(`%${search}%`);
+            whereClause += ` AND (full_name ILIKE $${params.length} OR phone ILIKE $${params.length} OR email ILIKE $${params.length})`;
+        }
+
+        params.push(limit);
+        const result = await pool.query(
+            `SELECT id, full_name, phone, email, profile_pic
+             FROM members
+             ${whereClause}
+             ORDER BY last_visit DESC NULLS LAST, id DESC
+             LIMIT $${params.length}`,
+            params
+        );
+
+        return res.json(result.rows);
+    } catch (err) {
+        console.error('MEMBER OPTIONS ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
     }
 });
 

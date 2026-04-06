@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   Search, Plus, X, Phone, MessageSquare, Target, Clock3, CalendarDays,
@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { openWhatsAppConversation } from './utils/externalNavigation';
 import PageLoader from './PageLoader';
+import PaginationControls from './components/PaginationControls';
 
 const STATUS_OPTIONS = [
   { key: 'ALL', label: 'All', pill: 'bg-slate-900 text-white', subtle: 'bg-slate-100 text-slate-600' },
@@ -112,12 +113,13 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingLead, setEditingLead] = useState(null);
   const [formState, setFormState] = useState(INITIAL_FORM);
   const loadCompletedRef = useRef(false);
 
-  const fetchLeadsData = async ({ soft = false } = {}) => {
+  const fetchLeadsData = useCallback(async ({ soft = false } = {}) => {
     if (!token) return;
 
     if (soft) setRefreshing(true);
@@ -129,6 +131,9 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
         axios.get('/api/leads', {
           headers: { 'x-auth-token': token },
           params: {
+            paginate: true,
+            page: pagination.page,
+            limit: pagination.limit,
             search: searchTerm || undefined,
             status: statusFilter,
           },
@@ -136,7 +141,11 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
       ]);
 
       setSummary(summaryRes.data || {});
-      setLeads(Array.isArray(leadsRes.data) ? leadsRes.data : []);
+      setLeads(Array.isArray(leadsRes.data?.items) ? leadsRes.data.items : []);
+      setPagination((prev) => ({
+        ...prev,
+        ...(leadsRes.data?.pagination || {}),
+      }));
       loadCompletedRef.current = true;
     } catch (_err) {
       toast?.('Unable to load leads right now.', 'error');
@@ -144,7 +153,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [pagination.limit, pagination.page, searchTerm, statusFilter, toast, token]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -154,7 +163,11 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
     }, soft ? 180 : 0);
 
     return () => window.clearTimeout(timer);
-  }, [token, searchTerm, statusFilter]);
+  }, [fetchLeadsData, token]);
+
+  useEffect(() => {
+    setPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
+  }, [searchTerm, statusFilter]);
 
   const closeFormModal = () => {
     setShowFormModal(false);
@@ -329,14 +342,14 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
   return (
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2">
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
-        {metrics.map(({ label, value, icon: Icon, box }) => (
-          <div key={label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${box}`}>
-              <Icon size={18} />
+        {metrics.map((metric) => (
+          <div key={metric.label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metric.box}`}>
+              <metric.icon size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{label}</p>
-              <p className="text-2xl font-black text-slate-900 leading-none">{value}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{metric.label}</p>
+              <p className="text-2xl font-black text-slate-900 leading-none">{metric.value}</p>
             </div>
           </div>
         ))}
@@ -545,6 +558,15 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 </tbody>
               </table>
             </div>
+
+            {pagination.totalPages > 1 && (
+              <PaginationControls
+                pagination={pagination}
+                itemLabel="leads"
+                onPageChange={(nextPage) => setPagination((prev) => ({ ...prev, page: nextPage }))}
+                onLimitChange={(nextLimit) => setPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
+              />
+            )}
           </>
         )}
       </div>

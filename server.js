@@ -10,6 +10,12 @@ const path = require('path');
 const { PROFILE_UPLOAD_DIR, allowedProfileImageExtensions } = require('./utils/profileUploads');
 const { setUserAuthCookie } = require('./utils/authCookies');
 const { enforceRequestPayloadLimits } = require('./utils/requestPayloadGuards');
+const {
+    runtimeTelemetryMiddleware,
+    captureExpressError,
+    captureProcessError,
+    capturePoolError,
+} = require('./utils/runtimeTelemetry');
 
 // Import Jobs and Middleware
 const checkExpirations = require('./jobs/expiryCheck');
@@ -68,6 +74,16 @@ const corsOrigins = (process.env.CORS_ORIGIN || '')
     .map((value) => value.trim())
     .filter(Boolean);
 const isProduction = process.env.NODE_ENV === 'production';
+const REQUIRED_NODE_VERSION = '20.18.0';
+const currentNodeVersion = String(process.version || '').replace(/^v/, '');
+
+if (isProduction && currentNodeVersion !== REQUIRED_NODE_VERSION) {
+    throw new Error(`FATAL: Production backend requires Node ${REQUIRED_NODE_VERSION}. Current runtime is ${currentNodeVersion}.`);
+}
+
+if (!isProduction && currentNodeVersion !== REQUIRED_NODE_VERSION) {
+    console.warn(`Node ${currentNodeVersion} detected. Production is pinned to ${REQUIRED_NODE_VERSION}.`);
+}
 
 const defaultDevOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
 const trustProxySetting = parseTrustProxySetting(process.env.TRUST_PROXY);
@@ -102,6 +118,7 @@ app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use(cors(corsOptions));
 app.use(compression({ threshold: 1024 }));
 app.use(enforceRequestPayloadLimits);
+app.use(runtimeTelemetryMiddleware);
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -345,8 +362,9 @@ app.get('/', (req, res) => {
     res.send('Gym Management System API: Online');
 });
 
-app.use((err, req, res, next) => {
+app.use(async (err, req, res, next) => {
     console.error('UNHANDLED ERROR:', err);
+    await captureExpressError(err, req);
     if (res.headersSent) return next(err);
     return res.status(err.status || 500).json({
         error: 'Server Error',
@@ -423,6 +441,10 @@ const startBackgroundJobs = () => {
     };
 };
 
+pool.on('error', (err) => {
+    void capturePoolError(err);
+});
+
 const closeHttpServer = () => new Promise((resolve) => {
     if (!httpServer) {
         resolve();
@@ -480,10 +502,14 @@ process.on('SIGINT', () => {
 
 process.on('unhandledRejection', (reason) => {
     console.error('UNHANDLED REJECTION:', reason);
+    const error = reason instanceof Error ? reason : new Error(String(reason || 'Unhandled rejection'));
+    void captureProcessError(error, 'unhandledRejection');
+    void initiateShutdown('unhandledRejection', 1);
 });
 
 process.on('uncaughtException', (err) => {
     console.error('UNCAUGHT EXCEPTION:', err);
+    void captureProcessError(err, 'uncaughtException');
     void initiateShutdown('uncaughtException', 1);
 });
 

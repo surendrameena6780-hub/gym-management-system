@@ -27,7 +27,8 @@ export const Card = ({ children, className = '', style = {} }) => (
   </div>
 );
 
-export const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onClick, tag }) => {
+export const KPICard = (props) => {
+  const { title, value, iconGradient, index = 0, onClick, tag } = props;
   const strVal = String(value ?? '');
   const prefix = strVal.startsWith('₹') ? '₹' : '';
   const suffix = strVal.endsWith('%') ? '%' : '';
@@ -53,7 +54,7 @@ export const KPICard = ({ title, value, icon: Icon, iconGradient, index = 0, onC
           className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-lg"
           style={{ background: iconGradient, boxShadow: '0 4px 14px rgba(0,0,0,0.15)' }}
         >
-          <Icon size={17} strokeWidth={2} />
+          <props.icon size={17} strokeWidth={2} />
         </div>
         {onClick && (
           <div className="w-6 h-6 rounded-full bg-slate-50 group-hover:bg-indigo-50 flex items-center justify-center transition-colors duration-200 mt-0.5">

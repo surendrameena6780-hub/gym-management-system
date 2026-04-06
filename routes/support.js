@@ -5,8 +5,20 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
 const { ensurePlatformSettingsBase, normalizeSupportProfile } = require('../utils/platformSettings');
+const { captureClientError } = require('../utils/runtimeTelemetry');
 
 router.use(auth, saasMiddleware);
+
+router.post('/client-errors', async (req, res) => {
+    try {
+        const payload = req.body && typeof req.body === 'object' ? req.body : {};
+        await captureClientError(req, payload);
+        return res.status(202).json({ accepted: true });
+    } catch (err) {
+        console.error('CLIENT ERROR INGEST ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to capture client error.' });
+    }
+});
 
 let ensureSupportProfileTablePromise;
 const ensureSupportProfileTable = async () => {

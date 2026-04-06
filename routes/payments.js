@@ -54,6 +54,11 @@ const parseAmount = (value) => {
     return roundMoney(Number.parseFloat(value));
 };
 
+const normalizeDateInput = (value) => {
+    const raw = String(value || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+};
+
 const formatCurrency = (value) => roundMoney(value).toLocaleString('en-IN', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
@@ -567,10 +572,17 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
 router.get('/', async (req, res) => {
     try {
         await ensurePaymentCollectionsSchema();
-        const { search } = req.query;
+        const search = String(req.query.search || '').trim();
+        const filter = String(req.query.filter || 'ALL').trim().toUpperCase();
+        const fromDate = normalizeDateInput(req.query.from);
+        const toDate = normalizeDateInput(req.query.to);
+        const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
+        const page = Math.max(Number.parseInt(req.query.page || '1', 10) || 1, 1);
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '20', 10) || 20, 1), 200);
+        const offset = (page - 1) * limit;
         const gym_id = req.user.gym_id;
 
-        let query = `
+        let baseQuery = `
             SELECT
                 p.id,
                 p.user_id,
@@ -623,14 +635,64 @@ router.get('/', async (req, res) => {
         const params = [gym_id];
 
         if (search) {
-            query += ` AND (m.full_name ILIKE $2 OR p.invoice_id ILIKE $2 OR p.transaction_id ILIKE $2)`;
             params.push(`%${search}%`);
+            baseQuery += ` AND (
+                m.full_name ILIKE $${params.length}
+                OR m.email ILIKE $${params.length}
+                OR m.phone ILIKE $${params.length}
+                OR p.invoice_id ILIKE $${params.length}
+                OR p.transaction_id ILIKE $${params.length}
+                OR COALESCE(pl.name, '') ILIKE $${params.length}
+            )`;
         }
 
-        query += ` ORDER BY p.payment_date DESC`;
+        if (fromDate) {
+            params.push(fromDate);
+            baseQuery += ` AND p.payment_date::date >= $${params.length}::date`;
+        }
 
-        const result = await pool.query(query, params);
-        res.json(result.rows);
+        if (toDate) {
+            params.push(toDate);
+            baseQuery += ` AND p.payment_date::date <= $${params.length}::date`;
+        }
+
+        if (filter === 'PENDING') {
+            baseQuery += ` AND LOWER(COALESCE(p.status, '')) = 'pending' AND COALESCE(p.amount_due, 0) > 0`;
+        } else if (filter === 'CASH') {
+            baseQuery += ` AND (LOWER(COALESCE(p.payment_mode, '')) = 'cash' OR COALESCE(pc.cash_collected_total, 0) > 0)`;
+        } else if (filter === 'ONLINE') {
+            baseQuery += ` AND (LOWER(COALESCE(p.payment_mode, '')) = 'online' OR COALESCE(pc.online_collected_total, 0) > 0)`;
+        }
+
+        const orderedQuery = `${baseQuery} ORDER BY p.payment_date DESC, p.id DESC`;
+        const listResult = await pool.query(
+            paginate
+                ? `${orderedQuery} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`
+                : orderedQuery,
+            paginate ? [...params, limit, offset] : params
+        );
+
+        if (!paginate) {
+            return res.json(listResult.rows);
+        }
+
+        const countResult = await pool.query(
+            `SELECT COUNT(*)::INTEGER AS total FROM (${baseQuery}) payments_list`,
+            params
+        );
+        const total = Number(countResult.rows[0]?.total || 0);
+
+        return res.json({
+            items: listResult.rows,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.max(1, Math.ceil(total / limit)),
+                hasNext: page * limit < total,
+                hasPrev: page > 1,
+            },
+        });
     } catch (err) {
         console.error('GET PAYMENTS ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });
@@ -764,12 +826,27 @@ router.get('/stats', async (req, res) => {
     try {
         await ensurePaymentCollectionsSchema();
         const gym_id = req.user.gym_id;
+        const fromDate = normalizeDateInput(req.query.from);
+        const toDate = normalizeDateInput(req.query.to);
+        const params = [gym_id];
+        let paymentDateClause = '';
+
+        if (fromDate) {
+            params.push(fromDate);
+            paymentDateClause += ` AND payment_date::date >= $${params.length}::date`;
+        }
+
+        if (toDate) {
+            params.push(toDate);
+            paymentDateClause += ` AND payment_date::date <= $${params.length}::date`;
+        }
+
         const [revenue, today, pending] = await Promise.all([
             pool.query(
                 `SELECT COALESCE(SUM(amount_paid), 0) AS total
                  FROM payments
-                 WHERE gym_id = $1 AND deleted_at IS NULL`,
-                [gym_id]
+                 WHERE gym_id = $1 AND deleted_at IS NULL${paymentDateClause}`,
+                params
             ),
             pool.query(
                 `WITH collection_totals AS (
@@ -787,29 +864,25 @@ router.get('/stats', async (req, res) => {
                     LEFT JOIN collection_totals ct ON ct.payment_id = p.id
                     WHERE p.gym_id = $1
                       AND p.deleted_at IS NULL
+                      ${paymentDateClause}
                       AND p.payment_date::date = CURRENT_DATE
                 ),
                 due_collections_today AS (
-                    SELECT COALESCE(SUM(pc.collected_amount), 0) AS total
-                    FROM payment_collections pc
-                    JOIN payments p ON p.id = pc.payment_id
-                    WHERE pc.gym_id = $1
-                      AND p.deleted_at IS NULL
-                      AND pc.created_at::date = CURRENT_DATE
+                    SELECT 0::numeric AS total
                 )
                 SELECT (
                     COALESCE((SELECT total FROM initial_payments_today), 0)
                     + COALESCE((SELECT total FROM due_collections_today), 0)
                 ) AS total`,
-                [gym_id]
+                params
             ),
             pool.query(
                 `SELECT COALESCE(SUM(amount_due), 0) AS pending
                  FROM payments
                  WHERE gym_id = $1
                    AND status = 'Pending'
-                   AND deleted_at IS NULL`,
-                [gym_id]
+                   AND deleted_at IS NULL${paymentDateClause}`,
+                params
             ),
         ]);
 

@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import PageLoader from './PageLoader';
+import PaginationControls from './components/PaginationControls';
 import { QRCodeCanvas } from 'qrcode.react';
 import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
@@ -179,6 +180,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   const [feed, setFeed] = useState([]);
   const [records, setRecords] = useState([]);
+  const [recordsPagination, setRecordsPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
   const [feedView, setFeedView] = useState('live');
   const [range, setRange] = useState('today');
   const [fromDate, setFromDate] = useState('');
@@ -208,29 +210,29 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   const [editingPolicyId, setEditingPolicyId] = useState(null);
   const [planOptions, setPlanOptions] = useState([]);
 
-  const fetchAccessPolicies = async () => {
+  const fetchAccessPolicies = useCallback(async () => {
     try {
       setPoliciesLoading(true);
       const res = await axios.get('/api/finance/access-policies', headers);
       setAccessPolicies(Array.isArray(res.data) ? res.data : []);
     } catch { setAccessPolicies([]); } finally { setPoliciesLoading(false); }
-  };
+  }, [headers]);
 
-  const fetchPlans = async () => {
+  const fetchPlans = useCallback(async () => {
     try {
       const res = await axios.get('/api/plans', headers);
       setPlanOptions(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPlanOptions([]);
     }
-  };
+  }, [headers]);
 
   useEffect(() => {
     if (attendanceTab === 'policies' && isOwner) {
       fetchAccessPolicies();
       fetchPlans();
     }
-  }, [attendanceTab, isOwner, token]);
+  }, [attendanceTab, fetchAccessPolicies, fetchPlans, isOwner]);
 
   useEffect(() => {
     if (!focusSection || !isActive) return undefined;
@@ -346,15 +348,15 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     ? '—'
     : `${String(overview.peak_hour_today).padStart(2, '0')}:00`;
 
-  const refreshAttendanceViews = () => Promise.all([
+  const refreshAttendanceViews = useCallback(() => Promise.all([
     loadOverviewBundle(),
     loadPeakHours(peakHoursDays),
     loadRecords(),
     loadInactive(inactiveDays),
     loadLeaderboard(),
-  ]);
+  ]), [inactiveDays, loadInactive, loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, peakHoursDays]);
 
-  const handleCheckinSuccess = (payload, fallbackMember = null, fallbackMethod = null) => {
+  const handleCheckinSuccess = useCallback((payload, fallbackMember = null, fallbackMethod = null) => {
     const body = asObject(payload, {});
     const detail = asObject(body.details, {});
     const member = asObject(body.member, fallbackMember || {});
@@ -394,7 +396,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
     refreshAttendanceViews().catch(() => {});
     window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'attendance' } }));
-  };
+  }, [checkinMethod, currentUser?.full_name, currentUser?.name, refreshAttendanceViews, toast]);
 
   const copyText = async (value, successMessage, errorMessage) => {
     if (!value || typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -563,7 +565,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     }
   };
 
-  const submitScannedQr = async (decodedText) => {
+  const submitScannedQr = useCallback(async (decodedText) => {
     setBusyQrAction(true);
     try {
       const res = await axios.post('/api/attendance/checkin/qr', {
@@ -590,9 +592,9 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     } finally {
       setBusyQrAction(false);
     }
-  };
+  }, [checkinNote, headers, handleCheckinSuccess, selectedMember, toast]);
 
-  const loadOverviewBundle = async () => {
+  const loadOverviewBundle = useCallback(async () => {
     const [overviewRes, feedRes, heatmapRes, modeRes] = await Promise.all([
       axios.get('/api/attendance/overview', headers),
       axios.get('/api/attendance/feed?limit=25', headers),
@@ -614,9 +616,9 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       gym_radius_meters: modeData.gym_radius_meters || DEFAULT_GYM_RADIUS_METERS,
       allow_expired_checkin: Boolean(modeData.allow_expired_checkin),
     }));
-  };
+  }, [headers]);
 
-  const loadPeakHours = async (period) => {
+  const loadPeakHours = useCallback(async (period) => {
     const url = period === 'today'
       ? '/api/attendance/peak-hours?today=true'
       : `/api/attendance/peak-hours?days=${period}`;
@@ -627,18 +629,28 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         count: item.count || 0,
       }))
     );
-  };
+  }, [headers]);
 
-  const loadRecords = async () => {
-    let url = `/api/attendance/records?range=${range}`;
-    if (range === 'custom' && fromDate && toDate) {
-      url += `&from=${fromDate}&to=${toDate}`;
-    }
-    const res = await axios.get(url, headers);
+  const loadRecords = useCallback(async () => {
+    const res = await axios.get('/api/attendance/records', {
+      ...headers,
+      params: {
+        paginate: true,
+        page: recordsPagination.page,
+        limit: recordsPagination.limit,
+        range,
+        from: range === 'custom' && fromDate ? fromDate : undefined,
+        to: range === 'custom' && toDate ? toDate : undefined,
+      },
+    });
     setRecords(asArray(unwrapApiData(res.data)));
-  };
+    setRecordsPagination((prev) => ({
+      ...prev,
+      ...(res.data?.pagination || {}),
+    }));
+  }, [fromDate, headers, range, recordsPagination.limit, recordsPagination.page, toDate]);
 
-  const loadInactive = async (days = inactiveDays) => {
+  const loadInactive = useCallback(async (days = inactiveDays) => {
     const requestId = inactiveRequestSeqRef.current + 1;
     inactiveRequestSeqRef.current = requestId;
 
@@ -648,14 +660,14 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     }
 
     setInactiveMembers(asArray(unwrapApiData(res.data)));
-  };
+  }, [headers, inactiveDays]);
 
-  const loadLeaderboard = async () => {
+  const loadLeaderboard = useCallback(async () => {
     const res = await axios.get('/api/attendance/leaderboard?days=30&limit=6', headers);
     setLeaderboard(asArray(unwrapApiData(res.data)));
-  };
+  }, [headers]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
@@ -665,26 +677,30 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     } finally {
       setLoading(false);
     }
-  };
+  }, [loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, peakHoursDays, toast, token]);
 
   useEffect(() => {
     loadAll();
-  }, [token]);
+  }, [loadAll]);
 
   useEffect(() => {
     if (!token) return;
     loadPeakHours(peakHoursDays);
-  }, [peakHoursDays]);
+  }, [loadPeakHours, peakHoursDays, token]);
 
   useEffect(() => {
     if (!token) return;
     loadRecords().catch(() => toast?.('Failed to load attendance table.', 'error'));
+  }, [loadRecords, recordsPagination.limit, recordsPagination.page, toast, token]);
+
+  useEffect(() => {
+    setRecordsPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
   }, [range, fromDate, toDate]);
 
   useEffect(() => {
     if (!token) return;
     loadInactive(inactiveDays).catch(() => toast?.('Failed to load inactive members.', 'error'));
-  }, [inactiveDays, token]);
+  }, [inactiveDays, loadInactive, toast, token]);
 
   useEffect(() => {
     if (!qrScannerOpen) return undefined;
@@ -755,7 +771,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       setQrScannerBooting(false);
       stopScanner();
     };
-  }, [qrScannerOpen, token]);
+  }, [qrScannerOpen, submitScannedQr, toast, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -775,7 +791,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     }, 220);
 
     return () => clearTimeout(timer);
-  }, [searchText, headers]);
+  }, [headers, searchText, token]);
 
   const saveModeSettings = async () => {
     if (!isOwner) {
@@ -1245,6 +1261,17 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                   </tbody>
                 </table>
               </div>
+
+              {recordsPagination.totalPages > 1 && (
+                <div className="pt-4">
+                  <PaginationControls
+                    pagination={recordsPagination}
+                    itemLabel="records"
+                    onPageChange={(nextPage) => setRecordsPagination((prev) => ({ ...prev, page: nextPage }))}
+                    onLimitChange={(nextLimit) => setRecordsPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

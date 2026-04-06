@@ -47,7 +47,8 @@ const Card = ({ children, className = '' }) => (
   </div>
 );
 
-const KPICard = ({ title, value, change, trend, icon: Icon, color, className = '' }) => {
+const KPICard = (props) => {
+  const { title, value, change, trend, color, className = '' } = props;
   const strVal = String(value ?? '');
   const prefix = strVal.startsWith('₹') ? '₹' : '';
   const suffix = strVal.endsWith('%') ? '%' : '';
@@ -60,7 +61,7 @@ const KPICard = ({ title, value, change, trend, icon: Icon, color, className = '
     <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col justify-between hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${className}`}>
       <div className="flex justify-between items-start mb-4">
         <div className={`p-3 rounded-xl ${color} bg-opacity-10 text-opacity-100`}>
-          <Icon size={20} className={color.replace('bg-', 'text-')} />
+          <props.icon size={20} className={color.replace('bg-', 'text-')} />
         </div>
         {change ? (
           <div className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${trend === 'up' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
@@ -110,8 +111,7 @@ const normalizeInsightsPayload = (payload) => ({
 });
 
 const InsightsPage = ({ appRuntime, isActive = true }) => {
-  const { token, toast, showConfirm, currentUser } = appRuntime;
-  const gymName = currentUser?.gym_name || 'GymVault';
+  const { token, toast, showConfirm } = appRuntime;
   const [activeTab, setActiveTab] = useState('revenue');
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [loading, setLoading] = useState(true);

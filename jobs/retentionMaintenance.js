@@ -27,6 +27,11 @@ const ARCHIVE_CONFIG = [
         retentionDays: Math.max(30, Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '365', 10) || 365),
     },
     {
+        sourceTable: 'system_runtime_events',
+        timestampColumn: 'created_at',
+        retentionDays: Math.max(14, Number.parseInt(process.env.RUNTIME_EVENT_RETENTION_DAYS || '60', 10) || 60),
+    },
+    {
         sourceTable: 'support_ticket_messages',
         timestampColumn: 'created_at',
         retentionDays: Math.max(30, Number.parseInt(process.env.SUPPORT_MESSAGE_RETENTION_DAYS || '365', 10) || 365),

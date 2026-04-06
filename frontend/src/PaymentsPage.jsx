@@ -12,6 +12,7 @@ import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import PaginationControls from './components/PaginationControls';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -107,6 +108,8 @@ const INSIGHT_TONE_STYLES = {
 const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled, isActive = true }) => {
   const { token, toast, showConfirm } = appRuntime;
   const [payments, setPayments] = useState([]);
+  const [ledgerPayments, setLedgerPayments] = useState([]);
+  const [ledgerPagination, setLedgerPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
   const [stats, setStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState('30d');
@@ -247,7 +250,6 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [posCart, setPosCart] = useState([]);
   const [posCheckout, setPosCheckout] = useState({ member_id: '', payment_mode: 'Cash', notes: '' });
   const [posSubmitting, setPosSubmitting] = useState(false);
-  const [financeLoading, setFinanceLoading] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ category: '', vendor: '', description: '', amount: '', bill_date: '', payment_mode: 'Cash' });
   const [showPayrollModal, setShowPayrollModal] = useState(false);
@@ -265,7 +267,6 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   }, [dateRange, resolveDateRangeBounds]);
 
   const fetchFinanceOverview = useCallback(async () => {
-    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/overview', {
         headers: { 'x-auth-token': token },
@@ -274,56 +275,42 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       setFinanceOverview(extractObject(res.data, {}));
     } catch {
       setFinanceOverview(null);
-    } finally {
-      setFinanceLoading(false);
     }
   }, [financeOverviewParams, token]);
 
   const fetchExpenses = useCallback(async () => {
-    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/expenses', { headers: { 'x-auth-token': token } });
       setExpenses(Array.isArray(res.data) ? res.data : []);
     } catch {
       setExpenses([]);
-    } finally {
-      setFinanceLoading(false);
     }
   }, [token]);
 
   const fetchPayroll = useCallback(async () => {
-    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/payroll', { headers: { 'x-auth-token': token } });
       setPayrollEntries(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPayrollEntries([]);
-    } finally {
-      setFinanceLoading(false);
     }
   }, [token]);
 
   const fetchPosProducts = useCallback(async () => {
-    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/pos/products', { headers: { 'x-auth-token': token } });
       setPosProducts(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPosProducts([]);
-    } finally {
-      setFinanceLoading(false);
     }
   }, [token]);
 
   const fetchPosSales = useCallback(async () => {
-    setFinanceLoading(true);
     try {
       const res = await axios.get('/api/finance/pos/sales', { headers: { 'x-auth-token': token } });
       setPosSales(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPosSales([]);
-    } finally {
-      setFinanceLoading(false);
     }
   }, [token]);
 
@@ -527,7 +514,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } finally {
       setDueReminderLoadingId(null);
     }
-  }, [toast, token]);
+  }, [showConfirm, toast, token]);
 
   const handleDueCall = useCallback((payment) => {
     const digits = String(payment?.member_phone || '').replace(/\D/g, '');
@@ -562,54 +549,61 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     }, 180);
   }, [onSectionHandled]);
 
-  const matchesFilter = useCallback((payment, filter) => {
-    if (filter === 'Pending') {
-      return String(payment.status || '').toLowerCase() === 'pending' && Number(payment.amount_due || 0) > 0;
+  const filteredPayments = ledgerPayments;
+
+  const loadMemberOptions = useCallback(async (query = '') => {
+    try {
+      const res = await axios.get('/api/members/options', {
+        headers: { 'x-auth-token': token },
+        params: {
+          search: query || undefined,
+          limit: 20,
+        },
+      });
+      setMembers(extractArray(res.data, ['members', 'rows', 'items']));
+    } catch (_err) {
+      setMembers([]);
     }
-    if (filter === 'Cash') {
-      const mode = String(payment.effective_payment_mode || payment.payment_mode || '').toLowerCase();
-      return mode === 'cash' || mode === 'mixed';
+  }, [token]);
+
+  const loadLedger = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/payments', {
+        headers: { 'x-auth-token': token },
+        params: {
+          paginate: true,
+          page: ledgerPagination.page,
+          limit: ledgerPagination.limit,
+          search: deferredSearchTerm || undefined,
+          filter: activeFilter,
+          from: financeOverviewParams.from,
+          to: financeOverviewParams.to,
+        },
+      });
+
+      const ledgerData = extractArray(res.data, ['payments', 'rows', 'items']).map((payment) => ({
+        ...payment,
+        profile_pic: normalizeProfileImageUrl(payment?.profile_pic),
+      }));
+      setLedgerPayments(ledgerData);
+      setLedgerPagination((prev) => ({
+        ...prev,
+        ...(res.data?.pagination || {}),
+      }));
+    } catch (err) {
+      reportClientError('Payments load ledger', err);
+      setLedgerPayments([]);
     }
-    if (filter === 'Online') {
-      const mode = String(payment.effective_payment_mode || payment.payment_mode || '').toLowerCase();
-      return mode === 'online' || mode === 'mixed';
-    }
-    return true;
-  }, []);
+  }, [activeFilter, deferredSearchTerm, financeOverviewParams.from, financeOverviewParams.to, ledgerPagination.limit, ledgerPagination.page, token]);
 
-  const filteredPayments = useMemo(() => {
-    const query = String(deferredSearchTerm || '').trim().toLowerCase();
-
-    return dateFilteredPayments.filter((payment) => {
-      if (!matchesFilter(payment, activeFilter)) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      const searchableFields = [
-        payment.member_name,
-        payment.member_email,
-        payment.member_phone,
-        payment.plan_name,
-        payment.invoice_id,
-        payment.transaction_id,
-      ];
-
-      return searchableFields.some((field) => String(field || '').toLowerCase().includes(query));
-    });
-  }, [activeFilter, deferredSearchTerm, matchesFilter, dateFilteredPayments]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const headers = { 'x-auth-token': token };
       const [paymentsRes, statsRes, membersRes, plansRes] = await Promise.all([
-        axios.get('/api/payments', { headers }),
-        axios.get('/api/payments/stats', { headers }),
-        axios.get('/api/members', { headers }),
+        axios.get('/api/payments', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to } }),
+        axios.get('/api/payments/stats', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to } }),
+        axios.get('/api/members/options', { headers, params: { limit: 20 } }),
         axios.get('/api/plans', { headers })
       ]);
 
@@ -629,14 +623,27 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       reportClientError('Payments load data', err);
       setLoading(false);
     }
-  };
+  }, [financeOverviewParams.from, financeOverviewParams.to, token]);
 
-  fetchDataRef.current = fetchData;
+  const refreshAllData = useCallback(async () => {
+    await Promise.all([fetchData(), loadLedger()]);
+  }, [fetchData, loadLedger]);
+
+  fetchDataRef.current = refreshAllData;
 
   useEffect(() => {
     if (!token || !isActive) return;
     fetchData();
-  }, [token, isActive]);
+  }, [fetchData, isActive, token]);
+
+  useEffect(() => {
+    if (!token || !isActive) return;
+    loadLedger();
+  }, [activeFilter, deferredSearchTerm, isActive, ledgerPagination.limit, ledgerPagination.page, loadLedger, token]);
+
+  useEffect(() => {
+    setLedgerPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
+  }, [activeFilter, deferredSearchTerm, financeOverviewParams.from, financeOverviewParams.to]);
 
   useEffect(() => {
     setActiveFilter(defaultFilter || 'All');
@@ -657,12 +664,12 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     if (!token) return;
 
     const refreshPayments = () => {
-      fetchData();
+      refreshAllData();
     };
 
     window.addEventListener('gymvault:data-changed', refreshPayments);
     return () => window.removeEventListener('gymvault:data-changed', refreshPayments);
-  }, [token]);
+  }, [refreshAllData, token]);
 
   useEffect(() => {
     if (!focusSection) return;
@@ -674,6 +681,11 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       }
     };
   }, [focusFinanceSection, focusSection]);
+
+  useEffect(() => {
+    if (!showModal || !token) return;
+    loadMemberOptions(memberSearch);
+  }, [loadMemberOptions, memberSearch, showModal, token]);
 
   const handleRecordPayment = async (e) => {
     if (e) e.preventDefault();
@@ -689,10 +701,10 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       setMemberSearch('');
       setShowMemberDropdown(false);
       setFormData({ user_id: '', plan_id: '', amount_paid: '', total_amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
-      await fetchData();
+      await refreshAllData();
       window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
       toast?.("Payment recorded successfully!", "success");
-    } catch (err) {
+    } catch (_err) {
       toast?.("Error recording payment. Please try again.", "error");
     } finally {
       setRecordSubmitting(false);
@@ -711,7 +723,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
             headers: { 'x-auth-token': token }
           });
           setShowReceipt(false);
-          await fetchData();
+          await refreshAllData();
           window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
           toast?.("Transaction deleted. Member status reset.", "success");
         } catch (err) {
@@ -739,7 +751,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         headers: { 'x-auth-token': token }
       });
       setMemberHistory(extractArray(res.data, ['history', 'payments', 'rows', 'items']));
-    } catch (err) {
+    } catch (_err) {
       // silently fail
     } finally {
       setHistoryLoading(false);
@@ -787,13 +799,13 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const settleDueLocally = useCallback(async (payload, fallbackMessage) => {
     const updatedPayment = { ...(dueModalPayment || {}), ...(payload?.payment || {}) };
     resetDueModal();
-    await fetchData();
+    await refreshAllData();
     window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments-due' } }));
     toast?.(payload?.message || fallbackMessage || 'Pending due collected successfully.', 'success');
     if (updatedPayment?.id) {
       await openReceipt(updatedPayment);
     }
-  }, [dueModalPayment, fetchData, openReceipt, resetDueModal, toast]);
+  }, [dueModalPayment, openReceipt, refreshAllData, resetDueModal, toast]);
 
   const checkDueRazorpayStatus = useCallback(async ({ manual = false } = {}) => {
     const paymentLinkId = dueRazorpayContext?.payment_link?.id;
@@ -1016,11 +1028,12 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } finally {
       setDueSubmitting(false);
     }
-  }, [checkDueRazorpayStatus, dueCollectionContext, dueFormData.amount, dueFormData.notes, dueFormData.payment_mode, dueModalPayment, dueOnlineMode, dueRazorpayContext, dueSubmitting, settleDueLocally, toast, token]);
+  }, [checkDueRazorpayStatus, dueCollectionContext, dueFormData.amount, dueFormData.notes, dueFormData.payment_mode, dueFormData.transaction_id, dueModalPayment, dueOnlineMode, dueRazorpayContext, dueSubmitting, settleDueLocally, toast, token]);
 
   useEffect(() => {
     if (!focusPaymentId) return;
-    const targetPayment = payments.find((payment) => Number(payment.id) === Number(focusPaymentId));
+    const targetPayment = ledgerPayments.find((payment) => Number(payment.id) === Number(focusPaymentId))
+      || payments.find((payment) => Number(payment.id) === Number(focusPaymentId));
     if (!targetPayment) return;
 
     setActiveFilter('Pending');
@@ -1030,7 +1043,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       openReceipt(targetPayment);
     }
     onFocusHandled?.();
-  }, [focusAction, focusPaymentId, onFocusHandled, openDueModal, openReceipt, payments]);
+  }, [focusAction, focusPaymentId, ledgerPayments, onFocusHandled, openDueModal, openReceipt, payments]);
 
   const handleDownloadReceipt = () => {
     if (!selectedPayment) return;
@@ -1087,7 +1100,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       periodOutflows,
       periodProfit,
     };
-  }, [dateRange, financeOverview]);
+  }, [dateRange, financeOverview, getDateRangeLabel]);
 
   const profitInsight = useMemo(() => {
     const profit = roundMoney(financePeriodSummary.periodProfit);
@@ -1606,6 +1619,17 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
             </tbody>
           </table>
         </div>
+
+        {ledgerPagination.totalPages > 1 && (
+          <div className="px-4 pb-4 md:px-6">
+            <PaginationControls
+              pagination={ledgerPagination}
+              itemLabel="payments"
+              onPageChange={(nextPage) => setLedgerPagination((prev) => ({ ...prev, page: nextPage }))}
+              onLimitChange={(nextLimit) => setLedgerPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
+            />
+          </div>
+        )}
       </div>
 
       </>)}
@@ -1961,17 +1985,20 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                       placeholder="Search member by name or phone..."
                       className="flex-1 bg-transparent font-bold text-slate-900 outline-none text-sm placeholder:font-normal placeholder:text-slate-400"
                       value={memberSearch}
-                      onFocus={() => setShowMemberDropdown(true)}
-                      onChange={e => { setMemberSearch(e.target.value); setShowMemberDropdown(true); if (!e.target.value) setFormData(f => ({...f, user_id: ''})); }}
+                      onFocus={() => { setShowMemberDropdown(true); loadMemberOptions(memberSearch); }}
+                      onChange={e => {
+                        const nextValue = e.target.value;
+                        setMemberSearch(nextValue);
+                        setShowMemberDropdown(true);
+                        if (!nextValue) setFormData(f => ({...f, user_id: ''}));
+                        loadMemberOptions(nextValue);
+                      }}
                     />
                     {formData.user_id && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg shrink-0">Selected</span>}
                   </div>
                   {showMemberDropdown && (
                     <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                      {members.filter(m => {
-                        const q = memberSearch.toLowerCase();
-                        return !q || m.full_name?.toLowerCase().includes(q) || m.phone?.includes(q) || m.email?.toLowerCase().includes(q);
-                      }).slice(0, 20).map(m => (
+                      {members.map(m => (
                         <button key={m.id} type="button"
                           className={`w-full text-left px-4 py-3 text-sm hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 ${formData.user_id === m.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-900'}`}
                           onClick={() => { setFormData(f => ({...f, user_id: m.id})); setMemberSearch(m.full_name); setShowMemberDropdown(false); }}>
@@ -1979,7 +2006,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                           <span className="text-slate-400 text-xs ml-2">{m.phone || m.email}</span>
                         </button>
                       ))}
-                      {members.filter(m => { const q = memberSearch.toLowerCase(); return !q || m.full_name?.toLowerCase().includes(q) || m.phone?.includes(q); }).length === 0 && (
+                      {members.length === 0 && (
                         <div className="px-4 py-3 text-sm text-slate-400 font-bold">No members found</div>
                       )}
                     </div>

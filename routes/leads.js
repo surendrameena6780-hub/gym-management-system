@@ -76,6 +76,10 @@ router.get('/', requirePermission('members:read'), async (req, res) => {
         const gymId = getGymIdFromRequest(req);
         const search = String(req.query.search || '').trim();
         const status = String(req.query.status || '').trim().toUpperCase();
+        const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
+        const page = Math.max(Number.parseInt(req.query.page || '1', 10) || 1, 1);
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '20', 10) || 20, 1), 200);
+        const offset = (page - 1) * limit;
         const queryParams = [gymId];
         let whereClause = 'WHERE l.gym_id = $1';
 
@@ -105,11 +109,35 @@ router.get('/', requirePermission('members:read'), async (req, res) => {
                     ELSE 1
                 END ASC,
                 l.next_follow_up_at ASC NULLS LAST,
-                l.created_at DESC`,
+                l.created_at DESC
+                ${paginate ? `LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}` : ''}`,
+            paginate ? [...queryParams, limit, offset] : queryParams
+        );
+
+        if (!paginate) {
+            return res.json(result.rows);
+        }
+
+        const countResult = await pool.query(
+            `SELECT COUNT(*)::INTEGER AS total
+             FROM leads l
+             ${whereClause}`,
             queryParams
         );
 
-        return res.json(result.rows);
+        const total = Number(countResult.rows[0]?.total || 0);
+
+        return res.json({
+            items: result.rows,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.max(1, Math.ceil(total / limit)),
+                hasNext: page * limit < total,
+                hasPrev: page > 1,
+            },
+        });
     } catch (err) {
         console.error('LEADS LIST ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to load leads.' });

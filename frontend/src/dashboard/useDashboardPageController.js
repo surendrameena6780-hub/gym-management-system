@@ -61,7 +61,7 @@ const normalizeActionPayments = (sourcePayments) => {
 
 export default function useDashboardPageController({ appRuntime, setCurrentPage, startTour, isActive = true }) {
   const { token, toast, navigateTo: navTo } = appRuntime;
-  const navigateTo = navTo || ((page) => setCurrentPage?.(page));
+  const navigateTo = useMemo(() => navTo || ((...args) => setCurrentPage?.(...args)), [navTo, setCurrentPage]);
 
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);

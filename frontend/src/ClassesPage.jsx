@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   CalendarDays, Clock3, Users, Plus, X, Search, CheckCircle2,
@@ -205,7 +205,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   const [memberSearchLoading, setMemberSearchLoading] = useState(false);
   const loadCompletedRef = useRef(false);
 
-  const fetchClassesData = async ({ soft = false } = {}) => {
+  const fetchClassesData = useCallback(async ({ soft = false } = {}) => {
     if (!token) return;
     if (soft) setRefreshing(true);
     else setLoading(true);
@@ -237,7 +237,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [toast, token]);
 
   const fetchBookings = async (sessionId) => {
     if (!sessionId) return;
@@ -259,7 +259,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       fetchClassesData({ soft });
     }, soft ? 180 : 0);
     return () => window.clearTimeout(timer);
-  }, [token]);
+  }, [fetchClassesData, token]);
 
   useEffect(() => {
     if (!selectedSessionId) {
@@ -532,14 +532,14 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   return (
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        {summaryCards.map(({ label, value, icon: Icon, box }) => (
-          <div key={label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${box}`}>
-              <Icon size={18} />
+        {summaryCards.map((card) => (
+          <div key={card.label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${card.box}`}>
+              <card.icon size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{label}</p>
-              <p className="text-2xl font-black text-slate-900 leading-none">{value}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{card.label}</p>
+              <p className="text-2xl font-black text-slate-900 leading-none">{card.value}</p>
             </div>
           </div>
         ))}

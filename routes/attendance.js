@@ -1377,6 +1377,10 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
         const range = String(req.query.range || 'today').toLowerCase();
         const from = req.query.from ? String(req.query.from) : null;
         const to = req.query.to ? String(req.query.to) : null;
+        const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
+        const page = Math.max(Number.parseInt(req.query.page || '1', 10) || 1, 1);
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '50', 10) || 50, 1), 200);
+        const offset = (page - 1) * limit;
 
         let dateClause = 'timezone($2, a.check_in_time)::date = timezone($2, NOW())::date';
         const params = [gym_id, gymTimezone];
@@ -1414,11 +1418,35 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
             ) ms_latest ON true
             WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}
             ORDER BY a.check_in_time DESC
-            LIMIT 500
+            ${paginate ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}` : 'LIMIT 500'}
         `;
 
-        const result = await pool.query(query, params);
-        res.json(result.rows);
+        const result = await pool.query(query, paginate ? [...params, limit, offset] : params);
+
+        if (!paginate) {
+            return res.json(result.rows);
+        }
+
+        const countResult = await pool.query(
+            `SELECT COUNT(*)::INTEGER AS total
+             FROM attendance a
+             JOIN members m ON m.id = a.member_id
+             WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}`,
+            params
+        );
+
+        const total = Number(countResult.rows[0]?.total || 0);
+        return res.json({
+            items: result.rows,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.max(1, Math.ceil(total / limit)),
+                hasNext: page * limit < total,
+                hasPrev: page > 1,
+            },
+        });
     } catch (err) {
         console.error('ATTENDANCE RECORDS ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });

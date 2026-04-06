@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   Search, Edit2, Plus, X, Zap, RefreshCw, Trash2, Ban, Calendar,
@@ -11,6 +11,7 @@ import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelive
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 import { reportClientError } from './utils/clientErrorReporter';
+import PaginationControls from './components/PaginationControls';
 
 const AVATAR_GRADIENTS = [
   'from-violet-500 to-purple-600',
@@ -69,6 +70,16 @@ const FILTER_TABS = [
 ];
 
 const STATUS_PILLS = { ACTIVE: 'bg-emerald-100 text-emerald-700', INACTIVE: 'bg-amber-100 text-amber-700', FROZEN: 'bg-cyan-100 text-cyan-700', 'EXPIRING SOON': 'bg-orange-100 text-orange-700', EXPIRED: 'bg-rose-100 text-rose-700', UNPAID: 'bg-slate-100 text-slate-500' };
+
+const FILTER_TO_API_STATUS = {
+  All: 'ALL',
+  Active: 'ACTIVE',
+  Unpaid: 'UNPAID',
+  Inactive: 'INACTIVE',
+  Expired: 'EXPIRED',
+  'Expiring Soon': 'EXPIRING SOON',
+  Frozen: 'FROZEN',
+};
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -279,6 +290,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [loading, setLoading] = useState(true);
+  const [memberSummary, setMemberSummary] = useState({ total: 0, active: 0, inactive: 0, expiring_soon: 0, expired: 0, unpaid: 0, frozen: 0 });
+  const [membersPagination, setMembersPagination] = useState({ page: 1, limit: 30, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [isBulkMode, setIsBulkMode] = useState(false);
@@ -334,6 +347,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
   const fetchMembersRef = useRef(null);
   const checkActivationRazorpayStatusRef = useRef(null);
+  const selectedMemberRef = useRef(selectedMember);
   const activationResumeStateRef = useRef({
     showActivateModal: false,
     activationOnlineMode: 'RAZORPAY',
@@ -344,6 +358,10 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const docCameraInputRef = useRef(null);
   const docGalleryInputRef = useRef(null);
   const memberActionTimerRef = useRef(null);
+
+  useEffect(() => {
+    selectedMemberRef.current = selectedMember;
+  }, [selectedMember]);
 
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
@@ -373,33 +391,33 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     });
   };
 
-  const loadMemberDetails = async (memberId) => {
+  const loadMemberDetails = useCallback(async (memberId) => {
     const res = await axios.get(`/api/members/${memberId}`, { headers: { 'x-auth-token': token } });
     const normalized = normalizeMemberRecord(res.data);
     setSelectedMember(normalized);
     syncOnboardingForm(normalized);
     return normalized;
-  };
+  }, [token]);
 
   // ── Lifecycle data fetchers ──
-  const fetchMemberNotes = async (memberId) => {
+  const fetchMemberNotes = useCallback(async (memberId) => {
     try {
       const res = await axios.get(`/api/members/${memberId}/notes`, { headers: { 'x-auth-token': token } });
       setMemberNotes(Array.isArray(res.data) ? res.data : []);
     } catch { setMemberNotes([]); }
-  };
-  const fetchMemberDocs = async (memberId) => {
+  }, [token]);
+  const fetchMemberDocs = useCallback(async (memberId) => {
     try {
       const res = await axios.get(`/api/members/${memberId}/documents`, { headers: { 'x-auth-token': token } });
       setMemberDocs(Array.isArray(res.data) ? res.data : []);
     } catch { setMemberDocs([]); }
-  };
-  const fetchMemberWaivers = async (memberId) => {
+  }, [token]);
+  const fetchMemberWaivers = useCallback(async (memberId) => {
     try {
       const res = await axios.get(`/api/members/${memberId}/waivers`, { headers: { 'x-auth-token': token } });
       setMemberWaivers(Array.isArray(res.data) ? res.data : []);
     } catch { setMemberWaivers([]); }
-  };
+  }, [token]);
   const handleAddNote = async () => {
     if (!newNote.trim() || !selectedMember) return;
     try {
@@ -624,25 +642,26 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
   useEffect(() => {
     if (showDetailsModal && selectedMember?.id) {
+      const currentMember = selectedMemberRef.current;
       setDrawerTab('profile');
-      syncOnboardingForm(selectedMember);
+      syncOnboardingForm(currentMember);
       setDocForm({ doc_type: 'ID Proof', doc_url: '', doc_name: '', notes: '' });
       fetchMemberNotes(selectedMember.id);
       fetchMemberDocs(selectedMember.id);
       fetchMemberWaivers(selectedMember.id);
       loadMemberDetails(selectedMember.id).catch(() => {});
     }
-  }, [showDetailsModal, selectedMember?.id]);
+  }, [fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal]);
 
-  const openAddMemberModal = () => {
+  const openAddMemberModal = useCallback(() => {
     if (!canWriteMembers) {
       toast?.('You do not have permission to add members.', 'warning');
       return;
     }
     setShowAddModal(true);
-  };
+  }, [canWriteMembers, toast]);
 
-  const openActivateModalForMember = (member) => {
+  const openActivateModalForMember = useCallback((member) => {
     if (!canWritePayments) {
       toast?.('You do not have permission to manage memberships or payments.', 'warning');
       return;
@@ -655,7 +674,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     setActivationReference('');
     setActivatingMode('');
     setShowActivateModal(true);
-  };
+  }, [canWritePayments, toast]);
 
   const openActivateModalWithFeedback = (member, actionKey) => {
     if (!canWritePayments) {
@@ -803,7 +822,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     }
 
     const intervalId = window.setInterval(() => {
-      checkActivationRazorpayStatus(selectedPlan);
+      checkActivationRazorpayStatusRef.current?.(selectedPlan);
     }, 5000);
 
     return () => {
@@ -854,47 +873,89 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return true;
   };
 
-  const fetchMembers = async () => {
+  const fetchMembers = useCallback(async () => {
     try {
-      const res = await axios.get('/api/members', { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/members', {
+        headers: { 'x-auth-token': token },
+        params: {
+          paginate: true,
+          page: membersPagination.page,
+          limit: membersPagination.limit,
+          search: deferredSearchTerm || undefined,
+          status: FILTER_TO_API_STATUS[filter] || 'ALL',
+        },
+      });
       const normalizedMembers = extractArray(res.data, ['members', 'rows', 'items']).map(normalizeMemberRecord);
       setMembers(normalizedMembers);
+      setMembersPagination((prev) => ({
+        ...prev,
+        ...(res.data?.pagination || {}),
+      }));
       // Sync selectedMember so photo & data stay fresh after any upload/edit
       setSelectedMember(prev => {
         if (!prev) return prev;
         const fresh = normalizedMembers.find(m => m.id === prev.id);
         return fresh ? { ...prev, ...fresh } : prev;
       });
-    } catch (err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
-  };
+    } catch (_err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
+  }, [deferredSearchTerm, filter, membersPagination.limit, membersPagination.page, toast, token]);
+
+  const fetchMemberSummary = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/members/summary', { headers: { 'x-auth-token': token } });
+      setMemberSummary({
+        total: Number(res.data?.total || 0),
+        active: Number(res.data?.active || 0),
+        inactive: Number(res.data?.inactive || 0),
+        expiring_soon: Number(res.data?.expiring_soon || 0),
+        expired: Number(res.data?.expired || 0),
+        unpaid: Number(res.data?.unpaid || 0),
+        frozen: Number(res.data?.frozen || 0),
+      });
+    } catch (err) {
+      reportClientError('Members fetch summary', err);
+    }
+  }, [token]);
 
   fetchMembersRef.current = fetchMembers;
 
-  const fetchPlans = async () => {
+  const fetchPlans = useCallback(async () => {
     try {
       const res = await axios.get('/api/memberships/plans', { headers: { 'x-auth-token': token } });
       setPlans(extractArray(res.data, ['plans', 'rows', 'items']));
     } catch (err) { reportClientError('Members fetch plans', err); }
-  };
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
     fetchPlans();
-  }, [token]);
+  }, [fetchPlans, token]);
 
   useEffect(() => {
     if (!token || !isActive) return;
     setLoading(true);
     fetchMembers();
-  }, [token, isActive]);
+  }, [fetchMembers, isActive, token]);
+
+  useEffect(() => {
+    if (!token || !isActive) return;
+    fetchMemberSummary();
+  }, [fetchMemberSummary, isActive, token]);
+
+  useEffect(() => {
+    setMembersPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
+  }, [deferredSearchTerm, filter]);
 
   // Instantly refresh when dashboard check-in or payment fires the data-changed event
   useEffect(() => {
     if (!token) return;
-    const handler = () => fetchMembers();
+    const handler = () => {
+      fetchMembers();
+      fetchMemberSummary();
+    };
     window.addEventListener('gymvault:data-changed', handler);
     return () => window.removeEventListener('gymvault:data-changed', handler);
-  }, [token]);
+  }, [fetchMemberSummary, fetchMembers, token]);
 
   useEffect(() => {
     if (!focusAction || focusMemberId) return;
@@ -902,7 +963,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       openAddMemberModal();
       onFocusHandled?.();
     }
-  }, [focusAction, focusMemberId, onFocusHandled, canWriteMembers]);
+  }, [focusAction, focusMemberId, onFocusHandled, openAddMemberModal]);
 
   useEffect(() => {
     if (!token || !focusMemberId) return;
@@ -957,7 +1018,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return () => {
       isMounted = false;
     };
-  }, [token, focusMemberId, focusAction, members, onFocusHandled, toast, canWritePayments]);
+  }, [focusAction, focusMemberId, members, onFocusHandled, openActivateModalForMember, toast, token]);
 
   useEffect(() => {
     const el = membersListRef.current;
@@ -998,8 +1059,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       el.removeEventListener('touchend',   onTouchEnd);
       if (s.rafId) cancelAnimationFrame(s.rafId);
     };
-  // Re-run when loading flips false so membersListRef is attached after PageLoader unmounts
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
   const downloadReceipt = () => {
@@ -1136,7 +1195,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       await fetchMembers();
       notifyDashboardDataChanged();
       await finishActivationSuccess(plan, paymentId);
-    } catch (err) {
+    } catch (_err) {
       toast?.('Activation failed. Please try again.', 'error');
     } finally {
       setActivatingMode('');
@@ -1314,7 +1373,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       await fetchMembers();
       notifyDashboardDataChanged();
       toast?.(`Extended by ${days} days!`, 'success');
-    } catch (err) { toast?.('Extension failed.', 'error'); }
+    } catch (_err) { toast?.('Extension failed.', 'error'); }
   };
 
   const handleFreezeMembership = async (event) => {
@@ -1412,7 +1471,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       await axios.put(`/api/members/${memberId}/check-in`, {}, { headers: { 'x-auth-token': token } });
       await fetchMembers();
       notifyDashboardDataChanged();
-    } catch (err) { toast?.('Check-in failed', 'error'); }
+    } catch (_err) { toast?.('Check-in failed', 'error'); }
   };
 
   const handleAddMember = async (e) => {
@@ -1523,7 +1582,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       return;
     }
     showConfirm?.({ title: 'Delete Member', message: 'This action cannot be undone.', confirmLabel: 'Yes, Delete', variant: 'danger', onConfirm: async () => {
-        try { await axios.delete(`/api/members/${editFormData.id}`, { headers: { 'x-auth-token': token } }); setShowEditModal(false); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Member deleted.', 'success'); } catch (err) { toast?.('Delete failed.', 'error'); }
+        try { await axios.delete(`/api/members/${editFormData.id}`, { headers: { 'x-auth-token': token } }); setShowEditModal(false); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Member deleted.', 'success'); } catch (_err) { toast?.('Delete failed.', 'error'); }
       }
     });
   };
@@ -1534,44 +1593,24 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       return;
     }
     showConfirm?.({ title: 'Cancel Active Plan', message: 'This will remove the active membership plan.', confirmLabel: 'Cancel Plan', variant: 'danger', onConfirm: async () => {
-        try { await axios.post('/api/memberships/remove-plan', { member_id: editFormData.id }, { headers: { 'x-auth-token': token } }); setShowEditModal(false); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Plan removed.', 'success'); } catch (err) { toast?.('Failed to remove plan.', 'error'); }
+        try { await axios.post('/api/memberships/remove-plan', { member_id: editFormData.id }, { headers: { 'x-auth-token': token } }); setShowEditModal(false); await fetchMembers(); notifyDashboardDataChanged(); toast?.('Plan removed.', 'success'); } catch (_err) { toast?.('Failed to remove plan.', 'error'); }
       }
     });
   };
 
   const toggleSelection = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
 
-  const filteredMembers = useMemo(() => {
-    const searchLower = deferredSearchTerm.trim().toLowerCase();
-    return members.filter((member) => {
-      const statusInfo = getStatusInfo(member);
-      const matchesFilter = filter === 'All'
-        ? true
-        : (filter === 'Active' && (statusInfo.label === 'ACTIVE' || statusInfo.label === 'EXPIRING SOON'))
-          || (filter === 'Frozen' && statusInfo.label === 'FROZEN')
-          || (filter === 'Unpaid' && statusInfo.label === 'UNPAID')
-          || (filter === 'Expired' && statusInfo.label === 'EXPIRED')
-          || (filter === 'Expiring Soon' && statusInfo.label === 'EXPIRING SOON')
-          || (filter === 'Inactive' && statusInfo.label === 'INACTIVE');
-
-      if (!matchesFilter) return false;
-      if (!searchLower) return true;
-
-      return member.full_name?.toLowerCase().includes(searchLower)
-        || member.email?.toLowerCase().includes(searchLower)
-        || String(member.phone || '').includes(deferredSearchTerm);
-    });
-  }, [deferredSearchTerm, filter, members]);
+  const filteredMembers = members;
 
   const counts = useMemo(() => ({
-    All: members.length,
-    Active: members.filter((member) => ['ACTIVE', 'EXPIRING SOON'].includes(getStatusInfo(member).label)).length,
-    Frozen: members.filter((member) => getStatusInfo(member).label === 'FROZEN').length,
-    Expired: members.filter((member) => getStatusInfo(member).label === 'EXPIRED').length,
-    'Expiring Soon': members.filter((member) => getStatusInfo(member).label === 'EXPIRING SOON').length,
-    Inactive: members.filter((member) => getStatusInfo(member).label === 'INACTIVE').length,
-    Unpaid: members.filter((member) => getStatusInfo(member).label === 'UNPAID').length,
-  }), [members]);
+    All: memberSummary.total,
+    Active: memberSummary.active,
+    Frozen: memberSummary.frozen,
+    Expired: memberSummary.expired,
+    'Expiring Soon': memberSummary.expiring_soon,
+    Inactive: memberSummary.inactive,
+    Unpaid: memberSummary.unpaid,
+  }), [memberSummary]);
 
   if (loading && members.length === 0) return <PageLoader className="min-h-[56vh]" />;
 
@@ -1586,10 +1625,10 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[ { label: 'Total Members', count: counts.All, icon: Users, bg: 'bg-indigo-50', ic: 'text-indigo-600' }, { label: 'Active', count: counts.Active, icon: CheckCircle, bg: 'bg-emerald-50', ic: 'text-emerald-600' }, { label: 'Expired', count: counts.Expired, icon: Clock, bg: 'bg-rose-50', ic: 'text-rose-600' }, { label: 'Unpaid', count: counts.Unpaid, icon: AlertTriangle, bg: 'bg-amber-50', ic: 'text-amber-600' } ].map(({ label, count, icon: Icon, bg, ic }) => (
-          <div key={label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
-            <div className={`w-10 h-10 rounded-xl ${bg} ${ic} flex items-center justify-center shrink-0`}><Icon size={18} /></div>
-            <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{label}</p><p className="text-2xl font-black text-slate-900 leading-none">{loading ? '—' : count}</p></div>
+        {[ { label: 'Total Members', count: counts.All, icon: Users, bg: 'bg-indigo-50', ic: 'text-indigo-600' }, { label: 'Active', count: counts.Active, icon: CheckCircle, bg: 'bg-emerald-50', ic: 'text-emerald-600' }, { label: 'Expired', count: counts.Expired, icon: Clock, bg: 'bg-rose-50', ic: 'text-rose-600' }, { label: 'Unpaid', count: counts.Unpaid, icon: AlertTriangle, bg: 'bg-amber-50', ic: 'text-amber-600' } ].map((card) => (
+          <div key={card.label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+            <div className={`w-10 h-10 rounded-xl ${card.bg} ${card.ic} flex items-center justify-center shrink-0`}><card.icon size={18} /></div>
+            <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{card.label}</p><p className="text-2xl font-black text-slate-900 leading-none">{loading ? '—' : card.count}</p></div>
           </div>
         ))}
       </div>
@@ -1658,7 +1697,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                     ) : (
                       filteredMembers.map((member, idx) => {
                         const statusInfo = getStatusInfo(member);
-                        const effectiveVisitSource = getEffectiveVisitSource(member);
                         return (
                           <div
                             key={`member-mobile-${member.id}`}
@@ -1690,6 +1728,14 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                     )}
                     </div>
                   </div>
+                  {membersPagination.totalPages > 1 && (
+                    <PaginationControls
+                      pagination={membersPagination}
+                      itemLabel="members"
+                      onPageChange={(nextPage) => setMembersPagination((prev) => ({ ...prev, page: nextPage }))}
+                      onLimitChange={(nextLimit) => setMembersPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
+                    />
+                  )}
                   <div className="gv-list-bottom-fade absolute bottom-0 inset-x-0 h-12 pointer-events-none rounded-b-2xl" style={{ background: 'linear-gradient(to top, rgba(248,250,252,0.96) 0%, transparent 100%)' }} />
                 </div>
               </div>
@@ -1758,6 +1804,16 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 )}
               </tbody>
               </table>
+              {membersPagination.totalPages > 1 && (
+                <div className="pt-4">
+                  <PaginationControls
+                    pagination={membersPagination}
+                    itemLabel="members"
+                    onPageChange={(nextPage) => setMembersPagination((prev) => ({ ...prev, page: nextPage }))}
+                    onLimitChange={(nextLimit) => setMembersPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
+                  />
+                </div>
+              )}
               </div>
             </>
           )}

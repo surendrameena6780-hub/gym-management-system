@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { reportClientError } from './utils/clientErrorReporter';
 import {
@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Bell,
 } from 'lucide-react';
+import PaginationControls from './components/PaginationControls';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -158,6 +159,7 @@ function SuperAdminDashboard({ token, onLogout }) {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
+  const initialLoadRef = useRef(false);
 
   const [search, setSearch] = useState('');
   const [globalSearch, setGlobalSearch] = useState({ gyms: [], users: [] });
@@ -185,6 +187,10 @@ function SuperAdminDashboard({ token, onLogout }) {
     },
   });
   const [logs, setLogs] = useState([]);
+  const [telemetry, setTelemetry] = useState(null);
+  const [runtimeEvents, setRuntimeEvents] = useState([]);
+  const [runtimeFilters, setRuntimeFilters] = useState({ q: '', event_type: '', severity: '' });
+  const [runtimePagination, setRuntimePagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
 
   const [gymFilters, setGymFilters] = useState({ q: '', status: '', plan: '', dateFrom: '', dateTo: '' });
   const [userFilters, setUserFilters] = useState({ q: '', status: '' });
@@ -256,57 +262,57 @@ function SuperAdminDashboard({ token, onLogout }) {
     return groups.sort((a, b) => String(a.gymName).localeCompare(String(b.gymName)));
   }, [users]);
 
-  const handleApiError = (err) => {
+  const handleApiError = useCallback((err) => {
     if (err?.response?.status === 401) onLogout();
     reportClientError('Superadmin API', err);
-  };
+  }, [onLogout]);
 
-  const loadOverview = async () => {
+  const loadOverview = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/overview', headers);
       setOverview(res.data || { stats: {}, recent_activity: [] });
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [handleApiError, headers]);
 
-  const loadGyms = async () => {
+  const loadGyms = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/gyms', { ...headers, params: gymFilters });
       setGyms(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [gymFilters, handleApiError, headers]);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/users', { ...headers, params: userFilters });
       setUsers(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [handleApiError, headers, userFilters]);
 
-  const loadTickets = async () => {
+  const loadTickets = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/support/tickets', { ...headers, params: ticketFilters });
       setTickets(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [handleApiError, headers, ticketFilters]);
 
-  const loadReports = async () => {
+  const loadReports = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/reports/light', headers);
       setReports(res.data || { summary: {}, growth: [] });
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [handleApiError, headers]);
 
-  const loadSystem = async () => {
+  const loadSystem = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/system', headers);
       const payload = res.data || {};
@@ -327,27 +333,77 @@ function SuperAdminDashboard({ token, onLogout }) {
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [handleApiError, headers]);
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/logs', headers);
       setLogs(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       handleApiError(err);
     }
-  };
+  }, [handleApiError, headers]);
 
-  const loadAll = async () => {
+  const loadTelemetry = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/superadmin/telemetry', headers);
+      setTelemetry(res.data || null);
+    } catch (err) {
+      handleApiError(err);
+    }
+  }, [handleApiError, headers]);
+
+  const loadRuntimeEvents = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/superadmin/runtime-events', {
+        ...headers,
+        params: {
+          q: runtimeFilters.q || undefined,
+          event_type: runtimeFilters.event_type || undefined,
+          severity: runtimeFilters.severity || undefined,
+          page: runtimePagination.page,
+          limit: runtimePagination.limit,
+        },
+      });
+      setRuntimeEvents(Array.isArray(res.data?.items) ? res.data.items : []);
+      setRuntimePagination((prev) => ({
+        ...prev,
+        ...(res.data?.pagination || {}),
+      }));
+    } catch (err) {
+      handleApiError(err);
+    }
+  }, [handleApiError, headers, runtimeFilters.event_type, runtimeFilters.q, runtimeFilters.severity, runtimePagination.limit, runtimePagination.page]);
+
+  const loadAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([loadOverview(), loadGyms(), loadUsers(), loadTickets(), loadReports(), loadSystem(), loadLogs()]);
+    await Promise.all([loadOverview(), loadGyms(), loadUsers(), loadTickets(), loadReports(), loadSystem(), loadLogs(), loadTelemetry(), loadRuntimeEvents()]);
     setLoading(false);
-  };
+  }, [loadGyms, loadLogs, loadOverview, loadReports, loadRuntimeEvents, loadSystem, loadTelemetry, loadTickets, loadUsers]);
 
-  useEffect(() => { loadAll(); }, []);
-  useEffect(() => { loadGyms(); }, [gymFilters]);
-  useEffect(() => { loadUsers(); }, [userFilters]);
-  useEffect(() => { loadTickets(); }, [ticketFilters]);
+  useEffect(() => {
+    if (initialLoadRef.current) {
+      return;
+    }
+    initialLoadRef.current = true;
+    loadAll();
+  }, [loadAll]);
+  useEffect(() => { loadGyms(); }, [loadGyms]);
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+  useEffect(() => { loadTickets(); }, [loadTickets]);
+  useEffect(() => {
+    if (activeTab === 'system') {
+      loadTelemetry();
+    }
+  }, [activeTab, loadTelemetry]);
+  useEffect(() => {
+    if (activeTab === 'logs') {
+      loadRuntimeEvents();
+    }
+  }, [activeTab, loadRuntimeEvents]);
+  useEffect(() => {
+    setRuntimePagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
+  }, [runtimeFilters.q, runtimeFilters.event_type, runtimeFilters.severity]);
 
   const runGlobalSearch = async () => {
     if (!search.trim()) {
@@ -490,7 +546,7 @@ function SuperAdminDashboard({ token, onLogout }) {
       }
 
       if (gymActionModal.mode === 'impersonate') {
-        const res = await axios.post(`/api/superadmin/gyms/${gymActionModal.gym.id}/impersonate`, {}, headers);
+        await axios.post(`/api/superadmin/gyms/${gymActionModal.gym.id}/impersonate`, {}, headers);
         window.location.href = '/dashboard';
         return;
       }
@@ -774,17 +830,17 @@ function SuperAdminDashboard({ token, onLogout }) {
         )}
 
         <div className="flex flex-wrap gap-2">
-          {TABS.map(({ id, label, icon: Icon }) => (
+          {TABS.map((tab) => (
             <button
-              key={id}
-              onClick={() => setActiveTab(id)}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all flex items-center gap-2 ${
-                activeTab === id
+                activeTab === tab.id
                   ? 'bg-indigo-600 text-white border-indigo-500'
                   : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
               }`}
             >
-              <Icon size={14} /> {label}
+              <tab.icon size={14} /> {tab.label}
             </button>
           ))}
         </div>
@@ -981,6 +1037,66 @@ function SuperAdminDashboard({ token, onLogout }) {
 
         {activeTab === 'system' && (
           <div className="space-y-4">
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-widest font-black text-slate-400">Runtime Telemetry</p>
+                  <p className="text-sm text-slate-500 mt-1">HQ-only live view of backend load, request latency, memory, and database pressure.</p>
+                </div>
+                <button onClick={loadTelemetry} className="px-3 py-2 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 text-sm font-bold flex items-center gap-2">
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                {[
+                  { label: 'Avg Response', value: `${Number(telemetry?.requests?.avg_duration_ms || 0)}ms` },
+                  { label: 'Active Requests', value: Number(telemetry?.requests?.active || 0) },
+                  { label: 'Pool Waiting', value: Number(telemetry?.database?.pool_waiting || 0) },
+                  { label: 'Heap Used', value: `${Number(telemetry?.process?.heap_used_mb || 0)} MB` },
+                ].map((card) => (
+                  <div key={card.label} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                    <p className="text-[10px] uppercase tracking-widest font-black text-slate-500">{card.label}</p>
+                    <p className="mt-2 text-2xl font-black text-white">{card.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-3">Slowest Endpoints</p>
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {(telemetry?.slowest_endpoints || []).map((entry) => (
+                      <div key={`${entry.method}-${entry.route}`} className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-black/20 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-black text-white truncate">{entry.method} {entry.route}</p>
+                          <p className="text-[11px] text-slate-500">avg {entry.avgDurationMs}ms · max {entry.maxDurationMs}ms</p>
+                        </div>
+                        <span className="text-xs font-black text-amber-300 shrink-0">{entry.count} hits</span>
+                      </div>
+                    ))}
+                    {(telemetry?.slowest_endpoints || []).length === 0 && <div className="text-sm font-bold text-slate-500">No endpoint telemetry yet.</div>}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-3">Recent Runtime Errors</p>
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {(telemetry?.recent_errors || []).map((entry, index) => (
+                      <div key={`${entry.created_at || index}-${entry.message || index}`} className="rounded-xl border border-white/5 bg-black/20 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-black text-white truncate">{entry.message || 'Unknown runtime issue'}</p>
+                          <span className="text-[11px] font-bold text-slate-500 shrink-0">{entry.created_at ? new Date(entry.created_at).toLocaleTimeString('en-GB') : 'now'}</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">{entry.route ? `${entry.method || ''} ${entry.route}`.trim() : entry.source || 'server'}</p>
+                      </div>
+                    ))}
+                    {(telemetry?.recent_errors || []).length === 0 && <div className="text-sm font-bold text-slate-500">No recent runtime errors captured.</div>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Bell size={14} className="text-indigo-400" />
@@ -1298,24 +1414,94 @@ function SuperAdminDashboard({ token, onLogout }) {
         )}
 
         {activeTab === 'logs' && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-            <div className="max-h-[680px] overflow-y-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-black/40 text-[10px] text-slate-400 uppercase font-black tracking-widest">
-                  <tr><th className="p-4">Action</th><th className="p-4">Target</th><th className="p-4">Time</th><th className="p-4">Details</th></tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {logs.map((l) => (
-                    <tr key={l.id} className="hover:bg-white/[0.02]">
-                      <td className="p-4 font-black text-white">{l.action}</td>
-                      <td className="p-4 text-slate-300">{l.target_type} · {l.target_label || l.target_id || '-'}</td>
-                      <td className="p-4 text-slate-400">{new Date(l.created_at).toLocaleString('en-GB')}</td>
-                      <td className="p-4 text-slate-500 text-xs">{typeof l.details === 'object' ? JSON.stringify(l.details) : String(l.details || '-')}</td>
-                    </tr>
+          <div className="space-y-4">
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-widest font-black text-slate-400">Runtime Events</p>
+                  <p className="text-sm text-slate-500 mt-1">Slow requests, pool issues, process failures, and client-side breakages from the app.</p>
+                </div>
+                <button onClick={loadRuntimeEvents} className="px-3 py-2 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 text-sm font-bold flex items-center gap-2">
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input
+                  className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                  placeholder="Search runtime logs"
+                  value={runtimeFilters.q}
+                  onChange={(e) => setRuntimeFilters((prev) => ({ ...prev, q: e.target.value }))}
+                />
+                <select className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" value={runtimeFilters.event_type} onChange={(e) => setRuntimeFilters((prev) => ({ ...prev, event_type: e.target.value }))}>
+                  <option value="">All event types</option>
+                  {['REQUEST_ERROR', 'SLOW_REQUEST', 'CLIENT_ERROR', 'POOL_ERROR', 'PROCESS_ERROR'].map((value) => (
+                    <option key={value} value={value}>{value}</option>
                   ))}
-                  {logs.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-500 font-bold">No logs found.</td></tr>}
-                </tbody>
-              </table>
+                </select>
+                <select className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" value={runtimeFilters.severity} onChange={(e) => setRuntimeFilters((prev) => ({ ...prev, severity: e.target.value }))}>
+                  <option value="">All severities</option>
+                  {['ERROR', 'WARN', 'INFO'].map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+              <div className="max-h-[480px] overflow-y-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-black/40 text-[10px] text-slate-400 uppercase font-black tracking-widest">
+                    <tr><th className="p-4">Event</th><th className="p-4">Route</th><th className="p-4">Impact</th><th className="p-4">Time</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {runtimeEvents.map((entry) => (
+                      <tr key={entry.id} className="hover:bg-white/[0.02]">
+                        <td className="p-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="font-black text-white">{entry.event_type}</span>
+                            <span className="text-xs text-slate-500">{entry.message}</span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-slate-300">{entry.method || 'SYSTEM'} {entry.route || '—'}</td>
+                        <td className="p-4 text-slate-400 text-xs">{entry.duration_ms ? `${entry.duration_ms}ms` : entry.status_code ? `HTTP ${entry.status_code}` : entry.severity}</td>
+                        <td className="p-4 text-slate-400">{new Date(entry.created_at).toLocaleString('en-GB')}</td>
+                      </tr>
+                    ))}
+                    {runtimeEvents.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-500 font-bold">No runtime events found.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {runtimePagination.totalPages > 1 && (
+              <PaginationControls
+                pagination={runtimePagination}
+                itemLabel="runtime events"
+                onPageChange={(nextPage) => setRuntimePagination((prev) => ({ ...prev, page: nextPage }))}
+                onLimitChange={(nextLimit) => setRuntimePagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
+              />
+            )}
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+              <div className="max-h-[420px] overflow-y-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-black/40 text-[10px] text-slate-400 uppercase font-black tracking-widest">
+                    <tr><th className="p-4">Action</th><th className="p-4">Target</th><th className="p-4">Time</th><th className="p-4">Details</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {logs.map((l) => (
+                      <tr key={l.id} className="hover:bg-white/[0.02]">
+                        <td className="p-4 font-black text-white">{l.action}</td>
+                        <td className="p-4 text-slate-300">{l.target_type} · {l.target_label || l.target_id || '-'}</td>
+                        <td className="p-4 text-slate-400">{new Date(l.created_at).toLocaleString('en-GB')}</td>
+                        <td className="p-4 text-slate-500 text-xs">{typeof l.details === 'object' ? JSON.stringify(l.details) : String(l.details || '-')}</td>
+                      </tr>
+                    ))}
+                    {logs.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-500 font-bold">No audit logs found.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

@@ -12,7 +12,8 @@ import { reportClientError } from './utils/clientErrorReporter';
 const API = import.meta.env.VITE_API_URL || '';
 
 // ─── Animated KPI Card ──────────────────────────────────────────────────────
-function StaffKPI({ label, value, icon: Icon, gradient, index = 0, onClick, prefix = '', suffix = '' }) {
+function StaffKPI(props) {
+  const { label, value, gradient, index = 0, onClick, prefix = '', suffix = '' } = props;
   const animatedValue = useCountUp(typeof value === 'number' ? value : 0);
   const displayValue = typeof value === 'number' ? `${prefix}${animatedValue.toLocaleString()}${suffix}` : value;
   return (
@@ -28,7 +29,7 @@ function StaffKPI({ label, value, icon: Icon, gradient, index = 0, onClick, pref
           <p className="text-2xl font-black text-slate-900 mt-1.5 truncate">{displayValue}</p>
         </div>
         <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: gradient }}>
-          <Icon size={18} className="text-white" />
+          <props.icon size={18} className="text-white" />
         </div>
       </div>
       {onClick && <ChevronRight size={14} className="absolute top-4 right-4 text-slate-300" />}

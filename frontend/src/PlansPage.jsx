@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { 
   Check, Plus, Trash2, Edit2, Zap, Crown, X, 
@@ -117,7 +117,7 @@ const PlansPage = ({ appRuntime }) => {
     class_eligibility: '',
   });
 
-  const fetchPlans = async () => {
+  const fetchPlans = useCallback(async () => {
     try {
       const res = await axios.get('/api/plans', {
         headers: { 'x-auth-token': token }
@@ -128,11 +128,11 @@ const PlansPage = ({ appRuntime }) => {
       reportClientError('Plans fetch', err);
       setLoading(false);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     if(token) fetchPlans();
-  }, [token]);
+  }, [fetchPlans, token]);
 
   // ANALYTICS FETCHER
   const openAnalytics = async (planId) => {
@@ -145,7 +145,7 @@ const PlansPage = ({ appRuntime }) => {
         });
       setAnalyticsData(normalizeAnalyticsPayload(res.data));
         setLoadingAnalytics(false);
-    } catch (err) {
+    } catch (_err) {
         toast?.("Failed to load analytics.", "error");
         setShowAnalyticsModal(false);
     }
@@ -221,7 +221,7 @@ const PlansPage = ({ appRuntime }) => {
       setShowModal(false);
       fetchPlans();
       toast?.(isEditing ? "Plan updated successfully!" : "Plan created successfully!", "success");
-    } catch (err) { toast?.("Error saving plan. Please try again.", "error"); }
+    } catch (_err) { toast?.("Error saving plan. Please try again.", "error"); }
   };
 
   const handleDelete = (id) => {
@@ -235,7 +235,7 @@ const PlansPage = ({ appRuntime }) => {
           await axios.delete(`/api/plans/${id}`, { headers: { 'x-auth-token': token } });
           fetchPlans();
           toast?.("Plan deleted successfully.", "success");
-        } catch (err) { toast?.("Delete failed. Please try again.", "error"); }
+        } catch (_err) { toast?.("Delete failed. Please try again.", "error"); }
       },
     });
   }

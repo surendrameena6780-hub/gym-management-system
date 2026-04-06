@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   LifeBuoy,
@@ -140,7 +140,7 @@ function HelpSupportPage({ appRuntime }) {
     return { total, open, closed, latest };
   }, [tickets]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
       const [overviewRes, ticketsRes] = await Promise.all([
@@ -148,7 +148,10 @@ function HelpSupportPage({ appRuntime }) {
         axios.get('/api/support/tickets', headers),
       ]);
 
-      setOverview(overviewRes.data || overview);
+      setOverview(overviewRes.data || {
+        contact: { phone: '', email: '', whatsapp: '', website: '' },
+        about: { title: '', mission: '', address: '', support_window: '' },
+      });
       setTickets(Array.isArray(ticketsRes.data) ? ticketsRes.data : []);
       setAccessDenied(false);
     } catch (_err) {
@@ -161,11 +164,11 @@ function HelpSupportPage({ appRuntime }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [headers, toast]);
 
   useEffect(() => {
     if (token) loadAll();
-  }, [token]);
+  }, [loadAll, token]);
 
   useEffect(() => {
     const chatBox = chatScrollRef.current;

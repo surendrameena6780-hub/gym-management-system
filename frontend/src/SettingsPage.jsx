@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { 
   User, Building2, Users, Bell, CreditCard, Blocks, 
@@ -489,7 +489,7 @@ const loadRazorpayScript = () => {
   });
   const [staffPasswordReset, setStaffPasswordReset] = useState({});
 
-  const headers = { headers: { 'x-auth-token': token } };
+  const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const activeWhatsAppOnboardingView = WHATSAPP_ONBOARDING_VIEWS[whatsappOnboardingView] || WHATSAPP_ONBOARDING_VIEWS.msg91;
   const activeWhatsAppOnboardingUrl = getWhatsAppOnboardingUrl(whatsappOnboardingView, whatsappOnboarding);
   const isWhatsAppConnected = String(integrationData.whatsapp_status || '').toUpperCase() === 'CONNECTED';
@@ -506,7 +506,7 @@ const loadRazorpayScript = () => {
     setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
   }, [isWhatsAppConnected]);
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const res = await axios.get('/api/settings', headers);
       
@@ -567,7 +567,7 @@ const loadRazorpayScript = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [headers, toast]);
 
   useEffect(() => {
     if (!token || !isActive || !isOwner) {
@@ -576,9 +576,9 @@ const loadRazorpayScript = () => {
     }
     setIsLoading(true);
     fetchSettings();
-  }, [token, isActive, isOwner]);
+  }, [fetchSettings, isActive, isOwner, token]);
 
-  const fetchStaff = async () => {
+  const fetchStaff = useCallback(async () => {
     if (!token) return;
     setLoadingStaff(true);
     try {
@@ -589,16 +589,16 @@ const loadRazorpayScript = () => {
     } finally {
       setLoadingStaff(false);
     }
-  };
+  }, [headers, toast, token]);
 
   useEffect(() => {
     if (!isActive || !isOwner) return;
     if (activeTab === 'staff') {
       fetchStaff();
     }
-  }, [activeTab, token, isActive, isOwner]);
+  }, [activeTab, fetchStaff, isActive, isOwner]);
 
-  const loadIntegrations = async () => {
+  const loadIntegrations = useCallback(async () => {
     if (!token) return;
     setIntegrationLoading(true);
     try {
@@ -659,9 +659,9 @@ const loadRazorpayScript = () => {
     } finally {
       setIntegrationLoading(false);
     }
-  };
+  }, [gymData.phone, headers, token, toast]);
 
-  const loadPlatform = async () => {
+  const loadPlatform = useCallback(async () => {
     if (!token) return;
     setPlatformLoading(true);
     try {
@@ -693,7 +693,7 @@ const loadRazorpayScript = () => {
     } finally {
       setPlatformLoading(false);
     }
-  };
+  }, [headers, token, toast]);
 
   useEffect(() => {
     if (!isActive || !isOwner) return;
@@ -701,7 +701,7 @@ const loadRazorpayScript = () => {
       loadIntegrations();
       loadPlatform();
     }
-  }, [activeTab, token, isActive, isOwner]);
+  }, [activeTab, isActive, isOwner, loadIntegrations, loadPlatform]);
 
   const updateBranchCount = (value) => {
     const nextCount = Math.max(1, Math.min(25, Number.parseInt(value, 10) || 1));
@@ -1365,14 +1365,14 @@ const loadRazorpayScript = () => {
                 return;
               }
 
-          const paymentObject = new window.Razorpay(options);
-          paymentObject.on('payment.failed', function (response){
+            const paymentObject = new window.Razorpay(options);
+            paymentObject.on('payment.failed', function (){
               toast("Payment cancelled or failed.", "error");
               setIsProcessingPayment(false);
           });
           paymentObject.open();
 
-      } catch (err) {
+          } catch (_err) {
           toast("Server error while initiating payment.", "error");
           setIsProcessingPayment(false);
       }
@@ -1464,7 +1464,7 @@ const loadRazorpayScript = () => {
     try {
       await axios.delete('/api/settings/nuke', headers);
       window.location.href = '/login'; 
-    } catch (err) {
+    } catch (_err) {
       toast("Failed to delete account", "error");
     }
   };
@@ -1474,13 +1474,14 @@ const loadRazorpayScript = () => {
       return new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  const ProgressBar = ({ label, current, max, icon: Icon, unit = '' }) => {
+    const ProgressBar = (props) => {
+      const { label, current, max, unit = '' } = props;
       const percentage = max === 'Unlimited' ? 100 : Math.min(100, (current / max) * 100);
       const isNearLimit = max !== 'Unlimited' && percentage > 85;
       return (
           <div className="mb-4 last:mb-0">
               <div className="flex justify-between text-xs font-bold mb-2">
-                  <span className="flex items-center gap-1.5 text-slate-700"><Icon size={14} className="text-indigo-500"/> {label}</span>
+            <span className="flex items-center gap-1.5 text-slate-700"><props.icon size={14} className="text-indigo-500"/> {label}</span>
                   <span className={isNearLimit ? 'text-rose-500' : 'text-slate-500'}>{current} / {max} {unit}</span>
               </div>
               <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1976,7 +1977,7 @@ const loadRazorpayScript = () => {
 
                 {/* dot indicators — mobile only */}
                 <div className="flex justify-center gap-1.5 mt-1 lg:hidden">
-                  {SAAS_PLANS[billingCycle].map((plan, i) => (
+                  {SAAS_PLANS[billingCycle].map((plan) => (
                     <div key={plan.id} className="w-1.5 h-1.5 rounded-full bg-slate-300" />
                   ))}
                 </div>

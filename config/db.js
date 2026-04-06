@@ -160,6 +160,36 @@ const createPerformanceIndexes = async (client) => {
     `);
 };
 
+const createRuntimeTelemetryInfrastructure = async (client) => {
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS system_runtime_events (
+            id SERIAL PRIMARY KEY,
+            event_type VARCHAR(40) NOT NULL,
+            severity VARCHAR(20) NOT NULL DEFAULT 'INFO',
+            source VARCHAR(40) NOT NULL DEFAULT 'server',
+            message TEXT NOT NULL,
+            route VARCHAR(255),
+            method VARCHAR(20),
+            status_code INTEGER,
+            duration_ms INTEGER,
+            gym_id INTEGER,
+            user_id INTEGER,
+            actor_role VARCHAR(30),
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_system_runtime_events_created_at
+            ON system_runtime_events(created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_system_runtime_events_type_created
+            ON system_runtime_events(event_type, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_system_runtime_events_severity_created
+            ON system_runtime_events(severity, created_at DESC);
+    `);
+};
+
 const runSchemaMigrations = async () => {
     const client = await pool.connect();
 
@@ -173,6 +203,7 @@ const runSchemaMigrations = async () => {
         await runNamedMigration(client, '2026-04-06-members-phone-required', enforceMembersPhonePresence);
         await runNamedMigration(client, '2026-04-06-rfid-event-snapshots', addRfidEventSnapshots);
         await runNamedMigration(client, '2026-04-07-performance-indexes', createPerformanceIndexes);
+        await runNamedMigration(client, '2026-04-07-runtime-telemetry', createRuntimeTelemetryInfrastructure);
     } finally {
         await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['gymvault-schema-migrations']).catch(() => {});
         client.release();

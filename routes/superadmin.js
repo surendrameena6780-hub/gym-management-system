@@ -7,6 +7,7 @@ const { pool } = require('../config/db');
 const webpush = require('web-push');
 const { setUserAuthCookie } = require('../utils/authCookies');
 const { ensurePlatformSettingsBase, normalizeSupportProfile } = require('../utils/platformSettings');
+const { getRuntimeTelemetrySnapshot, listRuntimeEvents } = require('../utils/runtimeTelemetry');
 
 // Configure VAPID (shared config)
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -998,6 +999,31 @@ router.post('/system/broadcast', superAuth, async (req, res) => {
         return res.json({ message: target_gym_id ? 'Broadcast sent to selected gym.' : 'Broadcast sent to all gyms.', pushSent });
     } catch (err) {
         console.error('SUPERADMIN BROADCAST ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.get('/telemetry', superAuth, async (_req, res) => {
+    try {
+        return res.json(getRuntimeTelemetrySnapshot());
+    } catch (err) {
+        console.error('SUPERADMIN TELEMETRY ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+router.get('/runtime-events', superAuth, async (req, res) => {
+    try {
+        const payload = await listRuntimeEvents({
+            page: req.query.page,
+            limit: req.query.limit,
+            search: req.query.q,
+            eventType: req.query.event_type,
+            severity: req.query.severity,
+        });
+        return res.json(payload);
+    } catch (err) {
+        console.error('SUPERADMIN RUNTIME EVENTS ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
 });
