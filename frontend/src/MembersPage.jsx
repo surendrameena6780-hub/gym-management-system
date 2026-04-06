@@ -8,7 +8,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
-import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 
 const AVATAR_GRADIENTS = [
@@ -1141,6 +1141,63 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
     }
   };
 
+  const confirmAndSendReminders = async ({ memberIds, templateKey, loadingSetter, loadingValue, summaryLabel = 'Reminder' }) => {
+    if (!Array.isArray(memberIds) || memberIds.length === 0) {
+      toast?.('Select at least one member first.', 'warning');
+      return;
+    }
+
+    try {
+      loadingSetter?.(loadingValue);
+      const previewPayload = await previewWhatsAppReminders({ token, memberIds, templateKey });
+      const previewDialog = buildReminderPreviewDialog(previewPayload, {
+        singleTitle: 'Send Reminder',
+        multiTitle: 'Send Reminders',
+        singleConfirmLabel: 'Send Reminder',
+        multiConfirmLabelPrefix: 'Send',
+      });
+
+      if (!previewDialog) {
+        toast?.(getReminderPreviewBlockReason(previewPayload) || 'No reminders can be sent for the selected members.', 'warning');
+        return;
+      }
+
+      const runSend = async () => {
+        try {
+          loadingSetter?.(loadingValue);
+          const payload = await sendWhatsAppReminders({ token, memberIds, templateKey });
+          const summary = summarizeReminderResult(payload, summaryLabel);
+          toast?.(summary.message, summary.tone);
+        } catch (err) {
+          toast?.(getApiErrorMessage(err, 'Failed to queue WhatsApp reminder.'), 'error');
+        } finally {
+          loadingSetter?.('');
+        }
+      };
+
+      if (showConfirm) {
+        showConfirm({
+          title: previewDialog.title,
+          message: previewDialog.message,
+          confirmLabel: previewDialog.confirmLabel,
+          variant: 'warning',
+          panelClassName: 'max-w-2xl',
+          messageClassName: 'text-left text-slate-600',
+          onConfirm: runSend,
+        });
+        return;
+      }
+
+      if (window.confirm(previewDialog.message)) {
+        await runSend();
+      }
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to prepare WhatsApp reminder preview.'), 'error');
+    } finally {
+      loadingSetter?.('');
+    }
+  };
+
   const sendWhatsAppReminder = async (member, type) => {
     if (!member?.id) {
       toast?.('Member details are incomplete for this reminder.', 'warning');
@@ -1151,23 +1208,16 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       ? 'EXPIRING_SOON'
       : type === 'followup'
         ? 'INACTIVE'
-        : undefined;
-    const loadingKey = `member-reminder-${member.id}`;
+        : type === 'expired'
+          ? 'EXPIRED'
+          : undefined;
 
-    try {
-      setReminderLoadingKey(loadingKey);
-      const payload = await sendWhatsAppReminders({
-        token,
-        memberIds: [member.id],
-        templateKey,
-      });
-      const summary = summarizeReminderResult(payload, 'Reminder');
-      toast?.(summary.message, summary.tone);
-    } catch (err) {
-      toast?.(getApiErrorMessage(err, 'Failed to send WhatsApp reminder.'), 'error');
-    } finally {
-      setReminderLoadingKey('');
-    }
+    await confirmAndSendReminders({
+      memberIds: [member.id],
+      templateKey,
+      loadingSetter: setReminderLoadingKey,
+      loadingValue: `member-reminder-${member.id}`,
+    });
   };
 
   const handleCall = (phoneNumber) => window.open(`tel:${phoneNumber}`, '_self');
@@ -1179,19 +1229,11 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
       return;
     }
 
-    try {
-      setBulkActionLoading('reminder');
-      const payload = await sendWhatsAppReminders({
-        token,
-        memberIds: selected.map((member) => member.id),
-      });
-      const summary = summarizeReminderResult(payload, 'Reminder');
-      toast?.(summary.message, summary.tone);
-    } catch (err) {
-      toast?.(getApiErrorMessage(err, 'Failed to send WhatsApp reminders.'), 'error');
-    } finally {
-      setBulkActionLoading('');
-    }
+    await confirmAndSendReminders({
+      memberIds: selected.map((member) => member.id),
+      loadingSetter: setBulkActionLoading,
+      loadingValue: 'reminder',
+    });
   };
 
   const handleBulkDelete = () => {
@@ -1651,18 +1693,18 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </div>
 
               <div className="hidden desktop:block h-full overflow-auto">
-              <table className="w-full text-left border-collapse table-fixed min-w-[1100px]">
+              <table className="w-full text-left border-collapse table-fixed min-w-[1240px]">
               <thead>
                 <tr className="text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-100">
                   <th className="py-4 w-[40px] px-2">{isBulkMode && '✓'}</th>
-                  <th className="py-4 w-[18%] pr-2 pl-0">Name</th>
-                  <th className="py-4 w-[11%] px-2">Phone</th>
-                  <th className="py-4 w-[15%] px-2">Email</th>
-                  <th className="py-4 w-[11%] text-center px-2">Status</th>
-                  <th className="py-4 w-[10%] text-center px-2">Plan</th>
-                  <th className="py-4 w-[7%] text-center px-2">Days</th>
-                  <th className="py-4 w-[10%] text-center px-2">Last Visit</th>
-                  <th className="py-4 w-[18%] text-right px-4">Actions</th>
+                  <th className="py-4 w-[17%] pr-2 pl-0">Name</th>
+                  <th className="py-4 w-[10%] px-2">Phone</th>
+                  <th className="py-4 w-[14%] px-2">Email</th>
+                  <th className="py-4 w-[9%] text-center px-2">Status</th>
+                  <th className="py-4 w-[11%] text-center px-2">Plan</th>
+                  <th className="py-4 w-[8%] text-center px-2">Days</th>
+                  <th className="py-4 w-[11%] text-center px-2">Last Visit</th>
+                  <th className="py-4 w-[20%] text-right px-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -1698,12 +1740,12 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
                         <td className="py-4 px-2 text-center"><span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span></td>
                         <td className="py-4 px-2 text-center">{member.plan_name ? <span className="text-xs font-bold text-slate-700 truncate block">{member.plan_name}</span> : <span className="text-slate-300 font-bold text-sm">—</span>}</td>
                         <td className="py-4 px-2 text-center">{statusInfo.label === 'UNPAID' ? <span className="text-slate-300 font-bold text-sm">—</span> : member.days_left <= 0 ? <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[9px] font-black rounded-full uppercase">Exp'd</span> : member.days_left <= 7 ? <span className="px-2.5 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full">{displayDays}d</span> : <span className="text-sm font-bold text-slate-700">{displayDays}</span>}</td>
-                        <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600">{effectiveVisitSource ? new Date(effectiveVisitSource).toLocaleDateString('en-GB') : '—'}</span></td>
+                        <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600 whitespace-nowrap">{effectiveVisitSource ? new Date(effectiveVisitSource).toLocaleDateString('en-GB') : '—'}</span></td>
                         <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex justify-end items-center gap-1.5">
-                            {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
-                            {canWritePayments && (statusInfo.label === 'EXPIRED' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
-                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => sendWhatsAppReminder(member, statusInfo.label === 'INACTIVE' ? 'followup' : 'reminder')} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
+                          <div className="ml-auto flex max-w-[240px] flex-wrap justify-end items-center gap-2">
+                            {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[82px] items-center justify-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
+                            {canWritePayments && (statusInfo.label === 'EXPIRED' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[76px] items-center justify-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
+                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON' || statusInfo.label === 'EXPIRED') && <button onClick={() => sendWhatsAppReminder(member, statusInfo.label === 'INACTIVE' ? 'followup' : statusInfo.label === 'EXPIRED' ? 'expired' : 'reminder')} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex min-w-[84px] items-center justify-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
                             {canWriteAttendance && canCheckMemberIn(member) && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
                             {canWriteMembers && <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
                           </div>
@@ -2013,7 +2055,7 @@ const MembersPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusMe
               </button>
             )}
             <button onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="flex-1 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed">
-              {reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={13} className="animate-spin" /> : <MessageSquare size={13} fill="currentColor" />} WhatsApp
+              {reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={13} className="animate-spin" /> : <MessageSquare size={13} fill="currentColor" />} Send Reminder
             </button>
             {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="flex-1 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-all active:scale-95">
               <Edit2 size={13} /> Edit

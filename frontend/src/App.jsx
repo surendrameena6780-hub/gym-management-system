@@ -88,8 +88,8 @@ function ToastItem({ message, type, onRemove }) {
 
 function useConfirm() {
   const [confirmState, setConfirmState] = useState(null);
-  const showConfirm = useCallback(({ title, message, onConfirm, confirmLabel, variant = 'danger' }) => {
-    setConfirmState({ title, message, onConfirm, confirmLabel, variant });
+  const showConfirm = useCallback(({ title, message, onConfirm, confirmLabel, cancelLabel, variant = 'danger', panelClassName = '', messageClassName = '' }) => {
+    setConfirmState({ title, message, onConfirm, confirmLabel, cancelLabel, variant, panelClassName, messageClassName });
   }, []);
   const hideConfirm = useCallback(() => setConfirmState(null), []);
   return { confirmState, showConfirm, hideConfirm };
@@ -100,13 +100,13 @@ function ConfirmModal({ confirmState, hideConfirm }) {
   const isDanger = confirmState.variant === 'danger';
   return (
     <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-[28px] w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-300">
+      <div className={`bg-white rounded-[28px] w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-300 ${confirmState.panelClassName || ''}`}>
         <div className="p-8 text-center">
           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-5 mx-auto ${isDanger ? 'bg-rose-100 text-rose-500' : 'bg-amber-100 text-amber-500'}`}>
             <AlertTriangle size={28} />
           </div>
           <h3 className="text-xl font-black text-slate-900 mb-2">{confirmState.title}</h3>
-          <p className="text-sm font-semibold text-slate-500 leading-relaxed">{confirmState.message}</p>
+          <p className={`text-sm font-semibold text-slate-500 leading-relaxed whitespace-pre-wrap ${confirmState.messageClassName || ''}`}>{confirmState.message}</p>
         </div>
         <div className="px-8 pb-8 flex flex-col gap-3">
           <button
@@ -119,7 +119,7 @@ function ConfirmModal({ confirmState, hideConfirm }) {
             {confirmState.confirmLabel || (isDanger ? 'Yes, Delete' : 'Confirm')}
           </button>
           <button onClick={hideConfirm} className="w-full py-3 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-700 transition-colors">
-            Cancel
+            {confirmState.cancelLabel || 'Cancel'}
           </button>
         </div>
       </div>
@@ -1351,6 +1351,7 @@ function App() {
                 <AttendancePage
                   token={token}
                   toast={toast}
+                  showConfirm={showConfirm}
                   isActive={currentPage === 'Attendance'}
                   currentUser={currentUser}
                   focusSection={attendanceSectionFocus}
@@ -1382,7 +1383,7 @@ function App() {
             {/* Insights */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Insights') && (
-                <InsightsPage token={token} toast={toast} currentUser={currentUser} isActive={currentPage === 'Insights'} />
+                <InsightsPage token={token} toast={toast} showConfirm={showConfirm} currentUser={currentUser} isActive={currentPage === 'Insights'} />
               )}
             </div>
 

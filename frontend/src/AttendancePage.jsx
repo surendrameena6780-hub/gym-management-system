@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PageLoader from './PageLoader';
 import { QRCodeCanvas } from 'qrcode.react';
-import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 
 function useCountUp(target, duration = 800) {
   const [display, setDisplay] = useState(0);
@@ -160,7 +160,7 @@ const hasPermission = (user, permission) => {
   return Boolean(scope && permissions.includes(`${scope}:*`));
 };
 
-function AttendancePage({ token, toast, isActive = true, currentUser = null, onOpenRfidSetup, focusSection = null, onSectionHandled }) {
+function AttendancePage({ token, toast, showConfirm, isActive = true, currentUser = null, onOpenRfidSetup, focusSection = null, onSectionHandled }) {
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
@@ -848,16 +848,55 @@ function AttendancePage({ token, toast, isActive = true, currentUser = null, onO
 
     try {
       setReminderLoadingId(member.id);
-      const payload = await sendWhatsAppReminders({
+      const previewPayload = await previewWhatsAppReminders({
         token,
         memberIds: [member.id],
         templateKey: 'INACTIVE',
       });
-      const summary = summarizeReminderResult(payload, 'Reminder');
-      toast?.(summary.message, summary.tone);
+      const previewDialog = buildReminderPreviewDialog(previewPayload);
+
+      if (!previewDialog) {
+        toast?.(getReminderPreviewBlockReason(previewPayload) || 'No reminder can be sent for this member.', 'warning');
+        return;
+      }
+
+      const runSend = async () => {
+        try {
+          setReminderLoadingId(member.id);
+          const payload = await sendWhatsAppReminders({
+            token,
+            memberIds: [member.id],
+            templateKey: 'INACTIVE',
+          });
+          const summary = summarizeReminderResult(payload, 'Reminder');
+          toast?.(summary.message, summary.tone);
+        } catch (err) {
+          const payload = asObject(err?.response?.data, {});
+          toast?.(payload.message || payload.error || 'Failed to queue WhatsApp reminder.', 'error');
+        } finally {
+          setReminderLoadingId(null);
+        }
+      };
+
+      if (showConfirm) {
+        showConfirm({
+          title: previewDialog.title,
+          message: previewDialog.message,
+          confirmLabel: previewDialog.confirmLabel,
+          variant: 'warning',
+          panelClassName: 'max-w-2xl',
+          messageClassName: 'text-left text-slate-600',
+          onConfirm: runSend,
+        });
+        return;
+      }
+
+      if (window.confirm(previewDialog.message)) {
+        await runSend();
+      }
     } catch (err) {
       const payload = asObject(err?.response?.data, {});
-      toast?.(payload.message || payload.error || 'Failed to send WhatsApp reminder.', 'error');
+      toast?.(payload.message || payload.error || 'Failed to prepare WhatsApp reminder preview.', 'error');
     } finally {
       setReminderLoadingId(null);
     }

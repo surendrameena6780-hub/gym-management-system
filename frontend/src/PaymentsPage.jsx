@@ -9,7 +9,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
-import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -426,15 +426,58 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
     try {
       setDueReminderLoadingId(payment.id);
-      const payload = await sendWhatsAppReminders({
+      const previewPayload = await previewWhatsAppReminders({
         token,
         memberIds: [payment.user_id],
         templateKey: 'PAYMENT_DUE',
       });
-      const summary = summarizeReminderResult(payload, 'Due reminder');
-      toast?.(summary.message, summary.tone);
+      const previewDialog = buildReminderPreviewDialog(previewPayload, {
+        singleTitle: 'Send Payment Reminder',
+        multiTitle: 'Send Payment Reminders',
+        singleConfirmLabel: 'Send Payment Reminder',
+        multiConfirmLabelPrefix: 'Send',
+      });
+
+      if (!previewDialog) {
+        toast?.(getReminderPreviewBlockReason(previewPayload) || 'No reminder can be sent for this member.', 'warning');
+        return;
+      }
+
+      const runSend = async () => {
+        try {
+          setDueReminderLoadingId(payment.id);
+          const payload = await sendWhatsAppReminders({
+            token,
+            memberIds: [payment.user_id],
+            templateKey: 'PAYMENT_DUE',
+          });
+          const summary = summarizeReminderResult(payload, 'Payment reminder');
+          toast?.(summary.message, summary.tone);
+        } catch (err) {
+          toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to queue WhatsApp reminder.', 'error');
+        } finally {
+          setDueReminderLoadingId(null);
+        }
+      };
+
+      if (showConfirm) {
+        showConfirm({
+          title: previewDialog.title,
+          message: previewDialog.message,
+          confirmLabel: previewDialog.confirmLabel,
+          variant: 'warning',
+          panelClassName: 'max-w-2xl',
+          messageClassName: 'text-left text-slate-600',
+          onConfirm: runSend,
+        });
+        return;
+      }
+
+      if (window.confirm(previewDialog.message)) {
+        await runSend();
+      }
     } catch (err) {
-      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to send WhatsApp reminder.', 'error');
+      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to prepare WhatsApp reminder preview.', 'error');
     } finally {
       setDueReminderLoadingId(null);
     }

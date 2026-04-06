@@ -11,7 +11,7 @@ import {
   MessageSquare, Phone, Award, RefreshCw,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
-import { sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 
 const EMPTY_ANALYTICS = {
@@ -138,7 +138,7 @@ const normalizeInsightsPayload = (payload) => ({
   },
 });
 
-const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
+const InsightsPage = ({ token, toast, showConfirm, currentUser, isActive = true }) => {
   const gymName = currentUser?.gym_name || 'GymVault';
   const [activeTab, setActiveTab] = useState('revenue');
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
@@ -164,15 +164,53 @@ const InsightsPage = ({ token, toast, currentUser, isActive = true }) => {
 
     try {
       setReminderLoadingKey(loadingKey);
-      const payload = await sendWhatsAppReminders({
+      const previewPayload = await previewWhatsAppReminders({
         token,
         memberIds: [member.id],
         templateKey,
       });
-      const summary = summarizeReminderResult(payload, 'Reminder');
-      toast?.(summary.message, summary.tone);
+      const previewDialog = buildReminderPreviewDialog(previewPayload);
+
+      if (!previewDialog) {
+        toast?.(getReminderPreviewBlockReason(previewPayload) || 'No reminder can be sent for this member.', 'warning');
+        return;
+      }
+
+      const runSend = async () => {
+        try {
+          setReminderLoadingKey(loadingKey);
+          const payload = await sendWhatsAppReminders({
+            token,
+            memberIds: [member.id],
+            templateKey,
+          });
+          const summary = summarizeReminderResult(payload, 'Reminder');
+          toast?.(summary.message, summary.tone);
+        } catch (err) {
+          toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to queue WhatsApp reminder.', 'error');
+        } finally {
+          setReminderLoadingKey('');
+        }
+      };
+
+      if (showConfirm) {
+        showConfirm({
+          title: previewDialog.title,
+          message: previewDialog.message,
+          confirmLabel: previewDialog.confirmLabel,
+          variant: 'warning',
+          panelClassName: 'max-w-2xl',
+          messageClassName: 'text-left text-slate-600',
+          onConfirm: runSend,
+        });
+        return;
+      }
+
+      if (window.confirm(previewDialog.message)) {
+        await runSend();
+      }
     } catch (err) {
-      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to send WhatsApp reminder.', 'error');
+      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Failed to prepare WhatsApp reminder preview.', 'error');
     } finally {
       setReminderLoadingKey('');
     }

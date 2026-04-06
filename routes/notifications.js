@@ -21,6 +21,7 @@ const AUDIENCE_MAP = {
 };
 
 const WHATSAPP_SEND_CONCURRENCY = Math.max(1, Math.min(10, parseInt(process.env.MSG91_SEND_CONCURRENCY || '5', 10) || 5));
+const BOT_MEMBER_EMAIL_DOMAIN = '@seed.gymvault.bot';
 
 const CHURN_SCORE_SQL = `
 WITH latest_membership AS (
@@ -46,6 +47,7 @@ base AS (
     SELECT
         m.id,
         m.full_name,
+        m.email,
         m.phone,
         m.last_visit,
         COALESCE(lm.status, 'UNPAID') AS membership_status,
@@ -171,6 +173,7 @@ async function getSegmentMembers(gymId, segment, limit = 200) {
 SELECT
     id,
     full_name,
+    email,
     phone,
     membership_status,
     plan_name,
@@ -210,6 +213,7 @@ async function getMembersByIds(gymId, memberIds = []) {
          SELECT
             id,
             full_name,
+                email,
             phone,
             membership_status,
             plan_name,
@@ -280,6 +284,80 @@ const pickApprovedTemplate = (templateMap, candidateKeys = []) => {
         }
     }
     return null;
+};
+
+const isDemoMember = (member = {}) => String(member.email || '').trim().toLowerCase().endsWith(BOT_MEMBER_EMAIL_DOMAIN);
+
+const renderReminderPreviewText = (templateText, member = {}, gymName = '') => {
+    const daysLeft = Number.isFinite(Number(member?.days_to_expiry)) ? Number(member.days_to_expiry) : 0;
+    const values = {
+        name: String(member?.full_name || 'Member').trim() || 'Member',
+        plan: String(member?.plan_name || 'your plan').trim() || 'your plan',
+        days_left: String(daysLeft),
+        gym_name: String(gymName || 'GymVault').trim() || 'GymVault',
+    };
+
+    return String(templateText || '').replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_token, placeholder) => {
+        const key = String(placeholder || '').trim().toLowerCase();
+        return values[key] || key.replace(/_/g, ' ');
+    });
+};
+
+const buildReminderPreviewItems = ({ members = [], approvedTemplates = new Map(), requestedTemplateKey = '', gymName = '' }) => {
+    return (Array.isArray(members) ? members : []).map((member) => {
+        if (isDemoMember(member)) {
+            return {
+                member_id: member.id,
+                full_name: member.full_name,
+                phone: member.phone,
+                email: member.email,
+                eligible: false,
+                reason: 'This is a demo/seed profile. Real reminders are blocked for demo members.',
+            };
+        }
+
+        const recipientNumber = normalizeLocalIndianPhone(member.phone);
+        if (!recipientNumber) {
+            return {
+                member_id: member.id,
+                full_name: member.full_name,
+                phone: member.phone,
+                email: member.email,
+                eligible: false,
+                reason: 'Valid phone number not available for this member.',
+            };
+        }
+
+        const selectedTemplate = pickApprovedTemplate(
+            approvedTemplates,
+            pickReminderTemplateCandidates(member, requestedTemplateKey)
+        );
+
+        if (!selectedTemplate) {
+            return {
+                member_id: member.id,
+                full_name: member.full_name,
+                phone: member.phone,
+                email: member.email,
+                eligible: false,
+                reason: requestedTemplateKey
+                    ? `Template ${requestedTemplateKey} is not approved for sending.`
+                    : 'No approved reminder template is available for this member.',
+            };
+        }
+
+        return {
+            member_id: member.id,
+            full_name: member.full_name,
+            phone: member.phone,
+            email: member.email,
+            eligible: true,
+            recipient_number: recipientNumber,
+            template_key: String(selectedTemplate.template_key || '').trim().toUpperCase(),
+            template_title: selectedTemplate.title,
+            message: renderReminderPreviewText(selectedTemplate.whatsapp_text, member, gymName),
+        };
+    });
 };
 
 const runWithConcurrency = async (items, concurrency, worker) => {
@@ -360,7 +438,104 @@ router.put('/read-all', auth, saasMiddleware, async (req, res) => {
     }
 });
 
-// --- 4. SEND DIRECT MEMBER REMINDERS ---
+// --- 4. PREVIEW DIRECT MEMBER REMINDERS ---
+router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
+    try {
+        await ensureMessagingSchema();
+
+        if (!canSendManualReminder(req.user)) {
+            return fail(res, 403, 'FORBIDDEN_REMINDER_SEND', 'You do not have permission to send WhatsApp reminders.');
+        }
+
+        const gymId = req.user.gym_id;
+        const memberIds = Array.from(new Set(
+            (Array.isArray(req.body.member_ids) ? req.body.member_ids : [req.body.member_id])
+                .map((value) => Number.parseInt(value, 10))
+                .filter((value) => Number.isInteger(value) && value > 0)
+        ));
+        const requestedTemplateKey = String(req.body.template_key || '').trim().toUpperCase();
+
+        if (memberIds.length === 0) {
+            return fail(res, 400, 'REMINDER_MEMBERS_REQUIRED', 'Select at least one member before previewing a reminder.');
+        }
+
+        const gymConfigRes = await pool.query(
+            `SELECT
+                name,
+                messaging_whatsapp_number,
+                messaging_whatsapp_status,
+                bulk_per_campaign_limit
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [gymId]
+        );
+        const gymConfig = gymConfigRes.rows[0] || {};
+
+        if (String(gymConfig.messaging_whatsapp_status || '').toUpperCase() !== 'CONNECTED' || !gymConfig.messaging_whatsapp_number) {
+            return fail(res, 400, 'WHATSAPP_NOT_CONNECTED', 'Connect and verify your gym WhatsApp number in Settings before sending reminders.');
+        }
+
+        const bulkLimit = Math.max(1, parseInt(gymConfig.bulk_per_campaign_limit || 50, 10));
+        if (memberIds.length > bulkLimit) {
+            return fail(res, 400, 'REMINDER_LIMIT_EXCEEDED', `Select up to ${bulkLimit} members at a time for WhatsApp reminders.`);
+        }
+
+        const templateRes = await pool.query(
+            `SELECT
+                template_key,
+                title,
+                whatsapp_text,
+                whatsapp_template_name,
+                whatsapp_template_language,
+                whatsapp_template_status,
+                is_active
+             FROM gym_message_templates
+             WHERE gym_id = $1 AND is_active = TRUE`,
+            [gymId]
+        );
+
+        const approvedTemplates = new Map();
+        for (const template of templateRes.rows) {
+            const templateKey = String(template.template_key || '').trim().toUpperCase();
+            if (!templateKey || !template.whatsapp_template_name) continue;
+            if (normalizeTemplateStatus(template.whatsapp_template_status) !== 'APPROVED') continue;
+            approvedTemplates.set(templateKey, template);
+        }
+
+        if (approvedTemplates.size === 0) {
+            return fail(res, 400, 'NO_APPROVED_TEMPLATES', 'No approved WhatsApp templates are available. Approve a template in Settings first.');
+        }
+
+        if (requestedTemplateKey && !approvedTemplates.has(requestedTemplateKey)) {
+            return fail(res, 400, 'TEMPLATE_NOT_APPROVED', 'The selected WhatsApp template is not approved yet. Approve it in Settings first.');
+        }
+
+        const members = await getMembersByIds(gymId, memberIds);
+        if (members.length === 0) {
+            return fail(res, 400, 'REMINDER_MEMBERS_NOT_FOUND', 'No valid members were found for this reminder request.');
+        }
+
+        const previewItems = buildReminderPreviewItems({
+            members,
+            approvedTemplates,
+            requestedTemplateKey,
+            gymName: gymConfig.name || 'GymVault',
+        });
+
+        return ok(res, {
+            preview_items: previewItems,
+            eligible_count: previewItems.filter((item) => item.eligible).length,
+            blocked_count: previewItems.filter((item) => !item.eligible).length,
+            template_keys_used: Array.from(new Set(previewItems.filter((item) => item.eligible).map((item) => item.template_key))),
+        });
+    } catch (err) {
+        console.error('REMINDER PREVIEW ERROR:', err.message);
+        return fail(res, 500, 'REMINDER_PREVIEW_FAILED', 'Failed to prepare the WhatsApp reminder preview.');
+    }
+});
+
+// --- 5. SEND DIRECT MEMBER REMINDERS ---
 router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
     try {
         await ensureMessagingSchema();
@@ -438,35 +613,37 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
             return fail(res, 400, 'REMINDER_MEMBERS_NOT_FOUND', 'No valid members were found for this reminder request.');
         }
 
+        const previewItems = buildReminderPreviewItems({
+            members,
+            approvedTemplates,
+            requestedTemplateKey,
+            gymName: gymConfig.name || 'GymVault',
+        });
+
         let successCount = 0;
         let failedCount = 0;
         const failures = [];
         const templateKeysUsed = new Set();
 
-        await runWithConcurrency(members, WHATSAPP_SEND_CONCURRENCY, async (member) => {
-            const toPhone = normalizeLocalIndianPhone(member.phone);
-            if (!toPhone) {
+        await runWithConcurrency(previewItems, WHATSAPP_SEND_CONCURRENCY, async (previewItem) => {
+            if (!previewItem.eligible) {
                 failedCount += 1;
                 failures.push({
-                    member_id: member.id,
-                    full_name: member.full_name,
-                    phone: member.phone,
-                    reason: 'Valid phone number not available.',
+                    member_id: previewItem.member_id,
+                    full_name: previewItem.full_name,
+                    phone: previewItem.phone,
+                    reason: previewItem.reason || 'Member is not eligible for a reminder.',
                 });
                 return;
             }
 
-            const selectedTemplate = pickApprovedTemplate(
-                approvedTemplates,
-                pickReminderTemplateCandidates(member, requestedTemplateKey)
-            );
-
+            const selectedTemplate = approvedTemplates.get(String(previewItem.template_key || '').trim().toUpperCase());
             if (!selectedTemplate) {
                 failedCount += 1;
                 failures.push({
-                    member_id: member.id,
-                    full_name: member.full_name,
-                    phone: member.phone,
+                    member_id: previewItem.member_id,
+                    full_name: previewItem.full_name,
+                    phone: previewItem.phone,
                     reason: requestedTemplateKey
                         ? `Template ${requestedTemplateKey} is not approved for sending.`
                         : 'No approved reminder template is available for this member.',
@@ -479,17 +656,21 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
                     integratedNumber: gymConfig.messaging_whatsapp_number,
                     templateName: selectedTemplate.whatsapp_template_name,
                     language: selectedTemplate.whatsapp_template_language || 'en_US',
-                    recipientNumber: toPhone,
-                    variables: buildTemplateBodyVariables(selectedTemplate.whatsapp_text, member, gymConfig.name || 'GymVault'),
+                    recipientNumber: previewItem.recipient_number,
+                    variables: buildTemplateBodyVariables(selectedTemplate.whatsapp_text, {
+                        full_name: previewItem.full_name,
+                        plan_name: members.find((member) => member.id === previewItem.member_id)?.plan_name,
+                        days_to_expiry: members.find((member) => member.id === previewItem.member_id)?.days_to_expiry,
+                    }, gymConfig.name || 'GymVault'),
                 });
                 successCount += 1;
                 templateKeysUsed.add(String(selectedTemplate.template_key || '').trim().toUpperCase());
             } catch (sendErr) {
                 failedCount += 1;
                 failures.push({
-                    member_id: member.id,
-                    full_name: member.full_name,
-                    phone: member.phone,
+                    member_id: previewItem.member_id,
+                    full_name: previewItem.full_name,
+                    phone: previewItem.phone,
                     reason: sendErr?.message || 'Send failed',
                 });
             }
@@ -501,8 +682,8 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
                  VALUES ($1, $2, $3)`,
                 [
                     gymId,
-                    successCount > 1 ? 'WhatsApp reminders sent' : 'WhatsApp reminder sent',
-                    `${successCount} delivered${failedCount > 0 ? `, ${failedCount} failed` : ''}`,
+                    successCount > 1 ? 'WhatsApp reminders queued' : 'WhatsApp reminder queued',
+                    `${successCount} accepted for sending${failedCount > 0 ? `, ${failedCount} blocked or failed` : ''}`,
                 ]
             );
         }
@@ -520,7 +701,7 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
     }
 });
 
-// --- 5. SEGMENT PREVIEW (automation pipeline) ---
+// --- 6. SEGMENT PREVIEW (automation pipeline) ---
 router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
@@ -540,7 +721,7 @@ router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req,
     }
 });
 
-// --- 6. RUN CAMPAIGN (returns links + writes audit log) ---
+// --- 7. RUN CAMPAIGN (returns links + writes audit log) ---
 router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMessagingSchema();
@@ -721,7 +902,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
     }
 });
 
-// --- 7. CAMPAIGN HISTORY LOG ---
+// --- 8. CAMPAIGN HISTORY LOG ---
 router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
@@ -742,7 +923,7 @@ router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res
     }
 });
 
-// --- 8. DEEPER CHURN SCORES ---
+// --- 9. DEEPER CHURN SCORES ---
 router.get('/campaign/churn-scores', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
