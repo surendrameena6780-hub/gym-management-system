@@ -259,25 +259,39 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
-
-// Expiration Janitor
-setInterval(() => {
-    checkExpirations();
-}, 1000 * 60 * 60); 
-
-checkExpirations();
-
 const automatedNudgeIntervalMs = 1000 * 60 * 30;
 
-setInterval(() => {
+const startBackgroundJobs = () => {
+    setInterval(() => {
+        checkExpirations();
+    }, 1000 * 60 * 60);
+
+    checkExpirations();
+
+    setInterval(() => {
+        runAutomatedNotificationNudges().catch((err) => {
+            console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
+        });
+    }, automatedNudgeIntervalMs);
+
     runAutomatedNotificationNudges().catch((err) => {
         console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
     });
-}, automatedNudgeIntervalMs);
+};
 
-runAutomatedNotificationNudges().catch((err) => {
-    console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
-});
+const bootstrap = async () => {
+    try {
+        await connectDB();
+
+        app.listen(PORT, () => {
+            console.log(`Server is running on port ${PORT}`);
+        });
+
+        startBackgroundJobs();
+    } catch (err) {
+        console.error('STARTUP ERROR:', err.message);
+        process.exit(1);
+    }
+};
+
+bootstrap();
