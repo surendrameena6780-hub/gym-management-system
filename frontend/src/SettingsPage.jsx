@@ -123,7 +123,7 @@ const DEFAULT_MESSAGE_TEMPLATES = [
 const normalizeTemplateSyncStatus = (value) => {
   const status = String(value || '').trim().toUpperCase();
   if (!status) return 'NOT_SYNCED';
-  if (status.includes('APPROVED') || status === 'ACTIVE') return 'APPROVED';
+  if (status.includes('APPROVED') || status === 'ACTIVE' || status.includes('ENABLE') || status === 'LIVE') return 'APPROVED';
   if (status.includes('PENDING') || status.includes('PROCESS') || status.includes('QUEUE') || status.includes('REVIEW') || status.includes('REQUESTED')) return 'PENDING';
   if (status.includes('REJECT')) return 'REJECTED';
   if (status.includes('DISABLE') || status.includes('INACTIVE')) return 'DISABLED';
