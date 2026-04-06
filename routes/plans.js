@@ -39,13 +39,53 @@ const normalizePlanPayload = (body = {}) => ({
         : {},
 });
 
+const normalizePlanFeatures = (value) => {
+    if (Array.isArray(value)) {
+        return value
+            .map((item) => String(item || '').trim())
+            .filter(Boolean);
+    }
+
+    if (typeof value !== 'string') {
+        return [];
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return [];
+    }
+
+    if (trimmed.startsWith('[')) {
+        try {
+            const parsed = JSON.parse(trimmed);
+            return normalizePlanFeatures(parsed);
+        } catch (_err) {
+            // Fall back to delimiter parsing below.
+        }
+    }
+
+    const postgresArrayLiteral = trimmed.startsWith('{') && trimmed.endsWith('}')
+        ? trimmed.slice(1, -1)
+        : trimmed;
+
+    return postgresArrayLiteral
+        .split(/\r?\n|,/) 
+        .map((item) => item.replace(/^"|"$/g, '').trim())
+        .filter(Boolean);
+};
+
+const normalizePlanRow = (row = {}) => ({
+    ...row,
+    features: normalizePlanFeatures(row.features),
+});
+
 router.use(auth, saasMiddleware, requireOwner);
 
 // GET ALL PLANS
 router.get('/', async (req, res) => {
     try {
         const plans = await pool.query('SELECT * FROM plans WHERE gym_id = $1 AND deleted_at IS NULL ORDER BY price ASC', [req.user.gym_id]);
-        res.json(plans.rows);
+        res.json(plans.rows.map(normalizePlanRow));
     } catch (err) {
         console.error(err.message);
         res.status(500).json({ error: 'Server error' });
@@ -86,7 +126,7 @@ router.post('/add', async (req, res) => {
             ]
         );
 
-        res.status(200).json(newPlan.rows[0]);
+        res.status(200).json(normalizePlanRow(newPlan.rows[0]));
     } catch (err) {
         console.error("DATABASE ERROR:", err.message);
         res.status(500).json({ error: 'Server error' });
@@ -158,7 +198,7 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ msg: "Plan not found" });
         }
 
-        res.json(updatePlan.rows[0]);
+        res.json(normalizePlanRow(updatePlan.rows[0]));
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
@@ -262,7 +302,7 @@ router.put('/:id/advanced-rules', async (req, res) => {
             [planId, gym_id, ...vals]
         );
         if (!result.rows.length) return res.status(404).json({ error: 'Plan not found' });
-        res.json(result.rows[0]);
+        res.json(normalizePlanRow(result.rows[0]));
     } catch (err) {
         console.error('PLAN RULES:', err.message);
         res.status(500).json({ error: 'Server error' });

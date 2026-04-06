@@ -15,6 +15,71 @@ const extractArray = (value, keys = []) => {
   return [];
 };
 
+const normalizePlanFeatures = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return normalizePlanFeatures(parsed);
+    } catch (_err) {
+      // Fall back to delimiter parsing below.
+    }
+  }
+
+  const postgresArrayLiteral = trimmed.startsWith('{') && trimmed.endsWith('}')
+    ? trimmed.slice(1, -1)
+    : trimmed;
+
+  return postgresArrayLiteral
+    .split(/\r?\n|,/) 
+    .map((item) => item.replace(/^"|"$/g, '').trim())
+    .filter(Boolean);
+};
+
+const normalizePlanRecord = (plan = {}) => ({
+  ...plan,
+  features: normalizePlanFeatures(plan.features),
+});
+
+const normalizeAnalyticsPayload = (payload = {}) => ({
+  ...payload,
+  graphData: Array.isArray(payload?.graphData)
+    ? payload.graphData.map((item) => ({
+        month: String(item?.month || '').trim(),
+        revenue: Number(item?.revenue || 0),
+      }))
+    : [],
+});
+
+const normalizeDateInputValue = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toISOString().split('T')[0];
+};
+
+const parseValidDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const PlansPage = ({ appRuntime }) => {
   const { token, toast, showConfirm } = appRuntime;
   const [plans, setPlans] = useState([]);
@@ -57,7 +122,7 @@ const PlansPage = ({ appRuntime }) => {
       const res = await axios.get('/api/plans', {
         headers: { 'x-auth-token': token }
       });
-      setPlans(extractArray(res.data, ['plans', 'rows', 'items']));
+      setPlans(extractArray(res.data, ['plans', 'rows', 'items']).map(normalizePlanRecord));
       setLoading(false);
     } catch (err) {
       reportClientError('Plans fetch', err);
@@ -78,7 +143,7 @@ const PlansPage = ({ appRuntime }) => {
         const res = await axios.get(`/api/plans/${planId}/analytics`, {
             headers: { 'x-auth-token': token }
         });
-        setAnalyticsData(res.data);
+      setAnalyticsData(normalizeAnalyticsPayload(res.data));
         setLoadingAnalytics(false);
     } catch (err) {
         toast?.("Failed to load analytics.", "error");
@@ -106,31 +171,28 @@ const PlansPage = ({ appRuntime }) => {
 
   const openEditModal = (plan) => {
     setIsEditing(true);
+    const normalizedPlan = normalizePlanRecord(plan);
     
     // Format date for input field (YYYY-MM-DD)
-    let validDate = '';
-    if (plan.discount_valid_until) {
-        const d = new Date(plan.discount_valid_until);
-        validDate = d.toISOString().split('T')[0];
-    }
+    const validDate = normalizeDateInputValue(normalizedPlan.discount_valid_until);
 
     setFormData({
-      id: plan.id,
-      name: plan.name,
-      price: plan.price,
-      duration_days: plan.duration_days,
-      features: plan.features || [],
-      color_theme: plan.color_theme || 'blue',
-      is_popular: plan.is_popular || false,
-      discount_percent: plan.discount_percent || 0,
+      id: normalizedPlan.id,
+      name: normalizedPlan.name,
+      price: normalizedPlan.price,
+      duration_days: normalizedPlan.duration_days,
+      features: normalizedPlan.features,
+      color_theme: normalizedPlan.color_theme || 'blue',
+      is_popular: normalizedPlan.is_popular || false,
+      discount_percent: normalizedPlan.discount_percent || 0,
       discount_valid_until: validDate,
-      joining_fee: plan.joining_fee || '',
-      freeze_allowance_days: plan.freeze_allowance_days || '',
-      transfer_fee: plan.transfer_fee || '',
-      access_hours: plan.access_hours || '',
-      guest_passes: plan.guest_passes || '',
-      renewal_policy: plan.renewal_policy || '',
-      class_eligibility: plan.class_eligibility || '',
+      joining_fee: normalizedPlan.joining_fee || '',
+      freeze_allowance_days: normalizedPlan.freeze_allowance_days || '',
+      transfer_fee: normalizedPlan.transfer_fee || '',
+      access_hours: normalizedPlan.access_hours || '',
+      guest_passes: normalizedPlan.guest_passes || '',
+      renewal_policy: normalizedPlan.renewal_policy || '',
+      class_eligibility: normalizedPlan.class_eligibility || '',
     });
     setShowModal(true);
   };
@@ -204,7 +266,8 @@ const PlansPage = ({ appRuntime }) => {
       <div className="grid grid-cols-1 desktop:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-8">
         {loading && [1,2,3].map(i => <div key={i} className="h-96 bg-white rounded-[32px] animate-pulse border border-slate-100 shadow-sm"></div>)}
 
-        {plans.map((plan) => {
+        {plans.map((rawPlan) => {
+          const plan = normalizePlanRecord(rawPlan);
           const theme = getTheme(plan.color_theme || 'blue');
           
           // 🛠️ FIX: DATE-AWARE DISCOUNT LOGIC
@@ -213,7 +276,7 @@ const PlansPage = ({ appRuntime }) => {
           today.setHours(0, 0, 0, 0);
 
           const hasDiscountField = plan.discount_percent > 0;
-          const expiryDate = plan.discount_valid_until ? new Date(plan.discount_valid_until) : null;
+          const expiryDate = parseValidDate(plan.discount_valid_until);
           
           // The offer is ONLY active if the discount exists AND the expiry date is in the future or today
           const isOfferActive = hasDiscountField && (!expiryDate || expiryDate >= today);
@@ -281,7 +344,7 @@ const PlansPage = ({ appRuntime }) => {
               </div>
 
               <div className="flex-1 space-y-4 mb-8">
-                {plan.features && plan.features.length > 0 ? (
+                {plan.features.length > 0 ? (
                     plan.features.map((feature, idx) => (
                         <div key={idx} className="flex items-start gap-3">
                             <div className={`mt-0.5 p-0.5 rounded-full ${theme.bg} text-white shrink-0`}>
