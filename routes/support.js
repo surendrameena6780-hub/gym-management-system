@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
+const { ensurePlatformSettingsBase, normalizeSupportProfile } = require('../utils/platformSettings');
 
 router.use(auth, saasMiddleware);
 
@@ -24,22 +25,10 @@ const ensureSupportProfileTable = async () => {
     await ensureSupportProfileTablePromise;
 };
 
-let ensurePlatformSupportProfileColumnPromise;
-const ensurePlatformSupportProfileColumn = async () => {
-    if (!ensurePlatformSupportProfileColumnPromise) {
-        ensurePlatformSupportProfileColumnPromise = pool.query(`
-            ALTER TABLE platform_settings
-            ADD COLUMN IF NOT EXISTS support_profile JSONB
-            DEFAULT '{"phone":"+91 00000 00000","email":"support@gymvault.com","whatsapp":"+91 00000 00000","about":"GymVault helps gym owners run operations with fast, reliable support.","address":"Head Office, India","timings":"Mon-Sat · 9:00 AM to 7:00 PM IST"}'::jsonb;
-        `);
-    }
-    await ensurePlatformSupportProfileColumnPromise;
-};
-
 // GET /api/support/overview
 router.get('/overview', requirePermission('support:read'), async (req, res) => {
     try {
-        await ensurePlatformSupportProfileColumn();
+        await ensurePlatformSettingsBase();
 
         const platform = await pool.query(
             `SELECT support_profile
@@ -47,19 +36,19 @@ router.get('/overview', requirePermission('support:read'), async (req, res) => {
              WHERE id = 1`
         );
 
-        const supportProfile = platform.rows[0]?.support_profile || {};
+        const supportProfile = normalizeSupportProfile(platform.rows[0]?.support_profile);
 
         return res.json({
             contact: {
-                phone: supportProfile.phone || '+91 00000 00000',
-                email: supportProfile.email || 'support@gymvault.com',
-                whatsapp: supportProfile.whatsapp || supportProfile.phone || '+91 00000 00000',
+                phone: supportProfile.phone,
+                email: supportProfile.email,
+                whatsapp: supportProfile.whatsapp,
             },
             about: {
                 title: 'About GymVault',
-                mission: supportProfile.about || supportProfile.mission || 'GymVault helps gym owners run operations with fast, reliable support.',
-                address: supportProfile.address || 'Head Office, India',
-                support_window: supportProfile.timings || supportProfile.support_window || 'Mon-Sat · 9:00 AM to 7:00 PM IST',
+                mission: supportProfile.about,
+                address: supportProfile.address,
+                support_window: supportProfile.timings,
             },
         });
     } catch (err) {

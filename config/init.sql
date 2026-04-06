@@ -64,6 +64,20 @@ CREATE INDEX IF NOT EXISTS idx_user_login_otps_user_purpose
 CREATE INDEX IF NOT EXISTS idx_user_login_otps_phone_active
     ON user_login_otps (phone, purpose, expires_at DESC);
 
+CREATE TABLE IF NOT EXISTS platform_settings (
+    id INTEGER PRIMARY KEY,
+    maintenance_mode BOOLEAN DEFAULT FALSE,
+    maintenance_message TEXT DEFAULT '',
+    feature_flags JSONB DEFAULT '{"support": true, "attendance": true, "billing": true}'::jsonb,
+    automation_settings JSONB DEFAULT '{"owner_staff_enabled": true, "member_push_enabled": true, "owner_staff_slots": {"MORNING": true, "AFTERNOON": true, "EVENING": true}, "member_slots": {"MORNING": true, "AFTERNOON": false, "EVENING": true}, "member_max_per_slot": 25}'::jsonb,
+    support_profile JSONB DEFAULT '{"phone":"+91 00000 00000","email":"support@gymvault.com","whatsapp":"+91 00000 00000","about":"GymVault helps gym owners run operations with fast, reliable support.","address":"Head Office, India","timings":"Mon-Sat · 9:00 AM to 7:00 PM IST"}'::jsonb,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO platform_settings (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
 -- 3. PLANS: The membership menu (1 Month, 3 Month, etc.)
 CREATE TABLE IF NOT EXISTS plans (
     id                   SERIAL PRIMARY KEY,

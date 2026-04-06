@@ -1189,6 +1189,9 @@ function SuperAdminDashboard({ token, onLogout }) {
 
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <p className="text-xs uppercase tracking-widest font-black text-slate-400">Global Help & Support Contact</p>
+              <p className="text-sm text-slate-500">
+                These HQ contact details appear on every gym's Help & Support page quick-contact card.
+              </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" placeholder="Support phone" value={system.support_profile?.phone || ''} onChange={(e) => setSystem((p) => ({ ...p, support_profile: { ...(p.support_profile || {}), phone: e.target.value } }))} />

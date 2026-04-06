@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { pool } = require('../config/db');
 const webpush = require('web-push');
 const { setUserAuthCookie } = require('../utils/authCookies');
+const { ensurePlatformSettingsBase, normalizeSupportProfile } = require('../utils/platformSettings');
 
 // Configure VAPID (shared config)
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -51,39 +52,6 @@ const isIpAllowed = (req) => {
 
     const clientIp = getClientIp(req);
     return allowList.includes(clientIp);
-};
-
-let ensurePlatformSupportProfileColumnPromise;
-const ensurePlatformSupportProfileColumn = async () => {
-    if (!ensurePlatformSupportProfileColumnPromise) {
-        ensurePlatformSupportProfileColumnPromise = pool.query(`
-            ALTER TABLE platform_settings
-            ADD COLUMN IF NOT EXISTS support_profile JSONB
-            DEFAULT '{"phone":"+91 00000 00000","email":"support@gymvault.com","whatsapp":"+91 00000 00000","about":"GymVault helps gym owners run operations with fast, reliable support.","address":"Head Office, India","timings":"Mon-Sat · 9:00 AM to 7:00 PM IST"}'::jsonb;
-        `);
-    }
-    await ensurePlatformSupportProfileColumnPromise;
-};
-
-let ensurePlatformAutomationSettingsPromise;
-const ensurePlatformAutomationSettings = async () => {
-    if (!ensurePlatformAutomationSettingsPromise) {
-        ensurePlatformAutomationSettingsPromise = pool.query(`
-            ALTER TABLE platform_settings
-            ADD COLUMN IF NOT EXISTS automation_settings JSONB
-            DEFAULT '{"owner_staff_enabled": true, "member_push_enabled": true, "owner_staff_slots": {"MORNING": true, "AFTERNOON": true, "EVENING": true}, "member_slots": {"MORNING": true, "AFTERNOON": false, "EVENING": true}, "member_max_per_slot": 25}'::jsonb;
-        `);
-    }
-    await ensurePlatformAutomationSettingsPromise;
-};
-
-const defaultSupportProfile = {
-    phone: '+91 00000 00000',
-    email: 'support@gymvault.com',
-    whatsapp: '+91 00000 00000',
-    about: 'GymVault helps gym owners run operations with fast, reliable support.',
-    address: 'Head Office, India',
-    timings: 'Mon-Sat · 9:00 AM to 7:00 PM IST',
 };
 
 const defaultAutomationMessageTemplates = {
@@ -899,17 +867,13 @@ router.get('/reports/light', superAuth, async (_req, res) => {
 
 router.get('/system', superAuth, async (_req, res) => {
     try {
-        await ensurePlatformSupportProfileColumn();
-        await ensurePlatformAutomationSettings();
+        await ensurePlatformSettingsBase();
         const row = await pool.query('SELECT * FROM platform_settings WHERE id = 1');
         const base = row.rows[0] || { maintenance_mode: false, maintenance_message: '', feature_flags: {} };
         return res.json({
             ...base,
             automation_settings: normalizeAutomationSettings(base.automation_settings),
-            support_profile: {
-                ...defaultSupportProfile,
-                ...(base.support_profile || {}),
-            },
+            support_profile: normalizeSupportProfile(base.support_profile),
         });
     } catch (err) {
         console.error('SUPERADMIN SYSTEM GET ERROR:', err.message);
@@ -921,14 +885,15 @@ router.put('/system', superAuth, async (req, res) => {
     const maintenanceMode = typeof req.body.maintenance_mode === 'boolean' ? req.body.maintenance_mode : null;
     const maintenanceMessage = req.body.maintenance_message == null ? null : String(req.body.maintenance_message);
     const featureFlags = req.body.feature_flags && typeof req.body.feature_flags === 'object' ? req.body.feature_flags : null;
-    const supportProfile = req.body.support_profile && typeof req.body.support_profile === 'object' ? req.body.support_profile : null;
+    const supportProfile = req.body.support_profile && typeof req.body.support_profile === 'object'
+        ? normalizeSupportProfile(req.body.support_profile)
+        : null;
     const automationSettings = req.body.automation_settings && typeof req.body.automation_settings === 'object'
         ? normalizeAutomationSettings(req.body.automation_settings)
         : null;
 
     try {
-        await ensurePlatformSupportProfileColumn();
-        await ensurePlatformAutomationSettings();
+        await ensurePlatformSettingsBase();
 
         const updated = await pool.query(
             `UPDATE platform_settings
