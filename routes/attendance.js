@@ -1474,39 +1474,50 @@ router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read
     try {
         const gym_id = req.user.gym_id;
         const days = Math.min(Math.max(parseInt(req.query.days || '7', 10), 1), 120);
+        const inactiveBucket = (() => {
+            if (days <= 7) {
+                return { minDays: 1, maxDays: 7 };
+            }
+            if (days <= 14) {
+                return { minDays: 8, maxDays: 14 };
+            }
+            return { minDays: 15, maxDays: null };
+        })();
 
         const result = await pool.query(
-            `SELECT
-                m.id,
-                m.full_name,
-                m.phone,
-                m.email,
-                m.last_visit,
-                COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
-                ms_latest.plan_name,
-                COALESCE(
-                    DATE_PART('day', NOW() - COALESCE(m.last_visit, m.joining_date::timestamp, m.created_at))::INTEGER,
-                    999
-                ) AS days_inactive
-             FROM members m
-             LEFT JOIN LATERAL (
-                SELECT ms.status, p.name AS plan_name
-                FROM memberships ms
-                LEFT JOIN plans p ON p.id = ms.plan_id
-                                WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
-                ORDER BY ms.end_date DESC NULLS LAST
-                LIMIT 1
-             ) ms_latest ON true
-             WHERE m.gym_id = $1
-                             AND m.deleted_at IS NULL
-               AND COALESCE(ms_latest.status, 'UNPAID') = 'ACTIVE'
-               AND (
-                    m.last_visit IS NULL
-                    OR m.last_visit < NOW() - ($2::int || ' day')::interval
-               )
-             ORDER BY days_inactive DESC, m.full_name ASC
-             LIMIT 100`,
-            [gym_id, days]
+            `WITH inactive_pool AS (
+                SELECT
+                    m.id,
+                    m.full_name,
+                    m.phone,
+                    m.email,
+                    m.last_visit,
+                    COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
+                    ms_latest.plan_name,
+                    COALESCE(
+                        DATE_PART('day', NOW() - COALESCE(m.last_visit, m.joining_date::timestamp, m.created_at))::INTEGER,
+                        999
+                    ) AS days_inactive
+                FROM members m
+                LEFT JOIN LATERAL (
+                    SELECT ms.status, p.name AS plan_name
+                    FROM memberships ms
+                    LEFT JOIN plans p ON p.id = ms.plan_id
+                    WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
+                    ORDER BY ms.end_date DESC NULLS LAST
+                    LIMIT 1
+                ) ms_latest ON true
+                WHERE m.gym_id = $1
+                  AND m.deleted_at IS NULL
+                  AND COALESCE(ms_latest.status, 'UNPAID') = 'ACTIVE'
+            )
+            SELECT *
+            FROM inactive_pool
+            WHERE days_inactive >= $2
+              AND ($3::int IS NULL OR days_inactive <= $3)
+            ORDER BY days_inactive DESC, full_name ASC
+            LIMIT 100`,
+            [gym_id, inactiveBucket.minDays, inactiveBucket.maxDays]
         );
 
         res.json(result.rows);

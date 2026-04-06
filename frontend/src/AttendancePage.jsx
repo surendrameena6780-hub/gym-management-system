@@ -145,6 +145,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
   const qrScannerRef = useRef(null);
   const qrScannerBusyRef = useRef(false);
+  const inactiveRequestSeqRef = useRef(0);
   const checkinOpsRef = useRef(null);
   const liveFeedRef = useRef(null);
 
@@ -349,7 +350,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     loadOverviewBundle(),
     loadPeakHours(peakHoursDays),
     loadRecords(),
-    loadInactive(),
+    loadInactive(inactiveDays),
     loadLeaderboard(),
   ]);
 
@@ -637,8 +638,15 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     setRecords(asArray(unwrapApiData(res.data)));
   };
 
-  const loadInactive = async () => {
-    const res = await axios.get(`/api/attendance/inactive?days=${inactiveDays}`, headers);
+  const loadInactive = async (days = inactiveDays) => {
+    const requestId = inactiveRequestSeqRef.current + 1;
+    inactiveRequestSeqRef.current = requestId;
+
+    const res = await axios.get(`/api/attendance/inactive?days=${days}`, headers);
+    if (inactiveRequestSeqRef.current !== requestId) {
+      return;
+    }
+
     setInactiveMembers(asArray(unwrapApiData(res.data)));
   };
 
@@ -651,7 +659,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     if (!token) return;
     setLoading(true);
     try {
-      await Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDays), loadRecords(), loadInactive(), loadLeaderboard()]);
+      await Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDays), loadRecords(), loadLeaderboard()]);
     } catch (_err) {
       toast?.('Failed to load attendance dashboard.', 'error');
     } finally {
@@ -675,8 +683,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   useEffect(() => {
     if (!token) return;
-    loadInactive().catch(() => toast?.('Failed to load inactive members.', 'error'));
-  }, [inactiveDays]);
+    loadInactive(inactiveDays).catch(() => toast?.('Failed to load inactive members.', 'error'));
+  }, [inactiveDays, token]);
 
   useEffect(() => {
     if (!qrScannerOpen) return undefined;
