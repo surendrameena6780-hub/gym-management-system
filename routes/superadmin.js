@@ -21,6 +21,8 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
 const masterPassword = String(process.env.MASTER_PASSWORD || process.env.SUPERADMIN_PASSWORD || '').trim();
 const superadminEnabled = masterPassword.length >= 8;
 const disabledMessage = 'Superadmin is disabled. Set MASTER_PASSWORD (or SUPERADMIN_PASSWORD) with at least 8 characters.';
+const REPORTS_LIGHT_CACHE_TTL_MS = Math.max(10000, parseInt(process.env.SUPERADMIN_REPORTS_LIGHT_CACHE_TTL_MS || '60000', 10) || 60000);
+let reportsLightCache = { payload: null, expiresAt: 0 };
 
 const normalizeIp = (value) => {
     const raw = String(value || '').trim();
@@ -843,6 +845,10 @@ router.put('/support/tickets/:id', superAuth, async (req, res) => {
 
 router.get('/reports/light', superAuth, async (_req, res) => {
     try {
+        if (reportsLightCache.payload && reportsLightCache.expiresAt > Date.now()) {
+            return res.json(reportsLightCache.payload);
+        }
+
         const totals = await pool.query(`
             SELECT
                 (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE deleted_at IS NULL) AS total_revenue,
@@ -859,7 +865,13 @@ router.get('/reports/light', superAuth, async (_req, res) => {
             LIMIT 6
         `);
 
-        return res.json({ summary: totals.rows[0], growth: growth.rows.reverse() });
+        const payload = { summary: totals.rows[0], growth: growth.rows.reverse() };
+        reportsLightCache = {
+            payload,
+            expiresAt: Date.now() + REPORTS_LIGHT_CACHE_TTL_MS,
+        };
+
+        return res.json(payload);
     } catch (err) {
         console.error('SUPERADMIN REPORTS ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });

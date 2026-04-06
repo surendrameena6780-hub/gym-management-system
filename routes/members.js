@@ -93,6 +93,92 @@ const buildMemberLifecycleStatusCase = (alias) => `
     END
 `;
 
+const buildMemberBaseQuery = ({ includeSearch = false } = {}) => `
+    WITH member_base AS (
+        SELECT
+            m.id,
+            m.full_name,
+            m.email,
+            m.phone,
+            m.joining_date,
+            m.profile_pic,
+            m.last_visit
+        FROM members m
+        WHERE m.gym_id = $1
+          AND m.deleted_at IS NULL
+          ${includeSearch ? `
+          AND (
+                m.full_name ILIKE $2
+             OR m.email ILIKE $2
+             OR m.phone ILIKE $2
+          )` : ''}
+    ),
+    payment_totals AS (
+        SELECT
+            p.user_id AS member_id,
+            COALESCE(SUM(p.amount_paid), 0) AS total_paid,
+            MAX(p.payment_date) AS latest_payment_date
+        FROM payments p
+        INNER JOIN member_base mb ON mb.id = p.user_id
+        WHERE p.gym_id = $1
+          AND p.deleted_at IS NULL
+        GROUP BY p.user_id
+    ),
+    latest_membership AS (
+        SELECT
+            ranked.member_id,
+            ranked.status,
+            ranked.end_date,
+            ranked.plan_name,
+            ranked.freeze_start_date,
+            ranked.freeze_end_date,
+            ranked.freeze_reason
+        FROM (
+            SELECT
+                ms.member_id,
+                ms.status,
+                ms.end_date,
+                p.name AS plan_name,
+                ms.freeze_start_date,
+                ms.freeze_end_date,
+                ms.freeze_reason,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ms.member_id
+                    ORDER BY ms.end_date DESC, ms.id DESC
+                ) AS row_number
+            FROM memberships ms
+            LEFT JOIN plans p ON p.id = ms.plan_id
+            INNER JOIN member_base mb ON mb.id = ms.member_id
+            WHERE ms.gym_id = $1
+              AND ms.deleted_at IS NULL
+        ) ranked
+        WHERE ranked.row_number = 1
+    )
+    SELECT
+        mb.id,
+        mb.full_name,
+        mb.email,
+        mb.phone,
+        mb.joining_date,
+        mb.profile_pic,
+        mb.last_visit,
+        COALESCE(lm.status, 'UNPAID') AS membership_status,
+        CASE
+            WHEN lm.end_date IS NULL THEN 0
+            ELSE GREATEST(0, (lm.end_date::date - CURRENT_DATE::date))
+        END AS days_left,
+        COALESCE(pt.total_paid, 0) AS total_paid,
+        pt.latest_payment_date,
+        lm.plan_name,
+        lm.end_date AS expiry_date,
+        lm.freeze_start_date,
+        lm.freeze_end_date,
+        lm.freeze_reason
+    FROM member_base mb
+    LEFT JOIN latest_membership lm ON lm.member_id = mb.id
+    LEFT JOIN payment_totals pt ON pt.member_id = mb.id
+`;
+
 // --- 1. GET ALL MEMBERS ---
 router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
@@ -105,49 +191,11 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
         const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
 
         const queryParams = [gym_id];
-        let whereClause = 'WHERE m.gym_id = $1 AND m.deleted_at IS NULL';
-
         if (search) {
             queryParams.push(`%${search}%`);
-            whereClause += ` AND (m.full_name ILIKE $${queryParams.length} OR m.email ILIKE $${queryParams.length} OR m.phone ILIKE $${queryParams.length})`;
         }
 
-        const baseQuery = `
-            SELECT
-                m.id,
-                m.full_name,
-                m.email,
-                m.phone,
-                m.joining_date,
-                m.profile_pic,
-                m.last_visit,
-                COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
-                CASE
-                    WHEN ms_latest.end_date IS NULL THEN 0
-                    ELSE GREATEST(0, (ms_latest.end_date::date - CURRENT_DATE::date))
-                END AS days_left,
-                COALESCE((
-                    SELECT SUM(amount_paid) FROM payments WHERE user_id = m.id AND gym_id = $1 AND deleted_at IS NULL
-                ), 0) AS total_paid,
-                (
-                    SELECT MAX(pay.payment_date)
-                    FROM payments pay WHERE pay.user_id = m.id AND gym_id = $1 AND pay.deleted_at IS NULL
-                ) AS latest_payment_date,
-                ms_latest.plan_name,
-                ms_latest.end_date AS expiry_date,
-                ms_latest.freeze_start_date,
-                ms_latest.freeze_end_date,
-                ms_latest.freeze_reason
-            FROM members m
-            LEFT JOIN LATERAL (
-                SELECT ms.status, ms.end_date, p.name AS plan_name, ms.freeze_start_date, ms.freeze_end_date, ms.freeze_reason
-                FROM memberships ms
-                LEFT JOIN plans p ON ms.plan_id = p.id
-                WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
-                ORDER BY ms.end_date DESC, ms.id DESC
-                LIMIT 1
-            ) ms_latest ON true
-            ${whereClause}`;
+        const baseQuery = buildMemberBaseQuery({ includeSearch: Boolean(search) });
 
         const labeledQuery = `
             SELECT members_base.*, ${buildMemberLifecycleStatusCase('members_base')} AS member_lifecycle_status
@@ -215,30 +263,7 @@ router.get('/summary', auth, saasMiddleware, requirePermission('members:read'), 
              FROM (
                 SELECT ${buildMemberLifecycleStatusCase('members_base')} AS member_lifecycle_status
                 FROM (
-                    SELECT
-                        m.id,
-                        m.joining_date,
-                        m.last_visit,
-                        COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
-                        CASE
-                            WHEN ms_latest.end_date IS NULL THEN 0
-                            ELSE GREATEST(0, (ms_latest.end_date::date - CURRENT_DATE::date))
-                        END AS days_left,
-                        (
-                            SELECT MAX(pay.payment_date)
-                            FROM payments pay WHERE pay.user_id = m.id AND gym_id = $1 AND pay.deleted_at IS NULL
-                        ) AS latest_payment_date,
-                        ms_latest.plan_name
-                    FROM members m
-                    LEFT JOIN LATERAL (
-                        SELECT ms.status, ms.end_date, p.name AS plan_name
-                        FROM memberships ms
-                        LEFT JOIN plans p ON ms.plan_id = p.id
-                        WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
-                        ORDER BY ms.end_date DESC, ms.id DESC
-                        LIMIT 1
-                    ) ms_latest ON true
-                    WHERE m.gym_id = $1 AND m.deleted_at IS NULL
+                    ${buildMemberBaseQuery()}
                 ) members_base
              ) member_summary`,
             [gym_id]

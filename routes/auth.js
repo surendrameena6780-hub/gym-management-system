@@ -28,6 +28,12 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.en
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
 }
 
+if (process.env.NODE_ENV === 'production' && String(process.env.MEMBER_OTP_BYPASS || '').trim().toLowerCase() === 'true') {
+    throw new Error('FATAL: MEMBER_OTP_BYPASS cannot be enabled in production.');
+}
+
+const isProduction = process.env.NODE_ENV === 'production';
+
 const normalizeAuthMode = (value) => (String(value || '').trim().toLowerCase() === 'signup' ? 'signup' : 'login');
 
 const stripTrailingSlash = (value, fallback) => {
@@ -111,6 +117,26 @@ const maskEmailAddress = (email) => {
         : '***';
 
     return `${safeLocal}@${[safeDomain, ...domainRest].filter(Boolean).join('.')}`;
+};
+
+const buildGenericAdminOtpDispatch = (phone) => ({
+    message: `If an owner or staff account exists for ${maskPhone(phone)}, a login code is on the way.`,
+    masked_phone: maskPhone(phone),
+    expires_in_minutes: ADMIN_LOGIN_OTP_TTL_MINUTES,
+    preview_otp: '',
+    preview_notice: '',
+});
+
+const buildGenericPasswordResetDispatch = (email) => {
+    const maskedEmail = maskEmailAddress(email) || String(email || '').trim().toLowerCase();
+    return {
+        message: `If an account exists for ${maskedEmail}, a reset code is on the way.`,
+        delivery_channel: 'email',
+        masked_email: maskedEmail,
+        expires_in_minutes: PASSWORD_RESET_OTP_TTL_MINUTES,
+        preview_otp: '',
+        preview_notice: '',
+    };
 };
 
 const getPasswordResetDeliveryMode = () => {
@@ -863,15 +889,24 @@ router.post('/admin/send-otp', async (req, res) => {
 
         const user = await loadAdminAuthContextByPhone(phone);
         if (!user) {
+            if (isProduction) {
+                return res.json(buildGenericAdminOtpDispatch(phone));
+            }
             return res.status(404).json({ message: 'No owner or staff account was found with that mobile number.' });
         }
 
         const authError = getOauthAccountError(user);
         if (authError) {
+            if (isProduction) {
+                return res.json(buildGenericAdminOtpDispatch(phone));
+            }
             return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
         }
 
         if (user.is_active === false) {
+            if (isProduction) {
+                return res.json(buildGenericAdminOtpDispatch(phone));
+            }
             return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
         }
 
@@ -930,16 +965,20 @@ router.post('/admin/send-otp', async (req, res) => {
         await pool.query('COMMIT');
 
         return res.json({
-            message: deliveryMode === OTP_MODES.PREVIEW
-                ? 'Preview OTP prepared for your owner login.'
-                : 'OTP sent to your registered mobile number.',
+            message: isProduction
+                ? buildGenericAdminOtpDispatch(phone).message
+                : deliveryMode === OTP_MODES.PREVIEW
+                    ? 'Preview OTP prepared for your owner login.'
+                    : 'OTP sent to your registered mobile number.',
             delivery_mode: deliveryMode.toLowerCase(),
             masked_phone: maskPhone(phone),
             expires_in_minutes: ADMIN_LOGIN_OTP_TTL_MINUTES,
-            preview_otp: previewOtp,
-            preview_notice: deliveryMode === OTP_MODES.PREVIEW
-                ? 'MSG91 owner OTP is still in preview mode, so the code is shown directly here.'
-                : '',
+            preview_otp: isProduction ? '' : previewOtp,
+            preview_notice: isProduction
+                ? ''
+                : deliveryMode === OTP_MODES.PREVIEW
+                    ? 'MSG91 owner OTP is still in preview mode, so the code is shown directly here.'
+                    : '',
             user_name: String(user.full_name || '').trim().split(/\s+/)[0] || '',
         });
     } catch (err) {
@@ -1252,19 +1291,31 @@ router.post('/password-reset/request', async (req, res) => {
 
         const user = await loadUserAuthContextByEmail(email);
         if (!user) {
+            if (isProduction) {
+                return res.json(buildGenericPasswordResetDispatch(email));
+            }
             return res.status(404).json({ message: 'No account was found with that email address.' });
         }
 
         const authError = getOauthAccountError(user);
         if (authError) {
+            if (isProduction) {
+                return res.json(buildGenericPasswordResetDispatch(email));
+            }
             return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
         }
 
         if (user.is_active === false) {
+            if (isProduction) {
+                return res.json(buildGenericPasswordResetDispatch(email));
+            }
             return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
         }
 
         if (String(user.password_hash || '') === 'OAUTH_NO_PASSWORD') {
+            if (isProduction) {
+                return res.json(buildGenericPasswordResetDispatch(email));
+            }
             return res.status(400).json({ message: getPasswordlessProviderMessage(user) });
         }
 
@@ -1313,12 +1364,14 @@ router.post('/password-reset/request', async (req, res) => {
 
         const delivery = await buildPasswordResetDelivery({ email, otp, userName: user.full_name });
         return res.json({
-            message: `A reset code is ready for ${delivery.masked_email}.`,
-            delivery_channel: delivery.channel,
+            message: isProduction
+                ? buildGenericPasswordResetDispatch(email).message
+                : `A reset code is ready for ${delivery.masked_email}.`,
+            delivery_channel: isProduction ? 'email' : delivery.channel,
             masked_email: delivery.masked_email,
             expires_in_minutes: PASSWORD_RESET_OTP_TTL_MINUTES,
-            preview_otp: delivery.preview_otp,
-            preview_notice: delivery.preview_notice,
+            preview_otp: isProduction ? '' : delivery.preview_otp,
+            preview_notice: isProduction ? '' : delivery.preview_notice,
         });
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});

@@ -383,21 +383,23 @@ const runWithConcurrency = async (items, concurrency, worker) => {
 router.get('/', auth, saasMiddleware, async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
-        
-        // Fetch the latest 50 notifications
-        const result = await pool.query(
-            `SELECT * FROM notifications 
-             WHERE gym_id = $1 
-             ORDER BY created_at DESC 
-             LIMIT 50`,
-            [gym_id]
-        );
-        
-        // Get the count of unread messages for the red badge
-        const unreadCount = await pool.query(
-            `SELECT COUNT(*) FROM notifications WHERE gym_id = $1 AND is_read = false`,
-            [gym_id]
-        );
+
+        const [result, unreadCount] = await Promise.all([
+            pool.query(
+                `SELECT *
+                 FROM notifications
+                 WHERE gym_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT 50`,
+                [gym_id]
+            ),
+            pool.query(
+                `SELECT COUNT(*)::INTEGER AS count
+                 FROM notifications
+                 WHERE gym_id = $1 AND is_read = FALSE`,
+                [gym_id]
+            ),
+        ]);
 
         const payload = {
             notifications: result.rows,

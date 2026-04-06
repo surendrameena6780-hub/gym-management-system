@@ -160,6 +160,40 @@ const createPerformanceIndexes = async (client) => {
     `);
 };
 
+const createReadRoutePerformanceIndexes = async (client) => {
+    await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_members_gym_id_active_desc
+            ON members(gym_id, id DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_members_gym_last_visit_active
+            ON members(gym_id, last_visit DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_memberships_gym_status_end_active
+            ON memberships(gym_id, status, end_date DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_payments_gym_user_date_active
+            ON payments(gym_id, user_id, payment_date DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_payments_gym_date_active
+            ON payments(gym_id, payment_date DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_attendance_gym_time_active
+            ON attendance(gym_id, check_in_time DESC)
+            WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_notifications_gym_created_desc
+            ON notifications(gym_id, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_notifications_gym_unread_created_desc
+            ON notifications(gym_id, is_read, created_at DESC);
+    `);
+};
+
 const createRuntimeTelemetryInfrastructure = async (client) => {
     await client.query(`
         CREATE TABLE IF NOT EXISTS system_runtime_events (
@@ -203,6 +237,7 @@ const runSchemaMigrations = async () => {
         await runNamedMigration(client, '2026-04-06-members-phone-required', enforceMembersPhonePresence);
         await runNamedMigration(client, '2026-04-06-rfid-event-snapshots', addRfidEventSnapshots);
         await runNamedMigration(client, '2026-04-07-performance-indexes', createPerformanceIndexes);
+        await runNamedMigration(client, '2026-04-07-read-route-performance-indexes', createReadRoutePerformanceIndexes);
         await runNamedMigration(client, '2026-04-07-runtime-telemetry', createRuntimeTelemetryInfrastructure);
     } finally {
         await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['gymvault-schema-migrations']).catch(() => {});

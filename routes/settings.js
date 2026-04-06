@@ -37,6 +37,9 @@ const {
     getStoredProfileValue,
     resolveStoredProfileImagePath,
 } = require('../utils/profileUploads');
+const { invalidateGymTimezoneCache } = require('../utils/gymTime');
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 const stripTrailingSlash = (value, fallback = '') => String(value || fallback || '').trim().replace(/\/+$/, '');
 
@@ -78,7 +81,11 @@ router.post('/platform/whatsapp-delivery/webhook', async (req, res) => {
         const expectedToken = normalizeWebhookToken();
         const suppliedToken = String(req.query.token || req.headers['x-gymvault-token'] || '').trim();
 
-        if (expectedToken && suppliedToken !== expectedToken) {
+        if (!expectedToken) {
+            return res.status(isProduction ? 503 : 400).json({ error: 'WhatsApp delivery webhook token is not configured.' });
+        }
+
+        if (suppliedToken !== expectedToken) {
             return res.status(401).json({ error: 'Invalid webhook token.' });
         }
 
@@ -759,33 +766,89 @@ const discardUploadedProfile = async (req) => {
 
 router.get('/', auth, async (req, res) => {
     try {
-        await ensureSupportProfileTable();
-        await ensureMessagingSchema();
-        await ensurePreferenceSchema();
+        await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema()]);
 
-        const userRes = await pool.query('SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1', [req.user.id]);
-        const gymRes = await pool.query(
-            'SELECT name, phone, address, currency, timezone, tax_id, website, support_email, saas_status, saas_valid_until, current_plan, saas_billing_cycle, grace_period_days, COALESCE(interface_reduce_motion, FALSE) AS interface_reduce_motion, COALESCE(interface_compact_mode, FALSE) AS interface_compact_mode, COALESCE(interface_dark_mode, TRUE) AS interface_dark_mode FROM gyms WHERE id = $1', 
-            [req.user.gym_id]
-        );
+        const [userRes, gymRes] = await Promise.all([
+            pool.query(
+                'SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1 LIMIT 1',
+                [req.user.id]
+            ),
+            pool.query(
+                `SELECT
+                    g.name,
+                    g.phone,
+                    g.address,
+                    g.currency,
+                    g.timezone,
+                    g.tax_id,
+                    g.website,
+                    g.support_email,
+                    g.saas_status,
+                    g.saas_valid_until,
+                    g.current_plan,
+                    g.saas_billing_cycle,
+                    g.grace_period_days,
+                    COALESCE(g.interface_reduce_motion, FALSE) AS interface_reduce_motion,
+                    COALESCE(g.interface_compact_mode, FALSE) AS interface_compact_mode,
+                    COALESCE(g.interface_dark_mode, TRUE) AS interface_dark_mode,
+                    sp.whatsapp,
+                    sp.about_mission,
+                    sp.support_window,
+                    sp.sla,
+                    COALESCE((
+                        SELECT COUNT(*)::INTEGER
+                        FROM members m
+                        WHERE m.gym_id = g.id AND m.deleted_at IS NULL
+                    ), 0) AS member_count,
+                    COALESCE((
+                        SELECT COUNT(*)::INTEGER
+                        FROM users u
+                        WHERE u.gym_id = g.id
+                    ), 1) AS staff_count
+                 FROM gyms g
+                 LEFT JOIN gym_support_profiles sp ON sp.gym_id = g.id
+                 WHERE g.id = $1
+                 LIMIT 1`,
+                [req.user.gym_id]
+            ),
+        ]);
 
-        const supportProfileRes = await pool.query(
-            `SELECT whatsapp, about_mission, support_window, sla
-             FROM gym_support_profiles
-             WHERE gym_id = $1`,
-            [req.user.gym_id]
-        );
-
-        const memberCount = await pool.query('SELECT COUNT(*) FROM members WHERE gym_id = $1', [req.user.gym_id]).catch(() => ({ rows: [{ count: 0 }] }));
-        const staffCount = await pool.query('SELECT COUNT(*) FROM users WHERE gym_id = $1', [req.user.gym_id]).catch(() => ({ rows: [{ count: 1 }] }));
+        const gym = gymRes.rows[0] || {};
 
         res.json({
             account: userRes.rows[0] || {},
-            gym: gymRes.rows[0] || {},
-            support_profile: supportProfileRes.rows[0] || {},
-            usage: { members: parseInt(memberCount.rows[0].count), staff: parseInt(staffCount.rows[0].count), storage: 0.1 }
+            gym: {
+                name: gym.name,
+                phone: gym.phone,
+                address: gym.address,
+                currency: gym.currency,
+                timezone: gym.timezone,
+                tax_id: gym.tax_id,
+                website: gym.website,
+                support_email: gym.support_email,
+                saas_status: gym.saas_status,
+                saas_valid_until: gym.saas_valid_until,
+                current_plan: gym.current_plan,
+                saas_billing_cycle: gym.saas_billing_cycle,
+                grace_period_days: gym.grace_period_days,
+                interface_reduce_motion: gym.interface_reduce_motion,
+                interface_compact_mode: gym.interface_compact_mode,
+                interface_dark_mode: gym.interface_dark_mode,
+            },
+            support_profile: {
+                whatsapp: gym.whatsapp,
+                about_mission: gym.about_mission,
+                support_window: gym.support_window,
+                sla: gym.sla,
+            },
+            usage: {
+                members: Number.parseInt(gym.member_count || 0, 10),
+                staff: Number.parseInt(gym.staff_count || 1, 10),
+                storage: 0.1,
+            }
         });
     } catch (err) {
+        console.error('SETTINGS ROOT ERROR:', err.message);
         res.status(500).json({ error: "Server Error" });
     }
 });
@@ -1738,6 +1801,7 @@ router.put('/preferences', auth, async (req, res) => {
              WHERE id = $6`,
             [currency, timezone, Boolean(interface_reduce_motion), Boolean(interface_compact_mode), Boolean(interface_dark_mode), req.user.gym_id]
         );
+        invalidateGymTimezoneCache(req.user.gym_id);
         res.json({ message: "Preferences updated successfully" });
     } catch (err) {
         console.error("PREFERENCES UPDATE ERROR:", err.message);

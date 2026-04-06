@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { getRequestCookie, OWNER_AUTH_COOKIE } = require('../utils/authCookies');
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
 }
@@ -11,6 +13,7 @@ module.exports = (req, res, next) => {
     const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
     const cookieToken = getRequestCookie(req, OWNER_AUTH_COOKIE);
     const token = headerToken || bearerToken || cookieToken;
+    const tokenSource = headerToken ? 'header' : bearerToken ? 'bearer' : cookieToken ? 'cookie' : '';
 
     if (!token) {
         return res.status(401).json({
@@ -21,12 +24,22 @@ module.exports = (req, res, next) => {
         });
     }
 
+    if (!SAFE_METHODS.has(req.method) && tokenSource === 'cookie') {
+        return res.status(401).json({
+            success: false,
+            code: 'AUTH_HEADER_REQUIRED',
+            error: 'Refresh your session and try again.',
+            message: 'Explicit auth token required for this action.'
+        });
+    }
+
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
         // This attaches the user/gym data to the request
         req.user = decoded.user || decoded; 
         req.authToken = token;
+        req.authTokenSource = tokenSource;
         next();
     } catch (err) {
         if (process.env.NODE_ENV !== 'production') {

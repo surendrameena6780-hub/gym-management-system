@@ -12,96 +12,91 @@ router.get('/stats', async (req, res) => {
     const gym_id = req.user.gym_id; 
 
     try {
-        const gymCheck = await pool.query(
-            'SELECT is_active FROM gyms WHERE id = $1', 
+        const result = await pool.query(
+            `WITH gym_base AS (
+                SELECT id, COALESCE(is_active, TRUE) AS is_active
+                FROM gyms
+                WHERE id = $1
+                LIMIT 1
+            ),
+            payments_summary AS (
+                SELECT
+                    COALESCE(SUM(amount_paid), 0) AS total_earnings,
+                    COALESCE(
+                        SUM(amount_paid) FILTER (
+                            WHERE payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+                              AND payment_date < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+                        ),
+                        0
+                    ) AS monthly_revenue
+                FROM payments
+                WHERE gym_id = $1 AND deleted_at IS NULL
+            ),
+            members_summary AS (
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'UNPAID')::INTEGER AS unpaid_members,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(last_visit, joining_date::timestamptz, NOW()) < NOW() - INTERVAL '14 days'
+                    )::INTEGER AS inactive_members
+                FROM members
+                WHERE gym_id = $1 AND deleted_at IS NULL
+            ),
+            memberships_summary AS (
+                SELECT
+                    COUNT(DISTINCT member_id) FILTER (WHERE status = 'ACTIVE')::INTEGER AS active_members,
+                    COUNT(*) FILTER (
+                        WHERE status = 'ACTIVE'
+                          AND end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
+                    )::INTEGER AS expiring_soon,
+                    COUNT(DISTINCT member_id) FILTER (WHERE status = 'EXPIRED')::INTEGER AS expired_members
+                FROM memberships
+                WHERE gym_id = $1 AND deleted_at IS NULL
+            ),
+            attendance_summary AS (
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE check_in_time >= CURRENT_DATE
+                          AND check_in_time < CURRENT_DATE + INTERVAL '1 day'
+                    )::INTEGER AS today_checkins
+                FROM attendance
+                WHERE gym_id = $1 AND deleted_at IS NULL
+            )
+            SELECT
+                g.is_active,
+                COALESCE(ms.active_members, 0) AS active_members,
+                COALESCE(ps.total_earnings, 0) AS total_earnings,
+                COALESCE(ps.monthly_revenue, 0) AS monthly_revenue,
+                COALESCE(ms.expiring_soon, 0) AS expiring_soon,
+                COALESCE(att.today_checkins, 0) AS today_checkins,
+                COALESCE(mb.unpaid_members, 0) AS unpaid_members,
+                COALESCE(ms.expired_members, 0) AS expired_members,
+                COALESCE(mb.inactive_members, 0) AS inactive_members
+            FROM gym_base g
+            LEFT JOIN payments_summary ps ON TRUE
+            LEFT JOIN members_summary mb ON TRUE
+            LEFT JOIN memberships_summary ms ON TRUE
+            LEFT JOIN attendance_summary att ON TRUE`,
             [gym_id]
         );
 
-        if (gymCheck.rows.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ message: "Gym not found." });
         }
 
-        if (gymCheck.rows[0].is_active === false) {
+        if (result.rows[0].is_active === false) {
             return res.json({ is_active: false });
         }
 
-        const [
-            activeMembers,
-            totalEarnings,
-            monthlyRevenue,
-            expiringSoon,
-            todayCheckins,
-            unpaidMembers,
-            expiredMembers
-        ] = await Promise.all([
-
-            pool.query(
-                `SELECT COUNT(DISTINCT member_id) AS count
-                 FROM memberships
-                 WHERE status = 'ACTIVE' AND gym_id = $1 AND deleted_at IS NULL`,
-                [gym_id]
-            ),
-
-            pool.query(
-                `SELECT COALESCE(SUM(amount_paid), 0) AS total
-                 FROM payments WHERE gym_id = $1 AND deleted_at IS NULL`,
-                [gym_id]
-            ),
-
-            pool.query(
-                `SELECT COALESCE(SUM(amount_paid), 0) AS total
-                 FROM payments
-                 WHERE gym_id = $1
-                                     AND deleted_at IS NULL
-                   AND EXTRACT(MONTH FROM payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-                   AND EXTRACT(YEAR  FROM payment_date) = EXTRACT(YEAR  FROM CURRENT_DATE)`,
-                [gym_id]
-            ),
-
-            pool.query(
-                `SELECT COUNT(*) AS count
-                 FROM memberships
-                 WHERE status = 'ACTIVE'
-                   AND gym_id = $1
-                                     AND deleted_at IS NULL
-                   AND end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'`,
-                [gym_id]
-            ),
-
-            pool.query(
-                `SELECT COUNT(*) AS count
-                 FROM attendance
-                 WHERE gym_id = $1
-                                     AND deleted_at IS NULL
-                   AND check_in_time::date = CURRENT_DATE`,
-                [gym_id]
-            ),
-
-            pool.query(
-                `SELECT COUNT(*) AS count
-                 FROM members
-                 WHERE gym_id = $1 AND status = 'UNPAID' AND deleted_at IS NULL`,
-                [gym_id]
-            ),
-
-            pool.query(
-                `SELECT COUNT(DISTINCT member_id) AS count
-                 FROM memberships
-                 WHERE status = 'EXPIRED' AND gym_id = $1 AND deleted_at IS NULL`,
-                [gym_id]
-            )
-        ]);
-
         res.json({
             is_active: true,
-            active_members:   parseInt(activeMembers.rows[0].count),
-            total_earnings:   parseFloat(totalEarnings.rows[0].total),
-            monthly_revenue:  parseFloat(monthlyRevenue.rows[0].total),
-            expiring_soon:    parseInt(expiringSoon.rows[0].count),
-            today_checkins:   parseInt(todayCheckins.rows[0].count),
-            unpaid_members:   parseInt(unpaidMembers.rows[0].count),
-            expired_members:  parseInt(expiredMembers.rows[0].count),
-            inactive_members: parseInt(expiringSoon.rows[0].count)
+            active_members: parseInt(result.rows[0].active_members || 0, 10),
+            total_earnings: parseFloat(result.rows[0].total_earnings || 0),
+            monthly_revenue: parseFloat(result.rows[0].monthly_revenue || 0),
+            expiring_soon: parseInt(result.rows[0].expiring_soon || 0, 10),
+            today_checkins: parseInt(result.rows[0].today_checkins || 0, 10),
+            unpaid_members: parseInt(result.rows[0].unpaid_members || 0, 10),
+            expired_members: parseInt(result.rows[0].expired_members || 0, 10),
+            inactive_members: parseInt(result.rows[0].inactive_members || 0, 10)
         });
 
     } catch (err) {
@@ -115,18 +110,37 @@ router.get('/setup-status', async (req, res) => {
     const gym_id = req.user.gym_id;
 
     try {
-        // 1. Check if gym profile is completed (has address and phone)
-        const gymQuery = await pool.query('SELECT address, phone FROM gyms WHERE id = $1', [gym_id]);
-        const gym = gymQuery.rows[0];
-        const step1_profile = Boolean(gym && gym.address && gym.phone && gym.address.length > 5);
+        const result = await pool.query(
+            `SELECT
+                (
+                    COALESCE(LENGTH(BTRIM(address)), 0) > 5
+                    AND COALESCE(LENGTH(BTRIM(phone)), 0) > 0
+                ) AS step1_profile,
+                EXISTS (
+                    SELECT 1
+                    FROM plans p
+                    WHERE p.gym_id = g.id AND p.deleted_at IS NULL
+                    LIMIT 1
+                ) AS step2_plans,
+                EXISTS (
+                    SELECT 1
+                    FROM members m
+                    WHERE m.gym_id = g.id AND m.deleted_at IS NULL
+                    LIMIT 1
+                ) AS step3_members
+             FROM gyms g
+             WHERE g.id = $1
+             LIMIT 1`,
+            [gym_id]
+        );
 
-        // 2. Check if they have created at least one plan
-        const plansQuery = await pool.query('SELECT COUNT(*) FROM plans WHERE gym_id = $1', [gym_id]);
-        const step2_plans = parseInt(plansQuery.rows[0].count) > 0;
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
 
-        // 3. Check if they have added at least one member
-        const membersQuery = await pool.query('SELECT COUNT(*) FROM members WHERE gym_id = $1 AND deleted_at IS NULL', [gym_id]);
-        const step3_members = parseInt(membersQuery.rows[0].count) > 0;
+        const step1_profile = Boolean(result.rows[0].step1_profile);
+        const step2_plans = Boolean(result.rows[0].step2_plans);
+        const step3_members = Boolean(result.rows[0].step3_members);
 
         // Calculate completion percentage
         let completedCount = 0;

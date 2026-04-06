@@ -1193,7 +1193,12 @@ router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'),
     try {
         const gymTimezone = await getGymTimezone(pool, req.user.gym_id);
         const list = await pool.query(
-            `SELECT
+            `WITH day_bounds AS (
+                SELECT
+                    (date_trunc('day', timezone($2, NOW())) AT TIME ZONE $2) AS day_start_utc,
+                    ((date_trunc('day', timezone($2, NOW())) + INTERVAL '1 day') AT TIME ZONE $2) AS day_end_utc
+             )
+             SELECT
                 a.id,
                 a.check_in_time,
                 a.checkin_method,
@@ -1205,14 +1210,16 @@ router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'),
                 m.profile_pic,
                 u.full_name AS staff_name
              FROM attendance a
+             CROSS JOIN day_bounds db
              JOIN members m ON a.member_id = m.id
              LEFT JOIN users u ON a.staff_user_id = u.id
              WHERE a.gym_id = $1
-                             AND a.deleted_at IS NULL
-                             AND m.deleted_at IS NULL
-                             AND timezone($2, a.check_in_time)::date = timezone($2, NOW())::date
+               AND a.deleted_at IS NULL
+               AND m.deleted_at IS NULL
+               AND a.check_in_time >= db.day_start_utc
+               AND a.check_in_time < db.day_end_utc
              ORDER BY a.check_in_time DESC`,
-                        [req.user.gym_id, gymTimezone]
+            [req.user.gym_id, gymTimezone]
         );
         res.json(list.rows);
     } catch (err) {
@@ -1255,14 +1262,21 @@ router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'
     try {
         const gymTimezone = await getGymTimezone(pool, gym_id);
         const result = await pool.query(
-            `SELECT
-                EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
+            `WITH window_bounds AS (
+                SELECT
+                    ((date_trunc('day', timezone($2, NOW())) - INTERVAL '6 days') AT TIME ZONE $2) AS range_start_utc,
+                    ((date_trunc('day', timezone($2, NOW())) + INTERVAL '1 day') AT TIME ZONE $2) AS range_end_utc
+             )
+             SELECT
+                EXTRACT(HOUR FROM timezone($2, a.check_in_time))::INTEGER AS hour,
                 COUNT(*)::INTEGER AS count
-             FROM attendance
-             WHERE gym_id = $1
-                             AND deleted_at IS NULL
-               AND check_in_time >= NOW() - INTERVAL '7 days'
-             GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
+             FROM attendance a
+             CROSS JOIN window_bounds wb
+             WHERE a.gym_id = $1
+               AND a.deleted_at IS NULL
+               AND a.check_in_time >= wb.range_start_utc
+               AND a.check_in_time < wb.range_end_utc
+             GROUP BY EXTRACT(HOUR FROM timezone($2, a.check_in_time))
              ORDER BY hour ASC`,
             [gym_id, gymTimezone]
         );

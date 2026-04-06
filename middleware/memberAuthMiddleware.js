@@ -2,6 +2,8 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { getRequestCookie, MEMBER_AUTH_COOKIE } = require('../utils/authCookies');
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
 }
@@ -12,9 +14,14 @@ module.exports = async (req, res, next) => {
     const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
     const cookieToken = getRequestCookie(req, MEMBER_AUTH_COOKIE);
     const token = headerToken || bearerToken || cookieToken;
+    const tokenSource = headerToken ? 'header' : bearerToken ? 'bearer' : cookieToken ? 'cookie' : '';
 
     if (!token) {
         return res.status(401).json({ message: 'No token, access denied' });
+    }
+
+    if (!SAFE_METHODS.has(req.method) && tokenSource === 'cookie') {
+        return res.status(401).json({ message: 'Refresh your session and try again.' });
     }
 
     try {
@@ -49,6 +56,7 @@ module.exports = async (req, res, next) => {
             role: 'MEMBER',
         };
         req.memberAuthToken = token;
+        req.memberAuthTokenSource = tokenSource;
         next();
     } catch (_err) {
         return res.status(401).json({ message: 'Token is not valid.' });
