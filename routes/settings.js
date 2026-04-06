@@ -23,11 +23,72 @@ const {
     sendWhatsAppTemplate,
 } = require('../utils/msg91');
 const {
+    MSG91_WHATSAPP_WEBHOOK_DOC_URL,
+    applyWhatsAppDeliveryWebhook,
+    ensureWhatsAppDeliverySchema,
+    getRecentWhatsAppDeliveryLogs,
+    getWhatsAppDeliverySummary,
+    normalizeWebhookToken,
+    sendTrackedWhatsAppTemplate,
+} = require('../utils/whatsappDelivery');
+const {
     createProfileUploadMiddleware,
     cleanupUploadedFile,
     getStoredProfileValue,
     resolveStoredProfileImagePath,
 } = require('../utils/profileUploads');
+
+const stripTrailingSlash = (value, fallback = '') => String(value || fallback || '').trim().replace(/\/+$/, '');
+
+const getRequestBaseUrl = (req) => {
+    const configured = stripTrailingSlash(process.env.APP_URL, '');
+    if (configured) return configured;
+
+    const forwardedProtocol = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
+    const forwardedHost = String(req.headers['x-forwarded-host'] || req.get('host') || '').split(',')[0].trim();
+    return forwardedHost ? `${forwardedProtocol}://${forwardedHost}` : 'http://localhost:5000';
+};
+
+const buildWhatsAppDeliveryCallbackUrl = (req) => {
+    const url = new URL('/api/settings/platform/whatsapp-delivery/webhook', `${getRequestBaseUrl(req)}/`);
+    const token = normalizeWebhookToken();
+    if (token) {
+        url.searchParams.set('token', token);
+    }
+    return url.toString();
+};
+
+const renderWhatsAppTemplatePreviewText = (templateText, member = {}, gymName = '') => {
+    const daysLeft = Number.isFinite(Number(member?.days_to_expiry)) ? Number(member.days_to_expiry) : 0;
+    const values = {
+        name: String(member?.full_name || 'Member').trim() || 'Member',
+        plan: String(member?.plan_name || 'your plan').trim() || 'your plan',
+        days_left: String(daysLeft),
+        gym_name: String(gymName || 'GymVault').trim() || 'GymVault',
+    };
+
+    return String(templateText || '').replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_token, placeholder) => {
+        const key = String(placeholder || '').trim().toLowerCase();
+        return values[key] || key.replace(/_/g, ' ');
+    });
+};
+
+router.post('/platform/whatsapp-delivery/webhook', async (req, res) => {
+    try {
+        const expectedToken = normalizeWebhookToken();
+        const suppliedToken = String(req.query.token || req.headers['x-gymvault-token'] || '').trim();
+
+        if (expectedToken && suppliedToken !== expectedToken) {
+            return res.status(401).json({ error: 'Invalid webhook token.' });
+        }
+
+        const result = await applyWhatsAppDeliveryWebhook(req.body || {});
+        return res.status(200).json({ ok: true, ...result });
+    } catch (err) {
+        console.error('WHATSAPP DELIVERY WEBHOOK ERROR:', err.message);
+        return res.status(500).json({ error: 'Webhook processing failed.' });
+    }
+});
 
 router.use(auth, requireOwner);
 
@@ -1070,8 +1131,10 @@ router.put('/integrations', auth, async (req, res) => {
 router.post('/integrations/test-message', auth, async (req, res) => {
     try {
         await ensureMessagingSchema();
+        await ensureWhatsAppDeliverySchema();
 
         const gymId = req.user.gym_id;
+        const requesterId = req.user.user_id || req.user.id || null;
         const toInput = String(req.body.to || '').trim();
         const requestedTemplateKey = String(req.body.template_key || '').trim().toUpperCase();
 
@@ -1103,11 +1166,23 @@ router.post('/integrations/test-message', auth, async (req, res) => {
             return res.status(400).json({ error: 'Approve at least one WhatsApp template in Integrations before sending a test message.' });
         }
 
-        await sendWhatsAppTemplate({
+        await sendTrackedWhatsAppTemplate({
+            gymId,
+            initiatedBy: requesterId,
+            sourceKind: 'TEST',
+            sourceLabel: 'SETTINGS_TEST',
             integratedNumber: gym.messaging_whatsapp_number,
-            templateName: selectedTemplate.whatsapp_template_name,
-            language: selectedTemplate.whatsapp_template_language || 'en_US',
             recipientNumber: normalizedTo,
+            recipientName: 'Test Member',
+            templateKey: selectedTemplate.template_key,
+            templateTitle: selectedTemplate.title,
+            templateName: selectedTemplate.whatsapp_template_name,
+            templateLanguage: selectedTemplate.whatsapp_template_language || 'en_US',
+            messagePreview: renderWhatsAppTemplatePreviewText(
+                selectedTemplate.whatsapp_text,
+                { full_name: 'Test Member', plan_name: 'Elite Plan', days_to_expiry: 3 },
+                gym.name || 'GymVault'
+            ),
             variables: buildTemplateBodyVariables(
                 selectedTemplate.whatsapp_text,
                 { full_name: 'Test Member', plan_name: 'Elite Plan', days_to_expiry: 3 },
@@ -1131,9 +1206,10 @@ router.post('/integrations/test-message', auth, async (req, res) => {
 router.get('/platform', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
+        await ensureWhatsAppDeliverySchema();
 
         const gymId = req.user.gym_id;
-        const [gymRes, apiKeyRes, webhookRes] = await Promise.all([
+        const [gymRes, apiKeyRes, webhookRes, deliverySummary, recentDeliveryLogs] = await Promise.all([
             pool.query(
                 `SELECT city, branches_count, branch_directory
                  FROM gyms
@@ -1143,6 +1219,8 @@ router.get('/platform', auth, async (req, res) => {
             ),
             pool.query(
                 `SELECT id, key_name, key_prefix, scopes, is_active, last_used_at, created_at
+            getWhatsAppDeliverySummary(gymId),
+            getRecentWhatsAppDeliveryLogs(gymId, 20),
                  FROM api_keys
                  WHERE gym_id = $1
                  ORDER BY created_at DESC`,
@@ -1170,6 +1248,13 @@ router.get('/platform', auth, async (req, res) => {
                 ...item,
                 has_secret: Boolean(item.has_secret),
             })),
+            whatsapp_delivery: {
+                callback_url: buildWhatsAppDeliveryCallbackUrl(req),
+                docs_url: MSG91_WHATSAPP_WEBHOOK_DOC_URL,
+                webhook_token_configured: Boolean(normalizeWebhookToken()),
+                summary: deliverySummary,
+                recent_logs: recentDeliveryLogs,
+            },
         });
     } catch (err) {
         console.error('PLATFORM FETCH ERROR:', err.message);

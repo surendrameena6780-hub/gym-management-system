@@ -455,11 +455,13 @@ const buildTemplateBodyVariables = (whatsappText, member = {}, gymName = '') => 
     }, {});
 };
 
-const sendWhatsAppTemplate = async ({ integratedNumber, templateName, language = 'en_US', recipientNumber, variables = {} }) => {
+const sendWhatsAppTemplate = async ({ integratedNumber, templateName, language = 'en_US', recipientNumber, variables = {}, correlationId = '' }) => {
     const authKey = getMsg91WhatsAppAuthKey();
     if (!authKey) {
         throw new Error('MSG91 WhatsApp is not configured.');
     }
+
+    const normalizedCorrelationId = toTrimmedString(correlationId);
 
     return msg91Request({
         path: '/api/v5/whatsapp/whatsapp-outbound-message/bulk/',
@@ -468,6 +470,7 @@ const sendWhatsAppTemplate = async ({ integratedNumber, templateName, language =
         body: {
             integrated_number: normalizeCountryCodePhone(integratedNumber),
             content_type: 'template',
+            ...(normalizedCorrelationId ? { CRQID: normalizedCorrelationId } : {}),
             payload: {
                 type: 'template',
                 template: {
@@ -480,6 +483,7 @@ const sendWhatsAppTemplate = async ({ integratedNumber, templateName, language =
                         {
                             to: normalizeCountryCodePhone(recipientNumber),
                             components: variables,
+                            ...(normalizedCorrelationId ? { CRQID: normalizedCorrelationId } : {}),
                         },
                     ],
                 },

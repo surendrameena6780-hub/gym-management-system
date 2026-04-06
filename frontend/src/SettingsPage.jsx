@@ -185,6 +185,30 @@ const getTemplateSyncMeta = (status) => {
   return lookup[normalized] || lookup.NOT_SYNCED;
 };
 
+const getWhatsAppDeliveryMeta = (status) => {
+  const normalized = String(status || 'QUEUED').trim().toUpperCase();
+  const lookup = {
+    READ: { label: 'Read', pill: 'bg-emerald-100 text-emerald-700' },
+    DELIVERED: { label: 'Delivered', pill: 'bg-teal-100 text-teal-700' },
+    SENT: { label: 'Sent', pill: 'bg-sky-100 text-sky-700' },
+    SUBMITTED: { label: 'Submitted', pill: 'bg-indigo-100 text-indigo-700' },
+    QUEUED: { label: 'Queued', pill: 'bg-slate-100 text-slate-600' },
+    FAILED: { label: 'Failed', pill: 'bg-rose-100 text-rose-700' },
+    UNKNOWN: { label: 'Unknown', pill: 'bg-slate-100 text-slate-500' },
+  };
+  return lookup[normalized] || lookup.UNKNOWN;
+};
+
+const getWhatsAppDeliveryActivity = (log) => {
+  if (log?.read_at) return { label: 'Read', time: log.read_at };
+  if (log?.delivered_at) return { label: 'Delivered', time: log.delivered_at };
+  if (log?.failed_at) return { label: 'Failed', time: log.failed_at };
+  if (log?.sent_at) return { label: 'Sent', time: log.sent_at };
+  if (log?.submitted_at) return { label: 'Submitted', time: log.submitted_at };
+  if (log?.updated_at) return { label: 'Updated', time: log.updated_at };
+  return { label: 'Created', time: log?.created_at };
+};
+
 const getRazorpayCheckoutImageUrl = () => {
   if (typeof window === 'undefined') return '';
   return new URL('/gymvault-app-icon-192.png', window.location.origin).toString();
@@ -354,11 +378,25 @@ const loadRazorpayScript = () => {
     branch_directory: buildBranchDirectoryState(1),
     api_keys: [],
     webhooks: [],
+    whatsapp_delivery: {
+      callback_url: '',
+      docs_url: '',
+      webhook_token_configured: false,
+      summary: {
+        total_count: 0,
+        in_flight_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        failed_count: 0,
+      },
+      recent_logs: [],
+    },
   });
   const [apiKeyForm, setApiKeyForm] = useState({ key_name: '', scopes: ['members:read'] });
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [revealedApiKey, setRevealedApiKey] = useState('');
   const [copiedApiKey, setCopiedApiKey] = useState(false);
+  const [copiedDeliveryCallback, setCopiedDeliveryCallback] = useState(false);
   const [webhookForm, setWebhookForm] = useState(() => createWebhookDraft());
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [webhookTestingId, setWebhookTestingId] = useState(null);
@@ -620,6 +658,19 @@ const loadRazorpayScript = () => {
         branch_directory: buildBranchDirectoryState(branchesCount, Array.isArray(payload.branch_directory) ? payload.branch_directory : []),
         api_keys: Array.isArray(payload.api_keys) ? payload.api_keys : [],
         webhooks: Array.isArray(payload.webhooks) ? payload.webhooks : [],
+        whatsapp_delivery: {
+          callback_url: String(payload.whatsapp_delivery?.callback_url || ''),
+          docs_url: String(payload.whatsapp_delivery?.docs_url || ''),
+          webhook_token_configured: Boolean(payload.whatsapp_delivery?.webhook_token_configured),
+          summary: {
+            total_count: Number(payload.whatsapp_delivery?.summary?.total_count || 0),
+            in_flight_count: Number(payload.whatsapp_delivery?.summary?.in_flight_count || 0),
+            delivered_count: Number(payload.whatsapp_delivery?.summary?.delivered_count || 0),
+            read_count: Number(payload.whatsapp_delivery?.summary?.read_count || 0),
+            failed_count: Number(payload.whatsapp_delivery?.summary?.failed_count || 0),
+          },
+          recent_logs: Array.isArray(payload.whatsapp_delivery?.recent_logs) ? payload.whatsapp_delivery.recent_logs : [],
+        },
       });
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to load platform settings.', 'error');
@@ -693,6 +744,19 @@ const loadRazorpayScript = () => {
       toast('API key copied to clipboard.', 'success');
     } catch {
       toast('Failed to copy API key. Copy it manually.', 'warning');
+    }
+  };
+
+  const copyDeliveryCallbackToClipboard = async () => {
+    const callbackUrl = String(platformData.whatsapp_delivery?.callback_url || '').trim();
+    if (!callbackUrl) return;
+    try {
+      await navigator.clipboard.writeText(callbackUrl);
+      setCopiedDeliveryCallback(true);
+      window.setTimeout(() => setCopiedDeliveryCallback(false), 1500);
+      toast('WhatsApp callback URL copied.', 'success');
+    } catch {
+      toast('Failed to copy callback URL. Copy it manually.', 'warning');
     }
   };
 
@@ -2776,6 +2840,105 @@ const loadRazorpayScript = () => {
                                       </div>
                                     </div>
                                   ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-4">
+                              <div>
+                                <h4 className="font-black text-slate-900 text-sm">WhatsApp Delivery Tracking</h4>
+                                <p className="text-xs text-slate-500 mt-0.5">Delivery receipts stay here in Settings only. Nothing new appears on the main app screens.</p>
+                              </div>
+                              <button type="button" onClick={loadPlatform} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-black hover:bg-slate-50 transition-colors">
+                                <RefreshCw size={14} /> Refresh Status
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-4">
+                              <div className="space-y-4">
+                                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                  <div className="flex items-center justify-between gap-3 mb-3">
+                                    <div>
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">MSG91 Callback URL</p>
+                                      <p className="text-xs text-slate-500 mt-1">Paste this into MSG91 WhatsApp outbound webhook settings.</p>
+                                    </div>
+                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${platformData.whatsapp_delivery?.webhook_token_configured ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                      {platformData.whatsapp_delivery?.webhook_token_configured ? 'Token Protected' : 'Open URL'}
+                                    </span>
+                                  </div>
+                                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                                    <p className="text-sm font-bold text-slate-800 break-all">{platformData.whatsapp_delivery?.callback_url || 'Callback URL will appear here after platform settings load.'}</p>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 mt-3">
+                                    <button type="button" onClick={copyDeliveryCallbackToClipboard} disabled={!platformData.whatsapp_delivery?.callback_url} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center gap-2">
+                                      {copiedDeliveryCallback ? <Check size={13} /> : <Link size={13} />} {copiedDeliveryCallback ? 'Copied' : 'Copy URL'}
+                                    </button>
+                                    {platformData.whatsapp_delivery?.docs_url && (
+                                      <a href={platformData.whatsapp_delivery.docs_url} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition-all">
+                                        MSG91 Guide
+                                      </a>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] font-semibold text-slate-600 leading-relaxed mt-3">
+                                    In MSG91 open <span className="font-black text-slate-700">WhatsApp → Webhook</span> or <span className="font-black text-slate-700">Webhook (New)</span>, then paste this URL for outbound delivery reports. MSG91 may retry duplicate callbacks, so GymVault keeps these updates idempotent.
+                                  </p>
+                                </div>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">30d Total</p>
+                                    <p className="text-2xl font-black text-slate-900 mt-1">{platformData.whatsapp_delivery?.summary?.total_count || 0}</p>
+                                  </div>
+                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In Flight</p>
+                                    <p className="text-2xl font-black text-indigo-600 mt-1">{platformData.whatsapp_delivery?.summary?.in_flight_count || 0}</p>
+                                  </div>
+                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivered</p>
+                                    <p className="text-2xl font-black text-teal-600 mt-1">{platformData.whatsapp_delivery?.summary?.delivered_count || 0}</p>
+                                  </div>
+                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Read</p>
+                                    <p className="text-2xl font-black text-emerald-600 mt-1">{platformData.whatsapp_delivery?.summary?.read_count || 0}</p>
+                                  </div>
+                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Failed</p>
+                                    <p className="text-2xl font-black text-rose-600 mt-1">{platformData.whatsapp_delivery?.summary?.failed_count || 0}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                                {platformData.whatsapp_delivery?.recent_logs?.length === 0 ? (
+                                  <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm font-medium">No WhatsApp delivery logs yet.</div>
+                                ) : (
+                                  platformData.whatsapp_delivery.recent_logs.map((log) => {
+                                    const statusMeta = getWhatsAppDeliveryMeta(log.current_status);
+                                    const activity = getWhatsAppDeliveryActivity(log);
+                                    return (
+                                      <div key={log.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <p className="text-sm font-black text-slate-900 truncate">{log.recipient_name || 'Unknown recipient'}</p>
+                                              <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-500">{String(log.source_kind || 'WHATSAPP').replace(/_/g, ' ')}</span>
+                                            </div>
+                                            <p className="text-xs font-semibold text-slate-500 mt-1">{log.recipient_number || 'No phone'} • {log.template_title || log.template_key || 'Template not recorded'}</p>
+                                            <p className="text-xs font-semibold text-slate-500 mt-2">{activity.label}: {activity.time ? new Date(activity.time).toLocaleString() : 'Waiting for update'}</p>
+                                            {log.status_detail && (
+                                              <p className="text-[11px] font-semibold text-rose-600 leading-relaxed mt-2">{log.status_detail}</p>
+                                            )}
+                                          </div>
+                                          <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
+                                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${statusMeta.pill}`}>{statusMeta.label}</span>
+                                            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{log.provider_status || 'No provider status yet'}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
                                 )}
                               </div>
                             </div>

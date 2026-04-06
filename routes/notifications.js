@@ -8,8 +8,8 @@ const { ok, fail } = require('../utils/apiResponse');
 const {
     buildTemplateBodyVariables,
     normalizeLocalIndianPhone,
-    sendWhatsAppTemplate,
 } = require('../utils/msg91');
+const { sendTrackedWhatsAppTemplate } = require('../utils/whatsappDelivery');
 
 const AUDIENCE_MAP = {
     All: 'ALL',
@@ -448,6 +448,7 @@ router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
         }
 
         const gymId = req.user.gym_id;
+        const requesterId = req.user.user_id || req.user.id || null;
         const memberIds = Array.from(new Set(
             (Array.isArray(req.body.member_ids) ? req.body.member_ids : [req.body.member_id])
                 .map((value) => Number.parseInt(value, 10))
@@ -515,6 +516,8 @@ router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
         if (members.length === 0) {
             return fail(res, 400, 'REMINDER_MEMBERS_NOT_FOUND', 'No valid members were found for this reminder request.');
         }
+
+        const memberMap = new Map(members.map((member) => [Number(member.id), member]));
 
         const previewItems = buildReminderPreviewItems({
             members,
@@ -652,15 +655,25 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
             }
 
             try {
-                await sendWhatsAppTemplate({
+                const member = memberMap.get(Number(previewItem.member_id)) || {};
+                await sendTrackedWhatsAppTemplate({
+                    gymId,
+                    memberId: previewItem.member_id,
+                    initiatedBy: requesterId,
+                    sourceKind: 'REMINDER',
+                    sourceLabel: requestedTemplateKey || 'AUTO',
                     integratedNumber: gymConfig.messaging_whatsapp_number,
-                    templateName: selectedTemplate.whatsapp_template_name,
-                    language: selectedTemplate.whatsapp_template_language || 'en_US',
                     recipientNumber: previewItem.recipient_number,
+                    recipientName: previewItem.full_name,
+                    templateKey: selectedTemplate.template_key,
+                    templateTitle: selectedTemplate.title,
+                    templateName: selectedTemplate.whatsapp_template_name,
+                    templateLanguage: selectedTemplate.whatsapp_template_language || 'en_US',
+                    messagePreview: previewItem.message,
                     variables: buildTemplateBodyVariables(selectedTemplate.whatsapp_text, {
                         full_name: previewItem.full_name,
-                        plan_name: members.find((member) => member.id === previewItem.member_id)?.plan_name,
-                        days_to_expiry: members.find((member) => member.id === previewItem.member_id)?.days_to_expiry,
+                        plan_name: member.plan_name,
+                        days_to_expiry: member.days_to_expiry,
                     }, gymConfig.name || 'GymVault'),
                 });
                 successCount += 1;
@@ -838,6 +851,14 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
             return fail(res, 400, 'NO_VALID_PHONES', 'No valid member phone numbers found for selected segment.');
         }
 
+        const insertLog = await pool.query(
+            `INSERT INTO broadcast_logs (gym_id, segment, channel, message, sent_to_count, status, created_by)
+             VALUES ($1, $2, $3, $4, 0, 'QUEUED', $5)
+             RETURNING id, created_at`,
+            [gymId, customMemberIds.length > 0 ? 'CUSTOM' : segment, channel, message, userId]
+        );
+
+        const broadcastLogId = insertLog.rows[0].id;
         let successCount = 0;
         let failedCount = 0;
         const failures = [];
@@ -845,11 +866,21 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         await runWithConcurrency(targetMembers, WHATSAPP_SEND_CONCURRENCY, async (member) => {
             const toPhone = normalizeLocalIndianPhone(member.phone);
             try {
-                await sendWhatsAppTemplate({
+                await sendTrackedWhatsAppTemplate({
+                    gymId,
+                    memberId: member.id,
+                    broadcastLogId,
+                    initiatedBy: userId,
+                    sourceKind: 'CAMPAIGN',
+                    sourceLabel: customMemberIds.length > 0 ? 'CUSTOM' : segment,
                     integratedNumber: gymConfig.messaging_whatsapp_number,
-                    templateName: selectedTemplate.whatsapp_template_name,
-                    language: selectedTemplate.whatsapp_template_language || 'en_US',
                     recipientNumber: toPhone,
+                    recipientName: member.full_name,
+                    templateKey: selectedTemplate.template_key,
+                    templateTitle: selectedTemplate.title,
+                    templateName: selectedTemplate.whatsapp_template_name,
+                    templateLanguage: selectedTemplate.whatsapp_template_language || 'en_US',
+                    messagePreview: renderReminderPreviewText(message, member, gymConfig.name || 'GymVault'),
                     variables: buildTemplateBodyVariables(message, member, gymConfig.name || 'GymVault'),
                 });
                 successCount += 1;
@@ -868,11 +899,12 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
 
         const logSegment = customMemberIds.length > 0 ? 'CUSTOM' : segment;
 
-        const insertLog = await pool.query(
-            `INSERT INTO broadcast_logs (gym_id, segment, channel, message, sent_to_count, status, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id, created_at`,
-            [gymId, logSegment, channel, message, successCount, status, userId]
+        await pool.query(
+            `UPDATE broadcast_logs
+             SET sent_to_count = $2,
+                 status = $3
+             WHERE id = $1`,
+            [broadcastLogId, successCount, status]
         );
 
         await pool.query(
@@ -882,7 +914,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         );
 
         return ok(res, {
-            campaign_id: insertLog.rows[0].id,
+            campaign_id: broadcastLogId,
             created_at: insertLog.rows[0].created_at,
             segment: logSegment,
             channel,
