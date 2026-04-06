@@ -1,0 +1,1560 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import axios from 'axios';
+import { copyCollectionText, describeCollectionLinkDelivery } from '../utils/memberCollection';
+import { normalizeProfileImageUrl } from '../utils/profileImage';
+import { reportClientError } from '../utils/clientErrorReporter';
+import {
+  formatHour,
+  isValidPhoneInput,
+  normalizePhoneInput,
+  resolveBroadcastTemplateSuggestion,
+} from './dashboardPageUtils';
+
+const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
+const MAX_WARMUP_RETRIES = 8;
+
+const unwrapApiData = (payload) => {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return unwrapApiData(payload.data);
+  }
+  return payload;
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const asObject = (value, fallback = {}) => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
+);
+
+const audienceToSegment = (audience) => ({
+  All: 'ALL',
+  Active: 'ACTIVE',
+  Expiring: 'EXPIRING_7_DAYS',
+  Ghosts: 'GHOSTS',
+  Expired: 'EXPIRED',
+  HighChurn: 'HIGH_CHURN',
+}[audience] || 'ALL');
+
+const normalizeActionMembers = (sourceMembers) => {
+  const uniqueMembers = new Map();
+
+  asArray(sourceMembers).forEach((member) => {
+    const id = Number.parseInt(member?.id, 10);
+    if (!Number.isInteger(id) || uniqueMembers.has(id)) return;
+    uniqueMembers.set(id, member);
+  });
+
+  return Array.from(uniqueMembers.values());
+};
+
+const normalizeActionPayments = (sourcePayments) => {
+  const uniquePayments = new Map();
+
+  asArray(sourcePayments).forEach((payment) => {
+    const id = Number.parseInt(payment?.id, 10);
+    if (!Number.isInteger(id) || uniquePayments.has(id)) return;
+    uniquePayments.set(id, payment);
+  });
+
+  return Array.from(uniquePayments.values());
+};
+
+export default function useDashboardPageController({ appRuntime, setCurrentPage, startTour, isActive = true }) {
+  const { token, toast, navigateTo: navTo } = appRuntime;
+  const navigateTo = navTo || ((page) => setCurrentPage?.(page));
+
+  const [members, setMembers] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [payStats, setPayStats] = useState({ total_revenue: 0, today_revenue: 0, pending_dues: 0 });
+  const [chart30, setChart30] = useState([]);
+  const [chart7, setChart7] = useState([]);
+  const [attendanceHeatmap, setAttendanceHeatmap] = useState([]);
+  const [todayCheckins, setTodayCheckins] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [chartDays, setChartDays] = useState(7);
+  const [isAutomating, setIsAutomating] = useState(false);
+
+  const [setup, setSetup] = useState({
+    progress: 0,
+    is_complete: false,
+    steps: { profile: false, plans: false, members: false },
+  });
+  const [isSkipped, setIsSkipped] = useState(localStorage.getItem('gymvault_skip_setup') === 'true');
+  const [showTourBanner, setShowTourBanner] = useState(localStorage.getItem('gymvault_tour_completed') !== 'true');
+  const [isWarmupRetrying, setIsWarmupRetrying] = useState(false);
+  const warmupRetryTimerRef = useRef(null);
+  const warmupRetryCountRef = useRef(0);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [showCheckinModal, setShowCheckinModal] = useState(false);
+  const [checkinQuery, setCheckinQuery] = useState('');
+  const [checkinBusyMemberId, setCheckinBusyMemberId] = useState(null);
+  const [todayAttendance, setTodayAttendance] = useState([]);
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [quickActionLoading, setQuickActionLoading] = useState('');
+  const quickActionTimerRef = useRef(null);
+  const paymentRazorpayPollBusyRef = useRef(false);
+
+  const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
+  const [addFile, setAddFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [addSelectedPlanId, setAddSelectedPlanId] = useState('');
+  const [selectedMemberForPay, setSelectedMemberForPay] = useState('');
+  const [payMemberSearch, setPayMemberSearch] = useState('');
+  const [payMemberDropdownOpen, setPayMemberDropdownOpen] = useState(false);
+  const [selectedPlanForPay, setSelectedPlanForPay] = useState('');
+  const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentOnlineMode, setPaymentOnlineMode] = useState('RAZORPAY');
+  const [paymentCollectionContext, setPaymentCollectionContext] = useState(null);
+  const [paymentRazorpayContext, setPaymentRazorpayContext] = useState(null);
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentStep, setPaymentStep] = useState('idle');
+  const [broadcastAudience, setBroadcastAudience] = useState('All');
+  const [broadcastTemplateKey, setBroadcastTemplateKey] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastSearch, setBroadcastSearch] = useState('');
+  const [broadcastCustomIds, setBroadcastCustomIds] = useState([]);
+  const [campaignPreviewCount, setCampaignPreviewCount] = useState(0);
+  const [campaignPreviewLoading, setCampaignPreviewLoading] = useState(false);
+  const [broadcastTemplates, setBroadcastTemplates] = useState([]);
+  const [gymName, setGymName] = useState('');
+  const [gymBilling, setGymBilling] = useState({
+    saas_status: 'FREE_TRIAL',
+    saas_valid_until: '',
+    current_plan: 'pro',
+    saas_billing_cycle: 'monthly',
+  });
+  const [churnInsights, setChurnInsights] = useState({ summary: { high: 0, medium: 0, low: 0 }, members: [] });
+  const [campaignLogs, setCampaignLogs] = useState([]);
+
+  const isAnyDashboardModalOpen = showAddModal || showPaymentModal || showBroadcastModal || showCheckinModal;
+  const authHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+
+  const closePaymentModal = useCallback(() => {
+    setShowPaymentModal(false);
+    setSelectedMemberForPay('');
+    setPayMemberSearch('');
+    setPayMemberDropdownOpen(false);
+    setSelectedPlanForPay('');
+    setPaymentMode('Cash');
+    setPaymentOnlineMode('RAZORPAY');
+    setPaymentCollectionContext(null);
+    setPaymentRazorpayContext(null);
+    setPaymentReference('');
+    setPaymentStep('idle');
+  }, []);
+
+  const handleCopyPaymentCollectionDetail = useCallback(async (value, successMessage) => {
+    const copied = await copyCollectionText(value);
+    if (copied) {
+      toast(successMessage, 'success');
+      return;
+    }
+    toast('Copy failed on this device. Long-press and copy it manually.', 'warning');
+  }, [toast]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const requestConfig = { ...authHeaders, timeout: DASHBOARD_REQUEST_TIMEOUT_MS };
+      const [
+        membersRes, plansRes, statsRes,
+        chart30Res, chart7Res, attendanceRes,
+        todayRes, setupRes, churnRes, logsRes,
+        settingsRes,
+      ] = await Promise.allSettled([
+        axios.get('/api/members', requestConfig),
+        axios.get('/api/memberships/plans', requestConfig),
+        axios.get('/api/payments/stats', requestConfig),
+        axios.get('/api/payments/chart?days=30', requestConfig),
+        axios.get('/api/payments/chart?days=7', requestConfig),
+        axios.get('/api/attendance/summary', requestConfig),
+        axios.get('/api/attendance/today', requestConfig),
+        axios.get('/api/dashboard/setup-status', requestConfig),
+        axios.get('/api/notifications/campaign/churn-scores?limit=30', requestConfig),
+        axios.get('/api/notifications/campaign/logs?limit=50', requestConfig),
+        axios.get('/api/settings', requestConfig),
+      ]);
+
+      const pickData = (result, fallback) => {
+        if (result.status !== 'fulfilled') return fallback;
+        const unwrapped = unwrapApiData(result.value?.data);
+        return unwrapped ?? fallback;
+      };
+
+      setMembers(asArray(pickData(membersRes, [])).map((member) => ({
+        ...member,
+        profile_pic: normalizeProfileImageUrl(member?.profile_pic),
+      })));
+      setPlans(asArray(pickData(plansRes, [])));
+      setPayStats(asObject(pickData(statsRes, { total_revenue: 0, today_revenue: 0, pending_dues: 0 }), { total_revenue: 0, today_revenue: 0, pending_dues: 0 }));
+      setChart30(asArray(pickData(chart30Res, [])));
+      setChart7(asArray(pickData(chart7Res, [])));
+      setAttendanceHeatmap(asArray(pickData(attendanceRes, [])));
+
+      const todayData = pickData(todayRes, []);
+      const normalizedTodayData = Array.isArray(todayData) ? todayData : [];
+      setTodayAttendance(normalizedTodayData);
+      setTodayCheckins(normalizedTodayData.length);
+      setSetup(asObject(pickData(setupRes, { progress: 0, is_complete: false, steps: {} }), { progress: 0, is_complete: false, steps: {} }));
+
+      const settingsData = asObject(pickData(settingsRes, {}), {});
+      const billingData = asObject(settingsData.gym, {});
+      const resolvedGymName = String(billingData.name || settingsData.account?.gym_name || '').trim();
+      if (resolvedGymName) {
+        setGymName(resolvedGymName);
+      }
+
+      setGymBilling({
+        saas_status: String(billingData.saas_status || 'FREE_TRIAL').toUpperCase(),
+        saas_valid_until: String(billingData.saas_valid_until || ''),
+        current_plan: String(billingData.current_plan || 'pro'),
+        saas_billing_cycle: String(billingData.saas_billing_cycle || 'monthly'),
+      });
+
+      const churnData = asObject(pickData(churnRes, { summary: { high: 0, medium: 0, low: 0 }, members: [] }), { summary: { high: 0, medium: 0, low: 0 }, members: [] });
+      setChurnInsights({
+        summary: asObject(churnData.summary, { high: 0, medium: 0, low: 0 }),
+        members: asArray(churnData.members),
+      });
+      setCampaignLogs(asArray(pickData(logsRes, [])));
+
+      const failedCalls = [membersRes, plansRes, statsRes, chart30Res, chart7Res, attendanceRes, todayRes, setupRes, churnRes, logsRes, settingsRes]
+        .filter((result) => result.status === 'rejected')
+        .length;
+      const successfulCalls = 11 - failedCalls;
+
+      if (failedCalls > 0 && successfulCalls > 0) {
+        toast?.(`${failedCalls} dashboard section(s) failed to load.`, 'warning');
+      }
+
+      if (failedCalls === 11 && warmupRetryCountRef.current === 0) {
+        toast?.('Server is waking up. Dashboard will retry automatically.', 'warning');
+      }
+
+      if (successfulCalls === 0 && warmupRetryCountRef.current < MAX_WARMUP_RETRIES) {
+        warmupRetryCountRef.current += 1;
+        setIsWarmupRetrying(true);
+        const retryDelayMs = Math.min(4000 * warmupRetryCountRef.current, 30000);
+        if (warmupRetryTimerRef.current) {
+          window.clearTimeout(warmupRetryTimerRef.current);
+        }
+        warmupRetryTimerRef.current = window.setTimeout(() => {
+          fetchData();
+        }, retryDelayMs);
+      } else {
+        warmupRetryCountRef.current = 0;
+        setIsWarmupRetrying(false);
+        if (warmupRetryTimerRef.current) {
+          window.clearTimeout(warmupRetryTimerRef.current);
+          warmupRetryTimerRef.current = null;
+        }
+      }
+    } catch (err) {
+      reportClientError('Dashboard fetch', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [authHeaders, toast]);
+
+  const finalizeDashboardPaymentSuccess = useCallback(async (memberId) => {
+    try {
+      await axios.post('/api/attendance/checkin', { member_id: memberId, method: 'STAFF' }, authHeaders);
+    } catch (_err) {
+      // Attendance sync is best-effort here; payment success should still complete.
+    }
+
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
+    setPaymentStep('success');
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    closePaymentModal();
+    await fetchData();
+  }, [authHeaders, closePaymentModal, fetchData]);
+
+  const checkDashboardRazorpayStatus = useCallback(async ({ manual = false } = {}) => {
+    const paymentLinkId = paymentRazorpayContext?.payment_link?.id;
+    if (!selectedMemberForPay || !selectedPlanForPay || !paymentLinkId || paymentRazorpayPollBusyRef.current) {
+      return false;
+    }
+
+    paymentRazorpayPollBusyRef.current = true;
+    try {
+      const statusRes = await axios.post(
+        '/api/memberships/online/payment-link-status',
+        {
+          member_id: selectedMemberForPay,
+          plan_id: selectedPlanForPay,
+          payment_link_id: paymentLinkId,
+        },
+        authHeaders,
+      );
+
+      if (!statusRes.data?.paid) {
+        if (manual) {
+          toast?.('Payment is still pending on Razorpay.', 'warning');
+        }
+        return false;
+      }
+
+      setPaymentStep('processing');
+      await finalizeDashboardPaymentSuccess(selectedMemberForPay);
+      return true;
+    } catch (err) {
+      if (manual) {
+        toast?.(err?.response?.data?.error || 'Unable to verify Razorpay payment right now.', 'error');
+      }
+      return false;
+    } finally {
+      paymentRazorpayPollBusyRef.current = false;
+    }
+  }, [authHeaders, finalizeDashboardPaymentSuccess, paymentRazorpayContext, selectedMemberForPay, selectedPlanForPay, toast]);
+
+  useEffect(() => {
+    if (!showPaymentModal || paymentMode !== 'Online' || paymentOnlineMode !== 'RAZORPAY' || !paymentRazorpayContext?.payment_link?.id) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      checkDashboardRazorpayStatus();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [checkDashboardRazorpayStatus, paymentMode, paymentOnlineMode, paymentRazorpayContext, showPaymentModal]);
+
+  useEffect(() => {
+    return () => {
+      if (quickActionTimerRef.current) {
+        window.clearTimeout(quickActionTimerRef.current);
+      }
+      if (warmupRetryTimerRef.current) {
+        window.clearTimeout(warmupRetryTimerRef.current);
+      }
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncModalClass = () => {
+      root.classList.toggle('app-modal-open', Boolean(isActive && isAnyDashboardModalOpen));
+    };
+
+    syncModalClass();
+
+    window.addEventListener('pageshow', syncModalClass);
+    window.addEventListener('gymvault:app-resumed', syncModalClass);
+
+    return () => {
+      window.removeEventListener('pageshow', syncModalClass);
+      window.removeEventListener('gymvault:app-resumed', syncModalClass);
+      root.classList.remove('app-modal-open');
+    };
+  }, [isActive, isAnyDashboardModalOpen]);
+
+  useEffect(() => {
+    if (!token || !isActive) return undefined;
+
+    fetchData();
+
+    const handleExternalRefresh = () => {
+      fetchData();
+    };
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    };
+
+    window.addEventListener('focus', handleExternalRefresh);
+    window.addEventListener('pageshow', handleExternalRefresh);
+    window.addEventListener('gymvault:data-changed', handleExternalRefresh);
+    window.addEventListener('gymvault:app-resumed', handleExternalRefresh);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+
+    return () => {
+      window.removeEventListener('focus', handleExternalRefresh);
+      window.removeEventListener('pageshow', handleExternalRefresh);
+      window.removeEventListener('gymvault:data-changed', handleExternalRefresh);
+      window.removeEventListener('gymvault:app-resumed', handleExternalRefresh);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
+  }, [fetchData, isActive, token]);
+
+  const handleStartTour = useCallback(() => {
+    localStorage.setItem('gymvault_tour_completed', 'true');
+    setShowTourBanner(false);
+    startTour();
+  }, [startTour]);
+
+  const handleSkipSetup = useCallback(() => {
+    localStorage.setItem('gymvault_skip_setup', 'true');
+    setIsSkipped(true);
+  }, []);
+
+  const launchQuickAction = useCallback((actionKey, action) => {
+    if (quickActionLoading) return;
+
+    setQuickActionLoading(actionKey);
+    if (quickActionTimerRef.current) {
+      window.clearTimeout(quickActionTimerRef.current);
+    }
+
+    quickActionTimerRef.current = window.setTimeout(() => {
+      action();
+      setQuickActionLoading('');
+      quickActionTimerRef.current = null;
+    }, 160);
+  }, [quickActionLoading]);
+
+  const handleAddMember = useCallback(async (event) => {
+    event.preventDefault();
+
+    const normalizedPhone = normalizePhoneInput(addFormData.phone);
+    if (!isValidPhoneInput(normalizedPhone)) {
+      toast('Phone must be exactly 10 digits.', 'error');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('full_name', addFormData.full_name);
+    formData.append('email', addFormData.email);
+    formData.append('phone', normalizedPhone);
+    if (addFile) {
+      formData.append('profile_pic', addFile);
+    }
+
+    try {
+      setAddSubmitting(true);
+      const res = await axios.post('/api/members/add', formData, authHeaders);
+      setShowAddModal(false);
+
+      const newMember = res.data;
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+        detail: {
+          source: 'dashboard-add-member',
+          member_id: newMember?.id || null,
+          at: Date.now(),
+        },
+      }));
+
+      setAddFormData({ full_name: '', email: '', phone: '' });
+      setAddFile(null);
+      setPreviewUrl(null);
+      toast('Member added successfully!', 'success');
+      fetchData();
+
+      if (addSelectedPlanId && newMember) {
+        setSelectedMemberForPay(newMember.id);
+        setSelectedPlanForPay(addSelectedPlanId);
+        setShowPaymentModal(true);
+      }
+      setAddSelectedPlanId('');
+    } catch (err) {
+      toast(err.response?.data?.error || 'Error adding member.', 'error');
+    } finally {
+      setAddSubmitting(false);
+    }
+  }, [addFile, addFormData, addSelectedPlanId, authHeaders, fetchData, toast]);
+
+  const handlePayment = useCallback(async (event) => {
+    event.preventDefault();
+    if (!selectedMemberForPay || !selectedPlanForPay) {
+      toast('Please select a member and a plan.', 'warning');
+      return;
+    }
+
+    setPaymentSubmitting(true);
+    try {
+      if (paymentMode === 'Online') {
+        if (paymentOnlineMode === 'UPI') {
+          if (!paymentCollectionContext) {
+            const collectionRes = await axios.post('/api/memberships/online/create-order', {
+              member_id: selectedMemberForPay,
+              plan_id: selectedPlanForPay,
+            }, authHeaders);
+
+            const collection = collectionRes.data?.collection;
+            if (!collection?.upi_id) {
+              toast('Direct UPI QR is not configured. Add a collection UPI ID in Integrations or use Razorpay collection.', 'error');
+              setPaymentStep('idle');
+              return;
+            }
+
+            setPaymentCollectionContext(collection);
+            setPaymentRazorpayContext(null);
+            setPaymentReference(collection.reference || '');
+            toast('Show this direct UPI QR to the member, then confirm once payment is received.', 'success');
+            return;
+          }
+
+          const paidMemberId = selectedMemberForPay;
+          setPaymentStep('processing');
+          await axios.post('/api/memberships/activate', {
+            member_id: paidMemberId,
+            plan_id: selectedPlanForPay,
+            payment_mode: 'Online',
+            payment_id: paymentReference || paymentCollectionContext.reference || null,
+          }, authHeaders);
+          await finalizeDashboardPaymentSuccess(paidMemberId);
+          return;
+        }
+
+        if (paymentRazorpayContext?.payment_link?.id) {
+          await checkDashboardRazorpayStatus({ manual: true });
+          return;
+        }
+
+        setPaymentStep('processing');
+
+        const orderRes = await axios.post('/api/memberships/online/create-order', {
+          member_id: selectedMemberForPay,
+          plan_id: selectedPlanForPay,
+        }, authHeaders);
+
+        const razorpay = orderRes.data?.razorpay;
+        const paymentLink = razorpay?.payment_link;
+        if (!paymentLink?.id || !paymentLink?.short_url) {
+          toast('Razorpay collection is not configured. Add Razorpay keys/connect in Integrations or use Direct UPI.', 'error');
+          setPaymentStep('idle');
+          return;
+        }
+
+        setPaymentCollectionContext(null);
+        setPaymentRazorpayContext(razorpay);
+        setPaymentStep('idle');
+
+        const delivery = describeCollectionLinkDelivery(paymentLink);
+        toast(
+          delivery.label === 'Manual share required'
+            ? 'Razorpay QR is ready. Since no member phone or email is saved, share the link manually.'
+            : `${delivery.label} and QR is ready on this screen.`,
+          'success',
+        );
+        return;
+      }
+
+      const paidMemberId = selectedMemberForPay;
+      setPaymentStep('processing');
+      await axios.post('/api/memberships/activate', {
+        member_id: paidMemberId,
+        plan_id: selectedPlanForPay,
+        payment_mode: paymentMode,
+        payment_id: null,
+      }, authHeaders);
+      await finalizeDashboardPaymentSuccess(paidMemberId);
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Payment recording failed.', 'error');
+      setPaymentStep('idle');
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  }, [
+    authHeaders,
+    checkDashboardRazorpayStatus,
+    finalizeDashboardPaymentSuccess,
+    paymentCollectionContext,
+    paymentMode,
+    paymentOnlineMode,
+    paymentRazorpayContext,
+    paymentReference,
+    selectedMemberForPay,
+    selectedPlanForPay,
+    toast,
+  ]);
+
+  const loadCampaignPreview = useCallback(async (audience) => {
+    if (!token || !showBroadcastModal) return;
+    if (broadcastCustomIds.length > 0) {
+      setCampaignPreviewCount(broadcastCustomIds.length);
+      setCampaignPreviewLoading(false);
+      return;
+    }
+
+    setCampaignPreviewLoading(true);
+    try {
+      const segment = audienceToSegment(audience);
+      const res = await axios.get(`/api/notifications/campaign/segments?segment=${segment}&limit=200`, authHeaders);
+      const payload = unwrapApiData(res.data) || {};
+      setCampaignPreviewCount(Number(payload.total || 0));
+    } catch (_err) {
+      setCampaignPreviewCount(0);
+    } finally {
+      setCampaignPreviewLoading(false);
+    }
+  }, [authHeaders, broadcastCustomIds, showBroadcastModal, token]);
+
+  useEffect(() => {
+    loadCampaignPreview(broadcastAudience);
+  }, [broadcastAudience, loadCampaignPreview]);
+
+  useEffect(() => {
+    const loadTemplatesAndGymName = async () => {
+      if (!showBroadcastModal) return;
+
+      try {
+        const [intRes, settRes] = await Promise.allSettled([
+          axios.get('/api/settings/integrations', authHeaders),
+          axios.get('/api/settings', authHeaders),
+        ]);
+
+        if (intRes.status === 'fulfilled') {
+          const data = intRes.value.data || {};
+          const templates = Array.isArray(data.templates)
+            ? data.templates.filter((item) => item.is_active !== false && String(item.whatsapp_template_status || '').toUpperCase() === 'APPROVED')
+            : [];
+          setBroadcastTemplates(templates);
+          if (!broadcastTemplateKey) {
+            const suggestedKey = resolveBroadcastTemplateSuggestion(broadcastAudience);
+            const nextTemplate = templates.find((item) => item.template_key === suggestedKey) || templates[0] || null;
+            setBroadcastTemplateKey(nextTemplate?.template_key || '');
+          }
+        } else {
+          setBroadcastTemplates([]);
+        }
+
+        if (settRes.status === 'fulfilled') {
+          const payload = settRes.value.data || {};
+          const gym = payload.gym || payload.data?.gym || {};
+          const account = payload.account || payload.data?.account || {};
+          const name = String(gym.name || account.gym_name || '').trim();
+          if (name) {
+            setGymName(name);
+          }
+        }
+      } catch (_err) {
+        setBroadcastTemplates([]);
+      }
+    };
+
+    loadTemplatesAndGymName();
+  }, [authHeaders, broadcastAudience, broadcastTemplateKey, showBroadcastModal]);
+
+  useEffect(() => {
+    if (!broadcastTemplateKey) {
+      setBroadcastMessage('');
+      return;
+    }
+
+    const selected = broadcastTemplates.find((item) => item.template_key === broadcastTemplateKey);
+    if (!selected) {
+      setBroadcastMessage('');
+      return;
+    }
+
+    let resolved = String(selected.whatsapp_text || '');
+    if (gymName) {
+      resolved = resolved.replace(/\{\{gym_name\}\}/gi, gymName);
+    }
+    setBroadcastMessage(resolved);
+  }, [broadcastTemplateKey, broadcastTemplates, gymName]);
+
+  const openBroadcastDraft = useCallback((audience, _message) => {
+    setBroadcastAudience(audience);
+    setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
+    setBroadcastSearch('');
+    setBroadcastCustomIds([]);
+    setBroadcastMessage('');
+    setShowBroadcastModal(true);
+  }, []);
+
+  const openBroadcastDraftForMembers = useCallback(({ memberIds = [], audience = 'All' }) => {
+    const normalizedIds = Array.from(new Set(
+      asArray(memberIds)
+        .map((id) => Number.parseInt(id, 10))
+        .filter((id) => Number.isInteger(id)),
+    ));
+
+    setBroadcastAudience(audience);
+    setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
+    setBroadcastSearch('');
+    setBroadcastCustomIds(normalizedIds);
+    setBroadcastMessage('');
+    setShowBroadcastModal(true);
+  }, []);
+
+  const buildSmartMemberCta = useCallback(({
+    members: sourceMembers,
+    singleFilter = 'All',
+    singleOptions = {},
+    singleCta = 'Open Member',
+    bulkCta = 'Open Bulk Reminder',
+    bulkMessage = '',
+    bulkAudience = 'All',
+    fallbackAction,
+  }) => {
+    const normalizedMembers = normalizeActionMembers(sourceMembers);
+    const count = normalizedMembers.length;
+
+    if (count === 0) {
+      return {
+        members: normalizedMembers,
+        count,
+        cta: bulkCta,
+        action: fallbackAction || (() => {}),
+      };
+    }
+
+    if (count === 1) {
+      const target = normalizedMembers[0];
+      return {
+        members: normalizedMembers,
+        count,
+        cta: singleCta,
+        action: () => navigateTo('Members', singleFilter, {
+          memberId: target.id,
+          ...(singleOptions || {}),
+        }),
+      };
+    }
+
+    return {
+      members: normalizedMembers,
+      count,
+      cta: bulkCta,
+      action: () => openBroadcastDraftForMembers({
+        memberIds: normalizedMembers.map((member) => member.id),
+        message: bulkMessage,
+        audience: bulkAudience,
+      }),
+    };
+  }, [navigateTo, openBroadcastDraftForMembers]);
+
+  const buildSmartPaymentCta = useCallback(({
+    payments: sourcePayments,
+    members: sourceMembers = [],
+    singleCta = 'Collect Due',
+    bulkCta = 'Open Pending Dues',
+    fallbackAction,
+  }) => {
+    const payments = normalizeActionPayments(sourcePayments);
+    const normalizedMembers = normalizeActionMembers(sourceMembers.length > 0 ? sourceMembers : payments.map((payment) => payment.member).filter(Boolean));
+    const count = payments.length;
+
+    if (count === 0) {
+      return {
+        payments,
+        members: normalizedMembers,
+        count,
+        cta: bulkCta,
+        action: fallbackAction || (() => navigateTo('Payments', 'Pending')),
+      };
+    }
+
+    if (count === 1) {
+      const target = payments[0];
+      return {
+        payments,
+        members: normalizedMembers,
+        count,
+        cta: singleCta,
+        action: () => navigateTo('Payments', 'Pending', {
+          paymentId: target.id,
+          action: 'collectDue',
+        }),
+      };
+    }
+
+    return {
+      payments,
+      members: normalizedMembers,
+      count,
+      cta: bulkCta,
+      action: () => navigateTo('Payments', 'Pending'),
+    };
+  }, [navigateTo]);
+
+  const handleBroadcast = useCallback(async (event) => {
+    event.preventDefault();
+    if (!broadcastTemplateKey) {
+      toast('Select an approved WhatsApp template before sending the broadcast.', 'warning');
+      return;
+    }
+
+    try {
+      setIsAutomating(true);
+      const segment = audienceToSegment(broadcastAudience);
+      const res = await axios.post('/api/notifications/campaign/run', {
+        segment,
+        channel: 'WHATSAPP',
+        template_key: broadcastTemplateKey || undefined,
+        message: broadcastMessage,
+        member_ids: broadcastCustomIds,
+      }, authHeaders);
+
+      const payload = unwrapApiData(res.data) || {};
+      const failed = Number(payload.failed_count || 0);
+      const delivered = Number(payload.sent_to_count || 0);
+      const statusLine = failed > 0
+        ? `Campaign delivered to ${delivered} members, ${failed} failed.`
+        : `Campaign delivered to ${delivered} members.`;
+
+      toast(statusLine, failed > 0 ? 'warning' : 'success');
+      setShowBroadcastModal(false);
+      setBroadcastTemplateKey('');
+      setBroadcastMessage('');
+      setBroadcastSearch('');
+      setBroadcastCustomIds([]);
+      fetchData();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Broadcast send failed.', 'error');
+    } finally {
+      setIsAutomating(false);
+    }
+  }, [authHeaders, broadcastAudience, broadcastCustomIds, broadcastMessage, broadcastTemplateKey, fetchData, toast]);
+
+  const handleQuickCheckIn = useCallback(async (member) => {
+    if (!member?.id || checkinBusyMemberId) return;
+
+    setCheckinBusyMemberId(member.id);
+    try {
+      await axios.post('/api/attendance/checkin', {
+        member_id: member.id,
+        method: 'STAFF',
+      }, authHeaders);
+      toast?.(`Checked in ${member.full_name}.`, 'success');
+      await fetchData();
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'dashboard-checkin' } }));
+    } catch (err) {
+      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Check-in failed.', 'error');
+    } finally {
+      setCheckinBusyMemberId(null);
+    }
+  }, [authHeaders, checkinBusyMemberId, fetchData, toast]);
+
+  const dashboardData = useMemo(() => {
+    const today = new Date();
+    const toDayAge = (value) => {
+      if (!value) return 999;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return 999;
+      return Math.floor((today - date) / 86400000);
+    };
+    const getLatestPayment = (member) => Array.isArray(member.payment_history) ? member.payment_history[0] : null;
+    const getLatestPendingDue = (member) => {
+      const latestPayment = getLatestPayment(member);
+      if (!latestPayment) return null;
+      return String(latestPayment.status || '').toLowerCase() === 'pending' && Number(latestPayment.amount_due || 0) > 0
+        ? latestPayment
+        : null;
+    };
+    const hasRecentActivation = (member) => {
+      const latestPayment = getLatestPayment(member);
+      const activationReference = latestPayment?.payment_date || member.joining_date;
+      return toDayAge(activationReference) <= 14;
+    };
+    const getDaysAbsent = (member) => {
+      const latestPayment = getLatestPayment(member);
+      const effectiveVisitSource = member.last_visit || latestPayment?.payment_date || null;
+      return effectiveVisitSource ? toDayAge(effectiveVisitSource) : 999;
+    };
+
+    const active = members.filter((member) => member.membership_status === 'ACTIVE');
+    const pendingDueMembers = members.filter((member) => !!getLatestPendingDue(member));
+    const pendingDuePayments = pendingDueMembers
+      .map((member) => {
+        const latestPayment = getLatestPendingDue(member);
+        return latestPayment ? { ...latestPayment, member } : null;
+      })
+      .filter(Boolean);
+    const pendingDueMemberIds = new Set(pendingDueMembers.map((member) => member.id));
+    const unpaid = members.filter((member) => member.membership_status === 'UNPAID' && !pendingDueMemberIds.has(member.id));
+    const expired = members.filter((member) => member.membership_status === 'EXPIRED');
+
+    const expiringIn3Days = active.filter((member) => member.days_left > 0 && member.days_left <= 3);
+    const expiringIn7Days = active.filter((member) => member.days_left > 0 && member.days_left <= 7);
+
+    const ghosts = active.filter((member) => {
+      if (member.days_left <= 7 || hasRecentActivation(member)) return false;
+      return getDaysAbsent(member) > 14;
+    });
+
+    const pendingDueValue = pendingDuePayments.reduce((sum, payment) => sum + Number(payment?.amount_due || 0), 0);
+    const revenueAtRisk = expiringIn7Days.reduce((sum, member) => {
+      const plan = plans.find((item) => item.name === member.plan_name);
+      return sum + Number.parseFloat(plan?.price || 0);
+    }, 0);
+
+    const monthlyRevenue = chart30.reduce((sum, day) => sum + (day.revenue || 0), 0);
+    const healthScore = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
+    const pendingDues = Number(payStats.pending_dues || 0);
+
+    const planCounts = {};
+    members.forEach((member) => {
+      if (member.plan_name) {
+        planCounts[member.plan_name] = (planCounts[member.plan_name] || 0) + 1;
+      }
+    });
+    const topPlanEntry = Object.entries(planCounts).sort((a, b) => b[1] - a[1])[0] || null;
+    const topPlanPct = topPlanEntry && members.length > 0 ? Math.round((topPlanEntry[1] / members.length) * 100) : 0;
+
+    const heatmap = attendanceHeatmap.map((day) => ({ t: formatHour(day.hour), v: day.count }));
+
+    const avgPlanPrice = plans.length > 0
+      ? Math.round(plans.reduce((sum, plan) => sum + Number(plan.price || 0), 0) / plans.length)
+      : 1500;
+    const planPriceByName = new Map(plans.map((plan) => [String(plan.name || ''), Number(plan.price || 0)]));
+    const todayStartDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const accessValidUntil = gymBilling.saas_valid_until ? new Date(gymBilling.saas_valid_until) : null;
+    const hasValidAccessDate = Boolean(accessValidUntil && !Number.isNaN(accessValidUntil.getTime()));
+    const accessExpiryDay = hasValidAccessDate
+      ? new Date(accessValidUntil.getFullYear(), accessValidUntil.getMonth(), accessValidUntil.getDate())
+      : null;
+    const accessDaysRemaining = accessExpiryDay
+      ? Math.ceil((accessExpiryDay.getTime() - todayStartDate.getTime()) / 86400000)
+      : null;
+    const accessDerivedStatus = (() => {
+      if (!hasValidAccessDate || gymBilling.saas_status === 'FREE_TRIAL') return 'FREE_TRIAL';
+      const diffDays = (accessValidUntil.getTime() - today.getTime()) / 86400000;
+      if (gymBilling.saas_status === 'EXPIRED' || diffDays <= -3) return 'EXPIRED';
+      if (gymBilling.saas_status === 'GRACE_PERIOD' || (diffDays < 0 && diffDays > -3)) return 'GRACE_PERIOD';
+      return 'ACTIVE';
+    })();
+    const accessExpiryLabel = hasValidAccessDate
+      ? accessValidUntil.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+      : '';
+    const estimateMemberValue = (member) => {
+      const byPlan = planPriceByName.get(String(member?.plan_name || ''));
+      if (Number.isFinite(byPlan) && byPlan > 0) return byPlan;
+      return avgPlanPrice;
+    };
+
+    const immediateRiskAmount = expiringIn3Days.reduce((sum, member) => sum + estimateMemberValue(member), 0);
+    const highChurnMembers = (churnInsights.members || []).filter((member) => String(member.churn_tier).toUpperCase() === 'HIGH');
+    const highChurnRiskAmount = highChurnMembers.reduce((sum, member) => sum + estimateMemberValue(member), 0);
+    const ghostRiskAmount = ghosts.reduce((sum, member) => sum + Math.round(estimateMemberValue(member) * 0.65), 0);
+    const expiredWinbackValue = Math.round(expired.length * avgPlanPrice * 0.5);
+    const expiringFollowupMembers = expiringIn7Days.filter((member) => member.days_left > 3);
+    const expiringFollowupRiskAmount = expiringFollowupMembers.reduce((sum, member) => sum + estimateMemberValue(member), 0);
+
+    const reminderMessages = {
+      highChurn: 'Hi {{name}}, we noticed your routine at {{gym_name}} has slowed down. Reply and we will help you with the right plan to get back on track.',
+      expiringImmediate: 'Hi {{name}}, your membership at {{gym_name}} expires in the next 3 days. Renew now to continue without interruption.',
+      expiringSoon: 'Hi {{name}}, your membership at {{gym_name}} expires this week. Renew in time to keep your plan active.',
+      expired: 'Hi {{name}}, your membership at {{gym_name}} has expired. Reply if you want help restarting with the best plan for you.',
+      inactive: 'Hi {{name}}, we have missed you at {{gym_name}}. Reply if you want help getting back into your routine.',
+      unpaid: 'Hi {{name}}, your membership at {{gym_name}} is still waiting for activation. Please complete your payment to start your plan.',
+      pendingDue: 'Hi {{name}}, you still have a pending balance for your membership at {{gym_name}}. Please clear the due amount to keep your plan up to date.',
+    };
+
+    const highChurnCta = buildSmartMemberCta({
+      members: highChurnMembers,
+      singleFilter: 'All',
+      bulkMessage: reminderMessages.highChurn,
+      bulkAudience: 'HighChurn',
+      bulkCta: 'Open Bulk Broadcast',
+    });
+    const expiringImmediateCta = buildSmartMemberCta({
+      members: expiringIn3Days,
+      singleFilter: 'Expiring Soon',
+      bulkMessage: reminderMessages.expiringImmediate,
+      bulkAudience: 'Expiring',
+      bulkCta: 'Open Renewal Broadcast',
+    });
+    const expiringSoonCta = buildSmartMemberCta({
+      members: expiringFollowupMembers,
+      singleFilter: 'Expiring Soon',
+      bulkMessage: reminderMessages.expiringSoon,
+      bulkAudience: 'Expiring',
+      bulkCta: 'Open Bulk Reminder',
+    });
+    const expiredCta = buildSmartMemberCta({
+      members: expired,
+      singleFilter: 'Expired',
+      bulkMessage: reminderMessages.expired,
+      bulkAudience: 'Expired',
+      bulkCta: 'Open Winback Broadcast',
+    });
+    const ghostCta = buildSmartMemberCta({
+      members: ghosts,
+      singleFilter: 'Inactive',
+      bulkMessage: reminderMessages.inactive,
+      bulkAudience: 'Ghosts',
+      bulkCta: 'Open Bulk Follow-up',
+    });
+    const unpaidCta = buildSmartMemberCta({
+      members: unpaid,
+      singleFilter: 'Unpaid',
+      bulkMessage: reminderMessages.unpaid,
+      bulkAudience: 'All',
+      bulkCta: 'Open Bulk Reminder',
+    });
+    const pendingDueCta = buildSmartPaymentCta({
+      payments: pendingDuePayments,
+      members: pendingDueMembers,
+      singleCta: 'Collect Due',
+      bulkCta: 'Open Pending Dues',
+      fallbackAction: () => navigateTo('Payments'),
+    });
+
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const sentToday = campaignLogs
+      .filter((log) => {
+        const created = new Date(log.created_at).getTime();
+        return Number.isFinite(created) && created >= startOfDay;
+      })
+      .reduce((sum, log) => sum + Number(log.sent_to_count || 0), 0);
+    const runsToday = campaignLogs.filter((log) => {
+      const created = new Date(log.created_at).getTime();
+      return Number.isFinite(created) && created >= startOfDay;
+    }).length;
+
+    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const weeklyLogs = campaignLogs.filter((log) => {
+      const created = new Date(log.created_at).getTime();
+      return Number.isFinite(created) && created >= sevenDaysAgo;
+    });
+    const weeklyRuns = weeklyLogs.length;
+    const weeklySent = weeklyLogs.reduce((sum, log) => sum + Number(log.sent_to_count || 0), 0);
+    const estimatedRecoveryValue = Math.round(weeklySent * avgPlanPrice * 0.12);
+    const lastAutomationAt = campaignLogs[0]?.created_at || null;
+    const lastAutomationLabel = lastAutomationAt
+      ? new Date(lastAutomationAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+      : 'No runs yet';
+
+    const incompleteSetupSteps = Object.entries(setup.steps || {})
+      .filter(([, isDone]) => !isDone)
+      .map(([key]) => key);
+    const setupStepLabels = {
+      profile: 'business profile',
+      plans: 'plan catalog',
+      members: 'member base',
+    };
+    const nextSetupStep = incompleteSetupSteps[0] || null;
+    const targetTodayTraffic = active.length > 0 ? Math.max(3, Math.round(active.length * 0.14)) : 3;
+    const trafficGap = Math.max(0, targetTodayTraffic - todayCheckins);
+
+    const buildRecommendation = ({
+      id,
+      title,
+      reason,
+      count,
+      members: recommendationMembers,
+      impact,
+      confidence,
+      urgency,
+      priority,
+      cta,
+      action,
+      sub,
+    }) => {
+      const priorityBoost = priority === 'P0' ? 2400 : priority === 'P1' ? 1100 : 400;
+      const score = Math.round((impact || 0) * (confidence / 100) + priorityBoost + (count || 0) * 25);
+      return {
+        id,
+        title,
+        reason,
+        count,
+        members: recommendationMembers,
+        impact,
+        confidence,
+        urgency,
+        priority,
+        cta,
+        action,
+        sub,
+        score,
+      };
+    };
+
+    const aiCandidates = [
+      buildRecommendation({
+        id: 'HIGH_CHURN',
+        title: 'Launch retention for high-churn members',
+        reason: `${highChurnCta.count} member${highChurnCta.count === 1 ? ' is' : 's are'} in HIGH churn tier`,
+        count: highChurnCta.count,
+        members: highChurnCta.members,
+        impact: highChurnRiskAmount,
+        confidence: Math.min(95, 74 + highChurnMembers.length * 2),
+        urgency: 'Today',
+        priority: 'P0',
+        cta: highChurnCta.cta,
+        sub: 'Prevent churn before expiry',
+        action: highChurnCta.action,
+      }),
+      buildRecommendation({
+        id: 'EXPIRING_72H',
+        title: 'Renew plans expiring in 72 hours',
+        reason: `${expiringImmediateCta.count} membership${expiringImmediateCta.count === 1 ? '' : 's'} will expire within 3 days`,
+        count: expiringImmediateCta.count,
+        members: expiringImmediateCta.members,
+        impact: immediateRiskAmount,
+        confidence: Math.min(94, 70 + expiringIn3Days.length * 2),
+        urgency: 'Today',
+        priority: 'P0',
+        cta: expiringImmediateCta.cta,
+        sub: 'Renew these today',
+        action: expiringImmediateCta.action,
+      }),
+      buildRecommendation({
+        id: 'EXPIRING_7D',
+        title: 'Follow up on memberships expiring this week',
+        reason: `${expiringSoonCta.count} membership${expiringSoonCta.count === 1 ? '' : 's'} expire within 7 days`,
+        count: expiringSoonCta.count,
+        members: expiringSoonCta.members,
+        impact: expiringFollowupRiskAmount,
+        confidence: Math.min(90, 66 + expiringIn7Days.length * 2),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: expiringSoonCta.cta,
+        sub: 'Follow up this week',
+        action: expiringSoonCta.action,
+      }),
+      buildRecommendation({
+        id: 'EXPIRED_WINBACK',
+        title: 'Win back expired members',
+        reason: `${expiredCta.count} member${expiredCta.count === 1 ? ' is' : 's are'} already expired`,
+        count: expiredCta.count,
+        members: expiredCta.members,
+        impact: expiredWinbackValue,
+        confidence: Math.min(90, 62 + expired.length),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: expiredCta.cta,
+        sub: 'Bring them back',
+        action: expiredCta.action,
+      }),
+      buildRecommendation({
+        id: 'GHOST_REACTIVATION',
+        title: 'Bring back members who stopped coming',
+        reason: `${ghostCta.count} active member${ghostCta.count === 1 ? '' : 's'} absent 14+ days`,
+        count: ghostCta.count,
+        members: ghostCta.members,
+        impact: ghostRiskAmount,
+        confidence: Math.min(88, 60 + Math.floor(ghosts.length * 0.8)),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: ghostCta.cta,
+        sub: 'Bring quiet members back',
+        action: ghostCta.action,
+      }),
+      buildRecommendation({
+        id: 'UNPAID_ACTIVATION',
+        title: 'Start unpaid members',
+        reason: `${unpaidCta.count} unpaid member${unpaidCta.count === 1 ? ' is' : 's are'} waiting for activation`,
+        count: unpaidCta.count,
+        members: unpaidCta.members,
+        impact: Math.round(unpaid.length * avgPlanPrice * 0.5),
+        confidence: Math.min(86, 58 + unpaid.length),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: unpaidCta.cta,
+        sub: 'Finish pending payments',
+        action: unpaidCta.action,
+      }),
+      buildRecommendation({
+        id: 'PENDING_DUES',
+        title: 'Collect pending dues',
+        reason: `${pendingDueCta.count} member${pendingDueCta.count === 1 ? ' still has' : 's still have'} an outstanding balance`,
+        count: pendingDueCta.count,
+        members: pendingDueCta.members,
+        impact: pendingDueValue,
+        confidence: Math.min(92, 62 + pendingDueMembers.length * 4),
+        urgency: 'This week',
+        priority: 'P1',
+        cta: pendingDueCta.cta,
+        sub: 'Clear pending balance',
+        action: pendingDueCta.action,
+      }),
+    ].filter((candidate) => candidate.count > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const opportunityCandidates = [
+      incompleteSetupSteps.length > 0 && buildRecommendation({
+        id: 'SETUP_PROGRESS',
+        title: setup.progress < 50 ? 'Complete your gym setup' : 'Finish remaining setup steps',
+        reason: `${incompleteSetupSteps.length} step${incompleteSetupSteps.length === 1 ? '' : 's'} not yet configured — complete them to unlock full features`,
+        count: incompleteSetupSteps.length,
+        impact: Math.round(avgPlanPrice * Math.max(1.5, incompleteSetupSteps.length * 1.1)),
+        confidence: Math.min(92, 72 + incompleteSetupSteps.length * 5),
+        urgency: setup.progress < 50 ? 'Today' : 'This week',
+        priority: setup.progress < 50 ? 'P1' : 'P2',
+        cta: nextSetupStep === 'plans' ? 'Create Plan' : nextSetupStep === 'members' ? 'Add Member' : 'Go to Settings',
+        sub: `Next step: ${setupStepLabels[nextSetupStep] || 'Settings'}`,
+        action: () => {
+          if (nextSetupStep === 'plans') {
+            navigateTo('Plans');
+            return;
+          }
+          if (nextSetupStep === 'members') {
+            setShowAddModal(true);
+            return;
+          }
+          navigateTo('Settings', 'account');
+        },
+      }),
+      active.length >= 10 && trafficGap > 0 && buildRecommendation({
+        id: 'TODAY_TRAFFIC',
+        title: todayCheckins === 0 ? 'Kickstart check-ins for today' : 'Today\'s floor traffic is soft',
+        reason: `${todayCheckins} check-ins recorded vs ${targetTodayTraffic} expected today`,
+        count: trafficGap,
+        impact: Math.round(Math.max(avgPlanPrice, trafficGap * avgPlanPrice * 0.25)),
+        confidence: Math.min(88, 68 + trafficGap * 4),
+        urgency: 'Today',
+        priority: todayCheckins === 0 && active.length >= 18 ? 'P1' : 'P2',
+        cta: 'Open Check-In',
+        sub: 'Move reception focus to attendance',
+        action: () => {
+          setCheckinQuery('');
+          setShowCheckinModal(true);
+        },
+      }),
+      members.length >= 12 && weeklyRuns === 0 && buildRecommendation({
+        id: 'AUTOMATION_RESTART',
+        title: 'Restart member messages',
+        reason: 'No campaign was sent in the last 7 days',
+        count: Math.max(active.length, members.length),
+        impact: Math.round(Math.max(avgPlanPrice * 2, active.length * avgPlanPrice * 0.12)),
+        confidence: Math.min(84, 64 + Math.min(20, Math.round(active.length / 2))),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Launch Broadcast',
+        sub: 'Send member reminders again',
+        action: () => openBroadcastDraft('Active', 'Hi from GymVault! New week, new goals. Reply if you want help with your next workout plan or renewal options.'),
+      }),
+      topPlanEntry && topPlanPct >= 65 && plans.length >= 2 && buildRecommendation({
+        id: 'PLAN_CONCENTRATION',
+        title: `Add another plan besides "${topPlanEntry[0]}"`,
+        reason: `${topPlanPct}% of members are on one plan. Adding one more option can balance revenue better.`,
+        count: topPlanEntry[1],
+        impact: Math.round(monthlyRevenue > 0 ? monthlyRevenue * 0.18 : avgPlanPrice * topPlanEntry[1]),
+        confidence: Math.min(82, 60 + Math.round(topPlanPct / 2)),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Review Plans',
+        sub: 'Offer more plan options',
+        action: () => navigateTo('Plans'),
+      }),
+      plans.length === 1 && members.length >= 8 && buildRecommendation({
+        id: 'SECOND_TIER',
+        title: 'Add one more plan option',
+        reason: 'One plan limits upsell and downgrade paths',
+        count: members.length,
+        impact: Math.round(avgPlanPrice * 2),
+        confidence: 78,
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Add Tier',
+        sub: 'Give members one more choice',
+        action: () => navigateTo('Plans'),
+      }),
+      active.length >= 12 && expiringIn7Days.length === 0 && highChurnMembers.length < 3 && pendingDues < avgPlanPrice && buildRecommendation({
+        id: 'GROWTH_PUSH',
+        title: 'This week is good for new joins',
+        reason: `Risk signals are stable across ${active.length} active members`,
+        count: Math.max(6, Math.round(active.length * 0.35)),
+        impact: Math.round(avgPlanPrice * 3),
+        confidence: 76,
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Launch Growth',
+        sub: 'Bring in new members',
+        action: () => openBroadcastDraft('All', 'Hi from GymVault! Bring your momentum back this week. Reply if you want help choosing the right plan or bringing a friend along.'),
+      }),
+    ].filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+
+    const recommendations = opportunityCandidates.slice(0, 3);
+    const primary = recommendations[0] || {
+      id: 'BASELINE',
+      title: 'Keep the gym running strong',
+      reason: 'Things look stable. Keep following up and keep new joins moving.',
+      count: active.length || members.length || 0,
+      impact: avgPlanPrice * 2,
+      confidence: 76,
+      urgency: 'This week',
+      priority: 'P2',
+      cta: plans.length > 0 ? 'Add Member' : 'Create Plan',
+      sub: plans.length > 0 ? 'Keep growth steady' : 'Set up your plans',
+      action: () => {
+        if (plans.length === 0) {
+          navigateTo('Plans');
+          return;
+        }
+        setShowAddModal(true);
+      },
+    };
+
+    const activeCoveragePct = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
+    const nextWatchline = expiringIn7Days.length > 0
+      ? `${expiringIn7Days.length} renewals are due within the next 7 days`
+      : unpaid.length > 0
+        ? `${unpaid.length} unpaid profiles are still waiting for activation`
+        : ghosts.length > 0
+          ? `${ghosts.length} active members have gone quiet recently`
+          : 'No immediate retention or revenue risks are peaking right now';
+    const aiSummaryLines = recommendations.length > 0
+      ? [
+          { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
+          { label: 'Money collected', value: (() => {
+            const earliest = chart30.find((day) => (day.revenue || 0) > 0);
+            const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null;
+            return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`;
+          })() },
+          { label: 'Watch today', value: nextWatchline },
+        ]
+      : [
+          { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
+          { label: 'Money collected', value: (() => {
+            const earliest = chart30.find((day) => (day.revenue || 0) > 0);
+            const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null;
+            return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`;
+          })() },
+          { label: 'Watch today', value: nextWatchline },
+        ];
+
+    const subscriptionWarning = (() => {
+      if (accessDaysRemaining === null) return null;
+      if ((accessDerivedStatus === 'ACTIVE' || accessDerivedStatus === 'FREE_TRIAL') && accessDaysRemaining > 7) return null;
+
+      const isCritical = accessDerivedStatus === 'EXPIRED' || accessDerivedStatus === 'GRACE_PERIOD' || accessDaysRemaining <= 1;
+      const title = accessDerivedStatus === 'EXPIRED'
+        ? 'GymVault access expired'
+        : accessDerivedStatus === 'GRACE_PERIOD'
+          ? 'GymVault access in grace period'
+          : accessDaysRemaining <= 0
+            ? 'GymVault access expires today'
+            : accessDaysRemaining === 1
+              ? 'GymVault access expires tomorrow'
+              : `GymVault access expires in ${accessDaysRemaining} days`;
+      const reason = accessExpiryLabel
+        ? `Renew before ${accessExpiryLabel} to keep members, attendance, and analytics unlocked`
+        : 'Renew your GymVault subscription to keep access uninterrupted';
+
+      return buildRecommendation({
+        id: 'GYMVAULT_ACCESS',
+        title,
+        reason,
+        count: 1,
+        impact: Math.max(monthlyRevenue, avgPlanPrice * 3),
+        confidence: 98,
+        urgency: isCritical ? 'Critical' : 'This week',
+        priority: isCritical ? 'P0' : 'P1',
+        cta: 'Open Billing',
+        sub: accessDerivedStatus === 'FREE_TRIAL' ? 'Trial ending soon' : 'Software subscription warning',
+        action: () => navigateTo('Settings', 'billing'),
+      });
+    })();
+
+    const priorityRank = { P0: 0, P1: 1, P2: 2 };
+    const actionCandidates = [subscriptionWarning, ...aiCandidates]
+      .filter(Boolean)
+      .sort((a, b) => {
+        const rankDiff = (priorityRank[a.priority] ?? 99) - (priorityRank[b.priority] ?? 99);
+        if (rankDiff !== 0) return rankDiff;
+        return Number(b.score || 0) - Number(a.score || 0);
+      });
+    const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
+    const mergedActionRows = actionRequiredRows.length > 0
+      ? actionRequiredRows.slice(0, 4)
+      : actionCandidates.slice(0, 4);
+    const urgentCount = actionRequiredRows.length;
+
+    return {
+      active: active.length,
+      unpaid: unpaid.length,
+      expired: expired.length,
+      expiring7: expiringIn7Days.length,
+      expiring3: expiringIn3Days.length,
+      ghosts: ghosts.length,
+      ghostMembers: ghosts,
+      pendingDuePayments,
+      monthlyRevenue,
+      revenueAtRisk,
+      healthScore,
+      pendingDueAction: pendingDuePayments.length > 0 ? pendingDueCta.action : () => navigateTo('Payments'),
+      topPlan: topPlanEntry ? { name: topPlanEntry[0], count: topPlanEntry[1], pct: topPlanPct } : null,
+      heatmap,
+      churnHigh: churnInsights.summary?.high || 0,
+      ai: {
+        summaryLines: aiSummaryLines,
+        primary,
+        recommendations,
+        urgentCount,
+      },
+      actionRows: mergedActionRows,
+      automations: {
+        sentToday,
+        runsToday,
+        weeklyRuns,
+        weeklySent,
+        estimatedRecoveryValue,
+        lastAutomationAt,
+        lastAutomationLabel,
+      },
+    };
+  }, [
+    attendanceHeatmap,
+    buildSmartMemberCta,
+    buildSmartPaymentCta,
+    campaignLogs,
+    chart30,
+    churnInsights,
+    gymBilling,
+    members,
+    navigateTo,
+    openBroadcastDraft,
+    payStats.pending_dues,
+    plans,
+    setup,
+    todayCheckins,
+  ]);
+
+  const displayChartData = useMemo(() => {
+    const data = chartDays === 7 ? chart7 : chart30;
+    return data.map((day) => ({
+      name: new Date(day.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+      rev: day.revenue || 0,
+    }));
+  }, [chart30, chart7, chartDays]);
+
+  const chartTotal = useMemo(() => (
+    (chartDays === 7 ? chart7 : chart30).reduce((sum, day) => sum + (day.revenue || 0), 0)
+  ), [chart30, chart7, chartDays]);
+
+  const checkedInMemberIds = useMemo(() => new Set(
+    todayAttendance
+      .map((row) => Number(row.member_id))
+      .filter((id) => Number.isFinite(id)),
+  ), [todayAttendance]);
+
+  const checkinMembers = useMemo(() => {
+    const query = String(checkinQuery || '').trim().toLowerCase();
+    const source = query
+      ? members.filter((member) => {
+          const name = String(member.full_name || '').toLowerCase();
+          const phone = String(member.phone || '').toLowerCase();
+          const email = String(member.email || '').toLowerCase();
+          return name.includes(query) || phone.includes(query) || email.includes(query);
+        })
+      : members;
+
+    return [...source].sort((a, b) => {
+      const aChecked = checkedInMemberIds.has(Number(a.id));
+      const bChecked = checkedInMemberIds.has(Number(b.id));
+      if (aChecked !== bChecked) return aChecked ? 1 : -1;
+
+      const aActive = String(a.membership_status || '').toUpperCase() === 'ACTIVE';
+      const bActive = String(b.membership_status || '').toUpperCase() === 'ACTIVE';
+      if (aActive !== bActive) return aActive ? -1 : 1;
+
+      return String(a.full_name || '').localeCompare(String(b.full_name || ''));
+    });
+  }, [checkinQuery, checkedInMemberIds, members]);
+
+  const broadcastSelectedMembers = useMemo(() => {
+    if (broadcastCustomIds.length === 0) return [];
+    const idSet = new Set(broadcastCustomIds.map((id) => Number(id)));
+    return members.filter((member) => idSet.has(Number(member.id)));
+  }, [broadcastCustomIds, members]);
+
+  const broadcastSearchResults = useMemo(() => {
+    const query = String(broadcastSearch || '').trim().toLowerCase();
+    if (!query) return [];
+    return members
+      .filter((member) => !broadcastCustomIds.includes(Number(member.id)))
+      .filter((member) => {
+        const name = String(member.full_name || '').toLowerCase();
+        const phone = String(member.phone || '').toLowerCase();
+        const email = String(member.email || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || email.includes(query);
+      })
+      .slice(0, 8);
+  }, [broadcastCustomIds, broadcastSearch, members]);
+
+  return {
+    addFile,
+    addFormData,
+    addSelectedPlanId,
+    addSubmitting,
+    broadcastAudience,
+    broadcastCustomIds,
+    broadcastMessage,
+    broadcastSearch,
+    broadcastSearchResults,
+    broadcastSelectedMembers,
+    broadcastTemplateKey,
+    broadcastTemplates,
+    campaignPreviewCount,
+    campaignPreviewLoading,
+    chartDays,
+    chartTotal,
+    checkDashboardRazorpayStatus,
+    checkedInMemberIds,
+    checkinBusyMemberId,
+    checkinMembers,
+    checkinQuery,
+    closePaymentModal,
+    dashboardData,
+    displayChartData,
+    gymName,
+    handleAddMember,
+    handleBroadcast,
+    handleCopyPaymentCollectionDetail,
+    handlePayment,
+    handleQuickCheckIn,
+    handleSkipSetup,
+    handleStartTour,
+    isAutomating,
+    isSkipped,
+    isWarmupRetrying,
+    launchQuickAction,
+    loading,
+    members,
+    navigateTo,
+    normalizePhoneInput,
+    payMemberDropdownOpen,
+    payMemberSearch,
+    payStats,
+    paymentCollectionContext,
+    paymentMode,
+    paymentOnlineMode,
+    paymentRazorpayContext,
+    paymentReference,
+    paymentStep,
+    paymentSubmitting,
+    plans,
+    previewUrl,
+    quickActionLoading,
+    selectedMemberForPay,
+    selectedPlanForPay,
+    setAddFile,
+    setAddFormData,
+    setAddSelectedPlanId,
+    setBroadcastAudience,
+    setBroadcastCustomIds,
+    setBroadcastMessage,
+    setBroadcastSearch,
+    setBroadcastTemplateKey,
+    setChartDays,
+    setCheckinQuery,
+    setPayMemberDropdownOpen,
+    setPayMemberSearch,
+    setPaymentCollectionContext,
+    setPaymentMode,
+    setPaymentOnlineMode,
+    setPaymentReference,
+    setPaymentRazorpayContext,
+    setPaymentStep,
+    setPreviewUrl,
+    setSelectedMemberForPay,
+    setSelectedPlanForPay,
+    setShowAddModal,
+    setShowBroadcastModal,
+    setShowCheckinModal,
+    setShowPaymentModal,
+    setup,
+    showAddModal,
+    showBroadcastModal,
+    showCheckinModal,
+    showPaymentModal,
+    showTourBanner,
+    todayCheckins,
+  };
+}

@@ -1,5 +1,3 @@
-/* global __APP_BUILD_ID__ */
-
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import axios from 'axios'

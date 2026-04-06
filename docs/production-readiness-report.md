@@ -117,7 +117,7 @@ No open critical production blockers remain.
 
 | # | Issue | Location | Impact |
 |---|-------|----------|--------|
-| M-9 | Frontend components 1000+ lines | Dashboard, Members, Payments | Hard to maintain |
+| M-9 | Frontend pages 1000+ lines | Members, Payments, Settings, Attendance, Classes | Hard to maintain |
 
 ---
 
@@ -150,7 +150,7 @@ No open critical production blockers remain.
 | **Express.js** | Single-threaded | Handles 1000+ req/s | OK for this scale |
 | **Memory** | ~200MB base | ~400MB at scale | OK |
 | **Attendance table** | No partition | 9M rows/year at scale | Slow after 6 months |
-| **Background jobs** | setInterval | OK for 100 gyms | Acceptable |
+| **Background jobs** | In-process self-rescheduling timers | OK for 100 gyms | Acceptable for single-instance deploys |
 
 #### Bottlenecks at Scale
 
@@ -158,7 +158,7 @@ No open critical production blockers remain.
 
 2. **Dashboard Queries:** 8+ parallel queries per dashboard load. With 30 concurrent owners, that's 240 concurrent queries. Acceptable at the target scale, but still worth watching as owner concurrency rises.
 
-3. **Background Job Coordination:** Expiry, notification, retention, and backup work still runs via in-process `setInterval`, so multi-instance deployments need care to avoid drift or duplicate execution.
+3. **Background Job Coordination:** Expiry, notification, retention, and backup work still runs via in-process self-rescheduling timers, so multi-instance deployments need care to avoid drift or duplicate execution.
 
 #### Verdict
 **The current application can comfortably handle 100 gyms × 500 members with the pool and index fixes already in place.** No architectural changes are required for that target scale.
@@ -198,7 +198,7 @@ No open critical production blockers remain.
 
 | Aspect | Grade | Summary |
 |--------|-------|---------|
-| Component Architecture | **C+** | Large monolithic components (1000+ lines) |
+| Component Architecture | **C+** | Dashboard is now split into controller/view/modal modules, but Members, Payments, Settings, Attendance, and Classes still contain oversized page modules |
 | Error Handling | **B-** | Page error boundaries exist and global auth/API failures surface toasts, though some page-specific async cleanup is still uneven |
 | Performance | **B-** | Route-level lazy loading is now in place, but oversized page modules and hook-dependency debt remain |
 | Accessibility | **D** | Missing ARIA labels, no keyboard navigation |
@@ -288,7 +288,7 @@ The database pool now runs with explicit production-oriented limits and timeouts
 ### Phase 3: Month 1 (Hardening)
 | # | Fix | Effort |
 |---|-----|--------|
-| 7 | Split oversized frontend components | 2-3 hours |
+| 7 | Split remaining oversized frontend pages after the dashboard extraction | 2-4 hours |
 | 8 | Resolve remaining lint warnings and hook dependency debt | 2-4 hours |
 | 9 | Evolve retention / archival into a formal partition policy for very large tables | 1-2 hours |
 
