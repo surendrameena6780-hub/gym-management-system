@@ -2900,25 +2900,25 @@ const loadRazorpayScript = () => {
                                   </p>
                                 </div>
 
-                                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
-                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">30d Total</p>
+                                <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-5 gap-3">
+                                  <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">30d Total</p>
                                     <p className="text-2xl font-black text-slate-900 mt-1">{platformData.whatsapp_delivery?.summary?.total_count || 0}</p>
                                   </div>
-                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In Flight</p>
+                                  <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">In Flight</p>
                                     <p className="text-2xl font-black text-indigo-600 mt-1">{platformData.whatsapp_delivery?.summary?.in_flight_count || 0}</p>
                                   </div>
-                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delivered</p>
+                                  <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">Delivered</p>
                                     <p className="text-2xl font-black text-teal-600 mt-1">{platformData.whatsapp_delivery?.summary?.delivered_count || 0}</p>
                                   </div>
-                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Read</p>
+                                  <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">Read</p>
                                     <p className="text-2xl font-black text-emerald-600 mt-1">{platformData.whatsapp_delivery?.summary?.read_count || 0}</p>
                                   </div>
-                                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Failed</p>
+                                  <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">Failed</p>
                                     <p className="text-2xl font-black text-rose-600 mt-1">{platformData.whatsapp_delivery?.summary?.failed_count || 0}</p>
                                   </div>
                                 </div>
