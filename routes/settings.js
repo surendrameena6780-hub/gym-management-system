@@ -38,6 +38,13 @@ const {
     resolveStoredProfileImagePath,
 } = require('../utils/profileUploads');
 const { invalidateGymTimezoneCache } = require('../utils/gymTime');
+const {
+    ensureTrimmedString,
+    ensureEmail,
+    ensureInteger,
+    ensureUrl,
+    isValidationError,
+} = require('../utils/fieldValidation');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -215,6 +222,15 @@ const normalizeBranchDirectory = (value, branchesCount = 1) => {
 
     return normalized;
 };
+
+const normalizeBranchDirectoryInput = (value, branchesCount = 1) => normalizeBranchDirectory(value, branchesCount).map((item, index) => ({
+    id: ensureTrimmedString(item?.id, { field: `branch_directory[${index}].id`, max: 60, defaultValue: `branch-${index + 1}` }) || `branch-${index + 1}`,
+    name: ensureTrimmedString(item?.name, { field: `branch_directory[${index}].name`, max: 120, defaultValue: index === 0 ? 'Main Branch' : `Branch ${index + 1}` }) || (index === 0 ? 'Main Branch' : `Branch ${index + 1}`),
+    address: ensureTrimmedString(item?.address, { field: `branch_directory[${index}].address`, max: 240 }),
+    phone: ensureTrimmedString(item?.phone, { field: `branch_directory[${index}].phone`, max: 30 }),
+}));
+
+const normalizeWebhookSecret = (value) => ensureTrimmedString(value, { field: 'secret', max: 240 });
 
 const ALLOWED_API_SCOPES = new Set([
     'members:read',
@@ -1329,9 +1345,9 @@ router.put('/platform/branches', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
 
-        const city = String(req.body?.city || '').trim();
+        const city = ensureTrimmedString(req.body?.city, { field: 'city', max: 100 });
         const branchesCount = Math.min(25, Math.max(1, toPositiveInt(req.body?.branches_count, 1)));
-        const branchDirectory = normalizeBranchDirectory(req.body?.branch_directory, branchesCount);
+        const branchDirectory = normalizeBranchDirectoryInput(req.body?.branch_directory, branchesCount);
 
         await pool.query(
             `UPDATE gyms
@@ -1349,6 +1365,9 @@ router.put('/platform/branches', auth, async (req, res) => {
             branch_directory: branchDirectory,
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('BRANCH SAVE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
@@ -1358,11 +1377,8 @@ router.post('/platform/api-keys', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
 
-        const keyName = String(req.body?.key_name || '').trim();
+        const keyName = ensureTrimmedString(req.body?.key_name, { field: 'key_name', required: true, min: 2, max: 120 });
         const scopes = normalizeApiScopes(req.body?.scopes);
-        if (!keyName) {
-            return res.status(400).json({ error: 'key_name is required.' });
-        }
         if (scopes.length === 0) {
             return res.status(400).json({ error: 'Select at least one scope.' });
         }
@@ -1382,6 +1398,9 @@ router.post('/platform/api-keys', auth, async (req, res) => {
             plain_text_key: plainTextKey,
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('API KEY CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
@@ -1390,18 +1409,22 @@ router.post('/platform/api-keys', auth, async (req, res) => {
 router.delete('/platform/api-keys/:id', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
+        const apiKeyId = ensureInteger(req.params.id, { field: 'API key id', required: true, min: 1 });
         const result = await pool.query(
             `UPDATE api_keys
              SET is_active = FALSE
              WHERE id = $1 AND gym_id = $2
              RETURNING id`,
-            [req.params.id, req.user.gym_id]
+            [apiKeyId, req.user.gym_id]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'API key not found.' });
         }
         return res.json({ message: 'API key revoked.' });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('API KEY DELETE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
@@ -1411,14 +1434,11 @@ router.post('/platform/webhooks', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
 
-        const url = String(req.body?.url || '').trim();
+        const url = ensureUrl(req.body?.url, { field: 'url', required: true, max: 2048 });
         const events = normalizeWebhookEvents(req.body?.events);
-        const secret = String(req.body?.secret || '').trim();
+        const secret = normalizeWebhookSecret(req.body?.secret);
         const isActive = req.body?.is_active !== false;
 
-        if (!/^https?:\/\//i.test(url)) {
-            return res.status(400).json({ error: 'A valid webhook URL is required.' });
-        }
         if (events.length === 0) {
             return res.status(400).json({ error: 'Select at least one webhook event.' });
         }
@@ -1438,6 +1458,9 @@ router.post('/platform/webhooks', auth, async (req, res) => {
             },
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('WEBHOOK CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
@@ -1446,22 +1469,20 @@ router.post('/platform/webhooks', auth, async (req, res) => {
 router.put('/platform/webhooks/:id', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
+        const webhookId = ensureInteger(req.params.id, { field: 'webhook id', required: true, min: 1 });
 
         const webhookRes = await pool.query(
             'SELECT secret_hash FROM webhooks WHERE id = $1 AND gym_id = $2 LIMIT 1',
-            [req.params.id, req.user.gym_id]
+            [webhookId, req.user.gym_id]
         );
         if (webhookRes.rows.length === 0) {
             return res.status(404).json({ error: 'Webhook not found.' });
         }
 
-        const url = String(req.body?.url || '').trim();
+        const url = ensureUrl(req.body?.url, { field: 'url', required: true, max: 2048 });
         const events = normalizeWebhookEvents(req.body?.events);
-        const secret = String(req.body?.secret || '').trim();
+        const secret = normalizeWebhookSecret(req.body?.secret);
         const isActive = req.body?.is_active !== false;
-        if (!/^https?:\/\//i.test(url)) {
-            return res.status(400).json({ error: 'A valid webhook URL is required.' });
-        }
         if (events.length === 0) {
             return res.status(400).json({ error: 'Select at least one webhook event.' });
         }
@@ -1475,7 +1496,7 @@ router.put('/platform/webhooks/:id', auth, async (req, res) => {
                  is_active = $4
              WHERE id = $5 AND gym_id = $6
              RETURNING id, url, events, is_active, last_triggered_at, created_at, secret_hash`,
-            [url, events, secretToPersist, isActive, req.params.id, req.user.gym_id]
+            [url, events, secretToPersist, isActive, webhookId, req.user.gym_id]
         );
 
         return res.json({
@@ -1486,6 +1507,9 @@ router.put('/platform/webhooks/:id', auth, async (req, res) => {
             },
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('WEBHOOK UPDATE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
@@ -1494,15 +1518,19 @@ router.put('/platform/webhooks/:id', auth, async (req, res) => {
 router.delete('/platform/webhooks/:id', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
+        const webhookId = ensureInteger(req.params.id, { field: 'webhook id', required: true, min: 1 });
         const result = await pool.query(
             'DELETE FROM webhooks WHERE id = $1 AND gym_id = $2 RETURNING id',
-            [req.params.id, req.user.gym_id]
+            [webhookId, req.user.gym_id]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Webhook not found.' });
         }
         return res.json({ message: 'Webhook deleted.' });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('WEBHOOK DELETE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
     }
@@ -1511,10 +1539,11 @@ router.delete('/platform/webhooks/:id', auth, async (req, res) => {
 router.post('/platform/webhooks/:id/test', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
+        const webhookId = ensureInteger(req.params.id, { field: 'webhook id', required: true, min: 1 });
 
         const webhookRes = await pool.query(
             'SELECT * FROM webhooks WHERE id = $1 AND gym_id = $2 LIMIT 1',
-            [req.params.id, req.user.gym_id]
+            [webhookId, req.user.gym_id]
         );
         if (webhookRes.rows.length === 0) {
             return res.status(404).json({ error: 'Webhook not found.' });
@@ -1545,23 +1574,24 @@ router.post('/platform/webhooks/:id/test', auth, async (req, res) => {
 
         await pool.query(
             'UPDATE webhooks SET last_triggered_at = NOW() WHERE id = $1 AND gym_id = $2',
-            [req.params.id, req.user.gym_id]
+            [webhookId, req.user.gym_id]
         );
 
         return res.json({ message: `Test webhook sent successfully (${response.status}).`, status: response.status });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('WEBHOOK TEST ERROR:', err.message);
         return res.status(502).json({ error: 'Failed to deliver webhook test event.' });
     }
 });
 
 router.post('/import/members', auth, async (req, res) => {
+    let client;
     try {
-        const csvText = String(req.body?.csv_text || '').trim();
+        const csvText = ensureTrimmedString(req.body?.csv_text, { field: 'csv_text', required: true, max: 500000 });
         const dryRun = req.body?.dry_run === true;
-        if (!csvText) {
-            return res.status(400).json({ error: 'csv_text is required.' });
-        }
 
         const rows = parseCsvText(csvText);
         if (rows.length === 0) {
@@ -1627,16 +1657,17 @@ router.post('/import/members', auth, async (req, res) => {
 
         let importedCount = 0;
         if (!dryRun && validRows.length > 0) {
-            await pool.query('BEGIN');
+            client = await pool.connect();
+            await client.query('BEGIN');
             for (const row of validRows) {
-                await pool.query(
+                await client.query(
                     `INSERT INTO members (full_name, email, phone, gym_id, joining_date, status)
                      VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')`,
                     [row.full_name, row.email, row.phone, req.user.gym_id]
                 );
                 importedCount += 1;
             }
-            await pool.query('COMMIT');
+            await client.query('COMMIT');
         }
 
         return res.json({
@@ -1648,22 +1679,34 @@ router.post('/import/members', auth, async (req, res) => {
             errors: errors.slice(0, 20),
         });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('MEMBER IMPORT ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
 // --- 3. MASTER ACCOUNT UPDATE ---
 router.put('/account', auth, uploadProfilePic, async (req, res) => {
-    const { full_name, email, phone, current_password, new_password } = req.body;
     const removeProfilePic = String(req.body?.remove_profile_pic || '').trim().toLowerCase() === 'true';
     const uploadedProfileValue = getStoredProfileValue(req.file);
+    let client;
 
     try {
         await ensurePreferenceSchema();
-        const normalizedCurrentPassword = String(current_password || '').trim();
-        const normalizedNewPassword = String(new_password || '');
+        const full_name = ensureTrimmedString(req.body?.full_name, { field: 'full_name', required: true, min: 2, max: 120 });
+        const email = ensureEmail(req.body?.email, { field: 'email', required: true, max: 120 });
+        const phone = ensureTrimmedString(req.body?.phone, { field: 'phone', max: 30 });
+        const normalizedCurrentPassword = String(req.body?.current_password || '').trim();
+        const normalizedNewPassword = String(req.body?.new_password || '');
         const currentUserRes = await pool.query('SELECT profile_pic, password_hash FROM users WHERE id = $1', [req.user.id]);
         const currentUser = currentUserRes.rows[0] || {};
 
@@ -1682,7 +1725,8 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
             return res.status(400).json({ error: 'New password must be different from current password.' });
         }
 
-        await pool.query('BEGIN');
+        client = await pool.connect();
+        await client.query('BEGIN');
 
         const nextProfileValue = uploadedProfileValue
             ? uploadedProfileValue
@@ -1691,14 +1735,14 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
                 : currentUser.profile_pic || null;
 
         if (uploadedProfileValue || removeProfilePic) {
-            await pool.query(
+            await client.query(
                 'UPDATE users SET full_name=$1, email=$2, phone=$3, profile_pic=$4 WHERE id=$5', 
-                [full_name, email, phone, nextProfileValue, req.user.id]
+                [full_name, email, phone || null, nextProfileValue, req.user.id]
             );
         } else {
-            await pool.query(
+            await client.query(
                 'UPDATE users SET full_name=$1, email=$2, phone=$3 WHERE id=$4', 
-                [full_name, email, phone, req.user.id]
+                [full_name, email, phone || null, req.user.id]
             );
         }
 
@@ -1706,7 +1750,7 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
             const isMatch = await bcrypt.compare(normalizedCurrentPassword, currentUser.password_hash || '');
             
             if (!isMatch) {
-                await pool.query('ROLLBACK');
+                await client.query('ROLLBACK');
                 await discardUploadedProfile(req);
                 return res.status(400).json({ error: "Current password is incorrect." });
             }
@@ -1714,13 +1758,13 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
             const salt = await bcrypt.genSalt(10);
             const hashedNewPassword = await bcrypt.hash(normalizedNewPassword, salt);
 
-            await pool.query(
+            await client.query(
                 'UPDATE users SET password_hash = $1 WHERE id = $2',
                 [hashedNewPassword, req.user.id]
             );
         }
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
 
         if (uploadedProfileValue || removeProfilePic) {
             const previousProfilePath = resolveStoredProfileImagePath(currentUser.profile_pic);
@@ -1735,23 +1779,43 @@ router.put('/account', auth, uploadProfilePic, async (req, res) => {
         });
 
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
         console.error("ACCOUNT UPDATE ERROR:", err.message);
         await discardUploadedProfile(req);
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
         if (err.code === '23505') return res.status(400).json({ error: "Email already in use." });
         res.status(500).json({ error: "Server Error" });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
 // --- 4. UPDATE GYM PROFILE ---
 router.put('/gym', auth, async (req, res) => {
-    const { name, phone, email, address, tax_id, website, support_whatsapp, support_window, support_sla, support_about_mission } = req.body;
     try {
         await ensureSupportProfileTable();
 
+        const name = ensureTrimmedString(req.body?.name, { field: 'name', required: true, min: 2, max: 120 });
+        const phone = ensureTrimmedString(req.body?.phone, { field: 'phone', max: 30 });
+        const email = ensureEmail(req.body?.email, { field: 'email', max: 120 });
+        const address = ensureTrimmedString(req.body?.address, { field: 'address', max: 500 });
+        const tax_id = ensureTrimmedString(req.body?.tax_id, { field: 'tax_id', max: 80 });
+        const websiteInput = ensureTrimmedString(req.body?.website, { field: 'website', max: 2048 });
+        const website = websiteInput
+            ? ensureUrl(/^https?:\/\//i.test(websiteInput) ? websiteInput : `https://${websiteInput.replace(/^\/+/, '')}`, { field: 'website', max: 2048 })
+            : '';
+        const support_whatsapp = ensureTrimmedString(req.body?.support_whatsapp, { field: 'support_whatsapp', max: 30 });
+        const support_window = ensureTrimmedString(req.body?.support_window, { field: 'support_window', max: 500 });
+        const support_sla = ensureTrimmedString(req.body?.support_sla, { field: 'support_sla', max: 500 });
+        const support_about_mission = ensureTrimmedString(req.body?.support_about_mission, { field: 'support_about_mission', max: 4000 });
+
         await pool.query(
             'UPDATE gyms SET name = $1, phone = $2, support_email = $3, address = $4, tax_id = $5, website = $6 WHERE id = $7',
-            [name, phone, email, address, tax_id, website, req.user.gym_id]
+            [name, phone || null, email || null, address || null, tax_id || null, website || null, req.user.gym_id]
         );
 
         await pool.query(
@@ -1775,6 +1839,7 @@ router.put('/gym', auth, async (req, res) => {
 
         res.json({ message: "Gym profile updated successfully" });
     } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
         console.error("GYM UPDATE ERROR:", err.message);
         res.status(500).json({ error: "Server Error" });
     }
@@ -1782,15 +1847,13 @@ router.put('/gym', auth, async (req, res) => {
 
 // --- 5. UPDATE SYSTEM PREFERENCES ---
 router.put('/preferences', auth, async (req, res) => {
-    const {
-        currency,
-        timezone,
-        interface_reduce_motion,
-        interface_compact_mode,
-        interface_dark_mode,
-    } = req.body || {};
     try {
         await ensurePreferenceSchema();
+        const currency = ensureTrimmedString(req.body?.currency, { field: 'currency', required: true, min: 1, max: 10, uppercase: true });
+        const timezone = ensureTrimmedString(req.body?.timezone, { field: 'timezone', required: true, min: 3, max: 100 });
+        const interface_reduce_motion = req.body?.interface_reduce_motion === true;
+        const interface_compact_mode = req.body?.interface_compact_mode === true;
+        const interface_dark_mode = req.body?.interface_dark_mode === true;
         await pool.query(
             `UPDATE gyms
              SET currency = $1,
@@ -1804,6 +1867,7 @@ router.put('/preferences', auth, async (req, res) => {
         invalidateGymTimezoneCache(req.user.gym_id);
         res.json({ message: "Preferences updated successfully" });
     } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
         console.error("PREFERENCES UPDATE ERROR:", err.message);
         res.status(500).json({ error: "Server Error" });
     }

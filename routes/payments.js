@@ -6,6 +6,13 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
 const { decryptSecret } = require('../utils/secretCrypto');
+const {
+    ensureInteger,
+    ensureNumber,
+    ensureTrimmedString,
+    ensureChoice,
+    isValidationError,
+} = require('../utils/fieldValidation');
 
 const router = express.Router();
 
@@ -113,10 +120,20 @@ const findRecentMatchingPayment = async (db, {
     return result.rows[0] || null;
 };
 
-const normalizeCollectionMode = (value) => {
-    const raw = String(value || '').trim().toUpperCase();
-    return raw === 'ONLINE' ? 'Online' : 'Cash';
+const normalizeCollectionMode = (value, { defaultValue = 'Cash' } = {}) => {
+    const normalized = ensureChoice(value, {
+        field: 'payment_mode',
+        choices: ['CASH', 'ONLINE'],
+        defaultValue: String(defaultValue || 'Cash').trim().toUpperCase() || 'CASH',
+        uppercase: true,
+    }) || 'CASH';
+
+    return normalized === 'ONLINE' ? 'Online' : 'Cash';
 };
+
+const normalizePaymentReference = (value, field = 'transaction_id') => ensureTrimmedString(value, { field, max: 120 });
+
+const normalizePaymentNotes = (value, field = 'notes') => ensureTrimmedString(value, { field, max: 1000 });
 
 const appendNote = (existingNotes, newNote) => {
     const current = String(existingNotes || '').trim();
@@ -467,11 +484,20 @@ const getGymGatewayConfig = async (gymId) => {
 const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, transactionId, notes, collectedBy }) => {
     await ensurePaymentCollectionsSchema();
 
+    const normalizedPaymentId = ensureInteger(paymentId, { field: 'payment id', required: true, min: 1 });
+    const normalizedMode = normalizeCollectionMode(paymentMode);
+    const normalizedTransactionId = normalizePaymentReference(transactionId);
+    const normalizedNotes = normalizePaymentNotes(notes);
+    const normalizedCollectedBy = collectedBy ? ensureInteger(collectedBy, { field: 'collectedBy', min: 1 }) : null;
+    const requestedAmountInput = amount === undefined || amount === null || amount === ''
+        ? amount
+        : ensureNumber(amount, { field: 'amount', min: 0, max: 1000000 });
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const payment = await getPendingPaymentById(client, gymId, paymentId, { lock: true });
+        const payment = await getPendingPaymentById(client, gymId, normalizedPaymentId, { lock: true });
         if (!payment) {
             await client.query('ROLLBACK');
             return { ok: false, status: 404, error: 'Payment record not found.' };
@@ -483,7 +509,7 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
             return { ok: false, status: 400, error: 'This payment no longer has a pending due.' };
         }
 
-        const requestedAmount = resolveDueAmount(amount, remainingDue);
+        const requestedAmount = resolveDueAmount(requestedAmountInput, remainingDue);
         if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
             await client.query('ROLLBACK');
             return { ok: false, status: 400, error: 'Enter a valid collection amount.' };
@@ -493,13 +519,11 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
             return { ok: false, status: 400, error: 'Collection amount cannot exceed the remaining due.' };
         }
 
-        const normalizedMode = normalizeCollectionMode(paymentMode);
-        const providedTransactionId = String(transactionId || '').trim();
-        const collectionTransactionId = providedTransactionId || buildAutoCollectionReference(paymentId);
+        const collectionTransactionId = normalizedTransactionId || buildAutoCollectionReference(normalizedPaymentId);
         const nextAmountPaid = roundMoney(Number(payment.amount_paid || 0) + requestedAmount);
         const nextAmountDue = Math.max(0, roundMoney(remainingDue - requestedAmount));
         const nextStatus = nextAmountDue <= DUE_ZERO_THRESHOLD ? 'Completed' : 'Pending';
-        const nextNotes = appendNote(payment.notes, notes);
+        const nextNotes = appendNote(payment.notes, normalizedNotes);
         const nextPaymentMode = Number(payment.amount_paid || 0) <= DUE_ZERO_THRESHOLD ? normalizedMode : payment.payment_mode;
 
         const collectionResult = await client.query(
@@ -509,12 +533,12 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
              RETURNING *`,
             [
                 gymId,
-                paymentId,
+                normalizedPaymentId,
                 requestedAmount,
                 normalizedMode,
                 collectionTransactionId || null,
-                String(notes || '').trim(),
-                collectedBy || null,
+                normalizedNotes,
+                normalizedCollectedBy,
             ]
         );
 
@@ -535,7 +559,7 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
                 nextPaymentMode,
                 normalizedMode === 'Online' ? collectionTransactionId : '',
                 nextNotes,
-                paymentId,
+                normalizedPaymentId,
                 gymId,
             ]
         );
@@ -700,46 +724,40 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/record', async (req, res) => {
-    const { user_id, plan_id, amount_paid, total_amount, payment_mode, notes, transaction_id } = req.body;
-    const gym_id = req.user.gym_id;
-
-    if (!user_id || !plan_id) {
-        return res.status(400).json({ error: 'user_id and plan_id are required.' });
-    }
-
-    const parsedAmountPaid = parseAmount(amount_paid);
-    const parsedTotalAmount = parseAmount(total_amount ?? amount_paid);
-    if (!Number.isFinite(parsedAmountPaid) || parsedAmountPaid < 0) {
-        return res.status(400).json({ error: 'amount_paid must be a valid non-negative number.' });
-    }
-    if (!Number.isFinite(parsedTotalAmount) || parsedTotalAmount < 0) {
-        return res.status(400).json({ error: 'total_amount must be a valid non-negative number.' });
-    }
-    if (parsedAmountPaid - parsedTotalAmount > DUE_ZERO_THRESHOLD) {
-        return res.status(400).json({ error: 'amount_paid cannot be greater than total_amount.' });
-    }
-
-    const client = await pool.connect();
+    let client;
 
     try {
+        const gym_id = req.user.gym_id;
+        const userId = ensureInteger(req.body?.user_id, { field: 'user_id', required: true, min: 1 });
+        const planId = ensureInteger(req.body?.plan_id, { field: 'plan_id', required: true, min: 1 });
+        const parsedAmountPaid = ensureNumber(req.body?.amount_paid, { field: 'amount_paid', required: true, min: 0, max: 1000000 });
+        const parsedTotalAmount = req.body?.total_amount === undefined || req.body?.total_amount === null || req.body?.total_amount === ''
+            ? parsedAmountPaid
+            : ensureNumber(req.body?.total_amount, { field: 'total_amount', min: 0, max: 1000000 });
+
+        if (parsedAmountPaid - parsedTotalAmount > DUE_ZERO_THRESHOLD) {
+            return res.status(400).json({ error: 'amount_paid cannot be greater than total_amount.' });
+        }
+
+        client = await pool.connect();
         const amount_due = roundMoney(parsedTotalAmount - parsedAmountPaid);
         const status = amount_due > DUE_ZERO_THRESHOLD ? 'Pending' : 'Completed';
-        const normalizedTransactionId = String(transaction_id || '').trim();
-        const normalizedNotes = String(notes || '').trim();
-        const auto_inv_id = buildAutoPaymentReference('INV', gym_id, user_id);
+        const normalizedTransactionId = normalizePaymentReference(req.body?.transaction_id);
+        const normalizedNotes = normalizePaymentNotes(req.body?.notes);
+        const auto_inv_id = buildAutoPaymentReference('INV', gym_id, userId);
 
         const final_txn_id = normalizedTransactionId || auto_inv_id;
         const final_invoice_id = normalizedTransactionId.startsWith('pay_') ? normalizedTransactionId : auto_inv_id;
-        const final_mode = normalizedTransactionId.startsWith('pay_') ? 'Online' : normalizeCollectionMode(payment_mode);
+        const final_mode = normalizedTransactionId.startsWith('pay_') ? 'Online' : normalizeCollectionMode(req.body?.payment_mode);
 
         const [memberResult, planResult] = await Promise.all([
             client.query(
                 'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-                [user_id, gym_id]
+                [userId, gym_id]
             ),
             client.query(
                 'SELECT id, duration_days FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-                [plan_id, gym_id]
+                [planId, gym_id]
             ),
         ]);
 
@@ -752,12 +770,12 @@ router.post('/record', async (req, res) => {
         }
 
         await client.query('BEGIN');
-        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payment-record:${gym_id}:${user_id}:${plan_id}`]);
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payment-record:${gym_id}:${userId}:${planId}`]);
 
         const existingPayment = await findRecentMatchingPayment(client, {
             gymId: gym_id,
-            userId: user_id,
-            planId: plan_id,
+            userId,
+            planId,
             amountPaid: parsedAmountPaid,
             totalAmount: parsedTotalAmount,
             paymentMode: final_mode,
@@ -781,19 +799,19 @@ router.post('/record', async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
              RETURNING *`,
             [
-                gym_id, user_id, plan_id,
+                gym_id, userId, planId,
                 parsedAmountPaid, amount_due, parsedTotalAmount,
                 final_mode, status, final_invoice_id, final_txn_id, normalizedNotes,
             ]
         );
 
-        await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [user_id, gym_id]);
+        await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [userId, gym_id]);
 
         const days = planResult.rows[0].duration_days || 30;
         await client.query(
             `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
              VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
-            [gym_id, user_id, plan_id, days]
+            [gym_id, userId, planId, days]
         );
 
         await client.query(
@@ -802,23 +820,30 @@ router.post('/record', async (req, res) => {
                  joining_date = COALESCE(joining_date, CURRENT_DATE),
                  last_visit = NOW()
              WHERE id = $1 AND gym_id = $2`,
-            [user_id, gym_id]
+            [userId, gym_id]
         );
 
         await client.query(
             `INSERT INTO attendance (gym_id, member_id, check_in_time)
              VALUES ($1, $2, NOW())`,
-            [gym_id, user_id]
+            [gym_id, userId]
         );
 
         await client.query('COMMIT');
         res.json({ msg: 'Payment Recorded!', payment: newPayment.rows[0] });
     } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('RECORD PAYMENT ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });
     } finally {
-        client.release();
+        if (client) {
+            client.release();
+        }
     }
 });
 
@@ -1024,15 +1049,12 @@ router.get('/history/:member_id', async (req, res) => {
 });
 
 router.post('/:id/due/create-order', async (req, res) => {
-    const paymentId = Number.parseInt(req.params.id, 10);
-    const gym_id = req.user.gym_id;
-    const amount = req.body?.amount;
-
-    if (!Number.isInteger(paymentId)) {
-        return res.status(400).json({ error: 'Invalid payment id.' });
-    }
-
     try {
+        const paymentId = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+        const amount = req.body?.amount === undefined || req.body?.amount === null || req.body?.amount === ''
+            ? req.body?.amount
+            : ensureNumber(req.body?.amount, { field: 'amount', min: 0, max: 1000000 });
         await ensurePaymentCollectionsSchema();
 
         const payment = await getPendingPaymentById(pool, gym_id, paymentId);
@@ -1110,28 +1132,23 @@ router.post('/:id/due/create-order', async (req, res) => {
             },
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('DUE COLLECTION CONTEXT ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to prepare due collection details.' });
     }
 });
 
 router.post('/:id/due/payment-link-status', async (req, res) => {
-    const paymentId = Number.parseInt(req.params.id, 10);
-    const gym_id = req.user.gym_id;
-    const {
-        payment_link_id,
-        amount,
-        notes,
-    } = req.body || {};
-
-    if (!Number.isInteger(paymentId)) {
-        return res.status(400).json({ error: 'Invalid payment id.' });
-    }
-    if (!payment_link_id) {
-        return res.status(400).json({ error: 'payment_link_id is required.' });
-    }
-
     try {
+        const paymentId = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+        const paymentLinkId = ensureTrimmedString(req.body?.payment_link_id, { field: 'payment_link_id', required: true, max: 120 });
+        const amount = req.body?.amount === undefined || req.body?.amount === null || req.body?.amount === ''
+            ? req.body?.amount
+            : ensureNumber(req.body?.amount, { field: 'amount', min: 0, max: 1000000 });
+        const notes = normalizePaymentNotes(req.body?.notes);
         await ensurePaymentCollectionsSchema();
 
         const collectionSetup = await getGymCollectionSetup(gym_id);
@@ -1143,7 +1160,7 @@ router.post('/:id/due/payment-link-status', async (req, res) => {
         }
 
         const razorpayClient = createCollectionRazorpayClient(collectionSetup.data.razorpay);
-        const paymentLink = await razorpayClient.paymentLink.fetch(payment_link_id);
+    const paymentLink = await razorpayClient.paymentLink.fetch(paymentLinkId);
         const settledPayment = await resolvePaidPaymentLinkResult(razorpayClient, paymentLink);
 
         if (!settledPayment) {
@@ -1222,20 +1239,18 @@ router.post('/:id/due/payment-link-status', async (req, res) => {
             payment_method: settledPayment.method || null,
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('DUE PAYMENT LINK STATUS ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to verify Razorpay due collection.' });
     }
 });
 
 router.post('/:id/due/collect', async (req, res) => {
-    const paymentId = Number.parseInt(req.params.id, 10);
-    const gym_id = req.user.gym_id;
-
-    if (!Number.isInteger(paymentId)) {
-        return res.status(400).json({ error: 'Invalid payment id.' });
-    }
-
     try {
+        const paymentId = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
         const result = await applyDueCollection({
             gymId: gym_id,
             paymentId,
@@ -1252,30 +1267,25 @@ router.post('/:id/due/collect', async (req, res) => {
 
         return res.json(result.data);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('DUE COLLECTION ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to collect pending due.' });
     }
 });
 
 router.post('/:id/due/verify', async (req, res) => {
-    const paymentId = Number.parseInt(req.params.id, 10);
-    const gym_id = req.user.gym_id;
-    const {
-        amount,
-        notes,
-        razorpay_order_id,
-        razorpay_payment_id,
-        razorpay_signature,
-    } = req.body || {};
-
-    if (!Number.isInteger(paymentId)) {
-        return res.status(400).json({ error: 'Invalid payment id.' });
-    }
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-        return res.status(400).json({ error: 'Missing payment verification details.' });
-    }
-
     try {
+        const paymentId = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+        const amount = req.body?.amount === undefined || req.body?.amount === null || req.body?.amount === ''
+            ? req.body?.amount
+            : ensureNumber(req.body?.amount, { field: 'amount', min: 0, max: 1000000 });
+        const notes = normalizePaymentNotes(req.body?.notes);
+        const razorpay_order_id = ensureTrimmedString(req.body?.razorpay_order_id, { field: 'razorpay_order_id', required: true, max: 120 });
+        const razorpay_payment_id = ensureTrimmedString(req.body?.razorpay_payment_id, { field: 'razorpay_payment_id', required: true, max: 120 });
+        const razorpay_signature = ensureTrimmedString(req.body?.razorpay_signature, { field: 'razorpay_signature', required: true, max: 256 });
         await ensurePaymentCollectionsSchema();
 
         const gatewayConfig = await getGymGatewayConfig(gym_id);
@@ -1330,39 +1340,53 @@ router.post('/:id/due/verify', async (req, res) => {
 
         return res.json(result.data);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('ONLINE DUE VERIFY ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to verify due payment.' });
     }
 });
 
 router.delete('/:id', async (req, res) => {
+    let client;
     try {
-        const { id } = req.params;
+        const id = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
         const gym_id = req.user.gym_id;
+        client = await pool.connect();
 
-        await pool.query('BEGIN');
+        await client.query('BEGIN');
 
-        const payInfo = await pool.query(
+        const payInfo = await client.query(
             'SELECT user_id FROM payments WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL',
             [id, gym_id]
         );
 
         if (payInfo.rows.length === 0) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(404).json({ msg: 'Record not found' });
         }
         const member_id = payInfo.rows[0].user_id;
 
-        await pool.query('UPDATE payments SET deleted_at = NOW() WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [id, gym_id]);
-        await pool.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [member_id, gym_id]);
-        await pool.query("UPDATE members SET status = 'UNPAID' WHERE id = $1 AND gym_id = $2", [member_id, gym_id]);
+        await client.query('UPDATE payments SET deleted_at = NOW() WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [id, gym_id]);
+        await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [member_id, gym_id]);
+        await client.query("UPDATE members SET status = 'UNPAID' WHERE id = $1 AND gym_id = $2", [member_id, gym_id]);
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         res.json({ msg: 'Record archived and membership reset to Unpaid' });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('DELETE PAYMENT ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 

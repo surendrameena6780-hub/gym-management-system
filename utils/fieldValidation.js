@@ -260,6 +260,63 @@ const ensureDateOnly = (value, {
     return normalized;
 };
 
+const ensureChoice = (value, {
+    field = 'value',
+    choices = [],
+    required = false,
+    defaultValue = '',
+    lowercase = false,
+    uppercase = false,
+} = {}) => {
+    const normalized = ensureTrimmedString(value, {
+        field,
+        required,
+        max: 120,
+        defaultValue,
+        lowercase,
+        uppercase,
+    });
+
+    if (!normalized) {
+        return normalized;
+    }
+
+    if (!choices.includes(normalized)) {
+        throw new ValidationError(`${field} is invalid.`);
+    }
+
+    return normalized;
+};
+
+const ensureUrl = (value, {
+    field = 'url',
+    required = false,
+    max = 2048,
+    defaultValue = '',
+    protocols = ['http:', 'https:'],
+} = {}) => {
+    const normalized = ensureTrimmedString(value, {
+        field,
+        required,
+        max,
+        defaultValue,
+    });
+
+    if (!normalized) {
+        return normalized;
+    }
+
+    try {
+        const parsed = new URL(normalized);
+        if (!protocols.includes(parsed.protocol.toLowerCase())) {
+            throw new ValidationError(`${field} is invalid.`);
+        }
+        return parsed.toString();
+    } catch (_err) {
+        throw new ValidationError(`${field} is invalid.`);
+    }
+};
+
 const isValidationError = (error) => error instanceof ValidationError;
 
 module.exports = {
@@ -273,6 +330,8 @@ module.exports = {
     ensureObject,
     ensureTimestamp,
     ensureDateOnly,
+    ensureChoice,
+    ensureUrl,
     isValidationError,
     normalizeDigits,
 };
