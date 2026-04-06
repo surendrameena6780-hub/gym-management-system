@@ -7,10 +7,14 @@ const { connectDB, pool } = require('./config/db');
 const fs = require('fs'); 
 const path = require('path');
 const { PROFILE_UPLOAD_DIR, allowedProfileImageExtensions } = require('./utils/profileUploads');
+const { setUserAuthCookie } = require('./utils/authCookies');
+const { enforceRequestPayloadLimits } = require('./utils/requestPayloadGuards');
 
 // Import Jobs and Middleware
 const checkExpirations = require('./jobs/expiryCheck');
 const { runAutomatedNotificationNudges } = require('./jobs/notificationAutomation');
+const { runRetentionMaintenance } = require('./jobs/retentionMaintenance');
+const { runDatabaseBackup } = require('./jobs/databaseBackup');
 const auth = require('./middleware/authMiddleware');
 
 // Import Routes
@@ -73,6 +77,7 @@ if (trustProxySetting) {
 }
 
 const corsOptions = {
+    credentials: true,
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
 
@@ -91,6 +96,7 @@ app.use(helmet({
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use(cors(corsOptions));
+app.use(enforceRequestPayloadLimits);
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -130,6 +136,62 @@ const authLimiter = rateLimit({
     },
 });
 
+const buildScopedLimiter = ({ windowMs, productionMax, developmentMax, code, description }) => rateLimit({
+    windowMs,
+    max: isProduction ? productionMax : developmentMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        const resetTimeMs = req.rateLimit?.resetTime ? new Date(req.rateLimit.resetTime).getTime() : Date.now() + windowMs;
+        const retryAfterSeconds = Math.max(1, Math.ceil((resetTimeMs - Date.now()) / 1000));
+        return res.status(429).json({
+            success: false,
+            code,
+            error: `Too many ${description}. Retry in about ${retryAfterSeconds} seconds.`,
+            retry_after_seconds: retryAfterSeconds,
+        });
+    },
+});
+
+const limitMethods = (methods, limiter) => (req, res, next) => {
+    if (!methods.includes(req.method)) {
+        return next();
+    }
+    return limiter(req, res, next);
+};
+
+const memberCreateLimiter = buildScopedLimiter({
+    windowMs: 15 * 60 * 1000,
+    productionMax: 60,
+    developmentMax: 600,
+    code: 'MEMBER_CREATE_RATE_LIMITED',
+    description: 'member creations',
+});
+
+const leadCreateLimiter = buildScopedLimiter({
+    windowMs: 15 * 60 * 1000,
+    productionMax: 80,
+    developmentMax: 800,
+    code: 'LEAD_CREATE_RATE_LIMITED',
+    description: 'lead creations',
+});
+
+const notificationSendLimiter = buildScopedLimiter({
+    windowMs: 15 * 60 * 1000,
+    productionMax: 20,
+    developmentMax: 200,
+    code: 'NOTIFICATION_SEND_RATE_LIMITED',
+    description: 'notification sends',
+});
+
+const exportLimiter = buildScopedLimiter({
+    windowMs: 15 * 60 * 1000,
+    productionMax: 30,
+    developmentMax: 300,
+    code: 'EXPORT_RATE_LIMITED',
+    description: 'exports',
+});
+
 app.use('/api/', (req, res, next) => {
     if (req.path === '/auth/login' || req.path === '/superadmin/login') {
         return next();
@@ -144,6 +206,11 @@ app.use('/api/auth/member/send-otp', authLimiter);
 app.use('/api/auth/member/verify-otp', authLimiter);
 app.use('/api/auth/password-reset/request', authLimiter);
 app.use('/api/auth/password-reset/confirm', authLimiter);
+app.use('/api/members/add', limitMethods(['POST'], memberCreateLimiter));
+app.use('/api/leads', limitMethods(['POST'], leadCreateLimiter));
+app.use('/api/notifications/reminders/send', limitMethods(['POST'], notificationSendLimiter));
+app.use('/api/notifications/campaign/run', limitMethods(['POST'], notificationSendLimiter));
+app.use('/api/exports', limitMethods(['GET'], exportLimiter));
 
 app.use(
     '/uploads/profiles',
@@ -168,9 +235,6 @@ app.use(
 );
 
 app.use('/api/users', require('./routes/users'));
-
-// Database Connection
-connectDB();
 
 // Create uploads folder structure if missing
 const uploadDir = path.join(__dirname, 'uploads');
@@ -215,7 +279,12 @@ app.get('/api/auth/me', auth, async (req, res) => {
         }
 
         const row = result.rows[0];
+        if (req.authToken) {
+            setUserAuthCookie(res, req.authToken);
+        }
+
         return res.json({
+            token: req.authToken || null,
             user: {
                 id: row.id,
                 gym_id: row.gym_id,
@@ -260,6 +329,8 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 const automatedNudgeIntervalMs = 1000 * 60 * 30;
+const retentionMaintenanceIntervalMs = 1000 * 60 * 60 * 12;
+const databaseBackupIntervalMs = Math.max(1, parseInt(process.env.DB_BACKUP_INTERVAL_HOURS || '24', 10) || 24) * 60 * 60 * 1000;
 
 const startBackgroundJobs = () => {
     setInterval(() => {
@@ -277,6 +348,28 @@ const startBackgroundJobs = () => {
     runAutomatedNotificationNudges().catch((err) => {
         console.error('AUTOMATED NOTIFICATION NUDGE ERROR:', err.message);
     });
+
+    setInterval(() => {
+        runRetentionMaintenance().catch((err) => {
+            console.error('RETENTION MAINTENANCE ERROR:', err.message);
+        });
+    }, retentionMaintenanceIntervalMs);
+
+    runRetentionMaintenance().catch((err) => {
+        console.error('RETENTION MAINTENANCE ERROR:', err.message);
+    });
+
+    if (String(process.env.DB_BACKUP_ENABLED || 'false').trim().toLowerCase() === 'true') {
+        setInterval(() => {
+            runDatabaseBackup().catch((err) => {
+                console.error('DATABASE BACKUP ERROR:', err.message);
+            });
+        }, databaseBackupIntervalMs);
+
+        runDatabaseBackup().catch((err) => {
+            console.error('DATABASE BACKUP ERROR:', err.message);
+        });
+    }
 };
 
 const bootstrap = async () => {

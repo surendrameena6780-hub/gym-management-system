@@ -337,7 +337,7 @@ const loadRazorpayScript = () => {
   const [localInvoice, setLocalInvoiceState] = useState(() => {
     try { const s = localStorage.getItem(invoiceStorageKey); return s ? JSON.parse(s) : null; } catch { return null; }
   });
-  const setLocalInvoice = (inv) => { setLocalInvoiceState(inv); try { if (inv) localStorage.setItem(invoiceStorageKey, JSON.stringify(inv)); else localStorage.removeItem(invoiceStorageKey); } catch {} };
+  const setLocalInvoice = (inv) => { setLocalInvoiceState(inv); try { if (inv) localStorage.setItem(invoiceStorageKey, JSON.stringify(inv)); else localStorage.removeItem(invoiceStorageKey); } catch (_err) { return null; } };
   
   const [billingCycle, setBillingCycle] = useState('monthly');
   const [autoRenew, setAutoRenew] = useState(true);
@@ -347,7 +347,7 @@ const loadRazorpayScript = () => {
     if (!token || !isActive || !isOwner) return;
     axios.get('/api/billing/config', { headers: { 'x-auth-token': token } })
       .then(res => setRazorpayKey(res.data.razorpay_key_id || ''))
-      .catch(() => {});
+      .catch(() => { setRazorpayKey(''); });
   }, [token, isActive, isOwner]);
 
   const fileInputRef = useRef(null); 

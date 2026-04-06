@@ -373,7 +373,9 @@ const DashboardPage = ({ token, setCurrentPage, toast, navigateTo: navTo, startT
   async function finalizeDashboardPaymentSuccess(memberId) {
     try {
       await axios.post('/api/attendance/checkin', { member_id: memberId, method: 'STAFF' }, { headers: { 'x-auth-token': token } });
-    } catch (_err) {}
+    } catch (_err) {
+      // Attendance sync is best-effort here; payment success should still complete.
+    }
     window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payment-modal' } }));
     setPaymentStep('success');
     await new Promise((resolve) => setTimeout(resolve, 1500));

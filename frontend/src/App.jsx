@@ -16,8 +16,10 @@ import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
 import SuperAdminLogin from './SuperAdminLogin';
 import SuperAdminDashboard from './SuperAdminDashboard';
+import PageErrorBoundary from './PageErrorBoundary';
 import SuspensionOverlay from './SuspensionOverlay'; 
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
+import { clearSessionToken, getSessionToken, setSessionToken } from './utils/authSession';
 import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
@@ -55,6 +57,17 @@ const PAGE_PERMISSIONS = {
   Settings: 'owner:only',
   'Help & Support': 'support:read',
 };
+
+const TOUR_STEPS = [
+  { targetId: null, page: 'Dashboard', position: 'center', title: 'Welcome to GymVault ✨', desc: 'Let\'s set up your gym in a few steps. I will guide you through the exact workflow.' },
+  { targetId: 'tour-dashboard-hero', page: 'Dashboard', position: 'bottom', title: 'Dashboard Overview', desc: 'This is your central command. It tracks revenue, active members, and daily check-ins in real-time.' },
+  { targetId: 'nav-Members', page: 'Dashboard', position: 'right', title: 'Members Directory', desc: 'Manage your clients here. You can track their active memberships and contact details.' },
+  { targetId: 'btn-add-member', page: 'Dashboard', position: 'top', title: 'Quick Actions', desc: 'Use this button anytime to instantly register a new member, record a payment, or send a WhatsApp broadcast.' },
+  { targetId: 'nav-Plans', page: 'Plans', position: 'right', title: 'Membership Plans', desc: 'Before adding members, you will create Plans here (e.g., Monthly VIP for ₹2000). They dictate pricing and duration.' },
+  { targetId: 'nav-Payments', page: 'Payments', position: 'right', title: 'Financial Ledger', desc: 'Every transaction is recorded safely here for your accounting.' },
+  { targetId: 'nav-Settings', page: 'Settings', position: 'right', title: 'Gym Configuration', desc: 'Upload your gym logo, update your address, and configure staff access here.' },
+  { targetId: null, page: 'Dashboard', position: 'center', title: 'You\'re All Set! 🚀', desc: 'Your gym setup is fully complete. You are ready to dominate. Let\'s get to work.' }
+];
 
 // â”€â”€â”€ Toast System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -248,7 +261,9 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
       />
 
       {/* Nav buttons */}
-      {items.map(({ name, icon: Icon }, idx) => {
+      {items.map((item, idx) => {
+        const { name } = item;
+        const IconComponent = item.icon;
         const isActive = currentPage === name;
         const isBlocked = isSuspended && name !== 'Settings';
         return (
@@ -261,7 +276,7 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
               isActive ? 'text-white' : 'text-slate-500 hover:text-slate-700'
             } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
-            <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
+            <IconComponent size={16} strokeWidth={isActive ? 2.5 : 2} />
             <span className={`text-[10px] font-bold leading-none tracking-[0.01em] transition-all duration-200 ${isActive ? 'scale-105' : ''}`}>{name}</span>
           </button>
         );
@@ -289,7 +304,7 @@ function App() {
   const pathname = String(window.location.pathname || '/');
   const normalizedPathname = pathname.replace(/\/+$/, '') || '/';
   const isHQ = normalizedPathname === '/hq-admin' || normalizedPathname.startsWith('/hq-admin/');
-  const [superToken, setSuperToken] = useState(localStorage.getItem('superToken'));
+  const [superToken, setSuperToken] = useState('');
   
   const [currentPage, setCurrentPage] = useState('Dashboard');
   const [memberFilter, setMemberFilter] = useState('All');
@@ -299,8 +314,9 @@ function App() {
   const [paymentSectionFocus, setPaymentSectionFocus] = useState(null);
   const [attendanceSectionFocus, setAttendanceSectionFocus] = useState(null);
   const [stats, setStats] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(() => getSessionToken());
   const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(!isHQ);
   const [isSuspended, setIsSuspended] = useState(false); 
   const [saasGrace, setSaasGrace] = useState(false);
   const [saasGraceNoticeKey, setSaasGraceNoticeKey] = useState('');
@@ -310,6 +326,8 @@ function App() {
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [isStandaloneMode, setIsStandaloneMode] = useState(false);
   const [showMobileMoreNav, setShowMobileMoreNav] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showSignup, setShowSignup] = useState(normalizedPathname === '/signup');
 
   // ðŸš¨ MASTERCLASS TOUR STATE ðŸš¨
@@ -322,6 +340,7 @@ function App() {
   const { toasts, toast, removeToast } = useToast();
   const { confirmState, showConfirm, hideConfirm } = useConfirm();
   const toastRef = useRef(toast);
+  const apiErrorToastRef = useRef({ message: '', at: 0 });
   const dashboardFallbackNotifiedRef = useRef(false);
   const mainRef = useRef(null);
   const [visitedPages, setVisitedPages] = useState(() => new Set(['Dashboard']));
@@ -368,10 +387,11 @@ function App() {
     const urlToken = params.get('token');
     if (!urlToken) return;
     stabilizeViewportAfterAuth();
-    localStorage.setItem('token', urlToken);
+    setSessionToken(urlToken);
     localStorage.removeItem('user');
     setCurrentUser(null);
     setToken(urlToken);
+    setIsAuthChecking(true);
     window.history.replaceState({}, '', '/dashboard');
   }, [isHQ, stabilizeViewportAfterAuth]);
 
@@ -441,8 +461,8 @@ function App() {
     toastRef.current?.('Install prompt is not available yet on this browser.', 'warning');
   }, [deferredInstallPrompt, isIosDevice, isStandaloneMode]);
 
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem('token');
+  const clearAuthState = useCallback(({ redirectToLogin = true } = {}) => {
+    clearSessionToken();
     localStorage.removeItem('user');
     localStorage.removeItem('gv_saas_grace_dismissed');
     
@@ -457,8 +477,28 @@ function App() {
     setSaasGraceNoticeKey('');
     setVisitedPages(new Set(['Dashboard']));
     setCurrentPage('Dashboard');
-    window.history.pushState({}, '', '/login');
-  }, []);
+    setShowNotifications(false);
+    setShowProfileMenu(false);
+    setShowMobileMoreNav(false);
+    setIsAuthChecking(false);
+
+    if (redirectToLogin && !isHQ) {
+      setShowSignup(false);
+      const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
+      if (currentPath !== '/login') {
+        window.history.pushState({}, '', '/login');
+      }
+    }
+  }, [isHQ]);
+
+  const handleLogout = useCallback(async ({ redirectToLogin = true, skipServerLogout = false } = {}) => {
+    if (!skipServerLogout) {
+      const requestConfig = token ? { headers: { 'x-auth-token': token } } : undefined;
+      await axios.post('/api/auth/logout', {}, requestConfig).catch(() => {});
+    }
+
+    clearAuthState({ redirectToLogin });
+  }, [clearAuthState, token]);
 
   const hasPermission = useCallback((permission) => {
     if (!permission) return true;
@@ -499,14 +539,32 @@ function App() {
   const isMoreActive = !mobilePrimary.includes(currentPage);
 
   useEffect(() => {
-    if (isHQ) return;
-    if (!token) return;
-    axios.get('/api/auth/me', { headers: { 'x-auth-token': token } })
+    if (isHQ) {
+      setIsAuthChecking(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsAuthChecking(true);
+
+    const requestConfig = token ? { headers: { 'x-auth-token': token } } : undefined;
+
+    axios.get('/api/auth/me', requestConfig)
       .then((res) => {
+        if (cancelled) return;
+
         const user = res.data?.user;
+        const returnedToken = String(res.data?.token || token || '').trim();
+
+        if (returnedToken) {
+          setSessionToken(returnedToken);
+          if (returnedToken !== token) {
+            setToken(returnedToken);
+          }
+        }
+
         if (user) {
           setCurrentUser(user);
-          localStorage.setItem('user', JSON.stringify(user));
         }
         // Check SaaS status from auth/me response
         const saas = res.data?.saas;
@@ -528,11 +586,21 @@ function App() {
             localStorage.removeItem('gv_saas_grace_dismissed');
           }
         }
+
+        setIsAuthChecking(false);
       })
       .catch(() => {
-        if (!currentUser) handleLogout();
+        if (cancelled) return;
+
+        const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
+        const shouldRedirectToLogin = Boolean(token) || !['/login', '/signup'].includes(currentPath);
+        clearAuthState({ redirectToLogin: shouldRedirectToLogin });
       });
-  }, [token, isHQ]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, isHQ, clearAuthState]);
 
   useEffect(() => {
     if (isHQ || !token || String(currentUser?.role || '').toUpperCase() !== 'OWNER') return undefined;
@@ -574,8 +642,6 @@ function App() {
   // --- NOTIFICATION STATE & LOGIC ---
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     if (!token || isHQ || isSuspended) return;
@@ -683,32 +749,51 @@ function App() {
   };
 
 
-  // ðŸš¨ REBUILT INTERCEPTOR
+  useEffect(() => {
+    if (isHQ) return undefined;
+
+    const handleAuthInvalid = (event) => {
+      const message = String(event?.detail?.message || 'Session expired. Please login again.').trim();
+      toastRef.current?.(message, 'error');
+      handleLogout({ redirectToLogin: true, skipServerLogout: true });
+    };
+
+    const handleApiError = (event) => {
+      const message = String(event?.detail?.message || '').trim();
+      if (!message) return;
+
+      const now = Date.now();
+      if (apiErrorToastRef.current.message === message && now - apiErrorToastRef.current.at < 4000) {
+        return;
+      }
+
+      apiErrorToastRef.current = { message, at: now };
+      toastRef.current?.(message, 'warning');
+    };
+
+    window.addEventListener('gymvault:auth-invalid', handleAuthInvalid);
+    window.addEventListener('gymvault:api-error', handleApiError);
+
+    return () => {
+      window.removeEventListener('gymvault:auth-invalid', handleAuthInvalid);
+      window.removeEventListener('gymvault:api-error', handleApiError);
+    };
+  }, [handleLogout, isHQ]);
+
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
-        const requestUrl = String(error?.config?.url || '');
-        const isSuperadminRequest = requestUrl.includes('/api/superadmin');
-
         if (error.response && error.response.data.error === "SAAS_EXPIRED") {
           setIsSuspended(true); 
           setCurrentPage('Settings'); 
           return new Promise(() => {}); 
         }
-        if (error.response && error.response.status === 401) {
-          if (isHQ || isSuperadminRequest) {
-            return Promise.reject(error);
-          }
-          const authMsg = error.response?.data?.error || error.response?.data?.message || 'Session expired. Please login again.';
-          toastRef.current?.(authMsg, 'error');
-          handleLogout();
-        }
         return Promise.reject(error);
       }
     );
     return () => axios.interceptors.response.eject(interceptor);
-  }, [handleLogout, isHQ]);
+  }, []);
 
   // ðŸš¨ NAVIGATION
   const handleSidebarNav = useCallback((page) => {
@@ -808,7 +893,7 @@ function App() {
     }
   }, [token, isHQ]);
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = useCallback(async () => {
     if (!token || isHQ || isSuspended || currentUser?.role !== 'OWNER') return;
     try {
       const res = await axios.get('/api/dashboard/stats', {
@@ -834,7 +919,7 @@ function App() {
           expiringSoon: 0
         });
       }
-    } catch (err) {
+    } catch (_err) {
       setStats({
         activeMembers: 0,
         monthlyRevenue: 0,
@@ -846,11 +931,11 @@ function App() {
         toastRef.current?.('Dashboard stats are temporarily unavailable. Showing basic view.', 'warning');
       }
     }
-  };
+  }, [token, isHQ, isSuspended, currentUser?.role]);
 
   useEffect(() => {
     if (currentPage === 'Dashboard' && !isSuspended && currentUser?.role === 'OWNER') fetchDashboard();
-  }, [currentPage, token, isHQ, isSuspended, currentUser]);
+  }, [currentPage, isSuspended, currentUser?.role, fetchDashboard]);
 
   useEffect(() => {
     if (!token || isHQ || isSuspended || currentUser?.role !== 'OWNER' || currentPage !== 'Dashboard') {
@@ -862,7 +947,7 @@ function App() {
     }, 45000);
 
     return () => clearInterval(intervalId);
-  }, [token, isHQ, isSuspended, currentUser, currentPage]);
+  }, [token, isHQ, isSuspended, currentUser?.role, currentPage, fetchDashboard]);
 
   useEffect(() => {
     if (!token || isHQ || isSuspended || currentUser?.role !== 'OWNER' || currentPage !== 'Dashboard' || stats) {
@@ -889,17 +974,6 @@ function App() {
   // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // ðŸš€ THE MASTERCLASS TOUR ENGINE
   // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-
-  const TOUR_STEPS = [
-    { targetId: null, page: 'Dashboard', position: 'center', title: 'Welcome to GymVault âœ¨', desc: 'Let\'s set up your gym in a few steps. I will guide you through the exact workflow.' },
-    { targetId: 'tour-dashboard-hero', page: 'Dashboard', position: 'bottom', title: 'Dashboard Overview', desc: 'This is your central command. It tracks revenue, active members, and daily check-ins in real-time.' },
-    { targetId: 'nav-Members', page: 'Dashboard', position: 'right', title: 'Members Directory', desc: 'Manage your clients here. You can track their active memberships and contact details.' },
-    { targetId: 'btn-add-member', page: 'Dashboard', position: 'top', title: 'Quick Actions', desc: 'Use this button anytime to instantly register a new member, record a payment, or send a WhatsApp broadcast.' },
-    { targetId: 'nav-Plans', page: 'Plans', position: 'right', title: 'Membership Plans', desc: 'Before adding members, you will create Plans here (e.g., Monthly VIP for â‚¹2000). They dictate pricing and duration.' },
-    { targetId: 'nav-Payments', page: 'Payments', position: 'right', title: 'Financial Ledger', desc: 'Every transaction is recorded safely here for your accounting.' },
-    { targetId: 'nav-Settings', page: 'Settings', position: 'right', title: 'Gym Configuration', desc: 'Upload your gym logo, update your address, and configure staff access here.' },
-    { targetId: null, page: 'Dashboard', position: 'center', title: 'You\'re All Set! ðŸš€', desc: 'Your gym setup is fully complete. You are ready to dominate. Let\'s get to work.' }
-  ];
 
   // The engine that finds the element on the screen and draws the spotlight over it
   useEffect(() => {
@@ -944,18 +1018,22 @@ function App() {
 
   if (isHQ) {
     if (!superToken) {
-      return <SuperAdminLogin setSuperToken={(t) => { localStorage.setItem('superToken', t); setSuperToken(t); }} />;
+      return <SuperAdminLogin setSuperToken={setSuperToken} />;
     }
-    return <SuperAdminDashboard token={superToken} onLogout={() => { localStorage.removeItem('superToken'); setSuperToken(null); }} />;
+    return <SuperAdminDashboard token={superToken} onLogout={() => { setSuperToken(''); }} />;
   }
 
   if (!token) {
+    if (isAuthChecking) {
+      return <SplashScreen exiting={false} />;
+    }
+
     const storeToken = (t, user) => {
       stabilizeViewportAfterAuth();
-      localStorage.setItem('token', t);
-      setToken(t);
+      const nextToken = setSessionToken(t);
+      setIsAuthChecking(false);
+      setToken(nextToken);
       if (user) {
-        localStorage.setItem('user', JSON.stringify(user));
         setCurrentUser(user);
       } else {
         localStorage.removeItem('user');
@@ -985,7 +1063,7 @@ function App() {
     return <LoginPage setToken={storeToken} onShowSignup={showSignupPage} />;
   }
 
-  if (!currentUser) {
+  if (isAuthChecking || !currentUser) {
     return <SplashScreen exiting={false} />;
   }
 
@@ -1112,7 +1190,9 @@ function App() {
           </div>
 
           <nav className="space-y-0.5 flex-1">
-            {availableNavItems.map(({ name, icon: Icon }) => {
+            {availableNavItems.map((item) => {
+              const { name } = item;
+              const IconComponent = item.icon;
               const isActive = currentPage === name;
               const isBlocked = isSuspended && name !== 'Settings';
               return (
@@ -1129,7 +1209,7 @@ function App() {
                   {isActive && (
                     <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-indigo-400" />
                   )}
-                  <Icon size={16} className={isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} />
+                  <IconComponent size={16} className={isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} />
                   {name}
                   {isBlocked && <Lock size={12} className="ml-auto opacity-50" />}
                 </div>
@@ -1300,104 +1380,126 @@ function App() {
             {/* Dashboard */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Dashboard') && (
-                currentUser?.role === 'OWNER'
-                  ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} currentUser={currentUser} showConfirm={showConfirm} isActive={currentPage === 'Dashboard'} />
-                  : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} isActive={currentPage === 'Dashboard'} />
+                <PageErrorBoundary pageName="Dashboard" onGoHome={() => navigateTo('Dashboard')}>
+                  {currentUser?.role === 'OWNER'
+                    ? <DashboardPage token={token} setCurrentPage={setCurrentPage} toast={toast} navigateTo={navigateTo} startTour={startTour} currentUser={currentUser} showConfirm={showConfirm} isActive={currentPage === 'Dashboard'} />
+                    : <StaffDashboard currentUser={currentUser} navigateTo={navigateTo} canAccessPage={canAccessPage} token={token} isActive={currentPage === 'Dashboard'} />}
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Members */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Members') && (
-                <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} isActive={currentPage === 'Members'} />
+                <PageErrorBoundary pageName="Members" onGoHome={() => navigateTo('Dashboard')}>
+                  <MembersPage key={`members-${memberFilter}`} token={token} toast={toast} showConfirm={showConfirm} defaultFilter={memberFilter} focusMemberId={memberFocus.id} focusAction={memberFocus.action} onFocusHandled={() => setMemberFocus({ id: null, action: null })} currentUser={currentUser} isActive={currentPage === 'Members'} />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Leads */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Leads' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Leads') && (
-                <LeadsPage token={token} toast={toast} showConfirm={showConfirm} navigateTo={navigateTo} canManage={hasPermission('members:write')} />
+                <PageErrorBoundary pageName="Leads" onGoHome={() => navigateTo('Dashboard')}>
+                  <LeadsPage token={token} toast={toast} showConfirm={showConfirm} navigateTo={navigateTo} canManage={hasPermission('members:write')} />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Plans */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Plans') && (
-                <PlansPage token={token} toast={toast} showConfirm={showConfirm} />
+                <PageErrorBoundary pageName="Plans" onGoHome={() => navigateTo('Dashboard')}>
+                  <PlansPage token={token} toast={toast} showConfirm={showConfirm} />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Payments */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Payments') && (
-                <PaymentsPage
-                  token={token}
-                  toast={toast}
-                  showConfirm={showConfirm}
-                  isActive={currentPage === 'Payments'}
-                  defaultFilter={paymentFilter}
-                  focusPaymentId={paymentFocus.id}
-                  focusAction={paymentFocus.action}
-                  onFocusHandled={() => setPaymentFocus({ id: null, action: null })}
-                  focusSection={paymentSectionFocus}
-                  onSectionHandled={() => setPaymentSectionFocus(null)}
-                />
+                <PageErrorBoundary pageName="Payments" onGoHome={() => navigateTo('Dashboard')}>
+                  <PaymentsPage
+                    token={token}
+                    toast={toast}
+                    showConfirm={showConfirm}
+                    isActive={currentPage === 'Payments'}
+                    defaultFilter={paymentFilter}
+                    focusPaymentId={paymentFocus.id}
+                    focusAction={paymentFocus.action}
+                    onFocusHandled={() => setPaymentFocus({ id: null, action: null })}
+                    focusSection={paymentSectionFocus}
+                    onSectionHandled={() => setPaymentSectionFocus(null)}
+                  />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Attendance */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Attendance') && (
-                <AttendancePage
-                  token={token}
-                  toast={toast}
-                  showConfirm={showConfirm}
-                  isActive={currentPage === 'Attendance'}
-                  currentUser={currentUser}
-                  focusSection={attendanceSectionFocus}
-                  onSectionHandled={() => setAttendanceSectionFocus(null)}
-                  onOpenRfidSetup={() => navigateTo('RFID Setup')}
-                />
+                <PageErrorBoundary pageName="Attendance" onGoHome={() => navigateTo('Dashboard')}>
+                  <AttendancePage
+                    token={token}
+                    toast={toast}
+                    showConfirm={showConfirm}
+                    isActive={currentPage === 'Attendance'}
+                    currentUser={currentUser}
+                    focusSection={attendanceSectionFocus}
+                    onSectionHandled={() => setAttendanceSectionFocus(null)}
+                    onOpenRfidSetup={() => navigateTo('RFID Setup')}
+                  />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Classes */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Classes' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Classes') && (
-                <ClassesPage token={token} toast={toast} showConfirm={showConfirm} canManage={hasPermission('attendance:write')} />
+                <PageErrorBoundary pageName="Classes" onGoHome={() => navigateTo('Dashboard')}>
+                  <ClassesPage token={token} toast={toast} showConfirm={showConfirm} canManage={hasPermission('attendance:write')} />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* RFID Setup */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('RFID Setup') && (
-                <RfidSetupPage
-                  token={token}
-                  toast={toast}
-                  currentUser={currentUser}
-                  navigateBack={() => navigateTo('Attendance')}
-                />
+                <PageErrorBoundary pageName="RFID Setup" onGoHome={() => navigateTo('Dashboard')}>
+                  <RfidSetupPage
+                    token={token}
+                    toast={toast}
+                    currentUser={currentUser}
+                    navigateBack={() => navigateTo('Attendance')}
+                  />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Insights */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Insights') && (
-                <InsightsPage token={token} toast={toast} showConfirm={showConfirm} currentUser={currentUser} isActive={currentPage === 'Insights'} />
+                <PageErrorBoundary pageName="Insights" onGoHome={() => navigateTo('Dashboard')}>
+                  <InsightsPage token={token} toast={toast} showConfirm={showConfirm} currentUser={currentUser} isActive={currentPage === 'Insights'} />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Settings */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Settings') && (
-                <SettingsPage toast={toast} token={token} defaultTab={settingsTab} isActive={currentPage === 'Settings'} currentUser={currentUser} />
+                <PageErrorBoundary pageName="Settings" onGoHome={() => navigateTo('Dashboard')}>
+                  <SettingsPage toast={toast} token={token} defaultTab={settingsTab} isActive={currentPage === 'Settings'} currentUser={currentUser} />
+                </PageErrorBoundary>
               )}
             </div>
 
             {/* Help & Support */}
             <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
               {visitedPages.has('Help & Support') && (
-                <HelpSupportPage token={token} toast={toast} />
+                <PageErrorBoundary pageName="Help & Support" onGoHome={() => navigateTo('Dashboard')}>
+                  <HelpSupportPage token={token} toast={toast} />
+                </PageErrorBoundary>
               )}
             </div>
 
@@ -1415,7 +1517,9 @@ function App() {
               style={{ bottom: 'calc(var(--mobile-nav-offset) + 0.5rem)' }}
             >
               <div className="grid grid-cols-2 gap-1.5">
-                {mobileMoreNavItems.map(({ name, icon: Icon }) => {
+                {mobileMoreNavItems.map((item) => {
+                  const { name } = item;
+                  const IconComponent = item.icon;
                   const isActive = currentPage === name;
                   const isBlocked = isSuspended && name !== 'Settings';
                   return (
@@ -1430,7 +1534,7 @@ function App() {
                         isActive ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100/70'
                       } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
                     >
-                      <Icon size={15} />
+                      <IconComponent size={15} />
                       <span className="truncate">{name}</span>
                     </button>
                   );

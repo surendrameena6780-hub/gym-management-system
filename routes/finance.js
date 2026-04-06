@@ -7,6 +7,22 @@ const { requirePermission } = require('../middleware/rbac');
 
 const gymId = (req) => { const v = Number.parseInt(req?.user?.gym_id ?? req?.user?.gymId, 10); return Number.isInteger(v) ? v : null; };
 const posInt = (v, f = null) => { const p = Number.parseInt(v, 10); return Number.isInteger(p) && p > 0 ? p : f; };
+const getFinancePeriodConfig = (value) => {
+    const period = String(value || 'all').trim().toLowerCase();
+    const now = new Date();
+
+    if (period === '7d') {
+        return { key: '7d', label: 'Last 7 days', startAt: new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000)) };
+    }
+    if (period === '30d') {
+        return { key: '30d', label: 'Last 30 days', startAt: new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)) };
+    }
+    if (period === '90d') {
+        return { key: '90d', label: 'Last 90 days', startAt: new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)) };
+    }
+
+    return { key: 'all', label: 'All time', startAt: null };
+};
 
 router.use(auth, saasMiddleware);
 
@@ -16,34 +32,81 @@ router.use(auth, saasMiddleware);
 router.get('/overview', requirePermission('payments:read'), async (req, res) => {
     try {
         const gid = gymId(req);
+        const periodConfig = getFinancePeriodConfig(req.query.period);
+        const periodStart = periodConfig.startAt ? periodConfig.startAt.toISOString() : null;
         const [revRes, expRes, payrollRes, posRes, pendingRes] = await Promise.all([
-            pool.query(`SELECT COALESCE(SUM(amount_paid),0)::NUMERIC AS total_revenue,
-                        COALESCE(SUM(amount_paid) FILTER (WHERE payment_date::date = CURRENT_DATE),0)::NUMERIC AS today_revenue,
-                        COALESCE(SUM(amount_due),0)::NUMERIC AS total_pending
-                        FROM payments WHERE gym_id=$1 AND deleted_at IS NULL`, [gid]),
+            pool.query(`WITH collection_totals AS (
+                            SELECT
+                                pc.payment_id,
+                                COALESCE(SUM(pc.collected_amount), 0) AS collected_total
+                            FROM payment_collections pc
+                            JOIN payments p ON p.id = pc.payment_id AND p.deleted_at IS NULL
+                            WHERE pc.gym_id = $1
+                            GROUP BY pc.payment_id
+                        ), initial_revenue AS (
+                            SELECT COALESCE(SUM(GREATEST(COALESCE(p.amount_paid, 0) - COALESCE(ct.collected_total, 0), 0)), 0)::NUMERIC AS total
+                            FROM payments p
+                            LEFT JOIN collection_totals ct ON ct.payment_id = p.id
+                            WHERE p.gym_id = $1
+                              AND p.deleted_at IS NULL
+                              AND ($2::timestamptz IS NULL OR p.payment_date >= $2::timestamptz)
+                        ), due_revenue AS (
+                            SELECT COALESCE(SUM(pc.collected_amount), 0)::NUMERIC AS total
+                            FROM payment_collections pc
+                            JOIN payments p ON p.id = pc.payment_id
+                            WHERE pc.gym_id = $1
+                              AND p.deleted_at IS NULL
+                              AND ($2::timestamptz IS NULL OR pc.created_at >= $2::timestamptz)
+                        )
+                        SELECT COALESCE(SUM(amount_paid),0)::NUMERIC AS total_revenue,
+                               COALESCE(SUM(amount_paid) FILTER (WHERE payment_date::date = CURRENT_DATE),0)::NUMERIC AS today_revenue,
+                               COALESCE(SUM(amount_due),0)::NUMERIC AS total_pending,
+                               COALESCE((SELECT total FROM initial_revenue), 0) + COALESCE((SELECT total FROM due_revenue), 0) AS period_revenue
+                        FROM payments
+                        WHERE gym_id=$1 AND deleted_at IS NULL`, [gid, periodStart]),
             pool.query(`SELECT COALESCE(SUM(amount),0)::NUMERIC AS total_expenses,
                         COALESCE(SUM(amount) FILTER (WHERE bill_date >= DATE_TRUNC('month', CURRENT_DATE)),0)::NUMERIC AS month_expenses,
+                        COALESCE(SUM(amount) FILTER (WHERE $2::timestamptz IS NULL OR bill_date::timestamptz >= $2::timestamptz),0)::NUMERIC AS period_expenses,
                         COUNT(*)::INTEGER AS expense_count
-                        FROM expenses WHERE gym_id=$1 AND deleted_at IS NULL`, [gid]),
+                        FROM expenses WHERE gym_id=$1 AND deleted_at IS NULL`, [gid, periodStart]),
             pool.query(`SELECT COALESCE(SUM(net_pay),0)::NUMERIC AS total_payroll,
                         COALESCE(SUM(net_pay) FILTER (WHERE status='PENDING'),0)::NUMERIC AS pending_payroll,
+                        COALESCE(SUM(net_pay) FILTER (WHERE $2::timestamptz IS NULL OR COALESCE(paid_at, created_at) >= $2::timestamptz),0)::NUMERIC AS period_payroll,
                         COUNT(*) FILTER (WHERE status='PENDING')::INTEGER AS pending_count
-                        FROM payroll_entries WHERE gym_id=$1`, [gid]),
+                        FROM payroll_entries WHERE gym_id=$1`, [gid, periodStart]),
             pool.query(`SELECT COALESCE(SUM(total_amount),0)::NUMERIC AS pos_revenue,
                         COALESCE(SUM(total_amount) FILTER (WHERE created_at::date = CURRENT_DATE),0)::NUMERIC AS pos_today,
+                        COALESCE(SUM(total_amount) FILTER (WHERE $2::timestamptz IS NULL OR created_at >= $2::timestamptz),0)::NUMERIC AS period_revenue,
                         COUNT(*)::INTEGER AS pos_count
-                        FROM pos_sales WHERE gym_id=$1`, [gid]),
+                        FROM pos_sales WHERE gym_id=$1`, [gid, periodStart]),
             pool.query(`SELECT COUNT(*)::INTEGER AS overdue_count,
                         COALESCE(SUM(amount_due),0)::NUMERIC AS overdue_amount
                         FROM payments WHERE gym_id=$1 AND deleted_at IS NULL AND amount_due > 0
                         AND payment_date < CURRENT_DATE - INTERVAL '7 days'`, [gid]),
         ]);
+
+        const revenue = revRes.rows[0] || {};
+        const expenses = expRes.rows[0] || {};
+        const payroll = payrollRes.rows[0] || {};
+        const pos = posRes.rows[0] || {};
+
+        const periodIncome = Number(revenue.period_revenue || 0) + Number(pos.period_revenue || 0);
+        const periodOutflows = Number(expenses.period_expenses || 0) + Number(payroll.period_payroll || 0);
+        const periodProfit = periodIncome - periodOutflows;
+
         return res.json({
-            revenue: revRes.rows[0],
-            expenses: expRes.rows[0],
-            payroll: payrollRes.rows[0],
-            pos: posRes.rows[0],
+            revenue,
+            expenses,
+            payroll,
+            pos,
             overdue: pendingRes.rows[0],
+            summary: {
+                period_key: periodConfig.key,
+                period_label: periodConfig.label,
+                period_income: periodIncome,
+                period_outflows: periodOutflows,
+                period_profit: periodProfit,
+            },
         });
     } catch (err) { console.error('FINANCE OVERVIEW:', err.message); return res.status(500).json({ error: 'Failed' }); }
 });
@@ -221,42 +284,66 @@ router.get('/pos/sales', requirePermission('payments:read'), async (req, res) =>
 });
 
 router.post('/pos/sales', requirePermission('payments:write'), async (req, res) => {
+    const client = await pool.connect();
     try {
         const gid = gymId(req);
         const { member_id, items, payment_mode, notes } = req.body || {};
         if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items required.' });
 
-        await pool.query('BEGIN');
+        await client.query('BEGIN');
         let totalAmount = 0;
         const validItems = [];
         for (const item of items) {
             const pid = posInt(item.product_id);
             const qty = posInt(item.quantity, 1);
             if (!pid) continue;
-            const prodRes = await pool.query('SELECT * FROM pos_products WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [pid, gid]);
-            if (!prodRes.rows.length) { await pool.query('ROLLBACK'); return res.status(404).json({ error: `Product ${pid} not found.` }); }
+            const prodRes = await client.query(
+                `UPDATE pos_products
+                 SET stock_qty = stock_qty - $1
+                 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL AND stock_qty >= $1
+                 RETURNING id, name, price, stock_qty`,
+                [qty, pid, gid]
+            );
+
+            if (!prodRes.rows.length) {
+                const productExists = await client.query(
+                    'SELECT id, stock_qty FROM pos_products WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                    [pid, gid]
+                );
+                await client.query('ROLLBACK');
+                if (!productExists.rows.length) {
+                    return res.status(404).json({ error: `Product ${pid} not found.` });
+                }
+                return res.status(409).json({ error: `Insufficient stock for product ${pid}.` });
+            }
+
             const prod = prodRes.rows[0];
             const lineTotal = Number(prod.price) * qty;
             totalAmount += lineTotal;
             validItems.push({ product_id: pid, product_name: prod.name, quantity: qty, unit_price: Number(prod.price), total_price: lineTotal });
-            await pool.query('UPDATE pos_products SET stock_qty = GREATEST(0, stock_qty - $1) WHERE id=$2', [qty, pid]);
         }
 
-        const saleRes = await pool.query(
+        const saleRes = await client.query(
             `INSERT INTO pos_sales (gym_id, member_id, total_amount, payment_mode, notes, sold_by)
              VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
             [gid, posInt(member_id), totalAmount, String(payment_mode||'Cash').trim(), String(notes||'').trim(), req.user.id]);
         const saleId = saleRes.rows[0].id;
 
         for (const vi of validItems) {
-            await pool.query(
+            await client.query(
                 `INSERT INTO pos_sale_items (sale_id, product_id, product_name, quantity, unit_price, total_price)
                  VALUES ($1,$2,$3,$4,$5,$6)`, [saleId, vi.product_id, vi.product_name, vi.quantity, vi.unit_price, vi.total_price]);
         }
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         return res.status(201).json({ ...saleRes.rows[0], items: validItems });
-    } catch (err) { await pool.query('ROLLBACK'); console.error('POS SALE CREATE:', err.message); return res.status(500).json({ error: 'Failed' }); }
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('POS SALE CREATE:', err.message);
+        return res.status(500).json({ error: 'Failed' });
+    } finally {
+        client.release();
+    }
 });
 
 // ═══════════════════════════════════════════════════════════

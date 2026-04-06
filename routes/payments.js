@@ -590,17 +590,21 @@ router.get('/', async (req, res) => {
 router.post('/record', async (req, res) => {
     const { user_id, plan_id, amount_paid, total_amount, payment_mode, notes, transaction_id } = req.body;
     const gym_id = req.user.gym_id;
+    const client = await pool.connect();
 
     if (!user_id || !plan_id) {
+        client.release();
         return res.status(400).json({ error: 'user_id and plan_id are required.' });
     }
 
     const parsedAmountPaid = parseFloat(amount_paid);
     const parsedTotalAmount = parseFloat(total_amount ?? amount_paid);
     if (isNaN(parsedAmountPaid) || parsedAmountPaid < 0) {
+        client.release();
         return res.status(400).json({ error: 'amount_paid must be a valid non-negative number.' });
     }
     if (isNaN(parsedTotalAmount) || parsedTotalAmount < 0) {
+        client.release();
         return res.status(400).json({ error: 'total_amount must be a valid non-negative number.' });
     }
 
@@ -614,11 +618,11 @@ router.post('/record', async (req, res) => {
         const final_mode = (transaction_id && transaction_id.startsWith('pay_')) ? 'Online' : (payment_mode || 'Cash');
 
         const [memberResult, planResult] = await Promise.all([
-            pool.query(
+            client.query(
                 'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
                 [user_id, gym_id]
             ),
-            pool.query(
+            client.query(
                 'SELECT id, duration_days FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
                 [plan_id, gym_id]
             ),
@@ -632,9 +636,9 @@ router.post('/record', async (req, res) => {
             return res.status(404).json({ error: 'Plan not found.' });
         }
 
-        await pool.query('BEGIN');
+        await client.query('BEGIN');
 
-        const newPayment = await pool.query(
+        const newPayment = await client.query(
             `INSERT INTO payments
              (gym_id, user_id, plan_id, amount_paid, amount_due, total_amount,
               payment_mode, status, invoice_id, transaction_id, notes, payment_date)
@@ -647,16 +651,16 @@ router.post('/record', async (req, res) => {
             ]
         );
 
-        await pool.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [user_id, gym_id]);
+        await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [user_id, gym_id]);
 
         const days = planResult.rows[0].duration_days || 30;
-        await pool.query(
+        await client.query(
             `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
              VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
             [gym_id, user_id, plan_id, days]
         );
 
-        await pool.query(
+        await client.query(
             `UPDATE members
              SET status = 'ACTIVE',
                  joining_date = COALESCE(joining_date, CURRENT_DATE),
@@ -665,18 +669,20 @@ router.post('/record', async (req, res) => {
             [user_id, gym_id]
         );
 
-        await pool.query(
+        await client.query(
             `INSERT INTO attendance (gym_id, member_id, check_in_time)
              VALUES ($1, $2, NOW())`,
             [gym_id, user_id]
         );
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         res.json({ msg: 'Payment Recorded!', payment: newPayment.rows[0] });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         console.error('RECORD PAYMENT ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });
+    } finally {
+        client.release();
     }
 });
 

@@ -112,6 +112,12 @@ const INSIGHT_TONE_STYLES = {
     title: 'text-slate-700',
     detail: 'text-slate-600',
   },
+  rose: {
+    wrapper: 'bg-rose-50 border-rose-100',
+    icon: 'bg-white text-rose-500',
+    title: 'text-rose-700',
+    detail: 'text-rose-700/80',
+  },
 };
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -131,6 +137,13 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     else if (range === '30d') d.setDate(d.getDate() - 30);
     else if (range === '90d') d.setDate(d.getDate() - 90);
     return d;
+  };
+
+  const getDateRangeLabel = (range) => {
+    if (range === '7d') return 'Last 7 days';
+    if (range === '30d') return 'Last 30 days';
+    if (range === '90d') return 'Last 90 days';
+    return 'All time';
   };
 
   const dateFilteredPayments = useMemo(() => {
@@ -224,14 +237,17 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
   const fetchFinanceOverview = useCallback(async () => {
     setFinanceLoading(true);
     try {
-      const res = await axios.get('/api/finance/overview', { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/finance/overview', {
+        headers: { 'x-auth-token': token },
+        params: { period: dateRange },
+      });
       setFinanceOverview(extractObject(res.data, {}));
     } catch {
       setFinanceOverview(null);
     } finally {
       setFinanceLoading(false);
     }
-  }, [token]);
+  }, [dateRange, token]);
 
   const fetchExpenses = useCallback(async () => {
     setFinanceLoading(true);
@@ -1006,7 +1022,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
 
   const revenueSplit = useMemo(() => {
     let cashTotal = 0, onlineTotal = 0, onlineCount = 0;
-    payments.forEach(p => {
+    dateFilteredPayments.forEach(p => {
       const initialAmount = parseFloat(p.initial_amount_paid ?? p.amount_paid) || 0;
       const dueOnlineAmount = parseFloat(p.due_online_collected || 0) || 0;
       const dueCashAmount = parseFloat(p.due_cash_collected || 0) || 0;
@@ -1022,18 +1038,64 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
     });
     const total = cashTotal + onlineTotal;
     return { cash: cashTotal, online: onlineTotal, onlineCount, cashPer: total > 0 ? (cashTotal / total) * 100 : 0, onlinePer: total > 0 ? (onlineTotal / total) * 100 : 0 };
-  }, [payments]);
+  }, [dateFilteredPayments]);
+
+  const financePeriodSummary = useMemo(() => {
+    const summary = extractObject(financeOverview?.summary, {});
+    const periodLabel = summary.period_label || getDateRangeLabel(dateRange);
+    const periodIncome = Number(summary.period_income || 0);
+    const periodOutflows = Number(summary.period_outflows || 0);
+    const periodProfit = Number(summary.period_profit || 0);
+
+    return {
+      periodLabel,
+      periodIncome,
+      periodOutflows,
+      periodProfit,
+    };
+  }, [dateRange, financeOverview]);
+
+  const profitInsight = useMemo(() => {
+    const profit = roundMoney(financePeriodSummary.periodProfit);
+    const outflows = roundMoney(financePeriodSummary.periodOutflows);
+    const label = dateRange === 'all' ? 'Profit earned overall' : `Profit earned · ${financePeriodSummary.periodLabel}`;
+
+    if (profit > 0) {
+      return {
+        id: 'period-profit',
+        icon: CheckCircle2,
+        tone: 'emerald',
+        title: label,
+        detail: `₹${profit.toLocaleString()} net after ₹${outflows.toLocaleString()} of expenses and payroll.`,
+      };
+    }
+
+    if (profit < 0) {
+      return {
+        id: 'period-profit',
+        icon: AlertCircle,
+        tone: 'rose',
+        title: label,
+        detail: `₹${Math.abs(profit).toLocaleString()} net loss after ₹${outflows.toLocaleString()} of expenses and payroll.`,
+      };
+    }
+
+    return {
+      id: 'period-profit',
+      icon: History,
+      tone: 'slate',
+      title: label,
+      detail: outflows > 0
+        ? `Collections are currently matching ₹${outflows.toLocaleString()} of expenses and payroll.`
+        : 'No expense or payroll outflow recorded in the selected period yet.',
+    };
+  }, [dateRange, financePeriodSummary]);
 
   const collectionIntelligence = useMemo(() => {
-    const completed = payments.filter((payment) => payment.status === 'Completed');
-    const pending = payments.filter((payment) => payment.status !== 'Completed');
+    const completed = dateFilteredPayments.filter((payment) => payment.status === 'Completed');
+    const pending = dateFilteredPayments.filter((payment) => payment.status !== 'Completed');
     const totalCollected = completed.reduce((sum, payment) => sum + (parseFloat(payment.amount_paid) || 0), 0);
     const averageTicket = completed.length > 0 ? Math.round(totalCollected / completed.length) : 0;
-    const todayKey = new Date().toDateString();
-    const todayCompleted = completed.filter((payment) => {
-      const paymentDate = new Date(payment.payment_date);
-      return !Number.isNaN(paymentDate.getTime()) && paymentDate.toDateString() === todayKey;
-    });
     const onlineShare = Math.round(revenueSplit.onlinePer || 0);
     const pendingValue = Number(filteredStats.pending_dues || 0);
     const dominantMode = revenueSplit.online === 0 && revenueSplit.cash === 0
@@ -1050,23 +1112,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
         detail: `₹${pendingValue.toLocaleString()} is still pending across ${pending.length} record${pending.length === 1 ? '' : 's'}.`,
       });
     }
-    if (Number(filteredStats.today_revenue || 0) > 0) {
-      actions.push({
-        id: 'today-pace',
-        icon: CheckCircle2,
-        tone: 'emerald',
-        title: `${todayCompleted.length} payment${todayCompleted.length === 1 ? '' : 's'} logged today`,
-        detail: `₹${Number(filteredStats.today_revenue || 0).toLocaleString()} collected so far today.`,
-      });
-    } else {
-      actions.push({
-        id: 'today-pace',
-        icon: Clock,
-        tone: 'sky',
-        title: 'No collections recorded today',
-        detail: 'Capture walk-in renewals early to keep the day on pace.',
-      });
-    }
+    actions.push(profitInsight);
     if (actions.length < 2) {
       actions.push({
         id: 'protect-ticket',
@@ -1086,7 +1132,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
       dominantMode,
       actions: actions.slice(0, 2),
     };
-  }, [payments, revenueSplit, filteredStats.pending_dues, filteredStats.today_revenue]);
+  }, [dateFilteredPayments, filteredStats.pending_dues, profitInsight, revenueSplit]);
 
   const financeSummary = useMemo(() => {
     const revenue = extractObject(financeOverview?.revenue, {});
@@ -1225,7 +1271,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
             style={{ gridColumn: '1 / -1', background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)', borderColor: 'rgba(16,185,129,0.15)', boxShadow: '0 4px 20px rgba(16,185,129,0.08)', opacity: 0, animation: 'payCardIn 0.5s cubic-bezier(0.16,1,0.3,1) 120ms forwards' }}>
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">{dateRange === 'all' ? 'Total Revenue' : `Revenue (${dateRange === '7d' ? 'Last 7 Days' : dateRange === '30d' ? 'Last 30 Days' : 'Last 90 Days'})`}</p>
+                  <p className="text-emerald-700/70 text-[10px] font-black uppercase tracking-widest mb-3">{dateRange === 'all' ? 'Total Revenue' : `Revenue (${getDateRangeLabel(dateRange)})`}</p>
                   <h3 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">₹{animatedTotalRevenue.toLocaleString()}</h3>
                   <p className="text-emerald-600 text-xs font-bold mt-1.5">{dateRange === 'all' ? 'All time earnings' : 'Filtered period'}</p>
                 </div>
@@ -1290,7 +1336,7 @@ const PaymentsPage = ({ token, toast, showConfirm, defaultFilter = 'All', focusP
             </div>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:hidden">
-            {collectionIntelligence.actions.filter((item) => item.id === 'recover-dues').slice(0, 1).map((item) => {
+            {collectionIntelligence.actions.slice(0, 2).map((item) => {
               const tone = INSIGHT_TONE_STYLES[item.tone] || INSIGHT_TONE_STYLES.slate;
               const Icon = item.icon;
               return (

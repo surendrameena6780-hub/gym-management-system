@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 const webpush = require('web-push');
+const { setUserAuthCookie } = require('../utils/authCookies');
 
 // Configure VAPID (shared config)
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -544,6 +545,8 @@ router.post('/gyms/:id/impersonate', superAuth, async (req, res) => {
             targetLabel: user.full_name,
             details: { owner_id: user.id, owner_email: user.email },
         });
+
+        setUserAuthCookie(res, token);
 
         return res.json({
             token,

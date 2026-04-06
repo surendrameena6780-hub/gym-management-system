@@ -3,8 +3,10 @@ const router = express.Router();
 const webpush = require('web-push');
 const { pool } = require('../config/db');
 const authMiddleware = require('../middleware/authMiddleware');
+const memberAuthMiddleware = require('../middleware/memberAuthMiddleware');
 
 const vapidConfigured = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+const PUSH_BATCH_SIZE = Math.max(25, Math.min(250, parseInt(process.env.PUSH_BATCH_SIZE || '100', 10) || 100));
 if (vapidConfigured) {
     webpush.setVapidDetails(
         process.env.VAPID_EMAIL || 'mailto:admin@gymvault.app',
@@ -60,9 +62,9 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     }
 });
 
-router.post('/subscribe-member', async (req, res) => {
-    const { endpoint, keys, member_id, gym_id } = req.body;
-    if (!endpoint || !keys?.p256dh || !keys?.auth || !gym_id) {
+router.post('/subscribe-member', memberAuthMiddleware, async (req, res) => {
+    const { endpoint, keys } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
         return res.status(400).json({ message: 'Invalid subscription.' });
     }
 
@@ -72,7 +74,7 @@ router.post('/subscribe-member', async (req, res) => {
              VALUES ($1, $2, 'MEMBER', $3, $4, $5)
              ON CONFLICT (endpoint) DO UPDATE
              SET p256dh = $4, auth = $5, gym_id = $1, user_id = $2, role = 'MEMBER'`,
-            [gym_id, member_id || null, endpoint, keys.p256dh, keys.auth]
+            [req.member.gym_id, req.member.id, endpoint, keys.p256dh, keys.auth]
         );
         res.json({ message: 'Subscribed.' });
     } catch (err) {
@@ -126,13 +128,30 @@ const sendPushToGym = async (gym_id, payload, roles = ['OWNER', 'STAFF', 'MEMBER
     try {
         if (!vapidConfigured) return 0;
 
-        const subs = await pool.query(
-            'SELECT * FROM push_subscriptions WHERE gym_id = $1 AND role = ANY($2)',
-            [gym_id, roles]
-        );
+        let deliveredTotal = 0;
+        for (let offset = 0; ; offset += PUSH_BATCH_SIZE) {
+            const subs = await pool.query(
+                `SELECT endpoint, p256dh, auth, user_id
+                 FROM push_subscriptions
+                 WHERE gym_id = $1 AND role = ANY($2)
+                 ORDER BY id ASC
+                 LIMIT $3 OFFSET $4`,
+                [gym_id, roles, PUSH_BATCH_SIZE, offset]
+            );
 
-        const delivered = await Promise.all(subs.rows.map((sub) => sendPushPayload(sub, payload)));
-        return delivered.reduce((sum, count) => sum + count, 0);
+            if (subs.rows.length === 0) {
+                break;
+            }
+
+            const delivered = await Promise.all(subs.rows.map((sub) => sendPushPayload(sub, payload)));
+            deliveredTotal += delivered.reduce((sum, count) => sum + count, 0);
+
+            if (subs.rows.length < PUSH_BATCH_SIZE) {
+                break;
+            }
+        }
+
+        return deliveredTotal;
     } catch (err) {
         console.error(`sendPushToGym(${gym_id}) error:`, err.message);
         return 0;
@@ -156,7 +175,9 @@ const sendPushToUsers = async (gym_id, userIds = [], payloadResolver, role = 'ME
         }
 
         const subs = await pool.query(
-            'SELECT * FROM push_subscriptions WHERE gym_id = $1 AND role = $2 AND user_id = ANY($3::int[])',
+            `SELECT endpoint, p256dh, auth, user_id
+             FROM push_subscriptions
+             WHERE gym_id = $1 AND role = $2 AND user_id = ANY($3::int[])`,
             [gym_id, role, ids]
         );
 

@@ -3,12 +3,118 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+const parsePositiveInt = (value, fallback) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const quoteIdentifier = (value) => `"${String(value || '').replace(/"/g, '""')}"`;
+
+const ensureSchemaMigrationsTable = async (client) => {
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            name TEXT PRIMARY KEY,
+            executed_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    `);
+};
+
+const runNamedMigration = async (client, name, runner) => {
+    const existing = await client.query('SELECT name FROM schema_migrations WHERE name = $1 LIMIT 1', [name]);
+    if (existing.rows.length > 0) {
+        return false;
+    }
+
+    await client.query('BEGIN');
+    try {
+        await runner(client);
+        await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
+        await client.query('COMMIT');
+        return true;
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    }
+};
+
+const normalizeLegacyTimestampColumns = async (client) => {
+    const timestampColumns = await client.query(`
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND data_type = 'timestamp without time zone'
+          AND table_name <> 'schema_migrations'
+        ORDER BY table_name ASC, ordinal_position ASC
+    `);
+
+    for (const row of timestampColumns.rows) {
+        const tableName = quoteIdentifier(row.table_name);
+        const columnName = quoteIdentifier(row.column_name);
+        await client.query(`
+            ALTER TABLE ${tableName}
+            ALTER COLUMN ${columnName}
+            TYPE TIMESTAMPTZ
+            USING CASE
+                WHEN ${columnName} IS NULL THEN NULL
+                ELSE ${columnName} AT TIME ZONE COALESCE(NULLIF(current_setting('TIMEZONE', true), ''), 'UTC')
+            END
+        `);
+    }
+};
+
+const createOperationalArchiveInfrastructure = async (client) => {
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS operational_archives (
+            id SERIAL PRIMARY KEY,
+            source_table VARCHAR(80) NOT NULL,
+            record_id INTEGER NOT NULL,
+            archived_from_at TIMESTAMPTZ,
+            payload JSONB NOT NULL,
+            archived_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE (source_table, record_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_operational_archives_source_time
+            ON operational_archives(source_table, archived_from_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_operational_archives_archived_at
+            ON operational_archives(archived_at DESC);
+    `);
+};
+
+const runSchemaMigrations = async () => {
+    const client = await pool.connect();
+
+    try {
+        await ensureSchemaMigrationsTable(client);
+        await client.query('SELECT pg_advisory_lock(hashtext($1))', ['gymvault-schema-migrations']);
+
+        await runNamedMigration(client, '2026-04-06-timestamptz-normalization', normalizeLegacyTimestampColumns);
+        await runNamedMigration(client, '2026-04-06-operational-archives', createOperationalArchiveInfrastructure);
+    } finally {
+        await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['gymvault-schema-migrations']).catch(() => {});
+        client.release();
+    }
+};
+
 const pool = new Pool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     database: process.env.DB_NAME,
+    max: parsePositiveInt(process.env.DB_POOL_MAX, 30),
+    min: parsePositiveInt(process.env.DB_POOL_MIN, 5),
+    idleTimeoutMillis: parsePositiveInt(process.env.DB_IDLE_TIMEOUT_MS, 60000),
+    connectionTimeoutMillis: parsePositiveInt(process.env.DB_CONNECTION_TIMEOUT_MS, 5000),
+    query_timeout: parsePositiveInt(process.env.DB_QUERY_TIMEOUT_MS, 30000),
+    statement_timeout: parsePositiveInt(process.env.DB_STATEMENT_TIMEOUT_MS, 30000),
+    keepAliveInitialDelayMillis: parsePositiveInt(process.env.DB_KEEPALIVE_INITIAL_DELAY_MS, 10000),
+    allowExitOnIdle: false,
+    application_name: process.env.DB_APPLICATION_NAME || 'gym-management-system',
+});
+
+pool.on('error', (err) => {
+    console.error('UNEXPECTED DATABASE POOL ERROR:', err.message);
 });
 
 const connectDB = async () => {
@@ -526,6 +632,14 @@ const connectDB = async () => {
             CREATE INDEX IF NOT EXISTS idx_class_bookings_session_id ON class_bookings(class_session_id);
             CREATE INDEX IF NOT EXISTS idx_class_bookings_member_id ON class_bookings(member_id);
             CREATE INDEX IF NOT EXISTS idx_class_bookings_status ON class_bookings(status);
+            CREATE INDEX IF NOT EXISTS idx_attendance_gym_checkin_time ON attendance(gym_id, check_in_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_payments_gym_status_active ON payments(gym_id, status) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_memberships_gym_end_status_active ON memberships(gym_id, end_date, status) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_members_gym_phone_active ON members(gym_id, phone) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_leads_gym_follow_up_status ON leads(gym_id, next_follow_up_at, status);
+            CREATE INDEX IF NOT EXISTS idx_expenses_gym_bill_date_active ON expenses(gym_id, bill_date DESC) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_payroll_entries_gym_period_status ON payroll_entries(gym_id, pay_period, status);
+            CREATE INDEX IF NOT EXISTS idx_class_bookings_session_status ON class_bookings(class_session_id, status);
         `);
         // Fix gyms that got saas_status='ACTIVE' from the old DB default but have never paid
         // (saas_valid_until is within 14 days of creation = still in trial window, no razorpay customer)
@@ -547,6 +661,9 @@ const connectDB = async () => {
         } else {
             console.log('ℹ️ Skipping init.sql on boot (production mode). Set RUN_DB_INIT_ON_BOOT=true to enable.');
         }
+
+        await runSchemaMigrations();
+        console.log('✅ Schema migrations checked');
 
     } catch (err) {
         console.error('❌ Database Error:', err.message);

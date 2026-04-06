@@ -490,8 +490,6 @@ function SuperAdminDashboard({ token, onLogout }) {
 
       if (gymActionModal.mode === 'impersonate') {
         const res = await axios.post(`/api/superadmin/gyms/${gymActionModal.gym.id}/impersonate`, {}, headers);
-        localStorage.setItem('token', res.data.token);
-        localStorage.setItem('user', JSON.stringify(res.data.user));
         window.location.href = '/dashboard';
         return;
       }

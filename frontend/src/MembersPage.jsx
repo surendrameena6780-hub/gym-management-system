@@ -189,6 +189,13 @@ const compressProfileImageFile = async (file, maxBytes = MAX_PROFILE_IMAGE_BYTES
   return file;
 };
 
+const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ''));
+  reader.onerror = () => reject(new Error('Unable to read file.'));
+  reader.readAsDataURL(file);
+});
+
 const normalizeProfileImageFile = async (file) => {
   if (!file) {
     return { file: null, error: null, wasCompressed: false };
@@ -200,13 +207,6 @@ const normalizeProfileImageFile = async (file) => {
   }
 
   if (Number(file.size || 0) <= MAX_PROFILE_IMAGE_BYTES) {
-
-  const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Unable to read file.'));
-    reader.readAsDataURL(file);
-  });
     return { file, error: null, wasCompressed: false };
   }
 

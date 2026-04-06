@@ -225,10 +225,12 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
         return res.status(400).json({ error: 'Invalid lead id.' });
     }
 
-    try {
-        await pool.query('BEGIN');
+    const client = await pool.connect();
 
-        const leadResult = await pool.query(
+    try {
+        await client.query('BEGIN');
+
+        const leadResult = await client.query(
             `SELECT *
              FROM leads
              WHERE id = $1 AND gym_id = $2
@@ -237,18 +239,20 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
         );
 
         if (leadResult.rows.length === 0) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Lead not found.' });
         }
 
         const lead = leadResult.rows[0];
+        const normalizedEmail = String(lead.email || '').trim().toLowerCase();
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`lead-convert:${gymId}:${lead.phone}:${normalizedEmail}`]);
 
         if (lead.converted_member_id) {
-            const existingMember = await pool.query(
+            const existingMember = await client.query(
                 'SELECT * FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
                 [lead.converted_member_id, gymId]
             );
-            await pool.query('COMMIT');
+            await client.query('COMMIT');
             return res.json({
                 lead,
                 member: existingMember.rows[0] || null,
@@ -256,22 +260,23 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
             });
         }
 
-        const memberLookup = await pool.query(
+        const memberLookup = await client.query(
             `SELECT *
              FROM members
              WHERE gym_id = $1
                AND deleted_at IS NULL
                AND (phone = $2 OR ($3 <> '' AND lower(email) = $3))
              ORDER BY id DESC
-             LIMIT 1`,
-            [gymId, lead.phone, String(lead.email || '').trim().toLowerCase()]
+             LIMIT 1
+             FOR UPDATE`,
+            [gymId, lead.phone, normalizedEmail]
         );
 
         let member = memberLookup.rows[0] || null;
         let createdNewMember = false;
 
         if (!member) {
-            const createdMember = await pool.query(
+            const createdMember = await client.query(
                 `INSERT INTO members (gym_id, full_name, phone, email, joining_date, status)
                  VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')
                  RETURNING *`,
@@ -281,7 +286,7 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
             createdNewMember = true;
         }
 
-        const updatedLead = await pool.query(
+        const updatedLead = await client.query(
             `UPDATE leads
              SET status = 'WON',
                  converted_member_id = $1,
@@ -292,16 +297,18 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
             [member.id, leadId, gymId]
         );
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         return res.json({
             lead: updatedLead.rows[0],
             member,
             created_new_member: createdNewMember,
         });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        await client.query('ROLLBACK').catch(() => {});
         console.error('LEAD CONVERT ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to convert lead.' });
+    } finally {
+        client.release();
     }
 });
 

@@ -14,6 +14,15 @@ const {
     requestMsg91Otp,
     verifyMsg91Otp,
 } = require('../utils/msg91');
+const {
+    getRequestCookie,
+    OWNER_AUTH_COOKIE,
+    MEMBER_AUTH_COOKIE,
+    setUserAuthCookie,
+    clearUserAuthCookie,
+    setMemberAuthCookie,
+    clearMemberAuthCookie,
+} = require('../utils/authCookies');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
@@ -301,6 +310,12 @@ const buildAuthSuccessPayload = (user, message = 'Login successful!') => {
             plan: user.current_plan,
         },
     };
+};
+
+const sendUserAuthResponse = (res, user, message = 'Login successful!') => {
+    const payload = buildAuthSuccessPayload(user, message);
+    setUserAuthCookie(res, payload.token);
+    return res.json(payload);
 };
 
 const getPasswordlessProviderMessage = (user) => {
@@ -828,7 +843,7 @@ router.post('/login', async (req, res) => {
 
         await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
-        return res.json(buildAuthSuccessPayload(user, 'Login successful!'));
+        return sendUserAuthResponse(res, user, 'Login successful!');
 
     } catch (err) {
         console.error("LOGIN ERROR:", err.message);
@@ -1041,7 +1056,7 @@ router.post('/admin/verify-otp', async (req, res) => {
         );
         await pool.query('COMMIT');
 
-        return res.json(buildAuthSuccessPayload(user, 'OTP verified. Login successful!'));
+        return sendUserAuthResponse(res, user, 'OTP verified. Login successful!');
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
         console.error('ADMIN VERIFY OTP ERROR:', err.message);
@@ -1217,7 +1232,7 @@ router.post('/admin/verify-email-otp', async (req, res) => {
         );
         await pool.query('COMMIT');
 
-        return res.json(buildAuthSuccessPayload(user, 'OTP verified. Login successful!'));
+        return sendUserAuthResponse(res, user, 'OTP verified. Login successful!');
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
         console.error('ADMIN VERIFY EMAIL OTP ERROR:', err.message);
@@ -1562,6 +1577,7 @@ router.get('/google/callback', async (req, res) => {
             is_active: true,
         });
 
+        setUserAuthCookie(res, token);
         res.redirect(buildFrontendAuthRedirect({ mode, token, source: 'google' }));
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
@@ -1645,7 +1661,7 @@ router.post('/google/signup/complete', async (req, res) => {
             is_active: true,
         });
 
-        return res.json({
+        const payloadResponse = {
             token,
             user: {
                 id: user.id,
@@ -1662,7 +1678,10 @@ router.post('/google/signup/complete', async (req, res) => {
                 valid_until: user.saas_valid_until,
                 plan: user.current_plan,
             }
-        });
+        };
+
+        setUserAuthCookie(res, token);
+        return res.json(payloadResponse);
     } catch (err) {
         await pool.query('ROLLBACK').catch(() => {});
         if (err?.message === 'INVALID_GOOGLE_SIGNUP_TOKEN' || err?.name === 'JsonWebTokenError' || err?.name === 'TokenExpiredError') {
@@ -1749,6 +1768,7 @@ router.post('/apple', async (req, res) => {
             { expiresIn: '30d' }
         );
 
+        setUserAuthCookie(res, token);
         return res.json({
             token,
             user: { id: user.id, full_name: user.full_name, email: user.email, gym_id: user.gym_id, role: user.role, permissions }
@@ -1905,6 +1925,7 @@ router.post('/member/verify-otp', async (req, res) => {
             { expiresIn: '7d' }
         );
 
+        setMemberAuthCookie(res, token);
         return res.json({
             token,
             member: {
@@ -1925,9 +1946,15 @@ router.post('/member/verify-otp', async (req, res) => {
     }
 });
 
+router.post('/logout', (_req, res) => {
+    clearUserAuthCookie(res);
+    clearMemberAuthCookie(res);
+    return res.json({ success: true });
+});
+
 // GET /api/auth/member/me — returns member profile (authenticated via member JWT)
 router.get('/member/me', async (req, res) => {
-    const token = req.header('x-auth-token');
+    const token = req.header('x-auth-token') || getRequestCookie(req, MEMBER_AUTH_COOKIE);
     if (!token) return res.status(401).json({ message: 'No token.' });
 
     try {
@@ -1970,7 +1997,7 @@ router.get('/member/me', async (req, res) => {
 
 // GET /api/auth/member/attendance — last 30 days attendance (member JWT required)
 router.get('/member/attendance', async (req, res) => {
-    const token = req.header('x-auth-token');
+    const token = req.header('x-auth-token') || getRequestCookie(req, MEMBER_AUTH_COOKIE);
     if (!token) return res.status(401).json({ message: 'No token.' });
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);

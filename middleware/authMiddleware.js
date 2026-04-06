@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { getRequestCookie, OWNER_AUTH_COOKIE } = require('../utils/authCookies');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
@@ -8,7 +9,8 @@ module.exports = (req, res, next) => {
     const headerToken = req.header('x-auth-token');
     const authHeader = req.header('authorization');
     const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-    const token = headerToken || bearerToken;
+    const cookieToken = getRequestCookie(req, OWNER_AUTH_COOKIE);
+    const token = headerToken || bearerToken || cookieToken;
 
     if (!token) {
         return res.status(401).json({
@@ -24,6 +26,7 @@ module.exports = (req, res, next) => {
         
         // This attaches the user/gym data to the request
         req.user = decoded.user || decoded; 
+        req.authToken = token;
         next();
     } catch (err) {
         if (process.env.NODE_ENV !== 'production') {

@@ -10,6 +10,7 @@ const {
     normalizeLocalIndianPhone,
 } = require('../utils/msg91');
 const { sendTrackedWhatsAppTemplate } = require('../utils/whatsappDelivery');
+const { writeAuditLog } = require('../utils/auditLog');
 
 const AUDIENCE_MAP = {
     All: 'ALL',
@@ -704,6 +705,23 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
             );
         }
 
+        await writeAuditLog({
+            actorType: 'GYM_USER',
+            actorId: String(requesterId || req.user.id || ''),
+            action: 'REMINDER_SEND',
+            targetType: 'WHATSAPP_REMINDER',
+            targetId: requestedTemplateKey || 'AUTO',
+            targetLabel: requestedTemplateKey || 'Auto template selection',
+            details: {
+                gym_id: gymId,
+                attempted_count: members.length,
+                sent_to_count: successCount,
+                failed_count: failedCount,
+                template_keys_used: Array.from(templateKeysUsed),
+                requested_member_count: memberIds.length,
+            },
+        });
+
         return ok(res, {
             attempted_count: members.length,
             sent_to_count: successCount,
@@ -915,6 +933,26 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
              VALUES ($1, $2, $3)`,
             [gymId, 'Campaign sent', `Broadcast ${status.toLowerCase()} · ${successCount} delivered, ${failedCount} failed [${logSegment}]`]
         );
+
+        await writeAuditLog({
+            actorType: 'GYM_USER',
+            actorId: String(userId || req.user.id || ''),
+            action: 'CAMPAIGN_RUN',
+            targetType: 'WHATSAPP_CAMPAIGN',
+            targetId: String(broadcastLogId),
+            targetLabel: `${logSegment}:${selectedTemplate?.title || selectedTemplate?.template_key || 'template'}`,
+            details: {
+                gym_id: gymId,
+                segment: logSegment,
+                template_key: selectedTemplate?.template_key || null,
+                template_title: selectedTemplate?.title || null,
+                attempted_count: targetMembers.length,
+                sent_to_count: successCount,
+                failed_count: failedCount,
+                monthly_limit: monthlyLimit,
+                monthly_used_after_send: monthlyUsed + successCount,
+            },
+        });
 
         return ok(res, {
             campaign_id: broadcastLogId,

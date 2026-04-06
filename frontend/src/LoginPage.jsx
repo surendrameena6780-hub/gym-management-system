@@ -481,11 +481,12 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
 
   useEffect(() => {
     const gymId = attendanceOptions?.gym?.id || member?.gym_id || null;
-    if (!gymId || !member?.id) return undefined;
+    if (!gymId || !member?.id || !token) return undefined;
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return undefined;
     if (Notification.permission === 'denied') return undefined;
 
     let cancelled = false;
+    const headers = { 'x-auth-token': token };
 
     (async () => {
       try {
@@ -499,9 +500,7 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
         if (existing) {
           await axios.post('/api/push/subscribe-member', {
             ...existing.toJSON(),
-            member_id: member.id,
-            gym_id: gymId,
-          }).catch(() => {});
+          }, { headers }).catch(() => {});
           return;
         }
 
@@ -527,9 +526,7 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
         if (!cancelled) {
           await axios.post('/api/push/subscribe-member', {
             ...subscription.toJSON(),
-            member_id: member.id,
-            gym_id: gymId,
-          }).catch(() => {});
+          }, { headers }).catch(() => {});
         }
       } catch (_err) {
         // Member push subscription should never block the portal.
@@ -539,7 +536,7 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
     return () => {
       cancelled = true;
     };
-  }, [attendanceOptions?.gym?.id, member?.gym_id, member?.id]);
+  }, [attendanceOptions?.gym?.id, member?.gym_id, member?.id, token]);
 
   useEffect(() => {
     if (!navigator?.geolocation) {

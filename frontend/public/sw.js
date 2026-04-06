@@ -58,7 +58,7 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data?.json() || {}; } catch (_) {}
+  try { data = event.data?.json() || {}; } catch (_err) { data = {}; }
   event.waitUntil(
     self.registration.showNotification(data.title || 'GymVault', {
       body: data.body || '',
@@ -74,10 +74,10 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = event.notification.data?.url || '/';
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
       const existing = windowClients.find((c) => c.url === url && 'focus' in c);
       if (existing) return existing.focus();
-      if (clients.openWindow) return clients.openWindow(url);
+      if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );
 });
