@@ -286,6 +286,9 @@ const createDeliveryLog = async ({
 
 const updateDeliveryFromAcceptance = async ({ logId, providerPayload, acceptance }) => {
     const status = mergeDeliveryStatus('QUEUED', acceptance?.normalizedStatus || 'QUEUED');
+    const statusTimestamp = new Date();
+    const submittedAtFallback = ['SUBMITTED', 'SENT', 'DELIVERED', 'READ'].includes(status) ? statusTimestamp : null;
+    const sentAtFallback = ['SENT', 'DELIVERED', 'READ'].includes(status) ? statusTimestamp : null;
     await pool.query(
         `UPDATE whatsapp_delivery_logs
          SET msg91_request_id = COALESCE($2, msg91_request_id),
@@ -293,9 +296,9 @@ const updateDeliveryFromAcceptance = async ({ logId, providerPayload, acceptance
              provider_status = COALESCE(NULLIF($4, ''), provider_status),
              current_status = $5,
              status_detail = COALESCE(NULLIF($6, ''), status_detail),
-             submitted_at = COALESCE(submitted_at, CASE WHEN $5 IN ('SUBMITTED', 'SENT', 'DELIVERED', 'READ') THEN NOW() ELSE NULL END),
-             sent_at = COALESCE(sent_at, CASE WHEN $5 IN ('SENT', 'DELIVERED', 'READ') THEN NOW() ELSE NULL END),
-             last_provider_payload = $7::jsonb,
+             submitted_at = COALESCE(submitted_at, $7::timestamptz),
+             sent_at = COALESCE(sent_at, $8::timestamptz),
+             last_provider_payload = $9::jsonb,
              updated_at = NOW()
          WHERE id = $1`,
         [
@@ -305,6 +308,8 @@ const updateDeliveryFromAcceptance = async ({ logId, providerPayload, acceptance
             toTrimmedString(acceptance?.providerStatus) || null,
             status,
             toTrimmedString(acceptance?.statusDetail) || null,
+            submittedAtFallback,
+            sentAtFallback,
             JSON.stringify(providerPayload || {}),
         ]
     );
@@ -427,6 +432,12 @@ const findLogForWebhookRecord = async (record) => {
 
 const applyWebhookRecordToLog = async (logRow, record) => {
     const nextStatus = mergeDeliveryStatus(logRow?.current_status, record.normalizedStatus);
+    const statusTimestamp = new Date();
+    const submittedAtFallback = ['SUBMITTED', 'SENT', 'DELIVERED', 'READ'].includes(nextStatus) ? statusTimestamp : null;
+    const sentAtFallback = ['SENT', 'DELIVERED', 'READ'].includes(nextStatus) ? statusTimestamp : null;
+    const deliveredAtFallback = ['DELIVERED', 'READ'].includes(nextStatus) ? statusTimestamp : null;
+    const readAtFallback = nextStatus === 'READ' ? statusTimestamp : null;
+    const failedAtFallback = nextStatus === 'FAILED' ? statusTimestamp : null;
     await pool.query(
         `UPDATE whatsapp_delivery_logs
          SET msg91_request_id = COALESCE($2, msg91_request_id),
@@ -435,11 +446,11 @@ const applyWebhookRecordToLog = async (logRow, record) => {
              provider_status = COALESCE(NULLIF($5, ''), provider_status),
              current_status = $6,
              status_detail = COALESCE(NULLIF($7, ''), status_detail),
-             submitted_at = COALESCE($8, submitted_at),
-             sent_at = COALESCE($9, sent_at, CASE WHEN $6 IN ('SENT', 'DELIVERED', 'READ') THEN NOW() ELSE NULL END),
-             delivered_at = COALESCE($10, delivered_at, CASE WHEN $6 IN ('DELIVERED', 'READ') THEN NOW() ELSE NULL END),
-             read_at = COALESCE($11, read_at, CASE WHEN $6 = 'READ' THEN NOW() ELSE NULL END),
-             failed_at = COALESCE($12, failed_at, CASE WHEN $6 = 'FAILED' THEN NOW() ELSE NULL END),
+             submitted_at = COALESCE($8::timestamptz, submitted_at, $15::timestamptz),
+             sent_at = COALESCE($9::timestamptz, sent_at, $16::timestamptz),
+             delivered_at = COALESCE($10::timestamptz, delivered_at, $17::timestamptz),
+             read_at = COALESCE($11::timestamptz, read_at, $18::timestamptz),
+             failed_at = COALESCE($12::timestamptz, failed_at, $19::timestamptz),
              template_language = COALESCE(NULLIF($13, ''), template_language),
              last_provider_payload = $14::jsonb,
              last_webhook_received_at = NOW(),
@@ -461,6 +472,11 @@ const applyWebhookRecordToLog = async (logRow, record) => {
             record.failedAt,
             record.templateLanguage || null,
             JSON.stringify(record.payload || {}),
+            submittedAtFallback,
+            sentAtFallback,
+            deliveredAtFallback,
+            readAtFallback,
+            failedAtFallback,
         ]
     );
 };
