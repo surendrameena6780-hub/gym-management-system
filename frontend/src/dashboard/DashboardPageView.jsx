@@ -265,7 +265,7 @@ const FloatingActionBar = ({ controller }) => {
   );
 };
 
-const DashboardPageView = ({ controller }) => {
+const DashboardPageView = ({ controller, isActive = true }) => {
   const {
     chartDays,
     chartTotal,
@@ -488,42 +488,44 @@ const DashboardPageView = ({ controller }) => {
             </div>
             <div className="flex-1 min-h-[220px]">
               {displayChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={displayChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#6366f1" stopOpacity={0.22} />
-                        <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 0" vertical={false} stroke="rgba(99,102,241,0.06)" />
-                    <XAxis
-                      dataKey="name"
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
-                      dy={8}
-                    />
-                    <YAxis
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
-                      tickFormatter={(value) => `₹${value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}`}
-                      width={44}
-                    />
-                    <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                    <Area
-                      type="monotone"
-                      dataKey="rev"
-                      stroke="#6366f1"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#revGrad)"
-                      dot={false}
-                      activeDot={{ r: 5, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                isActive ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={displayChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#6366f1" stopOpacity={0.22} />
+                          <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 0" vertical={false} stroke="rgba(99,102,241,0.06)" />
+                      <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
+                        dy={8}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
+                        tickFormatter={(value) => `₹${value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}`}
+                        width={44}
+                      />
+                      <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                      <Area
+                        type="monotone"
+                        dataKey="rev"
+                        stroke="#6366f1"
+                        strokeWidth={2.5}
+                        fillOpacity={1}
+                        fill="url(#revGrad)"
+                        dot={false}
+                        activeDot={{ r: 5, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : <div className="h-full rounded-2xl border border-slate-100 bg-slate-50" />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-3">
                   <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center">

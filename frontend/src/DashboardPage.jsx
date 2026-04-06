@@ -12,7 +12,7 @@ const DashboardPage = (props) => {
 
   return (
     <>
-      <DashboardPageView controller={controller} />
+      <DashboardPageView controller={controller} isActive={props.isActive !== false} />
       <DashboardPageModals controller={controller} />
     </>
   );

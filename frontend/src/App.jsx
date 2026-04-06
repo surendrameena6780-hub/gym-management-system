@@ -1,4 +1,4 @@
-﻿import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from 'react'
+﻿import React, { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
@@ -10,6 +10,7 @@ import SuspensionOverlay from './SuspensionOverlay';
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import { clearSessionToken, getSessionToken, setSessionToken } from './utils/authSession';
 import { reportClientError } from './utils/clientErrorReporter';
+import { lazyWithRecovery } from './utils/lazyWithRecovery';
 import {
   X, CheckCircle, AlertTriangle, AlertCircle,
   LayoutDashboard, Users, Layers, CreditCard,
@@ -18,18 +19,18 @@ import {
   Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- ðŸš¨ ADDED TOUR ICONS
 } from 'lucide-react';
 
-const DashboardPage = lazy(() => import('./DashboardPage'));
-const MembersPage = lazy(() => import('./MembersPage'));
-const LeadsPage = lazy(() => import('./LeadsPage'));
-const PlansPage = lazy(() => import('./PlansPage'));
-const PaymentsPage = lazy(() => import('./PaymentsPage'));
-const AttendancePage = lazy(() => import('./AttendancePage'));
-const ClassesPage = lazy(() => import('./ClassesPage'));
-const RfidSetupPage = lazy(() => import('./RfidSetupPage'));
-const InsightsPage = lazy(() => import('./InsightsPage'));
-const SettingsPage = lazy(() => import('./SettingsPage'));
-const HelpSupportPage = lazy(() => import('./HelpSupportPage'));
-const StaffDashboard = lazy(() => import('./StaffDashboard'));
+const DashboardPage = lazyWithRecovery('dashboard', () => import('./DashboardPage'));
+const MembersPage = lazyWithRecovery('members', () => import('./MembersPage'));
+const LeadsPage = lazyWithRecovery('leads', () => import('./LeadsPage'));
+const PlansPage = lazyWithRecovery('plans', () => import('./PlansPage'));
+const PaymentsPage = lazyWithRecovery('payments', () => import('./PaymentsPage'));
+const AttendancePage = lazyWithRecovery('attendance', () => import('./AttendancePage'));
+const ClassesPage = lazyWithRecovery('classes', () => import('./ClassesPage'));
+const RfidSetupPage = lazyWithRecovery('rfid-setup', () => import('./RfidSetupPage'));
+const InsightsPage = lazyWithRecovery('insights', () => import('./InsightsPage'));
+const SettingsPage = lazyWithRecovery('settings', () => import('./SettingsPage'));
+const HelpSupportPage = lazyWithRecovery('help-support', () => import('./HelpSupportPage'));
+const StaffDashboard = lazyWithRecovery('staff-dashboard', () => import('./StaffDashboard'));
 
 // â”€â”€â”€ Navigation Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

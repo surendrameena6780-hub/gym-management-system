@@ -311,12 +311,26 @@ if (typeof window !== 'undefined' && !window.__gymvaultTouchGuardsInstalled) {
 }
 
 if ('serviceWorker' in navigator) {
-  const serviceWorkerBuildId = typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : 'dev'
+  const refreshServiceWorker = () => {
+    navigator.serviceWorker.getRegistration().then((registration) => {
+      registration?.update().catch(() => undefined)
+    }).catch(() => undefined)
+  }
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`/sw.js?build=${encodeURIComponent(serviceWorkerBuildId)}`).catch((error) => {
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+      registration.update().catch(() => undefined)
+    }).catch((error) => {
       console.warn('Service worker registration failed:', error)
     })
   })
+
+  window.addEventListener('focus', refreshServiceWorker, { passive: true })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      refreshServiceWorker()
+    }
+  }, { passive: true })
 }
 
 createRoot(document.getElementById('root')).render(

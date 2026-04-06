@@ -1,8 +1,5 @@
-const BUILD_ID = new URL(self.location.href).searchParams.get('build') || 'dev';
-const CACHE_NAME = `gymvault-${BUILD_ID}`;
+const CACHE_NAME = 'gymvault-static-v2';
 const PRECACHE_URLS = [
-  '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/gymvault-app-icon-32.png',
   '/gymvault-app-icon-64.png',
@@ -26,33 +23,38 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  // Never cache API calls — always fetch fresh data from the server
-  if (event.request.url.includes('/api/')) return;
+  const requestUrl = new URL(event.request.url);
 
-  if (event.request.mode === 'navigate') {
+  // Never cache API calls — always fetch fresh data from the server
+  if (requestUrl.origin !== self.location.origin || requestUrl.pathname.startsWith('/api/')) return;
+
+  const isStableAsset = PRECACHE_URLS.includes(requestUrl.pathname);
+  if (isStableAsset) {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+
+        return fetch(event.request).then((response) => {
+          if (response && response.status === 200) {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+
+          return response;
+        });
+      })
     );
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
+  if (requestUrl.pathname.startsWith('/assets/')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
 
-      return fetch(event.request)
-        .then((response) => {
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
-          return response;
-        })
-        .catch(() => caches.match('/index.html'));
-    })
-  );
+  if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+  }
 });
 
 // ── Push Notifications ────────────────────────────────────────────────────────
