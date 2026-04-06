@@ -1219,8 +1219,6 @@ router.get('/platform', auth, async (req, res) => {
             ),
             pool.query(
                 `SELECT id, key_name, key_prefix, scopes, is_active, last_used_at, created_at
-            getWhatsAppDeliverySummary(gymId),
-            getRecentWhatsAppDeliveryLogs(gymId, 20),
                  FROM api_keys
                  WHERE gym_id = $1
                  ORDER BY created_at DESC`,
@@ -1234,6 +1232,8 @@ router.get('/platform', auth, async (req, res) => {
                  ORDER BY created_at DESC`,
                 [gymId]
             ),
+            getWhatsAppDeliverySummary(gymId),
+            getRecentWhatsAppDeliveryLogs(gymId, 20),
         ]);
 
         const gym = gymRes.rows[0] || {};

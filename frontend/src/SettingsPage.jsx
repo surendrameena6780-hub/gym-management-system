@@ -209,6 +209,13 @@ const getWhatsAppDeliveryActivity = (log) => {
   return { label: 'Created', time: log?.created_at };
 };
 
+const DELIVERY_LOG_FILTERS = [
+  { value: 'ALL', label: 'All' },
+  { value: 'DELIVERED', label: 'Delivered' },
+  { value: 'FAILED', label: 'Failed' },
+  { value: 'READ', label: 'Read' },
+];
+
 const getRazorpayCheckoutImageUrl = () => {
   if (typeof window === 'undefined') return '';
   return new URL('/gymvault-app-icon-192.png', window.location.origin).toString();
@@ -397,6 +404,7 @@ const loadRazorpayScript = () => {
   const [revealedApiKey, setRevealedApiKey] = useState('');
   const [copiedApiKey, setCopiedApiKey] = useState(false);
   const [copiedDeliveryCallback, setCopiedDeliveryCallback] = useState(false);
+  const [deliveryLogFilter, setDeliveryLogFilter] = useState('ALL');
   const [webhookForm, setWebhookForm] = useState(() => createWebhookDraft());
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [webhookTestingId, setWebhookTestingId] = useState(null);
@@ -485,6 +493,12 @@ const loadRazorpayScript = () => {
   const isWhatsAppConnected = String(integrationData.whatsapp_status || '').toUpperCase() === 'CONNECTED';
   const resolvedWhatsAppDisplayName = integrationData.whatsapp_display_name || (isWhatsAppConnected ? 'Managed in MSG91 portal' : 'Waiting for MSG91 sync');
   const resolvedWhatsAppCategory = integrationData.whatsapp_category || (isWhatsAppConnected ? 'Managed in MSG91 portal' : 'Not available yet');
+  const recentDeliveryLogs = Array.isArray(platformData.whatsapp_delivery?.recent_logs) ? platformData.whatsapp_delivery.recent_logs : [];
+  const visibleDeliveryLogs = recentDeliveryLogs.filter((log) => {
+    if (deliveryLogFilter === 'ALL') return true;
+    return String(log?.current_status || '').trim().toUpperCase() === deliveryLogFilter;
+  });
+  const activeDeliveryFilterLabel = DELIVERY_LOG_FILTERS.find((option) => option.value === deliveryLogFilter)?.label || 'All';
 
   useEffect(() => {
     setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
@@ -2910,11 +2924,25 @@ const loadRazorpayScript = () => {
                                 </div>
                               </div>
 
-                              <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                                {platformData.whatsapp_delivery?.recent_logs?.length === 0 ? (
-                                  <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm font-medium">No WhatsApp delivery logs yet.</div>
+                              <div>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                  {DELIVERY_LOG_FILTERS.map((option) => (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      onClick={() => setDeliveryLogFilter(option.value)}
+                                      className={`px-3 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wider transition-colors ${deliveryLogFilter === option.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                </div>
+
+                                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                                {visibleDeliveryLogs.length === 0 ? (
+                                  <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm font-medium">{deliveryLogFilter === 'ALL' ? 'No WhatsApp delivery logs yet.' : `No ${activeDeliveryFilterLabel.toLowerCase()} logs yet.`}</div>
                                 ) : (
-                                  platformData.whatsapp_delivery.recent_logs.map((log) => {
+                                  visibleDeliveryLogs.map((log) => {
                                     const statusMeta = getWhatsAppDeliveryMeta(log.current_status);
                                     const activity = getWhatsAppDeliveryActivity(log);
                                     return (
@@ -2940,6 +2968,7 @@ const loadRazorpayScript = () => {
                                     );
                                   })
                                 )}
+                                </div>
                               </div>
                             </div>
                           </div>

@@ -499,10 +499,10 @@ const getWhatsAppDeliverySummary = async (gymId) => {
     const result = await pool.query(
         `SELECT
             COUNT(*)::INT AS total_count,
-            COUNT(*) FILTER (WHERE current_status IN ('QUEUED', 'SUBMITTED', 'SENT'))::INT AS in_flight_count,
-            COUNT(*) FILTER (WHERE current_status = 'DELIVERED')::INT AS delivered_count,
-            COUNT(*) FILTER (WHERE current_status = 'READ')::INT AS read_count,
-            COUNT(*) FILTER (WHERE current_status = 'FAILED')::INT AS failed_count
+            COALESCE(SUM(CASE WHEN current_status IN ('QUEUED', 'SUBMITTED', 'SENT') THEN 1 ELSE 0 END), 0)::INT AS in_flight_count,
+            COALESCE(SUM(CASE WHEN current_status = 'DELIVERED' THEN 1 ELSE 0 END), 0)::INT AS delivered_count,
+            COALESCE(SUM(CASE WHEN current_status = 'READ' THEN 1 ELSE 0 END), 0)::INT AS read_count,
+            COALESCE(SUM(CASE WHEN current_status = 'FAILED' THEN 1 ELSE 0 END), 0)::INT AS failed_count
          FROM whatsapp_delivery_logs
          WHERE gym_id = $1
            AND created_at >= NOW() - INTERVAL '30 days'`,
