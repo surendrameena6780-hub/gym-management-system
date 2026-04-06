@@ -4,6 +4,13 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
+const {
+    ValidationError,
+    ensureTrimmedString,
+    ensureInteger,
+    ensureTimestamp,
+    isValidationError,
+} = require('../utils/fieldValidation');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -79,6 +86,56 @@ const buildRecurringStarts = ({ startsAt, repeatMode, repeatUntil, repeatDays })
     }
 
     return occurrences.map((item) => item.toISOString());
+};
+
+const CLASS_SESSION_STATUSES = new Set(['SCHEDULED', 'CANCELLED', 'COMPLETED']);
+
+const normalizeClassTypePayload = (payload = {}) => ({
+    title: ensureTrimmedString(payload.title, { field: 'title', required: true, min: 2, max: 120 }),
+    category: ensureTrimmedString(payload.category, { field: 'category', max: 60 }),
+    description: ensureTrimmedString(payload.description, { field: 'description', max: 2000 }),
+    trainer_name: ensureTrimmedString(payload.trainer_name, { field: 'trainer_name', max: 120 }),
+    capacity: ensureInteger(payload.capacity, { field: 'capacity', min: 1, max: 500, defaultValue: 20 }),
+    duration_minutes: ensureInteger(payload.duration_minutes, { field: 'duration_minutes', min: 5, max: 720, defaultValue: 60 }),
+    location: ensureTrimmedString(payload.location, { field: 'location', max: 120 }),
+    color_theme: ensureTrimmedString(payload.color_theme, { field: 'color_theme', max: 40, defaultValue: 'indigo' }) || 'indigo',
+});
+
+const normalizeClassSessionStatus = (value, fallback = 'SCHEDULED') => {
+    const normalized = ensureTrimmedString(value, { field: 'status', max: 20, defaultValue: fallback, uppercase: true }) || fallback;
+    if (!CLASS_SESSION_STATUSES.has(normalized)) {
+        throw new ValidationError('status must be one of SCHEDULED, CANCELLED, or COMPLETED.');
+    }
+    return normalized;
+};
+
+const normalizeSessionNotes = (value) => ensureTrimmedString(value, { field: 'notes', max: 1000 });
+
+const normalizeRepeatDaysInput = (value) => {
+    if (value === undefined || value === null) {
+        return [];
+    }
+
+    if (!Array.isArray(value)) {
+        throw new ValidationError('repeat_days must be an array of weekdays.');
+    }
+
+    if (value.length > 7) {
+        throw new ValidationError('repeat_days must contain 7 items or fewer.');
+    }
+
+    return Array.from(new Set(value.map((entry, index) => ensureInteger(entry, {
+        field: `repeat_days[${index}]`,
+        min: 0,
+        max: 6,
+        required: true,
+    })))).sort((a, b) => a - b);
+};
+
+const ensureEndsAfterStarts = (startsAt, endsAt) => {
+    if (new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
+        throw new ValidationError('ends_at must be after starts_at.');
+    }
 };
 
 router.use(auth, saasMiddleware);
@@ -164,18 +221,7 @@ router.get('/types', requirePermission('attendance:read'), async (req, res) => {
 router.post('/types', requirePermission('attendance:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const title = String(req.body?.title || '').trim();
-        const category = String(req.body?.category || '').trim();
-        const description = String(req.body?.description || '').trim();
-        const trainerName = String(req.body?.trainer_name || '').trim();
-        const capacity = parsePositiveInt(req.body?.capacity, 20);
-        const durationMinutes = parsePositiveInt(req.body?.duration_minutes, 60);
-        const location = String(req.body?.location || '').trim();
-        const colorTheme = String(req.body?.color_theme || 'indigo').trim() || 'indigo';
-
-        if (!title) {
-            return res.status(400).json({ error: 'title is required.' });
-        }
+        const payload = normalizeClassTypePayload(req.body || {});
 
         const result = await pool.query(
             `INSERT INTO class_types (
@@ -183,11 +229,14 @@ router.post('/types', requirePermission('attendance:write'), async (req, res) =>
                 duration_minutes, location, color_theme
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              RETURNING *`,
-            [gymId, title, category, description, trainerName, capacity, durationMinutes, location, colorTheme]
+            [gymId, payload.title, payload.category, payload.description, payload.trainer_name, payload.capacity, payload.duration_minutes, payload.location, payload.color_theme]
         );
 
         return res.status(201).json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS TYPE CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to create class type.' });
     }
@@ -196,24 +245,9 @@ router.post('/types', requirePermission('attendance:write'), async (req, res) =>
 router.put('/types/:id', requirePermission('attendance:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const classTypeId = parsePositiveInt(req.params.id);
-        if (!classTypeId) {
-            return res.status(400).json({ error: 'Invalid class type id.' });
-        }
-
-        const title = String(req.body?.title || '').trim();
-        const category = String(req.body?.category || '').trim();
-        const description = String(req.body?.description || '').trim();
-        const trainerName = String(req.body?.trainer_name || '').trim();
-        const capacity = parsePositiveInt(req.body?.capacity, 20);
-        const durationMinutes = parsePositiveInt(req.body?.duration_minutes, 60);
-        const location = String(req.body?.location || '').trim();
-        const colorTheme = String(req.body?.color_theme || 'indigo').trim() || 'indigo';
+        const classTypeId = ensureInteger(req.params.id, { field: 'class type id', required: true, min: 1 });
+        const payload = normalizeClassTypePayload(req.body || {});
         const isActive = typeof req.body?.is_active === 'boolean' ? req.body.is_active : true;
-
-        if (!title) {
-            return res.status(400).json({ error: 'title is required.' });
-        }
 
         const result = await pool.query(
             `UPDATE class_types
@@ -229,7 +263,7 @@ router.put('/types/:id', requirePermission('attendance:write'), async (req, res)
                  updated_at = NOW()
              WHERE id = $10 AND gym_id = $11
              RETURNING *`,
-            [title, category, description, trainerName, capacity, durationMinutes, location, colorTheme, isActive, classTypeId, gymId]
+            [payload.title, payload.category, payload.description, payload.trainer_name, payload.capacity, payload.duration_minutes, payload.location, payload.color_theme, isActive, classTypeId, gymId]
         );
 
         if (result.rows.length === 0) {
@@ -238,6 +272,9 @@ router.put('/types/:id', requirePermission('attendance:write'), async (req, res)
 
         return res.json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS TYPE UPDATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to update class type.' });
     }
@@ -283,14 +320,10 @@ router.get('/schedule', requirePermission('attendance:read'), async (req, res) =
 router.post('/sessions', requirePermission('attendance:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const classTypeId = parsePositiveInt(req.body?.class_type_id);
-        const startsAt = parseTimestamp(req.body?.starts_at);
-        const status = String(req.body?.status || 'SCHEDULED').trim().toUpperCase() || 'SCHEDULED';
-        const notes = String(req.body?.notes || '').trim();
-
-        if (!classTypeId || !startsAt) {
-            return res.status(400).json({ error: 'class_type_id and starts_at are required.' });
-        }
+        const classTypeId = ensureInteger(req.body?.class_type_id, { field: 'class_type_id', required: true, min: 1 });
+        const startsAt = ensureTimestamp(req.body?.starts_at, { field: 'starts_at', required: true });
+        const status = normalizeClassSessionStatus(req.body?.status, 'SCHEDULED');
+        const notes = normalizeSessionNotes(req.body?.notes);
 
         const classTypeRes = await pool.query(
             'SELECT * FROM class_types WHERE id = $1 AND gym_id = $2 LIMIT 1',
@@ -301,11 +334,13 @@ router.post('/sessions', requirePermission('attendance:write'), async (req, res)
         }
 
         const classType = classTypeRes.rows[0];
-        const capacity = parsePositiveInt(req.body?.capacity, classType.capacity || 20);
-        const trainerName = String(req.body?.trainer_name || classType.trainer_name || '').trim();
+        const capacity = ensureInteger(req.body?.capacity, { field: 'capacity', min: 1, max: 500, defaultValue: classType.capacity || 20 });
+        const trainerName = ensureTrimmedString(req.body?.trainer_name, { field: 'trainer_name', max: 120, defaultValue: classType.trainer_name || '' });
         const startsDate = new Date(startsAt);
-        const endsAt = parseTimestamp(req.body?.ends_at)
-            || new Date(startsDate.getTime() + ((parsePositiveInt(req.body?.duration_minutes, classType.duration_minutes || 60)) * 60 * 1000)).toISOString();
+        const durationMinutes = ensureInteger(req.body?.duration_minutes, { field: 'duration_minutes', min: 5, max: 720, defaultValue: classType.duration_minutes || 60 });
+        const endsAt = ensureTimestamp(req.body?.ends_at, { field: 'ends_at' })
+            || new Date(startsDate.getTime() + (durationMinutes * 60 * 1000)).toISOString();
+        ensureEndsAfterStarts(startsAt, endsAt);
 
         const result = await pool.query(
             `INSERT INTO class_sessions (
@@ -317,26 +352,34 @@ router.post('/sessions', requirePermission('attendance:write'), async (req, res)
 
         return res.status(201).json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS SESSION CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to create class session.' });
     }
 });
 
 router.post('/sessions/recurring', requirePermission('attendance:write'), async (req, res) => {
+    let client;
     try {
         const gymId = getGymIdFromRequest(req);
-        const classTypeId = parsePositiveInt(req.body?.class_type_id);
-        const startsAt = parseTimestamp(req.body?.starts_at);
+        const classTypeId = ensureInteger(req.body?.class_type_id, { field: 'class_type_id', required: true, min: 1 });
+        const startsAt = ensureTimestamp(req.body?.starts_at, { field: 'starts_at', required: true });
         const repeatMode = parseRepeatMode(req.body?.repeat_mode);
         const repeatUntil = parseRepeatUntil(req.body?.repeat_until);
-        const status = String(req.body?.status || 'SCHEDULED').trim().toUpperCase() || 'SCHEDULED';
-        const notes = String(req.body?.notes || '').trim();
+        const status = normalizeClassSessionStatus(req.body?.status, 'SCHEDULED');
+        const notes = normalizeSessionNotes(req.body?.notes);
+        const repeatDays = normalizeRepeatDaysInput(req.body?.repeat_days);
 
-        if (!classTypeId || !startsAt) {
-            return res.status(400).json({ error: 'class_type_id and starts_at are required.' });
-        }
         if (!repeatMode || !repeatUntil) {
             return res.status(400).json({ error: 'repeat_mode and repeat_until are required for recurring scheduling.' });
+        }
+        if (repeatMode === 'CUSTOM' && repeatDays.length === 0) {
+            return res.status(400).json({ error: 'repeat_days is required for CUSTOM repeat mode.' });
+        }
+        if (new Date(repeatUntil).getTime() < new Date(startsAt).getTime()) {
+            return res.status(400).json({ error: 'repeat_until must be on or after starts_at.' });
         }
 
         const classTypeRes = await pool.query(
@@ -348,22 +391,23 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
         }
 
         const classType = classTypeRes.rows[0];
-        const durationMinutes = parsePositiveInt(req.body?.duration_minutes, classType.duration_minutes || 60);
-        const capacity = parsePositiveInt(req.body?.capacity, classType.capacity || 20);
-        const trainerName = String(req.body?.trainer_name || classType.trainer_name || '').trim();
+        const durationMinutes = ensureInteger(req.body?.duration_minutes, { field: 'duration_minutes', min: 5, max: 720, defaultValue: classType.duration_minutes || 60 });
+        const capacity = ensureInteger(req.body?.capacity, { field: 'capacity', min: 1, max: 500, defaultValue: classType.capacity || 20 });
+        const trainerName = ensureTrimmedString(req.body?.trainer_name, { field: 'trainer_name', max: 120, defaultValue: classType.trainer_name || '' });
         const starts = buildRecurringStarts({
             startsAt,
             repeatMode,
             repeatUntil,
-            repeatDays: Array.isArray(req.body?.repeat_days) ? req.body.repeat_days : [],
+            repeatDays,
         });
 
-        await pool.query('BEGIN');
+        client = await pool.connect();
+        await client.query('BEGIN');
         const createdSessions = [];
         for (const occurrence of starts) {
             const startDate = new Date(occurrence);
             const endsAt = new Date(startDate.getTime() + (durationMinutes * 60 * 1000)).toISOString();
-            const insertRes = await pool.query(
+            const insertRes = await client.query(
                 `INSERT INTO class_sessions (
                     gym_id, class_type_id, starts_at, ends_at, trainer_name, capacity, status, notes
                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -372,7 +416,7 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
             );
             createdSessions.push(insertRes.rows[0]);
         }
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
 
         return res.status(201).json({
             created_count: createdSessions.length,
@@ -381,19 +425,25 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
             repeat_until: repeatUntil,
         });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS SESSION RECURRING CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to create recurring sessions.' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
 router.put('/sessions/:id', requirePermission('attendance:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const sessionId = parsePositiveInt(req.params.id);
-        if (!sessionId) {
-            return res.status(400).json({ error: 'Invalid class session id.' });
-        }
+        const sessionId = ensureInteger(req.params.id, { field: 'class session id', required: true, min: 1 });
 
         const currentSessionRes = await pool.query(
             `SELECT cs.*, ct.capacity AS default_capacity, ct.duration_minutes, ct.trainer_name AS default_trainer_name
@@ -409,14 +459,15 @@ router.put('/sessions/:id', requirePermission('attendance:write'), async (req, r
         }
 
         const currentSession = currentSessionRes.rows[0];
-        const startsAt = parseTimestamp(req.body?.starts_at) || currentSession.starts_at;
-        const durationMinutes = parsePositiveInt(req.body?.duration_minutes, currentSession.duration_minutes || 60);
-        const endsAt = parseTimestamp(req.body?.ends_at)
+        const startsAt = ensureTimestamp(req.body?.starts_at, { field: 'starts_at', defaultValue: currentSession.starts_at }) || currentSession.starts_at;
+        const durationMinutes = ensureInteger(req.body?.duration_minutes, { field: 'duration_minutes', min: 5, max: 720, defaultValue: currentSession.duration_minutes || 60 });
+        const endsAt = ensureTimestamp(req.body?.ends_at, { field: 'ends_at' })
             || new Date(new Date(startsAt).getTime() + (durationMinutes * 60 * 1000)).toISOString();
-        const trainerName = String(req.body?.trainer_name || currentSession.trainer_name || currentSession.default_trainer_name || '').trim();
-        const capacity = parsePositiveInt(req.body?.capacity, currentSession.capacity || currentSession.default_capacity || 20);
-        const status = String(req.body?.status || currentSession.status || 'SCHEDULED').trim().toUpperCase() || 'SCHEDULED';
-        const notes = String(req.body?.notes || '').trim();
+        const trainerName = ensureTrimmedString(req.body?.trainer_name, { field: 'trainer_name', max: 120, defaultValue: currentSession.trainer_name || currentSession.default_trainer_name || '' });
+        const capacity = ensureInteger(req.body?.capacity, { field: 'capacity', min: 1, max: 500, defaultValue: currentSession.capacity || currentSession.default_capacity || 20 });
+        const status = normalizeClassSessionStatus(req.body?.status, currentSession.status || 'SCHEDULED');
+        const notes = normalizeSessionNotes(req.body?.notes);
+        ensureEndsAfterStarts(startsAt, endsAt);
 
         const result = await pool.query(
             `UPDATE class_sessions
@@ -434,6 +485,9 @@ router.put('/sessions/:id', requirePermission('attendance:write'), async (req, r
 
         return res.json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS SESSION UPDATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to update class session.' });
     }
@@ -478,13 +532,9 @@ router.get('/sessions/:id/bookings', requirePermission('attendance:read'), async
 router.post('/sessions/:id/bookings', requirePermission('attendance:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const sessionId = parsePositiveInt(req.params.id);
-        const memberId = parsePositiveInt(req.body?.member_id);
-        const notes = String(req.body?.notes || '').trim();
-
-        if (!sessionId || !memberId) {
-            return res.status(400).json({ error: 'session id and member_id are required.' });
-        }
+        const sessionId = ensureInteger(req.params.id, { field: 'session id', required: true, min: 1 });
+        const memberId = ensureInteger(req.body?.member_id, { field: 'member_id', required: true, min: 1 });
+        const notes = normalizeSessionNotes(req.body?.notes);
 
         const sessionRes = await pool.query(
             `SELECT cs.id, COALESCE(cs.capacity, ct.capacity, 20) AS effective_capacity
@@ -545,6 +595,9 @@ router.post('/sessions/:id/bookings', requirePermission('attendance:write'), asy
 
         return res.status(201).json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS BOOKING CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to create booking.' });
     }
@@ -580,18 +633,16 @@ router.delete('/sessions/:sessionId/bookings/:memberId', requirePermission('atte
 });
 
 router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermission('attendance:write'), async (req, res) => {
-    const gymId = getGymIdFromRequest(req);
-    const sessionId = parsePositiveInt(req.params.sessionId);
-    const memberId = parsePositiveInt(req.params.memberId);
-
-    if (!sessionId || !memberId) {
-        return res.status(400).json({ error: 'Invalid booking identifier.' });
-    }
+    let client;
 
     try {
-        await pool.query('BEGIN');
+        const gymId = getGymIdFromRequest(req);
+        const sessionId = ensureInteger(req.params.sessionId, { field: 'session id', required: true, min: 1 });
+        const memberId = ensureInteger(req.params.memberId, { field: 'member id', required: true, min: 1 });
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-        const bookingRes = await pool.query(
+        const bookingRes = await client.query(
             `SELECT id, status
              FROM class_bookings
              WHERE gym_id = $1 AND class_session_id = $2 AND member_id = $3
@@ -600,16 +651,16 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
         );
 
         if (bookingRes.rows.length === 0) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Booking not found.' });
         }
 
         if (bookingRes.rows[0].status === 'CANCELLED') {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Cancelled bookings cannot be checked in.' });
         }
 
-        const memberStatusRes = await pool.query(
+        const memberStatusRes = await client.query(
             `SELECT COALESCE(ms_latest.status, 'UNPAID') AS membership_status
              FROM members m
              LEFT JOIN LATERAL (
@@ -626,11 +677,11 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
 
         const membershipStatus = String(memberStatusRes.rows[0]?.membership_status || 'UNPAID').toUpperCase();
         if (membershipStatus !== 'ACTIVE') {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(403).json({ error: `Access Denied: Membership is ${membershipStatus}` });
         }
 
-        await pool.query(
+        await client.query(
             `UPDATE class_bookings
              SET status = 'CHECKED_IN',
                  check_in_time = NOW()
@@ -638,7 +689,7 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
             [bookingRes.rows[0].id]
         );
 
-        const attendanceRes = await pool.query(
+        const attendanceRes = await client.query(
             `SELECT id
              FROM attendance
              WHERE gym_id = $1
@@ -651,24 +702,33 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
 
         let attendanceCreated = false;
         if (attendanceRes.rows.length === 0) {
-            await pool.query(
+            await client.query(
                 'INSERT INTO attendance (gym_id, member_id, check_in_time) VALUES ($1, $2, NOW())',
                 [gymId, memberId]
             );
             attendanceCreated = true;
         }
 
-        await pool.query(
+        await client.query(
             'UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2',
             [memberId, gymId]
         );
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         return res.json({ message: 'Class booking checked in.', attendance_created: attendanceCreated });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CLASS BOOKING CHECK-IN ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to check member into class.' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 

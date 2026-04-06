@@ -9,6 +9,15 @@ const {
     cleanupUploadedFile,
     resolveStoredProfileImagePath,
 } = require('../utils/profileUploads');
+const {
+    ensureTrimmedString,
+    ensureEmail,
+    ensurePhone10,
+    ensureInteger,
+    ensureDateOnly,
+    isValidationError,
+    normalizeDigits,
+} = require('../utils/fieldValidation');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -37,9 +46,6 @@ const getStoredProfileValue = (file) => {
     }
     return buildPicUrl(file.filename);
 };
-
-const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
-const isValidPhone = (value) => /^\d{10}$/.test(value);
 
 const memberSchemaCache = new Map();
 
@@ -79,6 +85,57 @@ const normalizeDocumentUrl = (value) => {
     } catch (_err) {
         return '';
     }
+};
+
+const normalizeMemberIdentityPayload = (payload = {}) => ({
+    full_name: ensureTrimmedString(payload.full_name, { field: 'full_name', required: true, min: 2, max: 100 }),
+    email: ensureEmail(payload.email, { field: 'email', required: true, max: 120 }),
+    phone: ensurePhone10(payload.phone, { field: 'phone', required: true }),
+});
+
+const normalizeMemberDocumentPayload = (payload = {}) => ({
+    doc_type: ensureTrimmedString(payload.doc_type, { field: 'doc_type', required: true, max: 60 }),
+    doc_name: ensureTrimmedString(payload.doc_name, { field: 'doc_name', max: 120 }),
+    notes: ensureTrimmedString(payload.notes, { field: 'notes', max: 1000 }),
+});
+
+const normalizeMemberNotePayload = (payload = {}) => ({
+    note: ensureTrimmedString(payload.note, { field: 'note', required: true, min: 1, max: 2000 }),
+    note_type: ensureTrimmedString(payload.note_type, { field: 'note_type', max: 40, defaultValue: 'general' }) || 'general',
+});
+
+const normalizeMemberWaiverPayload = (payload = {}) => ({
+    waiver_type: ensureTrimmedString(payload.waiver_type, { field: 'waiver_type', max: 40, defaultValue: 'general' }) || 'general',
+    waiver_text: ensureTrimmedString(payload.waiver_text, { field: 'waiver_text', max: 4000, defaultValue: 'Standard gym liability waiver' }) || 'Standard gym liability waiver',
+    signature_data: payload.signature_data || null,
+});
+
+const normalizeOnboardingPatch = (payload = {}) => {
+    const updates = {};
+
+    if (payload.onboarding_complete !== undefined) {
+        updates.onboarding_complete = Boolean(payload.onboarding_complete);
+    }
+    if (payload.emergency_contact !== undefined) {
+        updates.emergency_contact = ensureTrimmedString(payload.emergency_contact, { field: 'emergency_contact', max: 120 });
+    }
+    if (payload.gender !== undefined) {
+        updates.gender = ensureTrimmedString(payload.gender, { field: 'gender', max: 20 });
+    }
+    if (payload.date_of_birth !== undefined) {
+        updates.date_of_birth = ensureDateOnly(payload.date_of_birth, { field: 'date_of_birth', allowFuture: false });
+    }
+    if (payload.address !== undefined) {
+        updates.address = ensureTrimmedString(payload.address, { field: 'address', max: 500 });
+    }
+    if (payload.blood_group !== undefined) {
+        updates.blood_group = ensureTrimmedString(payload.blood_group, { field: 'blood_group', max: 20, uppercase: true });
+    }
+    if (payload.medical_notes !== undefined) {
+        updates.medical_notes = ensureTrimmedString(payload.medical_notes, { field: 'medical_notes', max: 2000 });
+    }
+
+    return updates;
 };
 
 const buildMemberLifecycleStatusCase = (alias) => `
@@ -364,32 +421,19 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
 router.post('/add', auth, saasMiddleware, requirePermission('members:write'), uploadProfilePic, async (req, res) => {
     try {
         const payload = req.body && typeof req.body === 'object' ? req.body : {};
-        const full_name = payload.full_name;
-        const email = payload.email;
-        const phone = payload.phone;
         const gym_id = getGymIdFromRequest(req);
-        const normalizedPhone = normalizePhone(phone);
-        const normalizedName = String(full_name || '').trim();
-        const normalizedEmail = String(email || '').trim().toLowerCase();
+        const normalizedIdentity = normalizeMemberIdentityPayload(payload);
 
         if (!gym_id) {
             await discardUploadedProfile(req);
             return res.status(401).json({ error: 'Invalid session. Please login again.' });
-        }
-        if (!normalizedName || !normalizedEmail || !normalizedPhone) {
-            await discardUploadedProfile(req);
-            return res.status(400).json({ error: 'full_name, email and phone are required.' });
-        }
-        if (!isValidPhone(normalizedPhone)) {
-            await discardUploadedProfile(req);
-            return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
         }
 
         const profile_pic = getStoredProfileValue(req.file);
 
         const existingPhone = await pool.query(
             'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND deleted_at IS NULL LIMIT 1',
-            [gym_id, normalizedPhone]
+            [gym_id, normalizedIdentity.phone]
         );
         if (existingPhone.rows.length > 0) {
             await discardUploadedProfile(req);
@@ -400,13 +444,16 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             `INSERT INTO members (full_name, email, phone, profile_pic, gym_id, joining_date, last_visit, status)
              VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, NULL, 'UNPAID')
              RETURNING *`,
-            [normalizedName, normalizedEmail, normalizedPhone, profile_pic, gym_id]
+            [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, gym_id]
         );
 
         res.json(newMember.rows[0]);
     } catch (err) {
         console.error("ADD MEMBER ERROR:", err.message);
         await discardUploadedProfile(req);
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         if (err.code === '23505') {
             return res.status(400).json({ error: "This email or phone is already registered to another member." });
         }
@@ -417,30 +464,24 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
 // --- 4. UPDATE MEMBER ---
 router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), uploadProfilePic, async (req, res) => {
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
-    const full_name = payload.full_name;
-    const email = payload.email;
-    const phone = payload.phone;
-    const normalizedPhone = normalizePhone(phone);
-    const normalizedName = String(full_name || '').trim();
-    const normalizedEmail = String(email || '').trim().toLowerCase();
     const gym_id = getGymIdFromRequest(req);
-    const memberId = Number.parseInt(req.params.id, 10);
+    let memberId;
+    let normalizedIdentity;
+
+    try {
+        memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        normalizedIdentity = normalizeMemberIdentityPayload(payload);
+    } catch (err) {
+        await discardUploadedProfile(req);
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        throw err;
+    }
 
     if (!gym_id) {
         await discardUploadedProfile(req);
         return res.status(401).json({ error: 'Invalid session. Please login again.' });
-    }
-    if (!Number.isInteger(memberId)) {
-        await discardUploadedProfile(req);
-        return res.status(400).json({ error: 'Invalid member id.' });
-    }
-    if (!normalizedName || !normalizedEmail || !normalizedPhone) {
-        await discardUploadedProfile(req);
-        return res.status(400).json({ error: 'full_name, email and phone are required.' });
-    }
-    if (!isValidPhone(normalizedPhone)) {
-        await discardUploadedProfile(req);
-        return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
     }
 
     try {
@@ -454,13 +495,13 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
         }
 
         const currentMember = currentMemberResult.rows[0];
-        const currentPhone = normalizePhone(currentMember.phone);
+        const currentPhone = normalizeDigits(currentMember.phone);
         const currentEmail = String(currentMember.email || '').trim().toLowerCase();
 
-        if (normalizedPhone !== currentPhone) {
+        if (normalizedIdentity.phone !== currentPhone) {
             const existingPhone = await pool.query(
                 'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
-                [gym_id, normalizedPhone, memberId]
+                [gym_id, normalizedIdentity.phone, memberId]
             );
             if (existingPhone.rows.length > 0) {
                 await discardUploadedProfile(req);
@@ -468,10 +509,10 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
             }
         }
 
-        if (normalizedEmail !== currentEmail) {
+        if (normalizedIdentity.email !== currentEmail) {
             const existingEmail = await pool.query(
                 'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
-                [gym_id, normalizedEmail, memberId]
+                [gym_id, normalizedIdentity.email, memberId]
             );
             if (existingEmail.rows.length > 0) {
                 await discardUploadedProfile(req);
@@ -483,7 +524,7 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
             const profile_pic = getStoredProfileValue(req.file);
             const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3, profile_pic = $4 WHERE id = $5 AND gym_id = $6 AND deleted_at IS NULL",
-                [normalizedName, normalizedEmail, normalizedPhone, profile_pic, memberId, gym_id]
+                [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
                 await discardUploadedProfile(req);
@@ -497,7 +538,7 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
         } else {
             const updateResult = await pool.query(
                 "UPDATE members SET full_name = $1, email = $2, phone = $3 WHERE id = $4 AND gym_id = $5 AND deleted_at IS NULL",
-                [normalizedName, normalizedEmail, normalizedPhone, memberId, gym_id]
+                [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
                 await discardUploadedProfile(req);
@@ -508,6 +549,9 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
     } catch (err) {
         console.error("UPDATE MEMBER ERROR:", err.message);
         await discardUploadedProfile(req);
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         if (err.code === '23505') {
             const detail = String(err.detail || '').toLowerCase();
             if (detail.includes('(email)')) {
@@ -526,6 +570,7 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
 router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     const gym_id = req.user.gym_id;
     try {
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
         const member = await pool.query(
             `SELECT
                 m.id,
@@ -539,7 +584,7 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
                 LIMIT 1
              ) ms_latest ON TRUE
              WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL`,
-            [req.params.id, gym_id]
+            [memberId, gym_id]
         );
         if(member.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
 
@@ -550,14 +595,17 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
 
         await pool.query(
             "INSERT INTO attendance (gym_id, member_id, check_in_time) VALUES ($1, $2, NOW())",
-            [gym_id, req.params.id]
+            [gym_id, memberId]
         );
         await pool.query(
             "UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2",
-            [req.params.id, gym_id]
+            [memberId, gym_id]
         );
         res.json({ message: "Member Checked In" });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error("CHECK-IN ERROR:", err.message);
         res.status(500).json({ error: 'Server error' });
     }
@@ -565,84 +613,124 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
 
 // --- 6. DELETE MEMBER ---
 router.delete('/:id', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
-    const memberId = req.params.id;
-    const gym_id = req.user.gym_id;
+    let client;
     try {
-        const check = await pool.query('SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+        client = await pool.connect();
+
+        const check = await client.query('SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
         if (check.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
 
-        await pool.query('BEGIN');
-        await pool.query('UPDATE payments    SET deleted_at = NOW() WHERE user_id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
-        await pool.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [memberId, gym_id]);
-        await pool.query('UPDATE attendance  SET deleted_at = NOW() WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
-        await pool.query("UPDATE members     SET deleted_at = NOW(), status = 'UNPAID' WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL", [memberId, gym_id]);
-        await pool.query('COMMIT');
+        await client.query('BEGIN');
+        await client.query('UPDATE payments    SET deleted_at = NOW() WHERE user_id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
+        await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [memberId, gym_id]);
+        await client.query('UPDATE attendance  SET deleted_at = NOW() WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
+        await client.query("UPDATE members     SET deleted_at = NOW(), status = 'UNPAID' WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL", [memberId, gym_id]);
+        await client.query('COMMIT');
         res.json({ message: "Member archived" });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error("DELETE MEMBER ERROR:", err.message);
         res.status(500).json({ error: 'Server error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
 // --- 7. CANCEL MEMBER ---
 router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
-    const memberId = req.params.id;
-    const gym_id = req.user.gym_id;
-    const { cancellation_reason } = req.body || {};
+    let client;
     try {
-        const check = await pool.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]);
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+        const cancellationReason = ensureTrimmedString(req.body?.cancellation_reason, { field: 'cancellation_reason', max: 500 }) || null;
+        client = await pool.connect();
+
+        const check = await client.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]);
         if (check.rows.length === 0) return res.status(404).json({ error: 'Member not found' });
-        await pool.query('BEGIN');
-        await pool.query(
+        await client.query('BEGIN');
+        await client.query(
             `UPDATE members SET status='CANCELLED', cancellation_reason=$3, cancelled_at=NOW() WHERE id=$1 AND gym_id=$2`,
-            [memberId, gym_id, String(cancellation_reason || '').trim() || null]
+            [memberId, gym_id, cancellationReason]
         );
-        await pool.query(
+        await client.query(
             `UPDATE memberships SET status='CANCELLED', cancellation_reason=$3, cancelled_at=NOW() WHERE member_id=$1 AND gym_id=$2 AND deleted_at IS NULL AND status IN ('ACTIVE','FROZEN')`,
-            [memberId, gym_id, String(cancellation_reason || '').trim() || null]
+            [memberId, gym_id, cancellationReason]
         );
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
         res.json({ message: 'Member cancelled' });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('CANCEL MEMBER ERROR:', err.message);
         res.status(500).json({ error: 'Server error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
 // --- 8. TRANSFER MEMBER ---
 router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
-    const memberId = req.params.id;
-    const gym_id = req.user.gym_id;
-    const { transfer_to_member_id, notes } = req.body || {};
-    if (!transfer_to_member_id) return res.status(400).json({ error: 'transfer_to_member_id required' });
+    let client;
     try {
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+        const transferToMemberId = ensureInteger(req.body?.transfer_to_member_id, { field: 'transfer_to_member_id', required: true, min: 1 });
+        const notes = ensureTrimmedString(req.body?.notes, { field: 'notes', max: 1000 });
+
+        if (memberId === transferToMemberId) {
+            return res.status(400).json({ error: 'transfer_to_member_id must be different from the source member.' });
+        }
+
+        client = await pool.connect();
         const [src, dst] = await Promise.all([
-            pool.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]),
-            pool.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [transfer_to_member_id, gym_id]),
+            client.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]),
+            client.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [transferToMemberId, gym_id]),
         ]);
         if (!src.rows.length) return res.status(404).json({ error: 'Source member not found' });
         if (!dst.rows.length) return res.status(404).json({ error: 'Destination member not found' });
-        await pool.query('BEGIN');
-        const ms = await pool.query(
+        await client.query('BEGIN');
+        const ms = await client.query(
             `SELECT id, plan_id, start_date, end_date FROM memberships
              WHERE member_id=$1 AND gym_id=$2 AND deleted_at IS NULL AND status IN ('ACTIVE','FROZEN')
              ORDER BY end_date DESC LIMIT 1`, [memberId, gym_id]);
-        if (!ms.rows.length) { await pool.query('ROLLBACK'); return res.status(400).json({ error: 'No active membership to transfer' }); }
+        if (!ms.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'No active membership to transfer' }); }
         const old = ms.rows[0];
-        await pool.query(`UPDATE memberships SET status='TRANSFERRED', cancelled_at=NOW(), transfer_id=$3 WHERE id=$1 AND gym_id=$2`, [old.id, gym_id, transfer_to_member_id]);
-        await pool.query(
+        await client.query(`UPDATE memberships SET status='TRANSFERRED', cancelled_at=NOW(), transfer_id=$3 WHERE id=$1 AND gym_id=$2`, [old.id, gym_id, transferToMemberId]);
+        await client.query(
             `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, amount_paid, total_amount)
              SELECT $1, $2, plan_id, NOW(), end_date, 'ACTIVE', amount_paid, total_amount FROM memberships WHERE id=$3`,
-            [gym_id, transfer_to_member_id, old.id]);
-        await pool.query(`UPDATE members SET transfer_status='TRANSFERRED' WHERE id=$1 AND gym_id=$2`, [memberId, gym_id]);
-        await pool.query('COMMIT');
+            [gym_id, transferToMemberId, old.id]);
+        await client.query(`UPDATE members SET transfer_status='TRANSFERRED' WHERE id=$1 AND gym_id=$2`, [memberId, gym_id]);
+        await client.query('COMMIT');
         res.json({ message: 'Membership transferred', notes });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('TRANSFER MEMBER ERROR:', err.message);
         res.status(500).json({ error: 'Server error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
@@ -669,12 +757,10 @@ router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:re
 router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        const { doc_type, doc_url, doc_name, notes } = req.body || {};
-        const normalizedDocType = String(doc_type || '').trim();
-        const normalizedDocUrl = normalizeDocumentUrl(doc_url);
-        const normalizedDocName = String(doc_name || '').trim();
-        const normalizedNotes = String(notes || '').trim();
-        if (!normalizedDocType || !normalizedDocUrl) {
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const payload = normalizeMemberDocumentPayload(req.body || {});
+        const normalizedDocUrl = normalizeDocumentUrl(req.body?.doc_url);
+        if (!normalizedDocUrl) {
             return res.status(400).json({ error: 'doc_type and a valid document are required' });
         }
         const [hasNotesColumn, hasDocNameColumn, hasUploadedByColumn] = await Promise.all([
@@ -683,14 +769,14 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
             tableHasColumn('member_documents', 'uploaded_by'),
         ]);
         const columns = ['gym_id', 'member_id', 'doc_type', 'doc_url'];
-        const values = [gid, req.params.id, normalizedDocType, normalizedDocUrl];
+        const values = [gid, memberId, payload.doc_type, normalizedDocUrl];
         if (hasNotesColumn) {
             columns.push('notes');
-            values.push(normalizedNotes || null);
+            values.push(payload.notes || null);
         }
         if (hasDocNameColumn) {
             columns.push('doc_name');
-            values.push(normalizedDocName || normalizedDocType);
+            values.push(payload.doc_name || payload.doc_type);
         }
         if (hasUploadedByColumn) {
             columns.push('uploaded_by');
@@ -702,7 +788,13 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
             values
         );
         res.status(201).json(result.rows[0]);
-    } catch(err) { console.error('ADD DOC:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('ADD DOC:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 router.delete('/:mid/documents/:did', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
@@ -726,14 +818,14 @@ router.get('/:id/notes', auth, saasMiddleware, requirePermission('members:read')
 router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        const { note, note_type } = req.body || {};
-        if (!note) return res.status(400).json({ error: 'note is required' });
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const payload = normalizeMemberNotePayload(req.body || {});
         const hasNoteTypeColumn = await tableHasColumn('member_notes', 'note_type');
         const columns = ['gym_id', 'member_id', 'created_by', 'note'];
-        const values = [gid, req.params.id, req.user.id, String(note).trim()];
+        const values = [gid, memberId, req.user.id, payload.note];
         if (hasNoteTypeColumn) {
             columns.push('note_type');
-            values.push(String(note_type || 'general').trim());
+            values.push(payload.note_type);
         }
         const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
         const result = await pool.query(
@@ -741,7 +833,13 @@ router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write
             values
         );
         res.status(201).json(result.rows[0]);
-    } catch(err) { console.error('ADD NOTE:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('ADD NOTE:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 router.delete('/:mid/notes/:nid', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
@@ -755,25 +853,26 @@ router.delete('/:mid/notes/:nid', auth, saasMiddleware, requirePermission('membe
 router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     let client;
     try {
-        client = await pool.connect();
         const gid = req.user.gym_id;
-        const { waiver_type, waiver_text, signature_data } = req.body || {};
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const payload = normalizeMemberWaiverPayload(req.body || {});
+        client = await pool.connect();
         const [hasWaiverTypeColumn, hasSignatureColumn, hasIpAddressColumn] = await Promise.all([
             tableHasColumn('member_waivers', 'waiver_type'),
             tableHasColumn('member_waivers', 'signature_data'),
             tableHasColumn('member_waivers', 'ip_address'),
         ]);
         const columns = ['gym_id', 'member_id', 'waiver_text'];
-        const values = [gid, req.params.id, String(waiver_text || 'Standard gym liability waiver').trim()];
+        const values = [gid, memberId, payload.waiver_text];
         const pushValue = (column, value) => {
             columns.push(column);
             values.push(value);
         };
         if (hasWaiverTypeColumn) {
-            pushValue('waiver_type', String(waiver_type || 'general').trim());
+            pushValue('waiver_type', payload.waiver_type);
         }
         if (hasSignatureColumn) {
-            pushValue('signature_data', signature_data || null);
+            pushValue('signature_data', payload.signature_data);
         }
         if (hasIpAddressColumn) {
             pushValue('ip_address', String(req.ip || '').slice(0, 60));
@@ -785,7 +884,7 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
             `INSERT INTO member_waivers (${columns.join(', ')}, signed_at) VALUES (${placeholders}, NOW())`,
             values
         );
-        await client.query('UPDATE members SET waiver_signed_at=NOW() WHERE id=$1 AND gym_id=$2', [req.params.id, gid]);
+        await client.query('UPDATE members SET waiver_signed_at=NOW() WHERE id=$1 AND gym_id=$2', [memberId, gid]);
         await client.query('COMMIT');
         res.json({ message: 'Waiver signed' });
     } catch(err) {
@@ -795,6 +894,9 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
             }
         } catch (_rollbackErr) {
             // ignore rollback errors after failed inserts
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
         }
         console.error('WAIVER:', err.message);
         res.status(500).json({ error: 'Server error' });
@@ -816,25 +918,32 @@ router.get('/:id/waivers', auth, saasMiddleware, requirePermission('members:read
 router.patch('/:id/onboarding', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        const { onboarding_complete, emergency_contact, gender, date_of_birth, address, blood_group, medical_notes } = req.body || {};
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const payload = normalizeOnboardingPatch(req.body || {});
         const updates = [];
         const vals = [];
         let idx = 3;
-        if (onboarding_complete !== undefined) { updates.push(`onboarding_complete=$${idx++}`); vals.push(!!onboarding_complete); }
-        if (emergency_contact !== undefined) { updates.push(`emergency_contact=$${idx++}`); vals.push(String(emergency_contact).trim()); }
-        if (gender !== undefined) { updates.push(`gender=$${idx++}`); vals.push(String(gender).trim()); }
-        if (date_of_birth !== undefined) { updates.push(`date_of_birth=$${idx++}`); vals.push(date_of_birth || null); }
-        if (address !== undefined) { updates.push(`address=$${idx++}`); vals.push(String(address).trim()); }
-        if (blood_group !== undefined) { updates.push(`blood_group=$${idx++}`); vals.push(String(blood_group).trim()); }
-        if (medical_notes !== undefined) { updates.push(`medical_notes=$${idx++}`); vals.push(String(medical_notes).trim()); }
+        if (payload.onboarding_complete !== undefined) { updates.push(`onboarding_complete=$${idx++}`); vals.push(payload.onboarding_complete); }
+        if (payload.emergency_contact !== undefined) { updates.push(`emergency_contact=$${idx++}`); vals.push(payload.emergency_contact); }
+        if (payload.gender !== undefined) { updates.push(`gender=$${idx++}`); vals.push(payload.gender); }
+        if (payload.date_of_birth !== undefined) { updates.push(`date_of_birth=$${idx++}`); vals.push(payload.date_of_birth || null); }
+        if (payload.address !== undefined) { updates.push(`address=$${idx++}`); vals.push(payload.address); }
+        if (payload.blood_group !== undefined) { updates.push(`blood_group=$${idx++}`); vals.push(payload.blood_group); }
+        if (payload.medical_notes !== undefined) { updates.push(`medical_notes=$${idx++}`); vals.push(payload.medical_notes); }
         if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
         const result = await pool.query(
             `UPDATE members SET ${updates.join(', ')} WHERE id=$1 AND gym_id=$2 RETURNING *`,
-            [req.params.id, gid, ...vals]
+            [memberId, gid, ...vals]
         );
         if (!result.rows.length) return res.status(404).json({ error: 'Member not found' });
         res.json(result.rows[0]);
-    } catch(err) { console.error('ONBOARDING:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('ONBOARDING:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 module.exports = router;

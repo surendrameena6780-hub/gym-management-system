@@ -4,9 +4,14 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
-
-const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
-const isValidPhone = (value) => /^\d{10}$/.test(value);
+const {
+    ensureTrimmedString,
+    ensureEmail,
+    ensurePhone10,
+    ensureInteger,
+    ensureTimestamp,
+    isValidationError,
+} = require('../utils/fieldValidation');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -14,25 +19,18 @@ const getGymIdFromRequest = (req) => {
     return Number.isInteger(gymId) ? gymId : null;
 };
 
-const parseOptionalTimestamp = (value) => {
-    if (!value) return null;
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-};
-
 const normalizeLeadPayload = (payload = {}) => {
-    const normalizedPhone = normalizePhone(payload.phone);
     return {
-        full_name: String(payload.full_name || '').trim(),
-        phone: normalizedPhone,
-        email: String(payload.email || '').trim().toLowerCase(),
-        source: String(payload.source || 'Walk-in').trim() || 'Walk-in',
-        status: String(payload.status || 'NEW').trim().toUpperCase(),
-        priority: String(payload.priority || 'MEDIUM').trim().toUpperCase(),
-        notes: String(payload.notes || '').trim(),
-        lost_reason: String(payload.lost_reason || '').trim(),
-        next_follow_up_at: parseOptionalTimestamp(payload.next_follow_up_at),
-        trial_date: parseOptionalTimestamp(payload.trial_date),
+        full_name: ensureTrimmedString(payload.full_name, { field: 'full_name', required: true, min: 2, max: 100 }),
+        phone: ensurePhone10(payload.phone, { field: 'phone', required: true }),
+        email: ensureEmail(payload.email, { field: 'email', max: 120 }),
+        source: ensureTrimmedString(payload.source, { field: 'source', max: 60, defaultValue: 'Walk-in' }) || 'Walk-in',
+        status: ensureTrimmedString(payload.status, { field: 'status', max: 40, defaultValue: 'NEW', uppercase: true }) || 'NEW',
+        priority: ensureTrimmedString(payload.priority, { field: 'priority', max: 40, defaultValue: 'MEDIUM', uppercase: true }) || 'MEDIUM',
+        notes: ensureTrimmedString(payload.notes, { field: 'notes', max: 2000 }),
+        lost_reason: ensureTrimmedString(payload.lost_reason, { field: 'lost_reason', max: 500 }),
+        next_follow_up_at: ensureTimestamp(payload.next_follow_up_at, { field: 'next_follow_up_at' }),
+        trial_date: ensureTimestamp(payload.trial_date, { field: 'trial_date' }),
         mark_contacted: Boolean(payload.mark_contacted),
     };
 };
@@ -149,13 +147,6 @@ router.post('/', requirePermission('members:write'), async (req, res) => {
         const gymId = getGymIdFromRequest(req);
         const payload = normalizeLeadPayload(req.body || {});
 
-        if (!payload.full_name || !payload.phone) {
-            return res.status(400).json({ error: 'full_name and phone are required.' });
-        }
-        if (!isValidPhone(payload.phone)) {
-            return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
-        }
-
         const result = await pool.query(
             `INSERT INTO leads (
                 gym_id, full_name, phone, email, source, status, priority,
@@ -180,6 +171,9 @@ router.post('/', requirePermission('members:write'), async (req, res) => {
 
         return res.status(201).json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('LEAD CREATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to create lead.' });
     }
@@ -188,18 +182,8 @@ router.post('/', requirePermission('members:write'), async (req, res) => {
 router.put('/:id', requirePermission('members:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const leadId = Number.parseInt(req.params.id, 10);
+        const leadId = ensureInteger(req.params.id, { field: 'lead id', required: true, min: 1 });
         const payload = normalizeLeadPayload(req.body || {});
-
-        if (!Number.isInteger(leadId)) {
-            return res.status(400).json({ error: 'Invalid lead id.' });
-        }
-        if (!payload.full_name || !payload.phone) {
-            return res.status(400).json({ error: 'full_name and phone are required.' });
-        }
-        if (!isValidPhone(payload.phone)) {
-            return res.status(400).json({ error: 'Phone must be exactly 10 digits.' });
-        }
 
         const result = await pool.query(
             `UPDATE leads
@@ -240,6 +224,9 @@ router.put('/:id', requirePermission('members:write'), async (req, res) => {
 
         return res.json(result.rows[0]);
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('LEAD UPDATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to update lead.' });
     }
@@ -247,10 +234,15 @@ router.put('/:id', requirePermission('members:write'), async (req, res) => {
 
 router.post('/:id/convert', requirePermission('members:write'), async (req, res) => {
     const gymId = getGymIdFromRequest(req);
-    const leadId = Number.parseInt(req.params.id, 10);
+    let leadId;
 
-    if (!Number.isInteger(leadId)) {
-        return res.status(400).json({ error: 'Invalid lead id.' });
+    try {
+        leadId = ensureInteger(req.params.id, { field: 'lead id', required: true, min: 1 });
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        throw err;
     }
 
     const client = await pool.connect();
@@ -343,10 +335,7 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
 router.delete('/:id', requirePermission('members:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
-        const leadId = Number.parseInt(req.params.id, 10);
-        if (!Number.isInteger(leadId)) {
-            return res.status(400).json({ error: 'Invalid lead id.' });
-        }
+        const leadId = ensureInteger(req.params.id, { field: 'lead id', required: true, min: 1 });
 
         const result = await pool.query(
             'DELETE FROM leads WHERE id = $1 AND gym_id = $2 RETURNING id',
@@ -359,6 +348,9 @@ router.delete('/:id', requirePermission('members:write'), async (req, res) => {
 
         return res.json({ message: 'Lead deleted.' });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('LEAD DELETE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to delete lead.' });
     }

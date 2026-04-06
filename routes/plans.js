@@ -4,39 +4,34 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
-
-const toMoney = (value, fallback = 0) => {
-    if (value === '' || value === null || value === undefined) return fallback;
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const toInt = (value, fallback = 0) => {
-    if (value === '' || value === null || value === undefined) return fallback;
-    const parsed = Number.parseInt(value, 10);
-    return Number.isInteger(parsed) ? parsed : fallback;
-};
+const {
+    ensureTrimmedString,
+    ensureInteger,
+    ensureNumber,
+    ensureStringArray,
+    ensureObject,
+    ensureDateOnly,
+    isValidationError,
+} = require('../utils/fieldValidation');
 
 const normalizePlanPayload = (body = {}) => ({
-    name: String(body.name || '').trim(),
-    price: toMoney(body.price, 0),
-    duration_days: toInt(body.duration_days, 30),
-    features: Array.isArray(body.features) ? body.features : [],
-    color_theme: String(body.color_theme || 'blue').trim() || 'blue',
+    name: ensureTrimmedString(body.name, { field: 'name', required: true, min: 2, max: 120 }),
+    price: ensureNumber(body.price, { field: 'price', min: 0, max: 1000000, defaultValue: 0 }),
+    duration_days: ensureInteger(body.duration_days, { field: 'duration_days', min: 1, max: 3650, defaultValue: 30 }),
+    features: ensureStringArray(body.features, { field: 'features', maxItems: 50, itemMax: 120 }),
+    color_theme: ensureTrimmedString(body.color_theme, { field: 'color_theme', max: 40, defaultValue: 'blue' }) || 'blue',
     is_popular: Boolean(body.is_popular),
-    description: String(body.description || '').trim(),
-    discount_percent: toInt(body.discount_percent, 0),
-    discount_valid_until: body.discount_valid_until || null,
-    joining_fee: toMoney(body.joining_fee, 0),
-    freeze_allowance_days: toInt(body.freeze_allowance_days, 0),
-    transfer_fee: toMoney(body.transfer_fee, 0),
-    access_hours: String(body.access_hours || '').trim(),
-    guest_passes: toInt(body.guest_passes, 0),
-    renewal_policy: String(body.renewal_policy || '').trim(),
-    class_eligibility: String(body.class_eligibility || '').trim(),
-    advanced_rules: body.advanced_rules && typeof body.advanced_rules === 'object' && !Array.isArray(body.advanced_rules)
-        ? body.advanced_rules
-        : {},
+    description: ensureTrimmedString(body.description, { field: 'description', max: 4000 }),
+    discount_percent: ensureInteger(body.discount_percent, { field: 'discount_percent', min: 0, max: 100, defaultValue: 0 }),
+    discount_valid_until: ensureDateOnly(body.discount_valid_until, { field: 'discount_valid_until' }),
+    joining_fee: ensureNumber(body.joining_fee, { field: 'joining_fee', min: 0, max: 1000000, defaultValue: 0 }),
+    freeze_allowance_days: ensureInteger(body.freeze_allowance_days, { field: 'freeze_allowance_days', min: 0, max: 3650, defaultValue: 0 }),
+    transfer_fee: ensureNumber(body.transfer_fee, { field: 'transfer_fee', min: 0, max: 1000000, defaultValue: 0 }),
+    access_hours: ensureTrimmedString(body.access_hours, { field: 'access_hours', max: 500 }),
+    guest_passes: ensureInteger(body.guest_passes, { field: 'guest_passes', min: 0, max: 365, defaultValue: 0 }),
+    renewal_policy: ensureTrimmedString(body.renewal_policy, { field: 'renewal_policy', max: 500 }),
+    class_eligibility: ensureTrimmedString(body.class_eligibility, { field: 'class_eligibility', max: 500 }),
+    advanced_rules: ensureObject(body.advanced_rules, { field: 'advanced_rules', defaultValue: {} }),
 });
 
 const normalizePlanFeatures = (value) => {
@@ -94,8 +89,8 @@ router.get('/', async (req, res) => {
 
 // CREATE A NEW PLAN
 router.post('/add', async (req, res) => {
-    const payload = normalizePlanPayload(req.body);
     try {
+        const payload = normalizePlanPayload(req.body);
         const gym_id = req.user.gym_id; 
 
         const newPlan = await pool.query(
@@ -128,6 +123,9 @@ router.post('/add', async (req, res) => {
 
         res.status(200).json(normalizePlanRow(newPlan.rows[0]));
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error("DATABASE ERROR:", err.message);
         res.status(500).json({ error: 'Server error' });
     }
@@ -147,10 +145,9 @@ router.delete('/:id', async (req, res) => {
 
 // UPDATE PLAN
 router.put('/:id', async (req, res) => {
-    const { id } = req.params;
-    const payload = normalizePlanPayload(req.body);
-
     try {
+        const id = ensureInteger(req.params.id, { field: 'plan id', required: true, min: 1 });
+        const payload = normalizePlanPayload(req.body);
         const updatePlan = await pool.query(
             `UPDATE plans 
             SET name = $1,
@@ -200,6 +197,9 @@ router.put('/:id', async (req, res) => {
 
         res.json(normalizePlanRow(updatePlan.rows[0]));
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error(err.message);
         res.status(500).send("Server Error");
     }
@@ -283,19 +283,19 @@ router.get('/:id/analytics', async (req, res) => {
 router.put('/:id/advanced-rules', async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
-        const planId = req.params.id;
+        const planId = ensureInteger(req.params.id, { field: 'plan id', required: true, min: 1 });
         const { joining_fee, freeze_allowance_days, transfer_fee, access_hours, guest_passes, renewal_policy, class_eligibility, advanced_rules } = req.body || {};
         const updates = [];
         const vals = [];
         let idx = 3;
-        if (joining_fee !== undefined)        { updates.push(`joining_fee=$${idx++}`);        vals.push(joining_fee); }
-        if (freeze_allowance_days !== undefined) { updates.push(`freeze_allowance_days=$${idx++}`); vals.push(freeze_allowance_days); }
-        if (transfer_fee !== undefined)       { updates.push(`transfer_fee=$${idx++}`);       vals.push(transfer_fee); }
-        if (access_hours !== undefined)       { updates.push(`access_hours=$${idx++}`);       vals.push(String(access_hours).trim()); }
-        if (guest_passes !== undefined)       { updates.push(`guest_passes=$${idx++}`);       vals.push(guest_passes); }
-        if (renewal_policy !== undefined)     { updates.push(`renewal_policy=$${idx++}`);     vals.push(String(renewal_policy).trim()); }
-        if (class_eligibility !== undefined)  { updates.push(`class_eligibility=$${idx++}`);  vals.push(String(class_eligibility).trim()); }
-        if (advanced_rules !== undefined)     { updates.push(`advanced_rules=$${idx++}`);     vals.push(JSON.stringify(advanced_rules)); }
+        if (joining_fee !== undefined)        { updates.push(`joining_fee=$${idx++}`);        vals.push(ensureNumber(joining_fee, { field: 'joining_fee', min: 0, max: 1000000 })); }
+        if (freeze_allowance_days !== undefined) { updates.push(`freeze_allowance_days=$${idx++}`); vals.push(ensureInteger(freeze_allowance_days, { field: 'freeze_allowance_days', min: 0, max: 3650 })); }
+        if (transfer_fee !== undefined)       { updates.push(`transfer_fee=$${idx++}`);       vals.push(ensureNumber(transfer_fee, { field: 'transfer_fee', min: 0, max: 1000000 })); }
+        if (access_hours !== undefined)       { updates.push(`access_hours=$${idx++}`);       vals.push(ensureTrimmedString(access_hours, { field: 'access_hours', max: 500 })); }
+        if (guest_passes !== undefined)       { updates.push(`guest_passes=$${idx++}`);       vals.push(ensureInteger(guest_passes, { field: 'guest_passes', min: 0, max: 365 })); }
+        if (renewal_policy !== undefined)     { updates.push(`renewal_policy=$${idx++}`);     vals.push(ensureTrimmedString(renewal_policy, { field: 'renewal_policy', max: 500 })); }
+        if (class_eligibility !== undefined)  { updates.push(`class_eligibility=$${idx++}`);  vals.push(ensureTrimmedString(class_eligibility, { field: 'class_eligibility', max: 500 })); }
+        if (advanced_rules !== undefined)     { updates.push(`advanced_rules=$${idx++}`);     vals.push(JSON.stringify(ensureObject(advanced_rules, { field: 'advanced_rules', defaultValue: {} }))); }
         if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
         const result = await pool.query(
             `UPDATE plans SET ${updates.join(', ')} WHERE id=$1 AND gym_id=$2 RETURNING *`,
@@ -304,6 +304,9 @@ router.put('/:id/advanced-rules', async (req, res) => {
         if (!result.rows.length) return res.status(404).json({ error: 'Plan not found' });
         res.json(normalizePlanRow(result.rows[0]));
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('PLAN RULES:', err.message);
         res.status(500).json({ error: 'Server error' });
     }

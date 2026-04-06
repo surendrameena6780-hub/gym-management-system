@@ -11,11 +11,11 @@ const STRING_RULES = [
     { pattern: /(^|\.)(gym_name|name|title|subject|reader_name|trainer_name|key_name)$/i, max: 120 },
     { pattern: /(^|\.)(email)$/i, max: 120 },
     { pattern: /(^|\.)(phone|owner_phone|mobile|whatsapp|messaging_whatsapp_number)$/i, max: 30 },
-    { pattern: /(^|\.)(city|source|category|status|priority|payment_mode|color_theme|staff_role|role|channel|schedule)$/i, max: 60 },
+    { pattern: /(^|\.)(city|source|category|status|priority|payment_mode|color_theme|staff_role|role|channel|schedule|location|gender|blood_group|doc_type|note_type|waiver_type)$/i, max: 60 },
     { pattern: /(^|\.)(sku|invoice_id|transaction_id|template_key|plan_name)$/i, max: 120 },
     { pattern: /(^|\.)(url|doc_url|receipt_url|avatar_url)$/i, max: 2048 },
     { pattern: /(^|\.)(description|message|about|mission|sla|waiver_text)$/i, max: 4000 },
-    { pattern: /(^|\.)(notes|reason|cancellation_reason|lost_reason|address|gym_address|support_window|renewal_policy|class_eligibility|access_hours)$/i, max: 2000 },
+    { pattern: /(^|\.)(notes|reason|cancellation_reason|lost_reason|address|gym_address|support_window|renewal_policy|class_eligibility|access_hours|emergency_contact)$/i, max: 2000 },
     { pattern: /(^|\.)(csv|csv_data|csv_text|import_data)$/i, max: 500000 },
     { pattern: /(^|\.)(profile_pic|image|photo)$/i, max: 2500000 },
 ];
