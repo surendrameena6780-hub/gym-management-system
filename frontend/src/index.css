@@ -312,6 +312,24 @@ html.gv-compact-ui main.app-scroll-shell > div {
   max-height: var(--members-mobile-list-max-height);
 }
 
+.members-page-shell {
+  min-height: 0;
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+  :root {
+    --members-mobile-list-max-height: clamp(28rem, calc(var(--app-viewport-height) - 30rem), 44rem);
+  }
+
+  .members-page-shell {
+    min-height: calc(var(--app-viewport-height) - var(--safe-area-top) - 8.5rem);
+  }
+
+  .members-mobile-list-scroll {
+    min-height: var(--members-mobile-list-max-height);
+  }
+}
+
 /* ── Bottom sheet drawer ────────────────────────────────────── */
 .drawer-sheet {
   position: fixed;

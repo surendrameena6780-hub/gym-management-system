@@ -1576,7 +1576,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   if (loading && members.length === 0) return <PageLoader className="min-h-[56vh]" />;
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative">
+    <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2 relative members-page-shell">
       {showSuccessAnim && (
         <SuccessModal
           memberName={selectedMember?.full_name}
@@ -1594,7 +1594,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         ))}
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="flex flex-col desktop:flex-row justify-between desktop:items-center gap-3">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
@@ -1623,7 +1623,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           </div>
         </div>
 
-        <div className="overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {!loading && members.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-50/50 rounded-[32px] border-2 border-dashed border-slate-200 animate-in fade-in slide-in-from-bottom-4 duration-700">
               <div className="w-20 h-20 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-6 text-slate-300"><Users size={40} /></div>
@@ -1633,9 +1633,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             </div>
           ) : (
             <>
-              <div className="desktop:hidden py-2">
-                <div className="relative">
-                  <div ref={membersListRef} className="members-mobile-list-scroll no-scrollbar">
+              <div className="desktop:hidden flex min-h-0 flex-1 py-2">
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <div ref={membersListRef} className="members-mobile-list-scroll no-scrollbar flex-1 min-h-0">
                     <div className="space-y-3 pb-6">
                       {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
