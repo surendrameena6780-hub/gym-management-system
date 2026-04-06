@@ -420,6 +420,7 @@ const loadRazorpayScript = () => {
   const [whatsappOnboardingRefreshing, setWhatsAppOnboardingRefreshing] = useState(false);
   const [whatsappOnboardingFrameLoading, setWhatsAppOnboardingFrameLoading] = useState(false);
   const [whatsappOnboardingFrameKey, setWhatsAppOnboardingFrameKey] = useState(0);
+  const [whatsappNumberEditorOpen, setWhatsAppNumberEditorOpen] = useState(false);
 
   const [interfacePreferences, setInterfacePreferences] = useState({
     reduce_motion: false,
@@ -443,6 +444,13 @@ const loadRazorpayScript = () => {
   const headers = { headers: { 'x-auth-token': token } };
   const activeWhatsAppOnboardingView = WHATSAPP_ONBOARDING_VIEWS[whatsappOnboardingView] || WHATSAPP_ONBOARDING_VIEWS.msg91;
   const activeWhatsAppOnboardingUrl = getWhatsAppOnboardingUrl(whatsappOnboardingView, whatsappOnboarding);
+  const isWhatsAppConnected = String(integrationData.whatsapp_status || '').toUpperCase() === 'CONNECTED';
+  const resolvedWhatsAppDisplayName = integrationData.whatsapp_display_name || (isWhatsAppConnected ? 'Managed in MSG91 portal' : 'Waiting for MSG91 sync');
+  const resolvedWhatsAppCategory = integrationData.whatsapp_category || (isWhatsAppConnected ? 'Managed in MSG91 portal' : 'Not available yet');
+
+  useEffect(() => {
+    setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
+  }, [isWhatsAppConnected]);
 
   const fetchSettings = async () => {
     try {
@@ -2141,37 +2149,35 @@ const loadRazorpayScript = () => {
                   {/* â•â• MESSAGING TAB â•â• */}
                   {integSubTab === 'messaging' && (
                     <div className="space-y-4 animate-in fade-in duration-200">
-                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
-                        <div>
-                          <h4 className="font-black text-slate-900 text-sm mb-1">Gym Business WhatsApp</h4>
-                          <p className="text-xs text-slate-500 font-medium">This is the verified business number GymVault will use for outbound member messaging.</p>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Business WhatsApp Number</label>
-                            <input value={integrationData.whatsapp_number}
-                              onChange={(e) => setIntegrationData(prev => ({ ...prev, whatsapp_number: e.target.value }))}
-                              placeholder="+91XXXXXXXXXX"
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                      {isWhatsAppConnected && !whatsappNumberEditorOpen ? (
+                        <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <h4 className="font-black text-slate-900 text-sm mb-1">Connected Gym WhatsApp</h4>
+                              <p className="text-xs text-slate-500 font-medium">This connected business number is now active for member-facing messaging from GymVault.</p>
+                            </div>
+                            <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black uppercase tracking-wider border border-emerald-200">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" /> Connected
+                            </span>
                           </div>
-                          <div>
-                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Owner Alert Mobile (optional)</label>
-                            <input value={integrationData.owner_mobile}
-                              onChange={(e) => setIntegrationData(prev => ({ ...prev, owner_mobile: e.target.value }))}
-                              placeholder="+91XXXXXXXXXX"
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Business WhatsApp Number</p>
+                              <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_number || 'Not available'}</p>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Owner Alert Mobile</p>
+                              <p className="mt-1 font-bold text-slate-800">{integrationData.owner_mobile || 'Not set'}</p>
+                            </div>
                           </div>
-                        </div>
-                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                          <p className="text-[11px] font-semibold text-emerald-800 leading-relaxed">
-                            Gym owners still log in using the phone saved on their account. This business number is only for member-facing WhatsApp templates and reminders.
-                          </p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In-App Setup Workspace</p>
-                            <p className="text-sm font-semibold text-slate-700 mt-1">Save the business number here, then launch MSG91 and Meta inside GymVault to finish onboarding.</p>
+
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                            <p className="text-[11px] font-semibold text-emerald-800 leading-relaxed">
+                              Gym owners do not need a separate MSG91 account. They only verify their business number once inside your shared MSG91 setup. After that, GymVault keeps sending from the connected number.
+                            </p>
                           </div>
+
                           <div className="flex flex-col sm:flex-row gap-3">
                             <button
                               type="button"
@@ -2179,24 +2185,96 @@ const loadRazorpayScript = () => {
                               disabled={whatsappOnboardingLaunching || integrationSaving}
                               className="flex-1 px-4 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
                             >
-                              <Blocks size={15} /> {whatsappOnboardingLaunching ? 'Opening Workspace...' : integrationData.whatsapp_status === 'CONNECTED' ? 'Open WhatsApp Workspace' : 'Start In-App Setup'}
+                              <Blocks size={15} /> {whatsappOnboardingLaunching ? 'Opening Workspace...' : 'Open WhatsApp Workspace'}
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                setWhatsAppOnboardingOpen(true);
-                                switchWhatsAppOnboardingView('guide');
-                              }}
-                              className="sm:w-auto px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-black text-sm hover:bg-white transition-all flex items-center justify-center gap-2"
+                              onClick={() => setWhatsAppNumberEditorOpen(true)}
+                              className="sm:w-auto px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-black text-sm hover:bg-slate-50 transition-all"
                             >
-                              <FileText size={15} /> View Guide
+                              Change Number
                             </button>
                           </div>
-                          <p className="text-[11px] font-semibold text-slate-500 leading-relaxed">
-                            GymVault keeps the setup anchored here. If MSG91 blocks embedding in your browser during login, you can still pop the same step out and return here to refresh status.
-                          </p>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <h4 className="font-black text-slate-900 text-sm mb-1">Gym Business WhatsApp</h4>
+                              <p className="text-xs text-slate-500 font-medium">This is the verified business number GymVault will use for outbound member messaging.</p>
+                            </div>
+                            {isWhatsAppConnected && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setWhatsAppNumberEditorOpen(false);
+                                  loadIntegrations();
+                                }}
+                                className="sm:w-auto px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-black text-xs hover:bg-slate-50 transition-all"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Business WhatsApp Number</label>
+                              <input value={integrationData.whatsapp_number}
+                                onChange={(e) => setIntegrationData(prev => ({ ...prev, whatsapp_number: e.target.value }))}
+                                placeholder="+91XXXXXXXXXX"
+                                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Owner Alert Mobile (optional)</label>
+                              <input value={integrationData.owner_mobile}
+                                onChange={(e) => setIntegrationData(prev => ({ ...prev, owner_mobile: e.target.value }))}
+                                placeholder="+91XXXXXXXXXX"
+                                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 outline-none" />
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                            <p className="text-[11px] font-semibold text-emerald-800 leading-relaxed">
+                              Gym owners still log in using the phone saved on their account. This business number is only for member-facing WhatsApp templates and reminders.
+                            </p>
+                          </div>
+                          {isWhatsAppConnected && (
+                            <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+                              <p className="text-[11px] font-semibold text-amber-800 leading-relaxed">
+                                Changing the connected number will pause template sync until the new number is verified in MSG91 and refreshed inside GymVault.
+                              </p>
+                            </div>
+                          )}
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">In-App Setup Workspace</p>
+                              <p className="text-sm font-semibold text-slate-700 mt-1">Save the business number here, then launch MSG91 and Meta inside GymVault to finish onboarding.</p>
+                            </div>
+                            <div className="flex flex-col sm:flex-row gap-3">
+                              <button
+                                type="button"
+                                onClick={handleLaunchWhatsAppOnboarding}
+                                disabled={whatsappOnboardingLaunching || integrationSaving}
+                                className="flex-1 px-4 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                              >
+                                <Blocks size={15} /> {whatsappOnboardingLaunching ? 'Opening Workspace...' : integrationData.whatsapp_status === 'CONNECTED' ? 'Open WhatsApp Workspace' : 'Start In-App Setup'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setWhatsAppOnboardingOpen(true);
+                                  switchWhatsAppOnboardingView('guide');
+                                }}
+                                className="sm:w-auto px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-black text-sm hover:bg-white transition-all flex items-center justify-center gap-2"
+                              >
+                                <FileText size={15} /> View Guide
+                              </button>
+                            </div>
+                            <p className="text-[11px] font-semibold text-slate-500 leading-relaxed">
+                              GymVault keeps the setup anchored here. If MSG91 blocks embedding in your browser during login, you can still pop the same step out and return here to refresh status.
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                         <div className={`rounded-2xl p-4 border ${getWhatsAppConnectionMeta(integrationData.whatsapp_status).card}`}>
@@ -2249,11 +2327,11 @@ const loadRazorpayScript = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                           <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
                             <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Display Name</p>
-                            <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_display_name || 'Waiting for MSG91 sync'}</p>
+                            <p className="mt-1 font-bold text-slate-800">{resolvedWhatsAppDisplayName}</p>
                           </div>
                           <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
                             <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Business Category</p>
-                            <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_category || 'Not available yet'}</p>
+                            <p className="mt-1 font-bold text-slate-800">{resolvedWhatsAppCategory}</p>
                           </div>
                           <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
                             <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Last Checked</p>
@@ -2264,6 +2342,14 @@ const loadRazorpayScript = () => {
                             <p className="mt-1 font-bold text-slate-800">{integrationData.whatsapp_templates_last_synced_at ? new Date(integrationData.whatsapp_templates_last_synced_at).toLocaleString() : 'Not synced yet'}</p>
                           </div>
                         </div>
+
+                        {isWhatsAppConnected && (!integrationData.whatsapp_display_name || !integrationData.whatsapp_category) && (
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">
+                              MSG91's current number API is returning the connected number but not the display-name or business-category metadata for this account. Messaging still works normally, and those details remain managed in the MSG91 portal.
+                            </p>
+                          </div>
+                        )}
 
                         {integrationData.whatsapp_last_error && (
                           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
