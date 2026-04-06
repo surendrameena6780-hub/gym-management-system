@@ -548,6 +548,7 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
         }
 
         const gymId = req.user.gym_id;
+        const requesterId = req.user.user_id || req.user.id || null;
         const memberIds = Array.from(new Set(
             (Array.isArray(req.body.member_ids) ? req.body.member_ids : [req.body.member_id])
                 .map((value) => Number.parseInt(value, 10))
@@ -615,6 +616,8 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
         if (members.length === 0) {
             return fail(res, 400, 'REMINDER_MEMBERS_NOT_FOUND', 'No valid members were found for this reminder request.');
         }
+
+        const memberMap = new Map(members.map((member) => [Number(member.id), member]));
 
         const previewItems = buildReminderPreviewItems({
             members,
