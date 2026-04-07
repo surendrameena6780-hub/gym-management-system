@@ -258,7 +258,7 @@ const PaymentModal = ({ controller }) => {
 
   return (
     <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="app-modal-panel relative bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-label="Record payment" className="app-modal-panel relative bg-white rounded-[24px] w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
@@ -384,6 +384,7 @@ const PaymentModal = ({ controller }) => {
                 <button
                   key={mode}
                   type="button"
+                  aria-pressed={paymentMode === mode}
                   onClick={() => { setPaymentMode(mode); resetPaymentFlow(); }}
                   className={`flex-1 py-2.5 rounded-xl font-bold text-sm border transition-all ${paymentMode === mode ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}
                 >
@@ -404,6 +405,7 @@ const PaymentModal = ({ controller }) => {
                   <button
                     key={option.key}
                     type="button"
+                    aria-pressed={paymentOnlineMode === option.key}
                     onClick={() => { setPaymentOnlineMode(option.key); setPaymentCollectionContext(null); setPaymentRazorpayContext(null); setPaymentReference(''); setPaymentStep('idle'); }}
                     className={`rounded-2xl border px-3 py-3 text-left transition-all ${paymentOnlineMode === option.key ? 'border-indigo-300 bg-indigo-50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                   >
@@ -578,7 +580,7 @@ const BroadcastModal = ({ controller }) => {
   return (
     <>
       <div className="fixed inset-0 z-[190] bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBroadcastModal(false)} />
-      <div className="app-bottom-sheet z-[200] bg-white shadow-2xl">
+      <div role="dialog" aria-modal="true" aria-label="Bulk broadcast" className="app-bottom-sheet z-[200] bg-white shadow-2xl">
         <div className="flex justify-center pt-3 pb-1 shrink-0">
           <div className="w-10 h-1 rounded-full bg-slate-200" />
         </div>

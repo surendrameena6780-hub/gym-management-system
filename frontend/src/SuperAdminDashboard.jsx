@@ -906,9 +906,9 @@ function SuperAdminDashboard({ token, onLogout }) {
                               <td className="p-4 text-slate-400">{owner.last_login_at ? new Date(owner.last_login_at).toLocaleString('en-GB') : '-'}</td>
                               <td className="p-4 text-right">
                                 <div className="flex justify-end gap-2">
-                                  <button onClick={() => resetPassword(owner)} className="p-2 rounded-lg border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20" title="Reset Password"><KeyRound size={14} /></button>
-                                  <button onClick={() => blockUser(owner, owner.is_active)} className="p-2 rounded-lg border border-amber-500/20 text-amber-300 hover:bg-amber-500/20" title="Block/Unblock"><Ban size={14} /></button>
-                                  <button onClick={() => deleteUser(owner)} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20" title="Delete"><Trash2 size={14} /></button>
+                                  <button type="button" aria-label={`Reset password for ${owner.full_name}`} onClick={() => resetPassword(owner)} className="p-2 rounded-lg border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20" title="Reset Password"><KeyRound size={14} /></button>
+                                  <button type="button" aria-label={`${owner.is_active ? 'Block' : 'Unblock'} ${owner.full_name}`} onClick={() => blockUser(owner, owner.is_active)} className="p-2 rounded-lg border border-amber-500/20 text-amber-300 hover:bg-amber-500/20" title="Block/Unblock"><Ban size={14} /></button>
+                                  <button type="button" aria-label={`Delete ${owner.full_name}`} onClick={() => deleteUser(owner)} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20" title="Delete"><Trash2 size={14} /></button>
                                 </div>
                               </td>
                             </tr>
@@ -923,9 +923,9 @@ function SuperAdminDashboard({ token, onLogout }) {
                               <td className="p-4 text-slate-400">{u.last_login_at ? new Date(u.last_login_at).toLocaleString('en-GB') : '-'}</td>
                               <td className="p-4 text-right">
                                 <div className="flex justify-end gap-2">
-                                  <button onClick={() => resetPassword(u)} className="p-2 rounded-lg border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20" title="Reset Password"><KeyRound size={14} /></button>
-                                  <button onClick={() => blockUser(u, u.is_active)} className="p-2 rounded-lg border border-amber-500/20 text-amber-300 hover:bg-amber-500/20" title="Block/Unblock"><Ban size={14} /></button>
-                                  <button onClick={() => deleteUser(u)} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20" title="Delete"><Trash2 size={14} /></button>
+                                  <button type="button" aria-label={`Reset password for ${u.full_name}`} onClick={() => resetPassword(u)} className="p-2 rounded-lg border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20" title="Reset Password"><KeyRound size={14} /></button>
+                                  <button type="button" aria-label={`${u.is_active ? 'Block' : 'Unblock'} ${u.full_name}`} onClick={() => blockUser(u, u.is_active)} className="p-2 rounded-lg border border-amber-500/20 text-amber-300 hover:bg-amber-500/20" title="Block/Unblock"><Ban size={14} /></button>
+                                  <button type="button" aria-label={`Delete ${u.full_name}`} onClick={() => deleteUser(u)} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20" title="Delete"><Trash2 size={14} /></button>
                                 </div>
                               </td>
                             </tr>

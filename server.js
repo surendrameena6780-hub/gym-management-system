@@ -85,7 +85,7 @@ if (!isProduction && currentNodeVersion !== REQUIRED_NODE_VERSION) {
     console.warn(`Node ${currentNodeVersion} detected. Production is pinned to ${REQUIRED_NODE_VERSION}.`);
 }
 
-const defaultDevOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const defaultDevOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173', 'http://127.0.0.1:4173'];
 const trustProxySetting = parseTrustProxySetting(process.env.TRUST_PROXY);
 
 if (isProduction && corsOrigins.length === 0) {
@@ -214,6 +214,14 @@ const exportLimiter = buildScopedLimiter({
     description: 'exports',
 });
 
+const pushSubscribeLimiter = buildScopedLimiter({
+    windowMs: 60 * 60 * 1000,
+    productionMax: 40,
+    developmentMax: 400,
+    code: 'PUSH_SUBSCRIBE_RATE_LIMITED',
+    description: 'push subscription registrations',
+});
+
 const rfidEventLimiter = buildScopedLimiter({
     windowMs: 5 * 60 * 1000,
     productionMax: 1200,
@@ -241,6 +249,8 @@ app.use('/api/leads', limitMethods(['POST'], leadCreateLimiter));
 app.use('/api/notifications/reminders/send', limitMethods(['POST'], notificationSendLimiter));
 app.use('/api/notifications/campaign/run', limitMethods(['POST'], notificationSendLimiter));
 app.use('/api/exports', limitMethods(['GET'], exportLimiter));
+app.use('/api/push/subscribe-member', limitMethods(['POST'], pushSubscribeLimiter));
+app.use('/api/push/subscribe', limitMethods(['POST'], pushSubscribeLimiter));
 app.use('/api/attendance/rfid/event', limitMethods(['POST'], rfidEventLimiter));
 
 app.use(

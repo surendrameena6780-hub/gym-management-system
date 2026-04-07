@@ -440,6 +440,15 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             return res.status(400).json({ error: 'This phone is already registered in your gym.' });
         }
 
+        const existingEmail = await pool.query(
+            'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND deleted_at IS NULL LIMIT 1',
+            [gym_id, normalizedIdentity.email]
+        );
+        if (existingEmail.rows.length > 0) {
+            await discardUploadedProfile(req);
+            return res.status(400).json({ error: 'This email is already registered in your gym.' });
+        }
+
         const newMember = await pool.query(
             `INSERT INTO members (full_name, email, phone, profile_pic, gym_id, joining_date, last_visit, status)
              VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, NULL, 'UNPAID')

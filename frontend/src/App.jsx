@@ -158,7 +158,7 @@ function ToastItem({ message, type, onRemove }) {
     <div className={`${config.bg} text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[280px] max-w-sm animate-in slide-in-from-right-5 duration-300`}>
       <div className="shrink-0">{config.icon}</div>
       <p className="flex-1 text-sm font-bold leading-snug">{message}</p>
-      <button onClick={onRemove} className="text-white/70 hover:text-white ml-1 shrink-0 transition-colors"><X size={16} /></button>
+      <button type="button" aria-label="Dismiss notification" onClick={onRemove} className="text-white/70 hover:text-white ml-1 shrink-0 transition-colors"><X size={16} /></button>
     </div>
   );
 }

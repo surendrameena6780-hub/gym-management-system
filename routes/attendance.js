@@ -6,6 +6,7 @@ const auth = require('../middleware/authMiddleware');
 const memberAuth = require('../middleware/memberAuthMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner, requirePermission } = require('../middleware/rbac');
+const { writeAuditLog } = require('../utils/auditLog');
 const { getGymTimezone } = require('../utils/gymTime');
 const { signAttendanceToken, verifyAttendanceToken } = require('../utils/attendanceTokens');
 const { sendPushToGym } = require('./push');
@@ -15,6 +16,8 @@ const RFID_DEVICE_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DISABLED']);
 const MEMBER_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_MEMBER_QR_TTL_MS || `${12 * 60 * 60 * 1000}`, 10);
 const GYM_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_GYM_QR_TTL_MS || `${5 * 60 * 1000}`, 10);
 const RFID_DUPLICATE_WINDOW_SECONDS = Number.parseInt(process.env.RFID_DUPLICATE_WINDOW_SECONDS || '10', 10);
+const RFID_EVENT_MAX_AGE_MS = Number.parseInt(process.env.RFID_EVENT_MAX_AGE_MS || `${5 * 60 * 1000}`, 10);
+const RFID_EVENT_MAX_FUTURE_SKEW_MS = Number.parseInt(process.env.RFID_EVENT_MAX_FUTURE_SKEW_MS || '60000', 10);
 const ACCESS_ALERT_DEDUP_SECONDS = Number.parseInt(process.env.ATTENDANCE_ALERT_DEDUP_SECONDS || '120', 10);
 const ACCESS_ALERT_ROLES = ['OWNER', 'STAFF'];
 const DEFAULT_ATTENDANCE_MODE = 'STAFF';
@@ -46,6 +49,37 @@ const safeCompareSecret = (expected, provided) => {
         return false;
     }
     return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+};
+
+const maskRfidTagId = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return 'UNKNOWN';
+    return raw.slice(-6);
+};
+
+const writeRfidAuditLog = async ({
+    device = null,
+    action,
+    targetType,
+    targetId,
+    targetLabel,
+    details = {},
+}) => {
+    await writeAuditLog({
+        actorType: 'RFID_DEVICE',
+        actorId: device ? String(device.id) : 'UNKNOWN_READER',
+        action,
+        targetType,
+        targetId: targetId ? String(targetId) : '',
+        targetLabel: targetLabel || '',
+        details: {
+            gym_id: device?.gym_id || null,
+            reader_id: device?.id || null,
+            reader_name: device?.reader_name || '',
+            reader_serial: device?.reader_serial || '',
+            ...details,
+        },
+    });
 };
 
 const haversineDistanceMeters = (lat1, lng1, lat2, lng2) => {
@@ -1030,10 +1064,21 @@ router.post('/rfid/event', async (req, res) => {
     const notes = String(req.body?.notes || '').trim();
 
     if (!readerSerial || !readerKey || !tagId) {
-        return res.status(400).json({ error: 'reader_serial, tag_id, and x-reader-key are required.' });
+        return res.status(400).json({ error: 'RFID event rejected.', code: 'RFID_FIELDS_REQUIRED' });
+    }
+
+    if (Number.isNaN(scannedAt.getTime())) {
+        return res.status(400).json({ error: 'RFID event rejected.', code: 'RFID_INVALID_TIMESTAMP' });
+    }
+
+    const nowMs = Date.now();
+    const scannedAtMs = scannedAt.getTime();
+    if (scannedAtMs < nowMs - RFID_EVENT_MAX_AGE_MS || scannedAtMs > nowMs + RFID_EVENT_MAX_FUTURE_SKEW_MS) {
+        return res.status(400).json({ error: 'RFID event rejected.', code: 'RFID_EVENT_STALE' });
     }
 
     let eventId = null;
+    let device = null;
     try {
         const deviceResult = await pool.query(
             `SELECT id, gym_id, reader_name, reader_serial, reader_location, shared_secret, status
@@ -1042,9 +1087,9 @@ router.post('/rfid/event', async (req, res) => {
              LIMIT 1`,
             [readerSerial]
         );
-        const device = deviceResult.rows[0];
+        device = deviceResult.rows[0];
         if (!device || device.status !== 'ACTIVE' || !safeCompareSecret(device.shared_secret, readerKey)) {
-            return res.status(403).json({ error: 'RFID reader authentication failed.' });
+            return res.status(403).json({ error: 'RFID event rejected.', code: 'RFID_READER_AUTH_FAILED' });
         }
 
         const eventInsert = await pool.query(
@@ -1077,12 +1122,23 @@ router.post('/rfid/event', async (req, res) => {
                     [eventId]
                 );
             }
+            await writeRfidAuditLog({
+                device,
+                action: 'RFID_UNKNOWN_TAG',
+                targetType: 'RFID_TAG',
+                targetId: maskRfidTagId(tagId),
+                targetLabel: `RFID tag ending ${maskRfidTagId(tagId)}`,
+                details: {
+                    event_id: eventId,
+                    scanned_at: scannedAt.toISOString(),
+                },
+            });
             await notifyUnknownRfidAttempt({
                 gym_id: device.gym_id,
                 reader_name: device.reader_name,
                 tag_id: tagId,
             });
-            return res.status(404).json({ error: 'No member is paired to this RFID tag.' });
+            return res.status(404).json({ error: 'RFID event rejected.', code: 'RFID_UNKNOWN_TAG' });
         }
 
         const result = await processAttendanceCheckin({
@@ -1121,6 +1177,20 @@ router.post('/rfid/event', async (req, res) => {
             );
         }
 
+        await writeRfidAuditLog({
+            device,
+            action: 'RFID_CHECKIN_ACCEPTED',
+            targetType: 'MEMBER',
+            targetId: member.id,
+            targetLabel: member.full_name,
+            details: {
+                event_id: eventId,
+                attendance_record_id: result.details?.id || null,
+                tag_suffix: maskRfidTagId(tagId),
+                scanned_at: scannedAt.toISOString(),
+            },
+        });
+
         res.json({
             message: result.message,
             member: result.member,
@@ -1142,7 +1212,25 @@ router.post('/rfid/event', async (req, res) => {
                 [eventId, err?.payload?.message || err?.payload?.error || err.message || 'RFID event rejected.']
             ).catch(() => {});
         }
-        sendAttendanceError(res, err);
+
+        await writeRfidAuditLog({
+            device,
+            action: 'RFID_CHECKIN_REJECTED',
+            targetType: 'RFID_TAG',
+            targetId: maskRfidTagId(tagId),
+            targetLabel: `RFID tag ending ${maskRfidTagId(tagId)}`,
+            details: {
+                event_id: eventId,
+                status_code: err?.statusCode || 500,
+                reason: err?.payload?.message || err?.payload?.error || err.message || 'RFID event rejected.',
+                scanned_at: scannedAt.toISOString(),
+            },
+        });
+
+        return res.status(err?.statusCode || 500).json({
+            error: 'RFID event rejected.',
+            code: err?.payload?.code || 'RFID_EVENT_REJECTED',
+        });
     }
 });
 

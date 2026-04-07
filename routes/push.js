@@ -7,6 +7,8 @@ const memberAuthMiddleware = require('../middleware/memberAuthMiddleware');
 
 const vapidConfigured = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
 const PUSH_BATCH_SIZE = Math.max(25, Math.min(250, parseInt(process.env.PUSH_BATCH_SIZE || '100', 10) || 100));
+const MAX_PUSH_ENDPOINT_LENGTH = 2048;
+const MAX_PUSH_KEY_LENGTH = 512;
 if (vapidConfigured) {
     webpush.setVapidDetails(
         process.env.VAPID_EMAIL || 'mailto:admin@gymvault.app',
@@ -33,14 +35,45 @@ const sendPushPayload = async (subscription, payload) => {
     }
 };
 
+const parsePushSubscription = (payload = {}) => {
+    const endpoint = String(payload?.endpoint || '').trim();
+    const p256dh = String(payload?.keys?.p256dh || '').trim();
+    const auth = String(payload?.keys?.auth || '').trim();
+
+    if (!endpoint || !p256dh || !auth) {
+        return { error: 'Invalid subscription object.' };
+    }
+
+    if (endpoint.length > MAX_PUSH_ENDPOINT_LENGTH || p256dh.length > MAX_PUSH_KEY_LENGTH || auth.length > MAX_PUSH_KEY_LENGTH) {
+        return { error: 'Invalid subscription object.' };
+    }
+
+    try {
+        const parsed = new URL(endpoint);
+        if (parsed.protocol !== 'https:') {
+            return { error: 'Invalid subscription object.' };
+        }
+    } catch (_err) {
+        return { error: 'Invalid subscription object.' };
+    }
+
+    return {
+        endpoint,
+        keys: {
+            p256dh,
+            auth,
+        },
+    };
+};
+
 router.get('/vapid-public-key', (req, res) => {
     res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || '' });
 });
 
 router.post('/subscribe', authMiddleware, async (req, res) => {
-    const { endpoint, keys } = req.body;
-    if (!endpoint || !keys?.p256dh || !keys?.auth) {
-        return res.status(400).json({ message: 'Invalid subscription object.' });
+    const parsedSubscription = parsePushSubscription(req.body);
+    if (parsedSubscription.error) {
+        return res.status(400).json({ message: parsedSubscription.error });
     }
 
     const gym_id = req.user.gym_id;
@@ -53,7 +86,7 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (endpoint) DO UPDATE
              SET p256dh = $5, auth = $6, gym_id = $1, user_id = $2, role = $3`,
-            [gym_id, user_id, role, endpoint, keys.p256dh, keys.auth]
+            [gym_id, user_id, role, parsedSubscription.endpoint, parsedSubscription.keys.p256dh, parsedSubscription.keys.auth]
         );
         res.json({ message: 'Subscribed.' });
     } catch (err) {
@@ -63,8 +96,8 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
 });
 
 router.post('/subscribe-member', memberAuthMiddleware, async (req, res) => {
-    const { endpoint, keys } = req.body;
-    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    const parsedSubscription = parsePushSubscription(req.body);
+    if (parsedSubscription.error) {
         return res.status(400).json({ message: 'Invalid subscription.' });
     }
 
@@ -74,7 +107,7 @@ router.post('/subscribe-member', memberAuthMiddleware, async (req, res) => {
              VALUES ($1, $2, 'MEMBER', $3, $4, $5)
              ON CONFLICT (endpoint) DO UPDATE
              SET p256dh = $4, auth = $5, gym_id = $1, user_id = $2, role = 'MEMBER'`,
-            [req.member.gym_id, req.member.id, endpoint, keys.p256dh, keys.auth]
+            [req.member.gym_id, req.member.id, parsedSubscription.endpoint, parsedSubscription.keys.p256dh, parsedSubscription.keys.auth]
         );
         res.json({ message: 'Subscribed.' });
     } catch (err) {
@@ -84,8 +117,8 @@ router.post('/subscribe-member', memberAuthMiddleware, async (req, res) => {
 });
 
 router.delete('/unsubscribe', authMiddleware, async (req, res) => {
-    const { endpoint } = req.body;
-    if (!endpoint) return res.status(400).json({ message: 'Endpoint required.' });
+    const endpoint = String(req.body?.endpoint || '').trim();
+    if (!endpoint || endpoint.length > MAX_PUSH_ENDPOINT_LENGTH) return res.status(400).json({ message: 'Endpoint required.' });
 
     try {
         await pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);

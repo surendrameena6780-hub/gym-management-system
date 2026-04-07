@@ -64,7 +64,6 @@ const superadminLoginLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: true,
-    keyGenerator: (req) => normalizeIp(req.ip || req.socket?.remoteAddress || '') || 'superadmin-login',
     handler: (_req, res) => {
         return res.status(429).json({ message: 'Too many login attempts. Wait a few minutes and try again.' });
     },
