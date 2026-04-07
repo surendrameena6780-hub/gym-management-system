@@ -20,14 +20,18 @@ function SafeResponsiveContainer({
   className = 'h-full w-full',
 }) {
   const hostRef = useRef(null);
-  const [isReady, setIsReady] = useState(false);
+  const [measuredSize, setMeasuredSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const element = hostRef.current;
     if (!element) return undefined;
 
     const updateReadyState = () => {
-      setIsReady(hasPositiveSize(element));
+      const rect = element.getBoundingClientRect();
+      setMeasuredSize({
+        width: Math.max(0, Math.round(rect.width || 0)),
+        height: Math.max(0, Math.round(rect.height || 0)),
+      });
     };
 
     updateReadyState();
@@ -47,10 +51,15 @@ function SafeResponsiveContainer({
     };
   }, []);
 
+  const isReady = isActive && measuredSize.width > 1 && measuredSize.height > 1;
+
   return (
     <div ref={hostRef} className={className}>
-      {isActive && isReady ? (
-        <ResponsiveContainer width={width} height={height}>
+      {isReady ? (
+        <ResponsiveContainer
+          width={width === '100%' ? measuredSize.width : width}
+          height={height === '100%' ? measuredSize.height : height}
+        >
           {children}
         </ResponsiveContainer>
       ) : (

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { getRequestCookie, OWNER_AUTH_COOKIE } = require('../utils/authCookies');
+const { DEFAULT_BRANCH_ID, ensureBranchScopeSchema } = require('../utils/branchAccess');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -35,6 +36,7 @@ module.exports = async (req, res, next) => {
     }
 
     try {
+        await ensureBranchScopeSchema();
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const decodedUser = decoded.user || decoded;
         const userId = Number.parseInt(decodedUser?.id, 10);
@@ -54,6 +56,7 @@ module.exports = async (req, res, next) => {
                     u.gym_id,
                     u.role,
                     u.staff_role,
+                    u.branch_id,
                     u.permissions,
                     COALESCE(u.is_active, TRUE) AS user_is_active,
                     COALESCE(g.is_active, TRUE) AS gym_is_active,
@@ -100,6 +103,7 @@ module.exports = async (req, res, next) => {
             gymId: session.gym_id,
             role: session.role || decodedUser.role,
             staff_role: session.staff_role || decodedUser.staff_role,
+            branch_id: session.branch_id || decodedUser.branch_id || DEFAULT_BRANCH_ID,
             permissions: Array.isArray(session.permissions) ? session.permissions : decodedUser.permissions,
             is_active: session.user_is_active,
         };

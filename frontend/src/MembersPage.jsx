@@ -310,6 +310,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [memberSummary, setMemberSummary] = useState({ total: 0, active: 0, inactive: 0, expiring_soon: 0, expired: 0, unpaid: 0, frozen: 0 });
   const [membersPagination, setMembersPagination] = useState({ page: 1, limit: 30, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
 
@@ -363,11 +364,14 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     medical_notes: '',
   });
 
-  const membersListRef = useRef(null);
-  const membersScrollState = useRef({ lastY: 0, velocity: 0, rafId: null });
   const fetchMembersRef = useRef(null);
+  const fetchMemberSummaryRef = useRef(null);
   const checkActivationRazorpayStatusRef = useRef(null);
   const selectedMemberRef = useRef(selectedMember);
+  const hasLoadedMembersRef = useRef(false);
+  const membersRequestIdRef = useRef(0);
+  const memberSummaryRequestIdRef = useRef(0);
+  const resumeRefreshAtRef = useRef(0);
   const activationResumeStateRef = useRef({
     showActivateModal: false,
     activationOnlineMode: 'RAZORPAY',
@@ -803,7 +807,15 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
     const refreshMembers = () => {
       if (document.visibilityState && document.visibilityState === 'hidden') return;
-      fetchMembersRef.current?.();
+
+      const now = Date.now();
+      if (now - resumeRefreshAtRef.current < 1200) {
+        return;
+      }
+      resumeRefreshAtRef.current = now;
+
+      fetchMembersRef.current?.({ background: true });
+      fetchMemberSummaryRef.current?.();
 
       const resumeState = activationResumeStateRef.current;
       if (!resumeState.showActivateModal || resumeState.activationOnlineMode !== 'RAZORPAY' || !resumeState.paymentLinkId) {
@@ -815,23 +827,10 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         checkActivationRazorpayStatusRef.current?.(selectedPlan, { manual: false });
       }
     };
-
-    const handleVisibilityRefresh = () => {
-      if (document.visibilityState === 'visible') {
-        refreshMembers();
-      }
-    };
-
-    window.addEventListener('focus', refreshMembers);
-    window.addEventListener('pageshow', refreshMembers);
     window.addEventListener('gymvault:app-resumed', refreshMembers);
-    document.addEventListener('visibilitychange', handleVisibilityRefresh);
 
     return () => {
-      window.removeEventListener('focus', refreshMembers);
-      window.removeEventListener('pageshow', refreshMembers);
       window.removeEventListener('gymvault:app-resumed', refreshMembers);
-      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
     };
   }, [token, isActive]);
 
@@ -893,7 +892,17 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return true;
   };
 
-  const fetchMembers = useCallback(async () => {
+  const fetchMembers = useCallback(async ({ background = false } = {}) => {
+    const requestId = membersRequestIdRef.current + 1;
+    membersRequestIdRef.current = requestId;
+    const shouldShowPageLoader = !hasLoadedMembersRef.current && !background;
+
+    if (shouldShowPageLoader) {
+      setLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
+
     try {
       const res = await axios.get('/api/members', {
         headers: { 'x-auth-token': token },
@@ -905,7 +914,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           status: FILTER_TO_API_STATUS[filter] || 'ALL',
         },
       });
+
+      if (requestId !== membersRequestIdRef.current) {
+        return;
+      }
+
       const normalizedMembers = extractArray(res.data, ['members', 'rows', 'items']).map(normalizeMemberRecord);
+      hasLoadedMembersRef.current = true;
       setMembers(normalizedMembers);
       setMembersPagination((prev) => ({
         ...prev,
@@ -917,12 +932,31 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         const fresh = normalizedMembers.find(m => m.id === prev.id);
         return fresh ? { ...prev, ...fresh } : prev;
       });
-    } catch (_err) { toast?.('Failed to load members', 'error'); } finally { setLoading(false); }
+    } catch (err) {
+      if (requestId !== membersRequestIdRef.current) {
+        return;
+      }
+      reportClientError('Members fetch members', err);
+      if (!hasLoadedMembersRef.current) {
+        toast?.('Failed to load members', 'error');
+      }
+    } finally {
+      if (requestId === membersRequestIdRef.current) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
+    }
   }, [deferredSearchTerm, filter, membersPagination.limit, membersPagination.page, toast, token]);
 
   const fetchMemberSummary = useCallback(async () => {
+    const requestId = memberSummaryRequestIdRef.current + 1;
+    memberSummaryRequestIdRef.current = requestId;
+
     try {
       const res = await axios.get('/api/members/summary', { headers: { 'x-auth-token': token } });
+      if (requestId !== memberSummaryRequestIdRef.current) {
+        return;
+      }
       setMemberSummary({
         total: Number(res.data?.total || 0),
         active: Number(res.data?.active || 0),
@@ -938,6 +972,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   }, [token]);
 
   fetchMembersRef.current = fetchMembers;
+  fetchMemberSummaryRef.current = fetchMemberSummary;
 
   const fetchPlans = useCallback(async () => {
     try {
@@ -953,7 +988,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
   useEffect(() => {
     if (!token || !isActive) return;
-    setLoading(true);
     fetchMembers();
   }, [fetchMembers, isActive, token]);
 
@@ -1039,47 +1073,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       isMounted = false;
     };
   }, [focusAction, focusMemberId, members, onFocusHandled, openActivateModalForMember, toast, token]);
-
-  useEffect(() => {
-    const el = membersListRef.current;
-    if (!el) return;
-    const s = membersScrollState.current;
-    const onTouchStart = (e) => {
-      s.lastY = e.touches[0].clientY;
-      s.velocity = 0;
-      if (s.rafId) { cancelAnimationFrame(s.rafId); s.rafId = null; }
-    };
-    const onTouchMove = (e) => {
-      if (!e.touches[0]) return;
-      const y = e.touches[0].clientY;
-      const dy = s.lastY - y;
-      s.lastY = y;
-      s.velocity = dy;
-      const { scrollTop, scrollHeight, clientHeight } = el;
-      if (scrollHeight <= clientHeight) return;
-      const atTop    = scrollTop <= 0 && dy < 0;
-      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && dy > 0;
-      if (!atTop && !atBottom) { el.scrollTop += dy; e.preventDefault(); }
-    };
-    const onTouchEnd = () => {
-      const tick = () => {
-        s.velocity *= 0.88;
-        if (Math.abs(s.velocity) < 0.5) { s.velocity = 0; return; }
-        el.scrollTop += s.velocity;
-        s.rafId = requestAnimationFrame(tick);
-      };
-      s.rafId = requestAnimationFrame(tick);
-    };
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
-    el.addEventListener('touchend',   onTouchEnd,   { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove',  onTouchMove);
-      el.removeEventListener('touchend',   onTouchEnd);
-      if (s.rafId) cancelAnimationFrame(s.rafId);
-    };
-  }, [loading]);
 
   const downloadReceipt = () => {
     if (!receiptData) return;
@@ -1657,7 +1650,10 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         <div className="flex flex-col desktop:flex-row justify-between desktop:items-center gap-3">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Manage and track your gym members</p>
+            <p className="text-slate-500 text-sm mt-0.5 flex items-center gap-2">
+              <span>Manage and track your gym members</span>
+              {isRefreshing && members.length > 0 ? <span className="text-[11px] font-bold text-indigo-500">Refreshing...</span> : null}
+            </p>
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">
             <button type="button" aria-pressed={isBulkMode} onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 desktop:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>
@@ -1694,7 +1690,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             <>
               <div className="desktop:hidden flex min-h-0 flex-1 py-2">
                 <div className="relative flex min-h-0 flex-1 flex-col">
-                  <div ref={membersListRef} className="members-mobile-list-scroll no-scrollbar flex-1 min-h-0">
+                  <div className="members-mobile-list-scroll no-scrollbar flex-1 min-h-0">
                     <div className="space-y-3 pb-6">
                       {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (

@@ -611,12 +611,17 @@ function App() {
       return undefined;
     }
 
+    if (!token) {
+      writeStoredUser(null);
+      setCurrentUser(null);
+      setIsAuthChecking(false);
+      return undefined;
+    }
+
     let cancelled = false;
     setIsAuthChecking(true);
 
-    const requestConfig = token ? { headers: { 'x-auth-token': token } } : undefined;
-
-    axios.get('/api/auth/me', requestConfig)
+    axios.get('/api/auth/me', { headers: { 'x-auth-token': token } })
       .then((res) => {
         if (cancelled) return;
 

@@ -49,6 +49,11 @@ const {
     ensureUrl,
     isValidationError,
 } = require('../utils/fieldValidation');
+const {
+    branchSchemaMiddleware,
+    getBranchName,
+    getOutOfDirectoryBranchUsage,
+} = require('../utils/branchAccess');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -109,6 +114,7 @@ router.post('/platform/whatsapp-delivery/webhook', async (req, res) => {
 });
 
 router.use(auth, requireOwner);
+router.use(branchSchemaMiddleware);
 
 let ensureSupportProfileTablePromise;
 let ensureMessagingSchemaPromise;
@@ -1485,6 +1491,15 @@ router.put('/platform/branches', auth, async (req, res) => {
         const city = ensureTrimmedString(req.body?.city, { field: 'city', max: 100 });
         const branchesCount = Math.min(25, Math.max(1, toPositiveInt(req.body?.branches_count, 1)));
         const branchDirectory = normalizeBranchDirectoryInput(req.body?.branch_directory, branchesCount);
+        const activeBranchIds = branchDirectory.map((branch) => branch.id);
+        const outOfDirectoryBranchUsage = await getOutOfDirectoryBranchUsage(pool, req.user.gym_id, activeBranchIds);
+
+        if (outOfDirectoryBranchUsage.length > 0) {
+            return res.status(409).json({
+                error: `Branch reduction blocked. Move records out of ${outOfDirectoryBranchUsage.map((branchId) => getBranchName(branchDirectory, branchId) || branchId).join(', ')} before removing those branches.`,
+                branch_ids: outOfDirectoryBranchUsage,
+            });
+        }
 
         await pool.query(
             `UPDATE gyms

@@ -582,9 +582,21 @@ ALTER TABLE users DROP COLUMN IF EXISTS password;
 -- =============================================================
 -- MULTI-TENANCY FIX: Allow same email in different gyms.
 -- =============================================================
+UPDATE members
+SET email = NULL
+WHERE email IS NOT NULL AND BTRIM(email) = '';
+
+UPDATE members
+SET email = LOWER(BTRIM(email))
+WHERE email IS NOT NULL;
+
 ALTER TABLE members DROP CONSTRAINT IF EXISTS members_email_key;
 ALTER TABLE members DROP CONSTRAINT IF EXISTS members_gym_email_key;
-ALTER TABLE members ADD CONSTRAINT members_gym_email_key UNIQUE (gym_id, email);
+DROP INDEX IF EXISTS members_email_key;
+DROP INDEX IF EXISTS members_gym_email_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_gym_email_active_unique
+    ON members(gym_id, LOWER(BTRIM(email)))
+    WHERE email IS NOT NULL AND BTRIM(email) <> '' AND deleted_at IS NULL;
 
 -- =============================================================
 -- SUPER ADMIN: The Gym Kill Switch
@@ -827,24 +839,15 @@ BEGIN
         WHERE phone IS NOT NULL
         GROUP BY gym_id, phone
         HAVING COUNT(*) > 1
-    ) THEN
-        ALTER TABLE members ADD CONSTRAINT members_gym_phone_key UNIQUE (gym_id, phone);
-    END IF;
-END $$;
+    UPDATE members
+    SET phone = NULL
+    WHERE phone IS NOT NULL AND BTRIM(phone) = '';
 
--- Notifications indexes
-CREATE INDEX IF NOT EXISTS idx_notifications_gym_id     ON notifications(gym_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_is_read    ON notifications(is_read);
-CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
-CREATE INDEX IF NOT EXISTS idx_broadcast_logs_gym_id    ON broadcast_logs(gym_id);
-CREATE INDEX IF NOT EXISTS idx_broadcast_logs_created   ON broadcast_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_notification_automation_log_gym_date ON notification_automation_log(gym_id, local_date DESC);
-CREATE INDEX IF NOT EXISTS idx_notification_automation_log_created_at ON notification_automation_log(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_member_notification_automation_log_gym_date ON member_notification_automation_log(gym_id, local_date DESC);
-CREATE INDEX IF NOT EXISTS idx_member_notification_automation_log_member_date ON member_notification_automation_log(member_id, local_date DESC);
-
-CREATE INDEX IF NOT EXISTS idx_attendance_method       ON attendance(checkin_method);
-CREATE INDEX IF NOT EXISTS idx_attendance_staff_user   ON attendance(staff_user_id);
+    ALTER TABLE members DROP CONSTRAINT IF EXISTS members_gym_phone_key;
+    DROP INDEX IF EXISTS members_gym_phone_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_members_gym_phone_active_unique
+        ON members(gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10))
+        WHERE phone IS NOT NULL AND BTRIM(phone) <> '' AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_attendance_member_time  ON attendance(member_id, check_in_time DESC);
 
 -- =============================================================

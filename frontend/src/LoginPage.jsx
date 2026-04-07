@@ -1343,10 +1343,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
   // Member portal state
   const [phone, setPhone]           = useState('');
-  const [otp, setOtp]               = useState('');
-  const [otpSent, setOtpSent]       = useState(false);
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [firstName, setFirstName]   = useState('');
+  const [memberLoginLoading, setMemberLoginLoading] = useState(false);
   const [memberData, setMemberData] = useState(null);
   const [memberToken, setMemberToken] = useState(null);
 
@@ -1464,34 +1461,16 @@ export default function LoginPage({ setToken, onShowSignup }) {
       .catch((err) => { if (err?.error !== 'popup_closed_by_user') setError('Apple Sign-In failed. Please try again.'); });
   };
 
-  // ── Member OTP ─────────────────────────────────────────────────────────────
-  const handleSendOTP = async (e) => {
+  // ── Member phone login ─────────────────────────────────────────────────────
+  const handleMemberLogin = async (e) => {
     e.preventDefault();
-    setOtpLoading(true); setError(''); setNotice('');
+    setMemberLoginLoading(true); setError(''); setNotice('');
     try {
-      const res = await axios.post('/api/auth/member/send-otp', { phone });
-      setFirstName(res.data.member_name || '');
-      // Bypass mode: backend returned OTP directly — auto-verify immediately
-      if (res.data.dev_otp) {
-        const verifyRes = await axios.post('/api/auth/member/verify-otp', { phone, otp: res.data.dev_otp });
-        setMemberData(verifyRes.data.member);
-        setMemberToken(verifyRes.data.token);
-        return;
-      }
-      setOtpSent(true);
-    } catch (err) { setError(err?.response?.data?.message || 'Failed to send OTP.'); }
-    finally { setOtpLoading(false); }
-  };
-
-  const handleVerifyOTP = async (e) => {
-    e.preventDefault();
-    setOtpLoading(true); setError(''); setNotice('');
-    try {
-      const res = await axios.post('/api/auth/member/verify-otp', { phone, otp });
+      const res = await axios.post('/api/auth/member/login', { phone });
       setMemberData(res.data.member);
       setMemberToken(res.data.token);
-    } catch (err) { setError(err?.response?.data?.message || 'Invalid OTP. Please try again.'); }
-    finally { setOtpLoading(false); }
+    } catch (err) { setError(err?.response?.data?.message || 'Unable to login with this phone number.'); }
+    finally { setMemberLoginLoading(false); }
   };
 
   const handlePasswordResetRequest = async (e) => {
@@ -1577,10 +1556,9 @@ export default function LoginPage({ setToken, onShowSignup }) {
     setTab(t);
     setError('');
     setNotice('');
-    setOtpSent(false);
-    setOtp('');
     setMemberData(null);
     setMemberToken(null);
+    setPhone('');
     setShowForgotEmailHint(false);
     setPasswordResetOpen(false);
     resetPasswordRecoveryState();
@@ -1593,7 +1571,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
         member={memberData}
         token={memberToken}
         onMemberChange={setMemberData}
-        onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setOtp(''); setOtpSent(false); setError(''); }}
+        onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setError(''); }}
       />
     );
   }
@@ -1843,68 +1821,33 @@ export default function LoginPage({ setToken, onShowSignup }) {
           {/* ════════ MEMBER FORM ════════ */}
           {tab === 'MEMBER' && !memberData && (
             <>
-              {!otpSent ? (
-                <form onSubmit={handleSendOTP} className="space-y-4">
-                  <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
-                    Enter your registered phone number — we'll send a one-time code to verify it's you.
-                  </p>
-                  <div>
-                    <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Phone Number</label>
-                    <div className="relative">
-                      <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
-                      <input required type="tel" value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                        placeholder="9876543210"
-                        className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
-                        style={iBase} onFocus={iFocus} onBlur={iBlur} />
-                    </div>
-                  </div>
-                  <button disabled={otpLoading || phone.length < 10}
-                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
-                    style={{
-                      background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-                      boxShadow: '0 8px 28px rgba(99,102,241,0.5)',
-                      opacity: (otpLoading || phone.length < 10) ? 0.65 : 1,
-                    }}>
-                    {otpLoading
-                      ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending...</>
-                      : <>Send OTP <ArrowRight size={16} /></>}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyOTP} className="space-y-4">
-                  <div className="flex items-center gap-2.5 p-3.5 rounded-xl mb-4"
-                    style={{ background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.2)' }}>
-                    <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
-                    <p className="text-emerald-300 text-sm font-semibold">
-                      OTP sent to {phone}{firstName ? ` · Hi, ${firstName}!` : ''}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">6-Digit OTP</label>
-                    <input required type="text" value={otp} maxLength={6}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      placeholder="● ● ● ● ● ●"
-                      className="w-full px-4 py-4 rounded-xl text-white text-center text-2xl font-black tracking-[0.55em] placeholder-slate-700 outline-none transition-all"
+              <form onSubmit={handleMemberLogin} className="space-y-4">
+                <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
+                  Enter your registered phone number to open your membership portal instantly.
+                </p>
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Phone Number</label>
+                  <div className="relative">
+                    <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
+                    <input required type="tel" value={phone}
+                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      placeholder="9876543210"
+                      className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
                       style={iBase} onFocus={iFocus} onBlur={iBlur} />
                   </div>
-                  <button disabled={otpLoading || otp.length < 6}
-                    className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
-                    style={{
-                      background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-                      boxShadow: '0 8px 28px rgba(99,102,241,0.5)',
-                      opacity: (otpLoading || otp.length < 6) ? 0.65 : 1,
-                    }}>
-                    {otpLoading
-                      ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying...</>
-                      : <>Verify & Continue <ArrowRight size={16} /></>}
-                  </button>
-                  <button type="button" onClick={() => { setOtpSent(false); setOtp(''); setError(''); }}
-                    className="w-full py-2.5 text-xs font-bold text-slate-500 hover:text-slate-300 transition-colors">
-                    ← Use a different number
-                  </button>
-                </form>
-              )}
+                </div>
+                <button disabled={memberLoginLoading || phone.length < 10}
+                  className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                    boxShadow: '0 8px 28px rgba(99,102,241,0.5)',
+                    opacity: (memberLoginLoading || phone.length < 10) ? 0.65 : 1,
+                  }}>
+                  {memberLoginLoading
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Opening portal...</>
+                    : <>Continue <ArrowRight size={16} /></>}
+                </button>
+              </form>
             </>
           )}
 

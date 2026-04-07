@@ -23,6 +23,7 @@ const {
     setMemberAuthCookie,
     clearMemberAuthCookie,
 } = require('../utils/authCookies');
+const { DEFAULT_BRANCH_ID } = require('../utils/branchAccess');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
@@ -327,6 +328,7 @@ const issueAuthToken = (user) => {
                 gym_id: user.gym_id,
                 role: user.role,
                 staff_role: user.staff_role,
+                branch_id: user.branch_id || DEFAULT_BRANCH_ID,
                 permissions,
                 is_active: user.is_active,
             }
@@ -350,6 +352,7 @@ const buildAuthSuccessPayload = (user, message = 'Login successful!') => {
             gym_id: user.gym_id,
             role: user.role,
             staff_role: user.staff_role,
+            branch_id: user.branch_id || DEFAULT_BRANCH_ID,
             is_active: user.is_active,
             permissions,
         },
@@ -499,6 +502,89 @@ const findExistingUserByPhone = async (phone, db = pool) => {
     );
 
     return result.rows[0] || null;
+};
+
+const normalizeMemberPhoneDigits = (value) => String(value || '').replace(/\D/g, '').slice(-10);
+
+const loadMemberPortalContextByPhone = async (phone) => {
+    const normalizedPhone = normalizeMemberPhoneDigits(phone);
+    if (!normalizedPhone || normalizedPhone.length !== 10) return null;
+
+    const result = await pool.query(
+        `SELECT m.*, g.name AS gym_name,
+                ms.start_date, ms.end_date, ms.status AS membership_status,
+                p.name AS plan_name
+         FROM members m
+         JOIN gyms g ON g.id = m.gym_id
+         LEFT JOIN memberships ms
+           ON ms.member_id = m.id
+          AND ms.deleted_at IS NULL
+          AND ms.status = 'ACTIVE'
+         LEFT JOIN plans p ON p.id = ms.plan_id
+         WHERE RIGHT(REGEXP_REPLACE(COALESCE(m.phone, ''), '[^0-9]', '', 'g'), 10) = $1
+           AND m.deleted_at IS NULL
+         ORDER BY CASE WHEN ms.status = 'ACTIVE' THEN 0 ELSE 1 END,
+                  m.id DESC
+         LIMIT 1`,
+        [normalizedPhone]
+    );
+
+    return result.rows[0] || null;
+};
+
+const buildMemberAuthPayload = (member, message = 'Login successful.') => {
+    const token = jwt.sign(
+        { member: { id: member.id, gym_id: member.gym_id, role: 'MEMBER' } },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+    );
+
+    return {
+        token,
+        message,
+        member: {
+            id: member.id,
+            full_name: member.full_name,
+            email: member.email,
+            gym_name: member.gym_name,
+            plan_name: member.plan_name,
+            membership_start: member.start_date,
+            membership_end: member.end_date,
+            membership_status: member.membership_status,
+            status: member.status,
+        },
+    };
+};
+
+const sendMemberAuthResponse = async (res, member, message = 'Login successful.') => {
+    await pool.query(
+        'UPDATE members SET otp_code = NULL, otp_expires_at = NULL WHERE id = $1',
+        [member.id]
+    );
+
+    const payload = buildMemberAuthPayload(member, message);
+    setMemberAuthCookie(res, payload.token);
+    return res.json(payload);
+};
+
+const handleMemberPhoneLogin = async (req, res) => {
+    const phone = normalizeMemberPhoneDigits(req.body?.phone);
+
+    if (!phone || phone.length !== 10) {
+        return res.status(400).json({ message: 'Please enter a valid 10-digit phone number.' });
+    }
+
+    try {
+        const member = await loadMemberPortalContextByPhone(phone);
+        if (!member) {
+            return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
+        }
+
+        return sendMemberAuthResponse(res, member, 'Login successful.');
+    } catch (err) {
+        console.error('MEMBER PHONE LOGIN ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not login right now. Please try again.' });
+    }
 };
 
 const generateAdminLoginOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
@@ -1779,6 +1865,7 @@ router.post('/google/signup/complete', async (req, res) => {
                 gym_id: user.gym_id,
                 role: user.role,
                 staff_role: user.staff_role,
+                branch_id: user.branch_id || DEFAULT_BRANCH_ID,
                 is_active: user.is_active,
                 permissions,
             },
@@ -1877,7 +1964,7 @@ router.post('/apple', async (req, res) => {
 
         const permissions = getAuthPermissions(user);
         const token = jwt.sign(
-            { user: { id: user.id, gym_id: user.gym_id, role: user.role || 'OWNER', staff_role: user.staff_role || 'OWNER', permissions, is_active: true } },
+            { user: { id: user.id, gym_id: user.gym_id, role: user.role || 'OWNER', staff_role: user.staff_role || 'OWNER', branch_id: user.branch_id || DEFAULT_BRANCH_ID, permissions, is_active: true } },
             process.env.JWT_SECRET,
             { expiresIn: '30d' }
         );
@@ -1885,7 +1972,7 @@ router.post('/apple', async (req, res) => {
         setUserAuthCookie(res, token);
         return res.json({
             token,
-            user: { id: user.id, full_name: user.full_name, email: user.email, gym_id: user.gym_id, role: user.role, permissions }
+            user: { id: user.id, full_name: user.full_name, email: user.email, gym_id: user.gym_id, role: user.role, branch_id: user.branch_id || DEFAULT_BRANCH_ID, permissions }
         });
     } catch (err) {
         console.error('APPLE AUTH ERROR:', err);
@@ -1893,171 +1980,10 @@ router.post('/apple', async (req, res) => {
     }
 });
 
-// ─── MEMBER PORTAL: OTP-based self-service login ──────────────────────────────
-// POST /api/auth/member/send-otp
-router.post('/member/send-otp', async (req, res) => {
-    const rawPhone = String(req.body?.phone || '').trim().replace(/\D/g, '');
-    const phone = rawPhone.slice(-10);
-
-    if (!phone || phone.length < 10) {
-        return res.status(400).json({ message: 'Please enter a valid 10-digit phone number.' });
-    }
-
-    try {
-        const memberResult = await pool.query(
-            `SELECT m.id, m.full_name, m.gym_id FROM members m
-             WHERE m.phone LIKE $1 AND m.deleted_at IS NULL
-             LIMIT 1`,
-            [`%${phone}`]
-        );
-
-        if (memberResult.rows.length === 0) {
-            return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
-        }
-
-        const member = memberResult.rows[0];
-        // OTP bypass — set MEMBER_OTP_BYPASS=true in env to skip real OTP (dev only)
-        const bypassMode = process.env.MEMBER_OTP_BYPASS === 'true';
-        const otp = bypassMode ? 'BYPASS' : String(require('crypto').randomInt(100000, 999999));
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-        await pool.query(
-            'UPDATE members SET otp_code = $1, otp_expires_at = $2 WHERE id = $3',
-            [otp, expiresAt, member.id]
-        );
-
-        // ── Send OTP: try each channel in priority order ───────────────────
-        const toPhone = `+91${phone}`;
-        const otpMsg  = `Your GymVault OTP is: ${otp}. Valid for 10 minutes. Do not share this.`;
-        let sent = false;
-
-        // 1. Fast2SMS (free Indian SMS — set FAST2SMS_API_KEY in .env)
-        if (!sent && process.env.FAST2SMS_API_KEY) {
-            try {
-                const axios = require('axios');
-                const res2 = await axios.post('https://www.fast2sms.com/dev/bulkV2', {
-                    route: 'otp',
-                    variables_values: otp,
-                    numbers: phone,
-                }, { headers: { authorization: process.env.FAST2SMS_API_KEY }, timeout: 8000 });
-                if (res2.data?.return === true) {
-                    console.log(`[OTP] Fast2SMS sent to ${phone}`);
-                    sent = true;
-                }
-            } catch (e) { console.error('[OTP] Fast2SMS failed:', e.message); }
-        }
-
-        // 2. Twilio WhatsApp sandbox (free, no payment needed)
-        if (!sent && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM) {
-            try {
-                const twilio = require('twilio');
-                const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                await client.messages.create({
-                    body: otpMsg,
-                    from: process.env.TWILIO_WHATSAPP_FROM,
-                    to: `whatsapp:${toPhone}`,
-                });
-                console.log(`[OTP] WhatsApp sent to ${toPhone}`);
-                sent = true;
-            } catch (e) { console.error('[OTP] Twilio WhatsApp failed:', e.message); }
-        }
-
-        // 3. Twilio SMS (paid)
-        if (!sent && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_SMS_FROM) {
-            try {
-                const twilio = require('twilio');
-                const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                await client.messages.create({ body: otpMsg, from: process.env.TWILIO_SMS_FROM, to: toPhone });
-                console.log(`[OTP] SMS sent to ${toPhone}`);
-                sent = true;
-            } catch (e) { console.error('[OTP] Twilio SMS failed:', e.message); }
-        }
-
-        // 4. Dev fallback — print to console
-        if (!sent && !bypassMode) {
-            console.log(`[DEV] OTP for ${phone}: ${otp}`);
-        }
-
-        return res.json({
-            message: bypassMode ? 'Logging you in...' : (sent ? 'OTP sent successfully.' : 'OTP generated (dev mode — check server console).'),
-            member_name: member.full_name.split(' ')[0],
-        });
-    } catch (err) {
-        console.error('MEMBER OTP SEND ERROR:', err.message);
-        return res.status(500).json({ message: 'Failed to send OTP. Please try again.' });
-    }
-});
-
-// POST /api/auth/member/verify-otp
-router.post('/member/verify-otp', async (req, res) => {
-    const rawPhone = String(req.body?.phone || '').trim().replace(/\D/g, '');
-    const phone = rawPhone.slice(-10);
-    const otp = String(req.body?.otp || '').trim();
-
-    if (!phone || !otp) {
-        return res.status(400).json({ message: 'Phone and OTP are required.' });
-    }
-
-    try {
-        const memberResult = await pool.query(
-            `SELECT m.*, g.name AS gym_name,
-                    ms.start_date, ms.end_date, ms.status AS membership_status,
-                    p.name AS plan_name
-             FROM members m
-             JOIN gyms g ON m.gym_id = g.id
-             LEFT JOIN memberships ms ON ms.member_id = m.id AND ms.status = 'ACTIVE' AND ms.deleted_at IS NULL
-             LEFT JOIN plans p ON p.id = ms.plan_id
-             WHERE m.phone LIKE $1 AND m.deleted_at IS NULL
-             LIMIT 1`,
-            [`%${phone}`]
-        );
-
-        if (memberResult.rows.length === 0) {
-            return res.status(404).json({ message: 'Member not found.' });
-        }
-
-        const member = memberResult.rows[0];
-
-        // Skip OTP check if bypass mode (member.otp_code === 'BYPASS')
-        const isBypass = member.otp_code === 'BYPASS';
-        if (!isBypass) {
-            if (!member.otp_code || member.otp_code !== otp) {
-                return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
-            }
-            if (!member.otp_expires_at || new Date() > new Date(member.otp_expires_at)) {
-                return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-            }
-        }
-
-        // Clear OTP after use
-        await pool.query('UPDATE members SET otp_code = NULL, otp_expires_at = NULL WHERE id = $1', [member.id]);
-
-        const token = jwt.sign(
-            { member: { id: member.id, gym_id: member.gym_id, role: 'MEMBER' } },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        setMemberAuthCookie(res, token);
-        return res.json({
-            token,
-            member: {
-                id: member.id,
-                full_name: member.full_name,
-                email: member.email,
-                gym_name: member.gym_name,
-                plan_name: member.plan_name,
-                membership_start: member.start_date,
-                membership_end: member.end_date,
-                membership_status: member.membership_status,
-                status: member.status,
-            }
-        });
-    } catch (err) {
-        console.error('MEMBER OTP VERIFY ERROR:', err.message);
-        return res.status(500).json({ message: 'Verification failed. Please try again.' });
-    }
-});
+// ─── MEMBER PORTAL: phone-based self-service login ───────────────────────────
+router.post('/member/login', handleMemberPhoneLogin);
+router.post('/member/send-otp', handleMemberPhoneLogin);
+router.post('/member/verify-otp', handleMemberPhoneLogin);
 
 router.post('/logout', (_req, res) => {
     clearUserAuthCookie(res);

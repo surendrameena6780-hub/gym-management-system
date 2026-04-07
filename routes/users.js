@@ -4,8 +4,18 @@ const bcrypt = require('bcryptjs');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware'); // Added Auth Check
 const { requireOwner, getDefaultPermissionsByStaffRole } = require('../middleware/rbac');
+const {
+    BranchAccessError,
+    DEFAULT_BRANCH_ID,
+    branchSchemaMiddleware,
+    getBranchName,
+    getGymBranchDirectory,
+    resolveBranchWriteScope,
+} = require('../utils/branchAccess');
 
 const saasMiddleware = require('../middleware/saasMiddleware');
+
+router.use(branchSchemaMiddleware);
 
 const normalizeStaffRole = (role) => {
     const value = String(role || 'STAFF').trim().toUpperCase();
@@ -23,14 +33,19 @@ const normalizePermissions = (permissions, staffRole) => {
 // GET /api/users — Returns gym users for admin dropdowns
 router.get('/', auth, async (req, res) => {
     try {
+        const branchDirectory = await getGymBranchDirectory(pool, req.user.gym_id);
         const result = await pool.query(
-            `SELECT id, full_name, email, role, staff_role, is_active
+            `SELECT id, full_name, email, role, staff_role, branch_id, is_active
              FROM users
              WHERE gym_id = $1
              ORDER BY full_name ASC`,
              [req.user.gym_id] // Securely locks queries to the logged-in owner's unique gym ID
         );
-        res.json(result.rows);
+        res.json(result.rows.map((row) => ({
+            ...row,
+            branch_id: row.branch_id || DEFAULT_BRANCH_ID,
+            branch_name: getBranchName(branchDirectory, row.branch_id || DEFAULT_BRANCH_ID),
+        })));
     } catch (err) {
         console.error("USERS ERROR:", err.message);
         res.status(500).json({ error: "Server Error" });
@@ -40,15 +55,20 @@ router.get('/', auth, async (req, res) => {
 // GET /api/users/staff — Owner-only staff list
 router.get('/staff', auth, requireOwner, async (req, res) => {
     try {
+        const branchDirectory = await getGymBranchDirectory(pool, req.user.gym_id);
         const result = await pool.query(
-            `SELECT id, full_name, email, role, staff_role, is_active, permissions, created_at, last_login_at
+            `SELECT id, full_name, email, role, staff_role, branch_id, is_active, permissions, created_at, last_login_at
              FROM users
              WHERE gym_id = $1
              ORDER BY CASE WHEN role = 'OWNER' THEN 0 ELSE 1 END, full_name ASC`,
             [req.user.gym_id]
         );
 
-        return res.json(result.rows);
+        return res.json(result.rows.map((row) => ({
+            ...row,
+            branch_id: row.branch_id || DEFAULT_BRANCH_ID,
+            branch_name: getBranchName(branchDirectory, row.branch_id || DEFAULT_BRANCH_ID),
+        })));
     } catch (err) {
         console.error('STAFF LIST ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
@@ -70,20 +90,22 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
     try {
         const normalizedRole = normalizeStaffRole(staff_role);
         const effectivePermissions = normalizePermissions(permissions, normalizedRole);
+        const branchScope = await resolveBranchWriteScope(pool, req, req.body?.branch_id);
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const insert = await pool.query(
-            `INSERT INTO users (gym_id, full_name, email, password_hash, role, staff_role, is_active, permissions, created_by)
-             VALUES ($1, $2, $3, $4, 'STAFF', $5, TRUE, $6::jsonb, $7)
-             RETURNING id, full_name, email, role, staff_role, is_active, permissions, created_at`,
+            `INSERT INTO users (gym_id, full_name, email, password_hash, role, staff_role, branch_id, is_active, permissions, created_by)
+             VALUES ($1, $2, $3, $4, 'STAFF', $5, $6, TRUE, $7::jsonb, $8)
+             RETURNING id, full_name, email, role, staff_role, branch_id, is_active, permissions, created_at`,
             [
                 req.user.gym_id,
                 full_name,
                 String(email).trim().toLowerCase(),
                 hashedPassword,
                 normalizedRole,
+                branchScope.branchId,
                 JSON.stringify(effectivePermissions),
                 req.user.id,
             ]
@@ -92,6 +114,9 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
         return res.status(201).json(insert.rows[0]);
     } catch (err) {
         console.error('STAFF CREATE ERROR:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         if (err.code === '23505') {
             return res.status(400).json({ error: 'This email is already registered.' });
         }
@@ -110,7 +135,7 @@ router.put('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) =>
 
     try {
         const existing = await pool.query(
-            `SELECT id, role
+            `SELECT id, role, branch_id
              FROM users
              WHERE id = $1 AND gym_id = $2`,
             [staffId, req.user.gym_id]
@@ -126,18 +151,23 @@ router.put('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) =>
 
         const normalizedRole = normalizeStaffRole(staff_role);
         const effectivePermissions = normalizePermissions(permissions, normalizedRole);
+        const nextBranchScope = req.body?.branch_id === undefined
+            ? { branchId: existing.rows[0].branch_id || DEFAULT_BRANCH_ID }
+            : await resolveBranchWriteScope(pool, req, req.body?.branch_id);
 
         const updated = await pool.query(
             `UPDATE users
              SET full_name = COALESCE($1, full_name),
                  staff_role = $2,
-                 is_active = COALESCE($3, is_active),
-                 permissions = $4::jsonb
-             WHERE id = $5 AND gym_id = $6
-             RETURNING id, full_name, email, role, staff_role, is_active, permissions, created_at, last_login_at`,
+                 branch_id = $3,
+                 is_active = COALESCE($4, is_active),
+                 permissions = $5::jsonb
+             WHERE id = $6 AND gym_id = $7
+             RETURNING id, full_name, email, role, staff_role, branch_id, is_active, permissions, created_at, last_login_at`,
             [
                 full_name || null,
                 normalizedRole,
+                nextBranchScope.branchId,
                 typeof is_active === 'boolean' ? is_active : null,
                 JSON.stringify(effectivePermissions),
                 staffId,
@@ -148,6 +178,9 @@ router.put('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) =>
         return res.json(updated.rows[0]);
     } catch (err) {
         console.error('STAFF UPDATE ERROR:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         return res.status(500).json({ error: 'Server Error' });
     }
 });

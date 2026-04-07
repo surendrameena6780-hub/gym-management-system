@@ -18,6 +18,15 @@ const {
     isValidationError,
     normalizeDigits,
 } = require('../utils/fieldValidation');
+const {
+    BranchAccessError,
+    DEFAULT_BRANCH_ID,
+    branchSchemaMiddleware,
+    ensureBranchAccess,
+    getBranchName,
+    resolveBranchReadScope,
+    resolveBranchWriteScope,
+} = require('../utils/branchAccess');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -138,6 +147,8 @@ const normalizeOnboardingPatch = (payload = {}) => {
     return updates;
 };
 
+router.use(branchSchemaMiddleware);
+
 const buildMemberLifecycleStatusCase = (alias) => `
     CASE
         WHEN UPPER(COALESCE(${alias}.membership_status, 'UNPAID')) = 'FROZEN' THEN 'FROZEN'
@@ -150,7 +161,35 @@ const buildMemberLifecycleStatusCase = (alias) => `
     END
 `;
 
-const buildMemberBaseQuery = ({ includeSearch = false } = {}) => `
+const appendMemberBranchMeta = (rows = [], branchDirectory = []) => rows.map((row) => {
+    const branchId = row?.branch_id || DEFAULT_BRANCH_ID;
+    return {
+        ...row,
+        branch_id: branchId,
+        branch_name: getBranchName(branchDirectory, branchId),
+    };
+});
+
+const assertMemberBranchAccess = async (db, req, memberId) => {
+    const gymId = getGymIdFromRequest(req);
+    const branchScope = await resolveBranchReadScope(db, req);
+    const result = await db.query(
+        `SELECT id, COALESCE(branch_id, $3) AS branch_id
+         FROM members
+         WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL
+         LIMIT 1`,
+        [memberId, gymId, DEFAULT_BRANCH_ID]
+    );
+
+    if (!result.rows.length) {
+        return { branchScope, member: null };
+    }
+
+    ensureBranchAccess(branchScope, result.rows[0].branch_id, 'This member belongs to another branch.');
+    return { branchScope, member: result.rows[0] };
+};
+
+const buildMemberBaseQuery = ({ searchParamIndex = null, branchParamIndex = null } = {}) => `
     WITH member_base AS (
         SELECT
             m.id,
@@ -159,15 +198,17 @@ const buildMemberBaseQuery = ({ includeSearch = false } = {}) => `
             m.phone,
             m.joining_date,
             m.profile_pic,
-            m.last_visit
+            m.last_visit,
+            COALESCE(m.branch_id, '${DEFAULT_BRANCH_ID}') AS branch_id
         FROM members m
         WHERE m.gym_id = $1
           AND m.deleted_at IS NULL
-          ${includeSearch ? `
+          ${branchParamIndex ? `AND COALESCE(m.branch_id, '${DEFAULT_BRANCH_ID}') = $${branchParamIndex}` : ''}
+          ${searchParamIndex ? `
           AND (
-                m.full_name ILIKE $2
-             OR m.email ILIKE $2
-             OR m.phone ILIKE $2
+                m.full_name ILIKE $${searchParamIndex}
+             OR m.email ILIKE $${searchParamIndex}
+             OR m.phone ILIKE $${searchParamIndex}
           )` : ''}
     ),
     payment_totals AS (
@@ -240,6 +281,7 @@ const buildMemberBaseQuery = ({ includeSearch = false } = {}) => `
 router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const branchScope = await resolveBranchReadScope(pool, req);
         const page = Math.max(parseInt(req.query.page || '1', 10), 1);
         const limit = Math.min(Math.max(parseInt(req.query.limit || '30', 10), 1), 200);
         const offset = (page - 1) * limit;
@@ -248,11 +290,19 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
         const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
 
         const queryParams = [gym_id];
+        let branchParamIndex = null;
+        let searchParamIndex = null;
+
+        if (branchScope.branchId) {
+            queryParams.push(branchScope.branchId);
+            branchParamIndex = queryParams.length;
+        }
         if (search) {
             queryParams.push(`%${search}%`);
+            searchParamIndex = queryParams.length;
         }
 
-        const baseQuery = buildMemberBaseQuery({ includeSearch: Boolean(search) });
+        const baseQuery = buildMemberBaseQuery({ searchParamIndex, branchParamIndex });
 
         const labeledQuery = `
             SELECT members_base.*, ${buildMemberLifecycleStatusCase('members_base')} AS member_lifecycle_status
@@ -275,7 +325,7 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
 
         if (!paginate) {
             const result = await pool.query(orderedQuery, filteredParams);
-            return res.json(result.rows);
+            return res.json(appendMemberBranchMeta(result.rows, branchScope.branchDirectory));
         }
 
         const pagedParams = [...filteredParams, limit, offset];
@@ -288,7 +338,7 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
         const total = countResult.rows[0]?.total || 0;
 
         return res.json({
-            items: pagedResult.rows,
+            items: appendMemberBranchMeta(pagedResult.rows, branchScope.branchDirectory),
             pagination: {
                 page,
                 limit,
@@ -301,6 +351,9 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
 
     } catch (err) {
         console.error("MEMBER LIST ERROR:", err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         res.status(500).json({ error: "Server Error" });
     }
 });
@@ -308,6 +361,15 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
 router.get('/summary', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const params = [gym_id];
+        let branchParamIndex = null;
+
+        if (branchScope.branchId) {
+            params.push(branchScope.branchId);
+            branchParamIndex = params.length;
+        }
+
         const result = await pool.query(
             `SELECT
                 COUNT(*)::INTEGER AS total,
@@ -320,10 +382,10 @@ router.get('/summary', auth, saasMiddleware, requirePermission('members:read'), 
              FROM (
                 SELECT ${buildMemberLifecycleStatusCase('members_base')} AS member_lifecycle_status
                 FROM (
-                    ${buildMemberBaseQuery()}
+                    ${buildMemberBaseQuery({ branchParamIndex })}
                 ) members_base
              ) member_summary`,
-            [gym_id]
+            params
         );
 
         return res.json(result.rows[0] || {
@@ -337,6 +399,9 @@ router.get('/summary', auth, saasMiddleware, requirePermission('members:read'), 
         });
     } catch (err) {
         console.error('MEMBER SUMMARY ERROR:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         return res.status(500).json({ error: 'Server Error' });
     }
 });
@@ -344,10 +409,16 @@ router.get('/summary', auth, saasMiddleware, requirePermission('members:read'), 
 router.get('/options', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const branchScope = await resolveBranchReadScope(pool, req);
         const search = String(req.query.search || '').trim();
         const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '20', 10) || 20, 1), 50);
         const params = [gym_id];
         let whereClause = 'WHERE gym_id = $1 AND deleted_at IS NULL';
+
+        if (branchScope.branchId) {
+            params.push(branchScope.branchId);
+            whereClause += ` AND COALESCE(branch_id, '${DEFAULT_BRANCH_ID}') = $${params.length}`;
+        }
 
         if (search) {
             params.push(`%${search}%`);
@@ -364,9 +435,12 @@ router.get('/options', auth, saasMiddleware, requirePermission('members:read'), 
             params
         );
 
-        return res.json(result.rows);
+        return res.json(appendMemberBranchMeta(result.rows, branchScope.branchDirectory));
     } catch (err) {
         console.error('MEMBER OPTIONS ERROR:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         return res.status(500).json({ error: 'Server Error' });
     }
 });
@@ -375,9 +449,18 @@ router.get('/options', auth, saasMiddleware, requirePermission('members:read'), 
 router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const params = [req.params.id, gym_id];
+        const branchFilter = branchScope.branchId
+            ? ` AND COALESCE(m.branch_id, '${DEFAULT_BRANCH_ID}') = $3`
+            : '';
+        if (branchScope.branchId) {
+            params.push(branchScope.branchId);
+        }
         const result = await pool.query(`
             SELECT
                 m.*,
+                COALESCE(m.branch_id, '${DEFAULT_BRANCH_ID}') AS branch_id,
                 COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
                 CASE
                     WHEN ms_latest.end_date IS NULL THEN 0
@@ -403,15 +486,19 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
                 ORDER BY ms.end_date DESC, ms.id DESC
                 LIMIT 1
             ) ms_latest ON true
-            WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL
-        `, [req.params.id, gym_id]);
+            WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL${branchFilter}
+        `, params);
 
         if (result.rows.length === 0) return res.status(404).json({ error: "Member not found" });
-        res.json(result.rows[0]);
+        const [member] = appendMemberBranchMeta(result.rows, branchScope.branchDirectory);
+        res.json(member);
    } catch (err) {
-        console.error("ADD MEMBER ERROR:", err.message);
+        console.error("GET MEMBER ERROR:", err.message);
         if (err.code === '23505') {
             return res.status(400).json({ error: "This email is already registered to a member in YOUR gym." });
+        }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
         }
         res.status(500).json({ error: "Server Error" });
     }
@@ -423,6 +510,7 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
         const payload = req.body && typeof req.body === 'object' ? req.body : {};
         const gym_id = getGymIdFromRequest(req);
         const normalizedIdentity = normalizeMemberIdentityPayload(payload);
+        const branchScope = await resolveBranchWriteScope(pool, req, payload.branch_id);
 
         if (!gym_id) {
             await discardUploadedProfile(req);
@@ -432,7 +520,12 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
         const profile_pic = getStoredProfileValue(req.file);
 
         const existingPhone = await pool.query(
-            'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND deleted_at IS NULL LIMIT 1',
+                        `SELECT id
+                         FROM members
+                         WHERE gym_id = $1
+                             AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $2
+                             AND deleted_at IS NULL
+                         LIMIT 1`,
             [gym_id, normalizedIdentity.phone]
         );
         if (existingPhone.rows.length > 0) {
@@ -441,7 +534,12 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
         }
 
         const existingEmail = await pool.query(
-            'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND deleted_at IS NULL LIMIT 1',
+                        `SELECT id
+                         FROM members
+                         WHERE gym_id = $1
+                             AND LOWER(BTRIM(COALESCE(email, ''))) = $2
+                             AND deleted_at IS NULL
+                         LIMIT 1`,
             [gym_id, normalizedIdentity.email]
         );
         if (existingEmail.rows.length > 0) {
@@ -450,17 +548,21 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
         }
 
         const newMember = await pool.query(
-            `INSERT INTO members (full_name, email, phone, profile_pic, gym_id, joining_date, last_visit, status)
-             VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, NULL, 'UNPAID')
+            `INSERT INTO members (full_name, email, phone, profile_pic, gym_id, joining_date, last_visit, status, branch_id)
+             VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, NULL, 'UNPAID', $6)
              RETURNING *`,
-            [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, gym_id]
+            [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, gym_id, branchScope.branchId]
         );
 
-        res.json(newMember.rows[0]);
+        const [member] = appendMemberBranchMeta(newMember.rows, branchScope.branchDirectory);
+        res.json(member);
     } catch (err) {
         console.error("ADD MEMBER ERROR:", err.message);
         await discardUploadedProfile(req);
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         if (err.code === '23505') {
@@ -495,8 +597,8 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
 
     try {
         const currentMemberResult = await pool.query(
-            'SELECT id, email, phone, profile_pic FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-            [memberId, gym_id]
+            'SELECT id, email, phone, profile_pic, COALESCE(branch_id, $3) AS branch_id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+            [memberId, gym_id, DEFAULT_BRANCH_ID]
         );
         if (currentMemberResult.rows.length === 0) {
             await discardUploadedProfile(req);
@@ -504,12 +606,19 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
         }
 
         const currentMember = currentMemberResult.rows[0];
+        const branchScope = await resolveBranchWriteScope(pool, req, payload.branch_id === undefined ? currentMember.branch_id : payload.branch_id);
         const currentPhone = normalizeDigits(currentMember.phone);
         const currentEmail = String(currentMember.email || '').trim().toLowerCase();
 
         if (normalizedIdentity.phone !== currentPhone) {
             const existingPhone = await pool.query(
-                'SELECT id FROM members WHERE gym_id = $1 AND phone = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
+                `SELECT id
+                 FROM members
+                 WHERE gym_id = $1
+                   AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $2
+                   AND id <> $3
+                   AND deleted_at IS NULL
+                 LIMIT 1`,
                 [gym_id, normalizedIdentity.phone, memberId]
             );
             if (existingPhone.rows.length > 0) {
@@ -520,7 +629,13 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
 
         if (normalizedIdentity.email !== currentEmail) {
             const existingEmail = await pool.query(
-                'SELECT id FROM members WHERE gym_id = $1 AND lower(email) = $2 AND id <> $3 AND deleted_at IS NULL LIMIT 1',
+                                `SELECT id
+                                 FROM members
+                                 WHERE gym_id = $1
+                                     AND LOWER(BTRIM(COALESCE(email, ''))) = $2
+                                     AND id <> $3
+                                     AND deleted_at IS NULL
+                                 LIMIT 1`,
                 [gym_id, normalizedIdentity.email, memberId]
             );
             if (existingEmail.rows.length > 0) {
@@ -532,8 +647,8 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
         if (req.file) {
             const profile_pic = getStoredProfileValue(req.file);
             const updateResult = await pool.query(
-                "UPDATE members SET full_name = $1, email = $2, phone = $3, profile_pic = $4 WHERE id = $5 AND gym_id = $6 AND deleted_at IS NULL",
-                [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, memberId, gym_id]
+                "UPDATE members SET full_name = $1, email = $2, phone = $3, profile_pic = $4, branch_id = $5 WHERE id = $6 AND gym_id = $7 AND deleted_at IS NULL",
+                [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, branchScope.branchId, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
                 await discardUploadedProfile(req);
@@ -546,8 +661,8 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
             }
         } else {
             const updateResult = await pool.query(
-                "UPDATE members SET full_name = $1, email = $2, phone = $3 WHERE id = $4 AND gym_id = $5 AND deleted_at IS NULL",
-                [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, memberId, gym_id]
+                "UPDATE members SET full_name = $1, email = $2, phone = $3, branch_id = $4 WHERE id = $5 AND gym_id = $6 AND deleted_at IS NULL",
+                [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, branchScope.branchId, memberId, gym_id]
             );
             if (updateResult.rowCount === 0) {
                 await discardUploadedProfile(req);
@@ -559,6 +674,9 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
         console.error("UPDATE MEMBER ERROR:", err.message);
         await discardUploadedProfile(req);
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         if (err.code === '23505') {
@@ -580,9 +698,18 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
     const gym_id = req.user.gym_id;
     try {
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const params = [memberId, gym_id];
+        const branchFilter = branchScope.branchId
+            ? ` AND COALESCE(m.branch_id, '${DEFAULT_BRANCH_ID}') = $3`
+            : '';
+        if (branchScope.branchId) {
+            params.push(branchScope.branchId);
+        }
         const member = await pool.query(
             `SELECT
                 m.id,
+                COALESCE(m.branch_id, '${DEFAULT_BRANCH_ID}') AS branch_id,
                 COALESCE(ms_latest.status, 'UNPAID') AS membership_status
              FROM members m
              LEFT JOIN LATERAL (
@@ -592,8 +719,8 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
                 ORDER BY ms.end_date DESC, ms.id DESC
                 LIMIT 1
              ) ms_latest ON TRUE
-             WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL`,
-            [memberId, gym_id]
+             WHERE m.id = $1 AND m.gym_id = $2 AND m.deleted_at IS NULL${branchFilter}`,
+            params
         );
         if(member.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
 
@@ -603,8 +730,8 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
         }
 
         await pool.query(
-            "INSERT INTO attendance (gym_id, member_id, check_in_time) VALUES ($1, $2, NOW())",
-            [gym_id, memberId]
+            "INSERT INTO attendance (gym_id, member_id, check_in_time, branch_id) VALUES ($1, $2, NOW(), $3)",
+            [gym_id, memberId, member.rows[0].branch_id || DEFAULT_BRANCH_ID]
         );
         await pool.query(
             "UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2",
@@ -613,6 +740,9 @@ router.put('/:id/check-in', auth, saasMiddleware, requirePermission('attendance:
         res.json({ message: "Member Checked In" });
     } catch (err) {
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         console.error("CHECK-IN ERROR:", err.message);
@@ -627,9 +757,8 @@ router.delete('/:id', auth, saasMiddleware, requirePermission('members:write'), 
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
         const gym_id = req.user.gym_id;
         client = await pool.connect();
-
-        const check = await client.query('SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
-        if (check.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+        const access = await assertMemberBranchAccess(client, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
 
         await client.query('BEGIN');
         await client.query('UPDATE payments    SET deleted_at = NOW() WHERE user_id = $1 AND gym_id = $2 AND deleted_at IS NULL', [memberId, gym_id]);
@@ -643,6 +772,9 @@ router.delete('/:id', auth, saasMiddleware, requirePermission('members:write'), 
             await client.query('ROLLBACK').catch(() => {});
         }
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         console.error("DELETE MEMBER ERROR:", err.message);
@@ -662,9 +794,8 @@ router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:writ
         const gym_id = req.user.gym_id;
         const cancellationReason = ensureTrimmedString(req.body?.cancellation_reason, { field: 'cancellation_reason', max: 500 }) || null;
         client = await pool.connect();
-
-        const check = await client.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Member not found' });
+        const access = await assertMemberBranchAccess(client, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         await client.query('BEGIN');
         await client.query(
             `UPDATE members SET status='CANCELLED', cancellation_reason=$3, cancelled_at=NOW() WHERE id=$1 AND gym_id=$2`,
@@ -681,6 +812,9 @@ router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:writ
             await client.query('ROLLBACK').catch(() => {});
         }
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         console.error('CANCEL MEMBER ERROR:', err.message);
@@ -707,11 +841,11 @@ router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:wr
 
         client = await pool.connect();
         const [src, dst] = await Promise.all([
-            client.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [memberId, gym_id]),
-            client.query('SELECT id FROM members WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL', [transferToMemberId, gym_id]),
+            assertMemberBranchAccess(client, req, memberId),
+            assertMemberBranchAccess(client, req, transferToMemberId),
         ]);
-        if (!src.rows.length) return res.status(404).json({ error: 'Source member not found' });
-        if (!dst.rows.length) return res.status(404).json({ error: 'Destination member not found' });
+        if (!src.member) return res.status(404).json({ error: 'Source member not found' });
+        if (!dst.member) return res.status(404).json({ error: 'Destination member not found' });
         await client.query('BEGIN');
         const ms = await client.query(
             `SELECT id, plan_id, start_date, end_date FROM memberships
@@ -734,6 +868,9 @@ router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:wr
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
         }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('TRANSFER MEMBER ERROR:', err.message);
         res.status(500).json({ error: 'Server error' });
     } finally {
@@ -747,6 +884,9 @@ router.post('/:id/transfer', auth, saasMiddleware, requirePermission('members:wr
 router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         const [hasNotesColumn, hasUploadedAtColumn] = await Promise.all([
             tableHasColumn('member_documents', 'notes'),
             tableHasColumn('member_documents', 'uploaded_at'),
@@ -758,15 +898,26 @@ router.get('/:id/documents', auth, saasMiddleware, requirePermission('members:re
              FROM member_documents md
              WHERE md.member_id = $1 AND md.gym_id = $2
              ORDER BY ${uploadedAtSelect} DESC`,
-            [req.params.id, gid]
+            [memberId, gid]
         );
         res.json(result.rows);
-    } catch(err) { console.error('GET DOCS:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('GET DOCS:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         const payload = normalizeMemberDocumentPayload(req.body || {});
         const normalizedDocUrl = normalizeDocumentUrl(req.body?.doc_url);
         if (!normalizedDocUrl) {
@@ -801,6 +952,9 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
         }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('ADD DOC:', err.message);
         res.status(500).json({ error: 'Server error' });
     }
@@ -808,26 +962,51 @@ router.post('/:id/documents', auth, saasMiddleware, requirePermission('members:w
 router.delete('/:mid/documents/:did', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        await pool.query('DELETE FROM member_documents WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.did, req.params.mid, gid]);
+        const memberId = ensureInteger(req.params.mid, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
+        await pool.query('DELETE FROM member_documents WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.did, memberId, gid]);
         res.json({ message: 'Document deleted' });
-    } catch(err) { console.error('DEL DOC:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('DEL DOC:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
-
 // --- 10. MEMBER NOTES ---
 router.get('/:id/notes', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         const result = await pool.query(
             `SELECT mn.*, u.full_name as author_name FROM member_notes mn
              LEFT JOIN users u ON u.id = mn.created_by
-             WHERE mn.member_id=$1 AND mn.gym_id=$2 ORDER BY mn.created_at DESC`, [req.params.id, gid]);
+             WHERE mn.member_id=$1 AND mn.gym_id=$2 ORDER BY mn.created_at DESC`, [memberId, gid]);
         res.json(result.rows);
-    } catch(err) { console.error('GET NOTES:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('GET NOTES:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         const payload = normalizeMemberNotePayload(req.body || {});
         const hasNoteTypeColumn = await tableHasColumn('member_notes', 'note_type');
         const columns = ['gym_id', 'member_id', 'created_by', 'note'];
@@ -846,6 +1025,9 @@ router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
         }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('ADD NOTE:', err.message);
         res.status(500).json({ error: 'Server error' });
     }
@@ -853,9 +1035,21 @@ router.post('/:id/notes', auth, saasMiddleware, requirePermission('members:write
 router.delete('/:mid/notes/:nid', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        await pool.query('DELETE FROM member_notes WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.nid, req.params.mid, gid]);
+        const memberId = ensureInteger(req.params.mid, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
+        await pool.query('DELETE FROM member_notes WHERE id=$1 AND member_id=$2 AND gym_id=$3', [req.params.nid, memberId, gid]);
         res.json({ message: 'Note deleted' });
-    } catch(err) { console.error('DEL NOTE:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('DEL NOTE:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 // --- 11. MEMBER WAIVERS ---
@@ -864,6 +1058,8 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
     try {
         const gid = req.user.gym_id;
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         const payload = normalizeMemberWaiverPayload(req.body || {});
         client = await pool.connect();
         const [hasWaiverTypeColumn, hasSignatureColumn, hasIpAddressColumn] = await Promise.all([
@@ -907,6 +1103,9 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
         }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('WAIVER:', err.message);
         res.status(500).json({ error: 'Server error' });
     } finally {
@@ -918,9 +1117,21 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
 router.get('/:id/waivers', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = req.user.gym_id;
-        const result = await pool.query('SELECT * FROM member_waivers WHERE member_id=$1 AND gym_id=$2 ORDER BY signed_at DESC', [req.params.id, gid]);
+        const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
+        const result = await pool.query('SELECT * FROM member_waivers WHERE member_id=$1 AND gym_id=$2 ORDER BY signed_at DESC', [memberId, gid]);
         res.json(result.rows);
-    } catch(err) { console.error('GET WAIVERS:', err.message); res.status(500).json({ error: 'Server error' }); }
+    } catch(err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('GET WAIVERS:', err.message);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 // --- 12. UPDATE ONBOARDING ---
@@ -928,6 +1139,8 @@ router.patch('/:id/onboarding', auth, saasMiddleware, requirePermission('members
     try {
         const gid = req.user.gym_id;
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
+        const access = await assertMemberBranchAccess(pool, req, memberId);
+        if (!access.member) return res.status(404).json({ error: 'Member not found' });
         const payload = normalizeOnboardingPatch(req.body || {});
         const updates = [];
         const vals = [];
@@ -948,6 +1161,9 @@ router.patch('/:id/onboarding', auth, saasMiddleware, requirePermission('members
         res.json(result.rows[0]);
     } catch(err) {
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         console.error('ONBOARDING:', err.message);

@@ -291,9 +291,10 @@ html.gv-compact-ui main.app-scroll-shell > div {
 
 .payments-mobile-list-scroll,
 .members-mobile-list-scroll {
-  overflow-y: scroll;
+  overflow-y: auto;
   overscroll-behavior-y: contain;
-  touch-action: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .no-scrollbar {

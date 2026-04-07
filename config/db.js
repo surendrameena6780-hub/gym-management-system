@@ -116,6 +116,70 @@ const enforceMembersPhonePresence = async (client) => {
     }
 };
 
+const repairMemberUniqueness = async (client) => {
+    await client.query(`
+        UPDATE members
+        SET email = NULL
+        WHERE email IS NOT NULL AND BTRIM(email) = '';
+
+        UPDATE members
+        SET email = LOWER(BTRIM(email))
+        WHERE email IS NOT NULL;
+
+        UPDATE members
+        SET phone = NULL
+        WHERE phone IS NOT NULL AND BTRIM(phone) = '';
+    `);
+
+    const duplicateEmails = await client.query(`
+        SELECT gym_id, LOWER(BTRIM(email)) AS normalized_email, COUNT(*)::INTEGER AS count
+        FROM members
+        WHERE deleted_at IS NULL
+          AND email IS NOT NULL
+          AND BTRIM(email) <> ''
+        GROUP BY gym_id, LOWER(BTRIM(email))
+        HAVING COUNT(*) > 1
+        LIMIT 5
+    `);
+
+    if (duplicateEmails.rows.length > 0) {
+        throw new Error('Cannot repair member email uniqueness because duplicate active member emails still exist.');
+    }
+
+    const duplicatePhones = await client.query(`
+        SELECT gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10) AS normalized_phone, COUNT(*)::INTEGER AS count
+        FROM members
+        WHERE deleted_at IS NULL
+          AND phone IS NOT NULL
+          AND BTRIM(phone) <> ''
+        GROUP BY gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10)
+        HAVING COUNT(*) > 1
+        LIMIT 5
+    `);
+
+    if (duplicatePhones.rows.length > 0) {
+        throw new Error('Cannot repair member phone uniqueness because duplicate active member phones still exist.');
+    }
+
+    await client.query(`
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_email_key;
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_gym_email_key;
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_gym_phone_key;
+
+        DROP INDEX IF EXISTS members_email_key;
+        DROP INDEX IF EXISTS members_gym_email_key;
+        DROP INDEX IF EXISTS members_gym_phone_key;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_members_gym_email_active_unique
+            ON members(gym_id, LOWER(BTRIM(email)))
+            WHERE email IS NOT NULL AND BTRIM(email) <> '' AND deleted_at IS NULL;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_members_gym_phone_active_unique
+            ON members(gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10))
+            WHERE phone IS NOT NULL AND BTRIM(phone) <> '' AND deleted_at IS NULL;
+    `);
+};
+
 const addRfidEventSnapshots = async (client) => {
     await client.query(`
         ALTER TABLE rfid_events ADD COLUMN IF NOT EXISTS member_snapshot JSONB DEFAULT '{}'::jsonb
@@ -235,6 +299,7 @@ const runSchemaMigrations = async () => {
         await runNamedMigration(client, '2026-04-06-operational-archives', createOperationalArchiveInfrastructure);
         await runNamedMigration(client, '2026-04-06-protect-gym-hard-deletes', protectGymHardDeletes);
         await runNamedMigration(client, '2026-04-06-members-phone-required', enforceMembersPhonePresence);
+        await runNamedMigration(client, '2026-04-07-member-uniqueness-repair', repairMemberUniqueness);
         await runNamedMigration(client, '2026-04-06-rfid-event-snapshots', addRfidEventSnapshots);
         await runNamedMigration(client, '2026-04-07-performance-indexes', createPerformanceIndexes);
         await runNamedMigration(client, '2026-04-07-read-route-performance-indexes', createReadRoutePerformanceIndexes);

@@ -509,10 +509,15 @@ const loadRazorpayScript = () => {
     email: '',
     password: '',
     staff_role: 'TRAINER',
+    branch_id: 'branch-1',
   });
   const [staffPasswordReset, setStaffPasswordReset] = useState({});
 
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+  const branchOptions = useMemo(
+    () => buildBranchDirectoryState(platformData.branches_count, platformData.branch_directory),
+    [platformData.branch_directory, platformData.branches_count]
+  );
   const activeWhatsAppOnboardingView = WHATSAPP_ONBOARDING_VIEWS[whatsappOnboardingView] || WHATSAPP_ONBOARDING_VIEWS.msg91;
   const activeWhatsAppOnboardingUrl = getWhatsAppOnboardingUrl(whatsappOnboardingView, whatsappOnboarding);
   const isWhatsAppConnected = String(integrationData.whatsapp_status || '').toUpperCase() === 'CONNECTED';
@@ -524,6 +529,14 @@ const loadRazorpayScript = () => {
     return String(log?.current_status || '').trim().toUpperCase() === deliveryLogFilter;
   });
   const activeDeliveryFilterLabel = DELIVERY_LOG_FILTERS.find((option) => option.value === deliveryLogFilter)?.label || 'All';
+
+  useEffect(() => {
+    const fallbackBranchId = branchOptions[0]?.id || 'branch-1';
+    setStaffForm((prev) => {
+      const hasSelectedBranch = branchOptions.some((branch) => branch.id === prev.branch_id);
+      return hasSelectedBranch ? prev : { ...prev, branch_id: fallbackBranchId };
+    });
+  }, [branchOptions]);
 
   useEffect(() => {
     setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
@@ -1151,7 +1164,7 @@ const loadRazorpayScript = () => {
     try {
       await axios.post('/api/users/staff', staffForm, headers);
       toast('Staff member created successfully.', 'success');
-      setStaffForm({ full_name: '', email: '', password: '', staff_role: 'TRAINER' });
+      setStaffForm({ full_name: '', email: '', password: '', staff_role: 'TRAINER', branch_id: branchOptions[0]?.id || 'branch-1' });
       fetchStaff();
       setUsageData((prev) => ({ ...prev, staff: Number(prev.staff || 0) + 1 }));
     } catch (err) {
@@ -1161,40 +1174,44 @@ const loadRazorpayScript = () => {
     }
   };
 
-  const toggleStaffStatus = async (staff) => {
+  const updateStaffRecord = async (staff, overrides, successMessage) => {
     setSavingStaffId(staff.id);
     try {
       await axios.put(`/api/users/staff/${staff.id}`, {
         full_name: staff.full_name,
-        staff_role: staff.staff_role || 'STAFF',
-        is_active: !staff.is_active,
-        permissions: staff.permissions,
+        staff_role: overrides.staff_role ?? staff.staff_role ?? 'STAFF',
+        branch_id: overrides.branch_id ?? staff.branch_id ?? branchOptions[0]?.id ?? 'branch-1',
+        is_active: overrides.is_active ?? staff.is_active,
+        permissions: Array.isArray(overrides.permissions) ? overrides.permissions : (staff.permissions || []),
       }, headers);
-      toast(`Staff ${!staff.is_active ? 'activated' : 'deactivated'} successfully.`, 'success');
+      toast(successMessage, 'success');
       fetchStaff();
     } catch (err) {
-      toast(err?.response?.data?.error || 'Failed to update staff status.', 'error');
+      toast(err?.response?.data?.error || 'Failed to update staff member.', 'error');
     } finally {
       setSavingStaffId(null);
     }
   };
 
+  const toggleStaffStatus = async (staff) => {
+    await updateStaffRecord(staff, {
+      is_active: !staff.is_active,
+      permissions: staff.permissions,
+    }, `Staff ${!staff.is_active ? 'activated' : 'deactivated'} successfully.`);
+  };
+
   const updateStaffRole = async (staff, nextRole) => {
-    setSavingStaffId(staff.id);
-    try {
-      await axios.put(`/api/users/staff/${staff.id}`, {
-        full_name: staff.full_name,
-        staff_role: nextRole,
-        is_active: staff.is_active,
-        permissions: [],
-      }, headers);
-      toast('Staff role updated.', 'success');
-      fetchStaff();
-    } catch (err) {
-      toast(err?.response?.data?.error || 'Failed to update staff role.', 'error');
-    } finally {
-      setSavingStaffId(null);
-    }
+    await updateStaffRecord(staff, {
+      staff_role: nextRole,
+      permissions: [],
+    }, 'Staff role updated.');
+  };
+
+  const updateStaffBranch = async (staff, nextBranchId) => {
+    await updateStaffRecord(staff, {
+      branch_id: nextBranchId,
+      permissions: staff.permissions,
+    }, 'Staff branch updated.');
   };
 
   const resetStaffPassword = async (staffId) => {
@@ -1670,7 +1687,7 @@ const loadRazorpayScript = () => {
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white max-w-5xl mb-5">
                 <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-4">Add Staff Member</h3>
-                <form onSubmit={handleAddStaff} className="grid grid-cols-1 desktop:grid-cols-5 gap-3">
+                <form onSubmit={handleAddStaff} className="grid grid-cols-1 desktop:grid-cols-6 gap-3">
                   <input
                     value={staffForm.full_name}
                     onChange={(e) => setStaffForm((prev) => ({ ...prev, full_name: e.target.value }))}
@@ -1700,6 +1717,15 @@ const loadRazorpayScript = () => {
                       <option key={role} value={role}>{role}</option>
                     ))}
                   </select>
+                  <select
+                    value={staffForm.branch_id}
+                    onChange={(e) => setStaffForm((prev) => ({ ...prev, branch_id: e.target.value }))}
+                    className="md:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold"
+                  >
+                    {branchOptions.map((branch) => (
+                      <option key={branch.id} value={branch.id}>{branch.name}</option>
+                    ))}
+                  </select>
                   <button
                     type="submit"
                     disabled={addingStaff}
@@ -1714,21 +1740,22 @@ const loadRazorpayScript = () => {
                 <div className="overflow-x-auto">
                 <table className="w-full min-w-[860px] text-left text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                    <tr><th className="px-6 py-4">Name</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Reset Password</th><th className="px-6 py-4 text-right">Actions</th></tr>
+                    <tr><th className="px-6 py-4">Name</th><th className="px-6 py-4">Role</th><th className="px-6 py-4">Branch</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Reset Password</th><th className="px-6 py-4 text-right">Actions</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     <tr>
                       <td className="px-6 py-4 font-bold text-slate-800">{accountData.full_name} <span className="block text-xs font-medium text-slate-400">{accountData.email}</span></td>
                       <td className="px-6 py-4"><span className="px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold uppercase tracking-wider">Owner</span></td>
+                      <td className="px-6 py-4 text-xs font-semibold text-slate-500">All branches</td>
                       <td className="px-6 py-4"><span className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold"><CheckCircle size={14}/> Active</span></td>
                       <td className="px-6 py-4 text-slate-300 text-xs font-bold">—</td>
                       <td className="px-6 py-4 text-right text-slate-300 font-bold text-xs">Cannot edit owner</td>
                     </tr>
 
                     {loadingStaff ? (
-                      <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400 font-medium bg-slate-50/50">Loading staff members...</td></tr>
+                      <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-400 font-medium bg-slate-50/50">Loading staff members...</td></tr>
                     ) : staffMembers.filter((u) => u.role !== 'OWNER').length === 0 ? (
-                      <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400 font-medium bg-slate-50/50">You haven't added any staff members yet.</td></tr>
+                      <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-400 font-medium bg-slate-50/50">You haven't added any staff members yet.</td></tr>
                     ) : (
                       staffMembers.filter((u) => u.role !== 'OWNER').map((staff) => (
                         <tr key={staff.id}>
@@ -1745,6 +1772,18 @@ const loadRazorpayScript = () => {
                             >
                               {STAFF_ROLE_OPTIONS.map((role) => (
                                 <option key={role} value={role}>{role}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-6 py-4">
+                            <select
+                              value={staff.branch_id || branchOptions[0]?.id || 'branch-1'}
+                              disabled={savingStaffId === staff.id}
+                              onChange={(e) => updateStaffBranch(staff, e.target.value)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-700"
+                            >
+                              {branchOptions.map((branch) => (
+                                <option key={branch.id} value={branch.id}>{branch.name}</option>
                               ))}
                             </select>
                           </td>
