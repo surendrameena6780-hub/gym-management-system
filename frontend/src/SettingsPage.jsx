@@ -1555,6 +1555,7 @@ const loadRazorpayScript = () => {
                   key={tab.id}
                   disabled={isTabDisabled}
                   onClick={() => openTab(tab.id)}
+                  aria-current={isActive ? 'page' : undefined}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
                     isTabDisabled ? 'opacity-50 cursor-not-allowed grayscale' : ''
                   } ${
@@ -2115,20 +2116,20 @@ const loadRazorpayScript = () => {
               <p className="text-sm font-medium text-slate-500 mb-6">Connect payment gateways, messaging services &amp; manage campaign templates.</p>
 
               {/* Sub-tab switcher */}
-              <div className="grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4 bg-slate-100 rounded-2xl p-1 mb-8 gap-1">
-                <button onClick={() => setIntegSubTab('payments')}
+              <div role="tablist" aria-label="Integration sections" className="grid w-full max-w-3xl grid-cols-2 sm:grid-cols-4 bg-slate-100 rounded-2xl p-1 mb-8 gap-1">
+                <button type="button" id="settings-integration-tab-payments" role="tab" aria-selected={integSubTab === 'payments'} aria-controls="settings-integration-panel-payments" tabIndex={integSubTab === 'payments' ? 0 : -1} onClick={() => setIntegSubTab('payments')}
                   className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'payments' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <CreditCard size={14} /> Payments
                 </button>
-                <button onClick={() => setIntegSubTab('messaging')}
+                <button type="button" id="settings-integration-tab-messaging" role="tab" aria-selected={integSubTab === 'messaging'} aria-controls="settings-integration-panel-messaging" tabIndex={integSubTab === 'messaging' ? 0 : -1} onClick={() => setIntegSubTab('messaging')}
                   className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'messaging' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <MessageSquare size={14} /> Messaging
                 </button>
-                <button onClick={() => setIntegSubTab('campaigns')}
+                <button type="button" id="settings-integration-tab-campaigns" role="tab" aria-selected={integSubTab === 'campaigns'} aria-controls="settings-integration-panel-campaigns" tabIndex={integSubTab === 'campaigns' ? 0 : -1} onClick={() => setIntegSubTab('campaigns')}
                   className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'campaigns' ? 'bg-white shadow-sm text-purple-700' : 'text-slate-500 hover:text-slate-700'}`}>
                   <Zap size={14} /> Campaigns
                 </button>
-                <button onClick={() => setIntegSubTab('platform')}
+                <button type="button" id="settings-integration-tab-platform" role="tab" aria-selected={integSubTab === 'platform'} aria-controls="settings-integration-panel-platform" tabIndex={integSubTab === 'platform' ? 0 : -1} onClick={() => setIntegSubTab('platform')}
                   className={`min-w-0 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 ${integSubTab === 'platform' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
                   <Blocks size={14} /> Platform
                 </button>
@@ -2141,7 +2142,7 @@ const loadRazorpayScript = () => {
 
                   {/* â•â• PAYMENTS TAB â•â• */}
                   {integSubTab === 'payments' && (
-                    <div className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-payments" role="tabpanel" aria-labelledby="settings-integration-tab-payments" className="space-y-4 animate-in fade-in duration-200">
 
                       {/* Razorpay Connect Hero Card */}
                       <div className={`rounded-2xl p-5 sm:p-6 border ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-50 border-emerald-200' : 'bg-gradient-to-br from-indigo-50 to-white border-indigo-200'}`}>
@@ -2180,7 +2181,7 @@ const loadRazorpayScript = () => {
 
                       {/* Paste acc_ manually */}
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-                        <button type="button" onClick={() => setShowLinkedAccountForm(v => !v)}
+                        <button type="button" onClick={() => setShowLinkedAccountForm(v => !v)} aria-expanded={showLinkedAccountForm} aria-controls="settings-linked-account-panel"
                           className="w-full flex items-center justify-between p-5 text-left hover:bg-slate-50 transition-colors">
                           <div>
                             <p className="font-bold text-slate-800 text-sm">Already have a Razorpay Account ID?</p>
@@ -2189,7 +2190,7 @@ const loadRazorpayScript = () => {
                           <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${showLinkedAccountForm ? 'rotate-180' : ''}`} />
                         </button>
                         {showLinkedAccountForm && (
-                          <div className="px-5 pb-5 space-y-3 animate-in fade-in duration-200">
+                          <div id="settings-linked-account-panel" className="px-5 pb-5 space-y-3 animate-in fade-in duration-200">
                             <div className="h-px bg-slate-100" />
                             <p className="text-xs text-slate-500 font-medium break-words">Go to <strong>Razorpay &gt; Route &gt; Accounts</strong> and copy your Account ID (starts with <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">acc_</code>)</p>
                             <input
@@ -2215,7 +2216,7 @@ const loadRazorpayScript = () => {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-slate-500">Use Route</span>
-                            <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, connect_mode: prev.member_payments?.connect_mode === 'PARTNER' ? 'MANUAL' : 'PARTNER' } }))}
+                            <button type="button" aria-pressed={integrationData.member_payments?.connect_mode === 'PARTNER'} aria-label="Toggle Razorpay Route mode" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, connect_mode: prev.member_payments?.connect_mode === 'PARTNER' ? 'MANUAL' : 'PARTNER' } }))}
                               className={`relative w-10 h-6 rounded-full transition-colors ${integrationData.member_payments?.connect_mode === 'PARTNER' ? 'bg-indigo-500' : 'bg-slate-300'}`}>
                               <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.member_payments?.connect_mode === 'PARTNER' ? 'translate-x-4' : ''}`} />
                             </button>
@@ -2254,7 +2255,7 @@ const loadRazorpayScript = () => {
                             <p className="font-bold text-slate-800 text-sm">Enable Member Online Collection</p>
                             <p className="text-xs text-slate-500 mt-0.5">Staff can collect member payments using Razorpay payment links with member-phone delivery and owner QR, direct UPI QR, or both</p>
                           </div>
-                          <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, enabled: !prev.member_payments?.enabled } }))}
+                          <button type="button" aria-pressed={Boolean(integrationData.member_payments?.enabled)} aria-label="Toggle member online collection" onClick={() => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, enabled: !prev.member_payments?.enabled } }))}
                             className={`relative w-11 h-6 rounded-full transition-colors ${integrationData.member_payments?.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}>
                             <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.member_payments?.enabled ? 'translate-x-5' : ''}`} />
                           </button>
@@ -2272,7 +2273,7 @@ const loadRazorpayScript = () => {
 
                   {/* â•â• MESSAGING TAB â•â• */}
                   {integSubTab === 'messaging' && (
-                    <div className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-messaging" role="tabpanel" aria-labelledby="settings-integration-tab-messaging" className="space-y-4 animate-in fade-in duration-200">
                       {isWhatsAppConnected && !whatsappNumberEditorOpen ? (
                         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2532,7 +2533,7 @@ const loadRazorpayScript = () => {
 
                   {/* â•â• CAMPAIGNS TAB â•â• */}
                   {integSubTab === 'campaigns' && (
-                    <div className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-campaigns" role="tabpanel" aria-labelledby="settings-integration-tab-campaigns" className="space-y-4 animate-in fade-in duration-200">
 
                       {/* Usage + Controls */}
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
@@ -2541,7 +2542,7 @@ const loadRazorpayScript = () => {
                             <h4 className="font-black text-slate-900 text-sm">Bulk Messaging</h4>
                             <p className="text-xs text-slate-500 mt-0.5 font-medium">Send campaigns to multiple members at once</p>
                           </div>
-                          <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_enabled: !prev.bulk_enabled }))}
+                          <button type="button" aria-pressed={Boolean(integrationData.bulk_enabled)} aria-label="Toggle bulk messaging" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_enabled: !prev.bulk_enabled }))}
                             className={`relative w-11 h-6 rounded-full transition-colors ${integrationData.bulk_enabled ? 'bg-purple-500' : 'bg-slate-300'}`}>
                             <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_enabled ? 'translate-x-5' : ''}`} />
                           </button>
@@ -2585,7 +2586,7 @@ const loadRazorpayScript = () => {
                             <p className="text-sm font-bold text-slate-700">WhatsApp Campaigns</p>
                             <p className="text-[11px] text-slate-500 font-medium mt-0.5">Campaign sending is template-first and WhatsApp-only for now.</p>
                           </div>
-                          <button type="button" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { whatsapp: !prev.bulk_channels?.whatsapp, sms: false } }))}
+                          <button type="button" aria-pressed={Boolean(integrationData.bulk_channels?.whatsapp)} aria-label="Toggle WhatsApp campaign delivery" onClick={() => setIntegrationData(prev => ({ ...prev, bulk_channels: { whatsapp: !prev.bulk_channels?.whatsapp, sms: false } }))}
                             className={`relative w-9 h-5 rounded-full transition-colors ${integrationData.bulk_channels?.whatsapp ? 'bg-emerald-500' : 'bg-slate-300'}`}>
                             <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${integrationData.bulk_channels?.whatsapp ? 'translate-x-4' : ''}`} />
                           </button>
@@ -2671,7 +2672,7 @@ const loadRazorpayScript = () => {
                   )}
 
                   {integSubTab === 'platform' && (
-                    <div className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-platform" role="tabpanel" aria-labelledby="settings-integration-tab-platform" className="space-y-4 animate-in fade-in duration-200">
                       {platformLoading ? (
                         <div className="p-10 bg-white border border-slate-100 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading platform settings...</div>
                       ) : (
