@@ -128,26 +128,50 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   )
   const KEYBOARD_OPEN_THRESHOLD_PX = 120
 
+  const isEditableElement = (element) => {
+    if (!(element instanceof HTMLElement)) {
+      return false
+    }
+
+    if (element.isContentEditable) {
+      return true
+    }
+
+    if (['TEXTAREA', 'SELECT'].includes(element.tagName)) {
+      return true
+    }
+
+    if (element.tagName !== 'INPUT') {
+      return false
+    }
+
+    const inputType = String(element.getAttribute('type') || element.type || '').trim().toLowerCase()
+    return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(inputType)
+  }
+
   const syncViewportVariables = () => {
     const viewport = window.visualViewport
     const layoutViewportHeight = Math.max(
       Math.round(window.innerHeight || 0),
       Math.round(document.documentElement.clientHeight || 0),
-      stableViewportHeight || 0,
     )
     const visibleViewportHeight = Math.round(viewport?.height || layoutViewportHeight || 0)
     const viewportOffsetTop = Math.round(viewport?.offsetTop || 0)
     const inferredKeyboardInset = Math.max(0, layoutViewportHeight - visibleViewportHeight - viewportOffsetTop)
-    const isKeyboardOpen = inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
+    const isKeyboardOpen = isEditableElement(document.activeElement) && inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
 
     if (!isKeyboardOpen && layoutViewportHeight > 0) {
       stableViewportHeight = layoutViewportHeight
-    } else if (layoutViewportHeight > stableViewportHeight) {
+    } else if (stableViewportHeight <= 0 && layoutViewportHeight > 0) {
       stableViewportHeight = layoutViewportHeight
     }
 
-    if (stableViewportHeight > 0) {
-      document.documentElement.style.setProperty('--app-viewport-height', `${stableViewportHeight}px`)
+    const resolvedViewportHeight = isKeyboardOpen
+      ? Math.max(stableViewportHeight || 0, layoutViewportHeight || 0)
+      : layoutViewportHeight
+
+    if (resolvedViewportHeight > 0) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${resolvedViewportHeight}px`)
     }
 
     document.documentElement.style.setProperty('--app-keyboard-inset', `${isKeyboardOpen ? inferredKeyboardInset : 0}px`)
@@ -200,6 +224,8 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
   window.addEventListener('pageshow', () => notifyAppResumed('pageshow'), { passive: true })
   window.addEventListener('gymvault:force-viewport-sync', handleForcedViewportSync, { passive: true })
   document.addEventListener('visibilitychange', handleVisibilityResume, { passive: true })
+  document.addEventListener('focusin', handleForcedViewportSync)
+  document.addEventListener('focusout', handleForcedViewportSync)
   window.visualViewport?.addEventListener('resize', queueViewportSync, { passive: true })
   window.visualViewport?.addEventListener('scroll', queueViewportSync, { passive: true })
 }
