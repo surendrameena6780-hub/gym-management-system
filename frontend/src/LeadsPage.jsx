@@ -379,19 +379,22 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
               type="text"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
+              aria-label="Search leads"
               placeholder="Search lead, phone, email..."
               className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-sm font-medium transition-all"
             />
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-wrap gap-2 w-full">
+          <div role="group" aria-label="Lead status filters" className="grid grid-cols-2 sm:grid-cols-4 xl:flex xl:flex-wrap gap-2 w-full">
             {STATUS_OPTIONS.map((option) => {
               const isActive = statusFilter === option.key;
               return (
                 <button
                   key={option.key}
+                  type="button"
                   onClick={() => setStatusFilter(option.key)}
-                  className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wide transition-all border ${isActive ? `${option.pill} border-transparent shadow-sm` : `${option.subtle} border-transparent hover:border-slate-200`}`}
+                  aria-pressed={isActive}
+                  className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wide transition-all border focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:ring-offset-1 ${isActive ? `${option.pill} border-transparent shadow-sm` : `${option.subtle} border-transparent hover:border-slate-200`}`}
                 >
                   {option.label}
                 </button>
@@ -471,7 +474,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                         )
                       )}
                       {canManage && (
-                        <button onClick={() => openEditModal(lead)} className="w-11 h-11 rounded-xl bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center">
+                        <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="w-11 h-11 rounded-xl bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center">
                           <Pencil size={14} />
                         </button>
                       )}
@@ -523,10 +526,10 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                         <td className="py-4 px-2 align-top"><span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span></td>
                         <td className="py-4 px-2 align-top">
                           <div className="flex justify-end items-center gap-1.5 flex-wrap">
-                            <button onClick={() => handleCall(lead.phone)} className="p-2 text-blue-500 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-500 hover:text-white transition-all">
+                            <button type="button" aria-label={`Call ${lead.full_name}`} onClick={() => handleCall(lead.phone)} className="p-2 text-blue-500 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-500 hover:text-white transition-all">
                               <Phone size={13} />
                             </button>
-                            <button onClick={() => handleWhatsApp(lead)} className="p-2 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all">
+                            <button type="button" aria-label={`WhatsApp ${lead.full_name}`} onClick={() => handleWhatsApp(lead)} className="p-2 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all">
                               <MessageSquare size={13} />
                             </button>
                             {lead.converted_member_id ? (
@@ -541,12 +544,12 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                               )
                             )}
                             {canManage && (
-                              <button onClick={() => openEditModal(lead)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all">
+                              <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all">
                                 <Pencil size={13} />
                               </button>
                             )}
                             {canManage && (
-                              <button onClick={() => handleDeleteLead(lead)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
+                              <button type="button" aria-label={`Delete ${lead.full_name}`} onClick={() => handleDeleteLead(lead)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
                                 <Trash2 size={13} />
                               </button>
                             )}
@@ -573,13 +576,13 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
 
       {showFormModal && (
         <div className="app-modal-shell z-[140] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label={editingLead ? 'Update lead' : 'Add lead'} className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f0c29 0%, #312e81 100%)' }}>
               <div>
                 <h2 className="text-lg font-black">{editingLead ? 'Update Lead' : 'Add Lead'}</h2>
                 <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Capture demand without slowing down the desk</p>
               </div>
-              <button onClick={closeFormModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <button type="button" aria-label="Close lead form" onClick={closeFormModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
 
             <form onSubmit={handleSaveLead} className="app-modal-scroll p-6 space-y-5">

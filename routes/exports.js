@@ -1,13 +1,27 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
 
 const gymId = (req) => { const v = Number.parseInt(req?.user?.gym_id ?? req?.user?.gymId, 10); return Number.isInteger(v) ? v : null; };
+const EXPORT_ROW_LIMIT = Math.max(100, Math.min(5000, parseInt(process.env.EXPORT_ROW_LIMIT || '5000', 10) || 5000));
+const EXPORTS_PER_HOUR_LIMIT = Math.max(1, parseInt(process.env.EXPORTS_PER_HOUR_LIMIT || '10', 10) || 10);
 
 router.use(auth, saasMiddleware);
+
+const exportRateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: EXPORTS_PER_HOUR_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `${gymId(req) || 'nogym'}:${req.user?.id || 'anon'}`,
+    handler: (_req, res) => {
+        return res.status(429).json({ error: 'Too many export requests. Try again later.' });
+    },
+});
 
 const toCsv = (rows, columns) => {
     if (!rows.length) return columns.map(c => c.label).join(',') + '\n';
@@ -21,8 +35,15 @@ const toCsv = (rows, columns) => {
     return header + '\n' + body + '\n';
 };
 
+const setCsvHeaders = (res, filename, rowCount) => {
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Export-Row-Limit', String(EXPORT_ROW_LIMIT));
+    res.setHeader('X-Export-Truncated', rowCount >= EXPORT_ROW_LIMIT ? 'true' : 'false');
+};
+
 // ── Members CSV ──
-router.get('/members', requirePermission('members:read'), async (req, res) => {
+router.get('/members', exportRateLimiter, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = gymId(req);
         const result = await pool.query(
@@ -36,7 +57,7 @@ router.get('/members', requirePermission('members:read'), async (req, res) => {
                 ORDER BY ms2.end_date DESC, ms2.id DESC LIMIT 1
              ) ms ON true
              LEFT JOIN plans p ON p.id = ms.plan_id
-             WHERE m.gym_id = $1 AND m.deleted_at IS NULL ORDER BY m.full_name`, [gid]);
+                 WHERE m.gym_id = $1 AND m.deleted_at IS NULL ORDER BY m.full_name LIMIT $2`, [gid, EXPORT_ROW_LIMIT]);
 
         const csv = toCsv(result.rows, [
             { key: 'full_name', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' },
@@ -47,14 +68,13 @@ router.get('/members', requirePermission('members:read'), async (req, res) => {
             { key: 'date_of_birth', label: 'DOB' }, { key: 'emergency_contact', label: 'Emergency Contact' },
             { key: 'onboarding_complete', label: 'Onboarding Done' }, { key: 'waiver_signed_at', label: 'Waiver Signed' },
         ]);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename="members-export.csv"');
+        setCsvHeaders(res, 'members-export.csv', result.rows.length);
         return res.send(csv);
     } catch (err) { console.error('EXPORT MEMBERS:', err.message); return res.status(500).json({ error: 'Export failed.' }); }
 });
 
 // ── Payments CSV ──
-router.get('/payments', requirePermission('payments:read'), async (req, res) => {
+router.get('/payments', exportRateLimiter, requirePermission('payments:read'), async (req, res) => {
     try {
         const gid = gymId(req);
         const result = await pool.query(
@@ -63,7 +83,7 @@ router.get('/payments', requirePermission('payments:read'), async (req, res) => 
              FROM payments pay
              LEFT JOIN members m ON m.id = pay.user_id
              LEFT JOIN plans p2 ON p2.id = pay.plan_id
-             WHERE pay.gym_id = $1 AND pay.deleted_at IS NULL ORDER BY pay.payment_date DESC`, [gid]);
+             WHERE pay.gym_id = $1 AND pay.deleted_at IS NULL ORDER BY pay.payment_date DESC LIMIT $2`, [gid, EXPORT_ROW_LIMIT]);
 
         const csv = toCsv(result.rows, [
             { key: 'full_name', label: 'Member' }, { key: 'plan_name', label: 'Plan' },
@@ -72,40 +92,38 @@ router.get('/payments', requirePermission('payments:read'), async (req, res) => 
             { key: 'transaction_id', label: 'Txn ID' }, { key: 'invoice_id', label: 'Invoice' },
             { key: 'status', label: 'Status' }, { key: 'payment_date', label: 'Date' }, { key: 'notes', label: 'Notes' },
         ]);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename="payments-export.csv"');
+        setCsvHeaders(res, 'payments-export.csv', result.rows.length);
         return res.send(csv);
     } catch (err) { console.error('EXPORT PAYMENTS:', err.message); return res.status(500).json({ error: 'Export failed.' }); }
 });
 
 // ── Attendance CSV ──
-router.get('/attendance', requirePermission('attendance:read'), async (req, res) => {
+router.get('/attendance', exportRateLimiter, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gid = gymId(req);
         const result = await pool.query(
             `SELECT m.full_name, m.phone, a.check_in_time, a.checkin_method, a.checkin_status
              FROM attendance a
              LEFT JOIN members m ON m.id = a.member_id
-             WHERE a.gym_id = $1 AND a.deleted_at IS NULL ORDER BY a.check_in_time DESC LIMIT 5000`, [gid]);
+             WHERE a.gym_id = $1 AND a.deleted_at IS NULL ORDER BY a.check_in_time DESC LIMIT $2`, [gid, EXPORT_ROW_LIMIT]);
 
         const csv = toCsv(result.rows, [
             { key: 'full_name', label: 'Member' }, { key: 'phone', label: 'Phone' },
             { key: 'check_in_time', label: 'Check-In Time' }, { key: 'checkin_method', label: 'Method' },
             { key: 'checkin_status', label: 'Status' },
         ]);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename="attendance-export.csv"');
+        setCsvHeaders(res, 'attendance-export.csv', result.rows.length);
         return res.send(csv);
     } catch (err) { console.error('EXPORT ATTENDANCE:', err.message); return res.status(500).json({ error: 'Export failed.' }); }
 });
 
 // ── Leads CSV ──
-router.get('/leads', requirePermission('members:read'), async (req, res) => {
+router.get('/leads', exportRateLimiter, requirePermission('members:read'), async (req, res) => {
     try {
         const gid = gymId(req);
         const result = await pool.query(
             `SELECT full_name, phone, email, source, status, priority, notes, next_follow_up_at, trial_date, lost_reason, created_at
-             FROM leads WHERE gym_id=$1 ORDER BY created_at DESC`, [gid]);
+             FROM leads WHERE gym_id=$1 ORDER BY created_at DESC LIMIT $2`, [gid, EXPORT_ROW_LIMIT]);
 
         const csv = toCsv(result.rows, [
             { key: 'full_name', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' },
@@ -113,19 +131,18 @@ router.get('/leads', requirePermission('members:read'), async (req, res) => {
             { key: 'next_follow_up_at', label: 'Follow-Up' }, { key: 'trial_date', label: 'Trial Date' },
             { key: 'lost_reason', label: 'Lost Reason' }, { key: 'notes', label: 'Notes' }, { key: 'created_at', label: 'Created' },
         ]);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename="leads-export.csv"');
+        setCsvHeaders(res, 'leads-export.csv', result.rows.length);
         return res.send(csv);
     } catch (err) { console.error('EXPORT LEADS:', err.message); return res.status(500).json({ error: 'Export failed.' }); }
 });
 
 // ── Expenses CSV ──
-router.get('/expenses', requirePermission('payments:read'), async (req, res) => {
+router.get('/expenses', exportRateLimiter, requirePermission('payments:read'), async (req, res) => {
     try {
         const gid = gymId(req);
         const result = await pool.query(
             `SELECT category, vendor, description, amount, bill_date, payment_mode, is_recurring, created_at
-             FROM expenses WHERE gym_id=$1 AND deleted_at IS NULL ORDER BY bill_date DESC`, [gid]);
+             FROM expenses WHERE gym_id=$1 AND deleted_at IS NULL ORDER BY bill_date DESC LIMIT $2`, [gid, EXPORT_ROW_LIMIT]);
 
         const csv = toCsv(result.rows, [
             { key: 'category', label: 'Category' }, { key: 'vendor', label: 'Vendor' },
@@ -133,8 +150,7 @@ router.get('/expenses', requirePermission('payments:read'), async (req, res) => 
             { key: 'bill_date', label: 'Bill Date' }, { key: 'payment_mode', label: 'Mode' },
             { key: 'is_recurring', label: 'Recurring' }, { key: 'created_at', label: 'Created' },
         ]);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', 'attachment; filename="expenses-export.csv"');
+        setCsvHeaders(res, 'expenses-export.csv', result.rows.length);
         return res.send(csv);
     } catch (err) { console.error('EXPORT EXPENSES:', err.message); return res.status(500).json({ error: 'Export failed.' }); }
 });

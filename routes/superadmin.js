@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../config/db');
 const webpush = require('web-push');
 const { setUserAuthCookie } = require('../utils/authCookies');
@@ -56,6 +57,18 @@ const isIpAllowed = (req) => {
     const clientIp = getClientIp(req);
     return allowList.includes(clientIp);
 };
+
+const superadminLoginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: Math.max(1, parseInt(process.env.SUPERADMIN_LOGIN_RATE_LIMIT_MAX || '5', 10) || 5),
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => normalizeIp(req.ip || req.socket?.remoteAddress || '') || 'superadmin-login',
+    handler: (_req, res) => {
+        return res.status(429).json({ message: 'Too many login attempts. Wait a few minutes and try again.' });
+    },
+});
 
 const defaultAutomationMessageTemplates = {
     SETUP_FOCUS: {
@@ -191,7 +204,7 @@ const superAuth = (req, res, next) => {
     }
 };
 
-router.post('/login', (req, res) => {
+router.post('/login', superadminLoginLimiter, (req, res) => {
     if (!superadminEnabled) {
         return res.status(503).json({ message: disabledMessage });
     }

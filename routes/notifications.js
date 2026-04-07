@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
@@ -23,6 +24,9 @@ const AUDIENCE_MAP = {
 
 const WHATSAPP_SEND_CONCURRENCY = Math.max(1, Math.min(10, parseInt(process.env.MSG91_SEND_CONCURRENCY || '5', 10) || 5));
 const BOT_MEMBER_EMAIL_DOMAIN = '@seed.gymvault.bot';
+const REMINDER_REQUEST_WINDOW_MS = 15 * 60 * 1000;
+const REMINDER_REQUEST_LIMIT = Math.max(1, parseInt(process.env.REMINDER_REQUEST_LIMIT || '6', 10) || 6);
+const REMINDER_HOURLY_SEND_LIMIT = Math.max(1, parseInt(process.env.REMINDER_HOURLY_SEND_LIMIT || '250', 10) || 250);
 
 const CHURN_SCORE_SQL = `
 WITH latest_membership AS (
@@ -246,6 +250,17 @@ const canSendManualReminder = (user = {}) => {
         || hasPermission(user, 'attendance:write')
         || hasPermission(user, 'payments:write');
 };
+
+const reminderRequestLimiter = rateLimit({
+    windowMs: REMINDER_REQUEST_WINDOW_MS,
+    max: REMINDER_REQUEST_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `${req.user?.gym_id || 'nogym'}:${req.user?.id || req.user?.user_id || 'anon'}`,
+    handler: (_req, res) => {
+        return fail(res, 429, 'REMINDER_REQUEST_RATE_LIMIT', 'Too many reminder requests. Wait a few minutes and try again.');
+    },
+});
 
 const pickReminderTemplateCandidates = (member = {}, requestedTemplateKey = '') => {
     const explicitKey = String(requestedTemplateKey || '').trim().toUpperCase();
@@ -542,7 +557,7 @@ router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 5. SEND DIRECT MEMBER REMINDERS ---
-router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
+router.post('/reminders/send', auth, saasMiddleware, reminderRequestLimiter, async (req, res) => {
     try {
         await ensureMessagingSchema();
 
@@ -628,6 +643,40 @@ router.post('/reminders/send', auth, saasMiddleware, async (req, res) => {
             requestedTemplateKey,
             gymName: gymConfig.name || 'GymVault',
         });
+
+        const eligibleReminderCount = previewItems.filter((item) => item.eligible).length;
+        const reminderUsageRes = await pool.query(
+            `SELECT COUNT(*)::INT AS sent_last_hour
+             FROM whatsapp_delivery_logs
+             WHERE gym_id = $1
+               AND source_kind = 'REMINDER'
+               AND created_at >= NOW() - INTERVAL '1 hour'`,
+            [gymId]
+        );
+        const sentLastHour = Number(reminderUsageRes.rows[0]?.sent_last_hour || 0);
+        if (eligibleReminderCount > 0 && sentLastHour + eligibleReminderCount > REMINDER_HOURLY_SEND_LIMIT) {
+            await writeAuditLog({
+                actorType: 'GYM_USER',
+                actorId: String(requesterId || req.user.id || ''),
+                action: 'REMINDER_SEND_BLOCKED',
+                targetType: 'WHATSAPP_REMINDER',
+                targetId: requestedTemplateKey || 'AUTO',
+                targetLabel: requestedTemplateKey || 'Auto template selection',
+                details: {
+                    gym_id: gymId,
+                    attempted_count: memberIds.length,
+                    eligible_count: eligibleReminderCount,
+                    sent_last_hour: sentLastHour,
+                    hourly_limit: REMINDER_HOURLY_SEND_LIMIT,
+                },
+            });
+            return fail(
+                res,
+                429,
+                'REMINDER_HOURLY_LIMIT_REACHED',
+                `Reminder sending is capped at ${REMINDER_HOURLY_SEND_LIMIT} messages per hour. Try again later.`
+            );
+        }
 
         let successCount = 0;
         let failedCount = 0;

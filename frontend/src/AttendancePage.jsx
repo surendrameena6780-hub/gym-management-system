@@ -1544,13 +1544,13 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
       {showPolicyModal && (
         <div className="app-modal-shell z-[205] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label={editingPolicyId ? 'Edit access policy' : 'Create access policy'} className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)' }}>
               <div>
                 <h2 className="text-lg font-black">{editingPolicyId ? 'Edit Access Policy' : 'Create Access Policy'}</h2>
                 <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Rule engine for member entry</p>
               </div>
-              <button onClick={closePolicyModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <button type="button" aria-label="Close access policy form" onClick={closePolicyModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
 
             <form onSubmit={savePolicy} className="app-modal-scroll p-6 space-y-5">
@@ -1572,11 +1572,11 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-0.5">Allowed Days</label>
-                <div className="flex flex-wrap gap-2">
+                <div role="group" aria-label="Allowed days" className="flex flex-wrap gap-2">
                   {POLICY_DAY_OPTIONS.map((option) => {
                     const active = policyForm.allowed_days.includes(option.value);
                     return (
-                      <button key={option.value} type="button" onClick={() => togglePolicyDay(option.value)} className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${active ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-indigo-200 hover:text-indigo-600'}`}>
+                      <button key={option.value} type="button" aria-pressed={active} onClick={() => togglePolicyDay(option.value)} className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:ring-offset-1 ${active ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:border-indigo-200 hover:text-indigo-600'}`}>
                         {option.label}
                       </button>
                     );
@@ -1664,7 +1664,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
       {qrModalState && (
         <div className="app-modal-shell z-[220] bg-slate-900/70 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] max-w-md w-full p-6 border border-slate-200 shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-label="Attendance QR" className="app-modal-panel bg-white rounded-[28px] max-w-md w-full p-6 border border-slate-200 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Attendance QR</p>
@@ -1672,6 +1672,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                 <p className="text-sm font-semibold text-slate-500 mt-1">{qrModalState.subtitle}</p>
               </div>
               <button
+                type="button"
+                aria-label="Close attendance QR"
                 onClick={() => setQrModalState(null)}
                 className="w-9 h-9 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center shrink-0"
               >
@@ -1728,7 +1730,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
       {qrScannerOpen && (
         <div className="app-modal-shell z-[220] bg-slate-900/70 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] max-w-lg w-full p-6 border border-slate-200 shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-label="Scan member QR" className="app-modal-panel bg-white rounded-[28px] max-w-lg w-full p-6 border border-slate-200 shadow-2xl">
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Reception Scan</p>
@@ -1736,6 +1738,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                 <p className="text-sm font-semibold text-slate-500 mt-1">Open the member portal QR on the customer phone and point the camera here.</p>
               </div>
               <button
+                type="button"
+                aria-label="Close QR scanner"
                 onClick={() => setQrScannerOpen(false)}
                 className="w-9 h-9 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center shrink-0"
               >

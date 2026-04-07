@@ -35,7 +35,7 @@ const AddMemberModal = ({ controller }) => {
 
   return (
     <div className="app-modal-shell z-[200] bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div role="dialog" aria-modal="true" aria-label="New member form" className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div
           className="relative p-6 text-white flex justify-between items-center"
           style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' }}
@@ -49,7 +49,7 @@ const AddMemberModal = ({ controller }) => {
               <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider">Add to GymVault</p>
             </div>
           </div>
-          <button onClick={closeAddModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all">
+          <button type="button" aria-label="Close new member form" onClick={closeAddModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all">
             <X size={20} />
           </button>
         </div>

@@ -752,13 +752,13 @@ function SuperAdminDashboard({ token, onLogout }) {
                   <td className="p-4 text-slate-400">{g.last_active ? new Date(g.last_active).toLocaleString('en-GB') : '-'}</td>
                   <td className="p-4 text-right">
                     <div className="flex justify-end gap-2">
-                      <button onClick={() => viewGym(g.id)} className="p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-all" title="View"><Eye size={14} /></button>
-                      <button onClick={() => openGymEditModal(g)} className="p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-all" title="Edit"><Edit3 size={14} /></button>
-                      <button onClick={() => openGymActionModal('status', g, 'BLOCKED')} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all" title="Block"><Ban size={14} /></button>
-                      <button onClick={() => openGymActionModal('status', g, 'SUSPENDED')} className="p-2 rounded-lg border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-all" title="Suspend"><PauseCircle size={14} /></button>
-                      <button onClick={() => openGymActionModal('status', g, 'ACTIVE')} className="p-2 rounded-lg border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all" title="Activate"><Activity size={14} /></button>
-                      <button onClick={() => openGymActionModal('impersonate', g)} className="p-2 rounded-lg border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 transition-all" title="Impersonate"><UserCog size={14} /></button>
-                      <button onClick={() => openGymActionModal('delete', g)} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all" title="Delete"><Trash2 size={14} /></button>
+                      <button type="button" aria-label={`View ${g.gym_name}`} onClick={() => viewGym(g.id)} className="p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-all" title="View"><Eye size={14} /></button>
+                      <button type="button" aria-label={`Edit ${g.gym_name}`} onClick={() => openGymEditModal(g)} className="p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-all" title="Edit"><Edit3 size={14} /></button>
+                      <button type="button" aria-label={`Block ${g.gym_name}`} onClick={() => openGymActionModal('status', g, 'BLOCKED')} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all" title="Block"><Ban size={14} /></button>
+                      <button type="button" aria-label={`Suspend ${g.gym_name}`} onClick={() => openGymActionModal('status', g, 'SUSPENDED')} className="p-2 rounded-lg border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-all" title="Suspend"><PauseCircle size={14} /></button>
+                      <button type="button" aria-label={`Activate ${g.gym_name}`} onClick={() => openGymActionModal('status', g, 'ACTIVE')} className="p-2 rounded-lg border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all" title="Activate"><Activity size={14} /></button>
+                      <button type="button" aria-label={`Impersonate ${g.gym_name}`} onClick={() => openGymActionModal('impersonate', g)} className="p-2 rounded-lg border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 transition-all" title="Impersonate"><UserCog size={14} /></button>
+                      <button type="button" aria-label={`Archive ${g.gym_name}`} onClick={() => openGymActionModal('delete', g)} className="p-2 rounded-lg border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all" title="Delete"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -792,12 +792,13 @@ function SuperAdminDashboard({ token, onLogout }) {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && runGlobalSearch()}
+                aria-label="Search gyms and users"
                 placeholder="Search gym, user, email"
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm outline-none focus:border-indigo-500/40"
               />
             </div>
             <button onClick={runGlobalSearch} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold">Search</button>
-            <button onClick={loadAll} className="px-3 py-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5"><RefreshCw size={16} /></button>
+            <button aria-label="Refresh HQ data" onClick={loadAll} className="px-3 py-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5"><RefreshCw size={16} /></button>
             <button onClick={onLogout} className="flex items-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-rose-500/10 hover:text-rose-400 text-slate-400 rounded-xl font-bold transition-all text-sm border border-white/10">
               <LogOut size={16} /> Logout
             </button>

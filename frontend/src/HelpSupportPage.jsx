@@ -123,6 +123,9 @@ function HelpSupportPage({ appRuntime }) {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const chatScrollRef = useRef(null);
+  const chatToggleRef = useRef(null);
+  const chatInputRef = useRef(null);
+  const chatWasOpenRef = useRef(false);
   const [chatMessages, setChatMessages] = useState([
     {
       id: 'init-assistant',
@@ -175,6 +178,31 @@ function HelpSupportPage({ appRuntime }) {
     if (!chatBox) return;
     chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
   }, [chatBusy, chatMessages, chatOpen]);
+
+  useEffect(() => {
+    if (chatOpen) {
+      chatWasOpenRef.current = true;
+      const focusTimer = window.setTimeout(() => {
+        chatInputRef.current?.focus();
+      }, 0);
+      const handleKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          setChatOpen(false);
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => {
+        window.clearTimeout(focusTimer);
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+
+    if (chatWasOpenRef.current) {
+      chatToggleRef.current?.focus();
+    }
+
+    return undefined;
+  }, [chatOpen]);
 
   const createTicket = async ({ subject, category, priority, description }) => {
     if (!subject?.trim() || !description?.trim()) {
@@ -291,13 +319,13 @@ function HelpSupportPage({ appRuntime }) {
     const wrapperClass = 'fixed inset-x-3 bottom-[5.5rem] z-[170] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col sm:inset-x-auto sm:right-6 sm:bottom-20 sm:w-[380px]';
 
     return (
-      <div className={wrapperClass} style={{ height: 'min(34rem, calc(var(--app-viewport-height) - 8rem))' }}>
+      <div id="support-chat-panel" role="dialog" aria-modal="false" aria-labelledby="support-chat-title" className={wrapperClass} style={{ height: 'min(34rem, calc(var(--app-viewport-height) - 8rem))' }}>
         <div className="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between">
           <div>
-            <p className="text-sm font-black uppercase tracking-wider">Support Chat</p>
+            <p id="support-chat-title" className="text-sm font-black uppercase tracking-wider">Support Chat</p>
             <p className="text-[11px] text-white/75 font-semibold mt-0.5">Quick help for billing, login, check-in, and data issues.</p>
           </div>
-          <button type="button" onClick={() => setChatOpen(false)} className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center">
+          <button type="button" aria-label="Close support chat" onClick={() => setChatOpen(false)} className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center">
             <X size={14} />
           </button>
         </div>
@@ -339,6 +367,7 @@ function HelpSupportPage({ appRuntime }) {
         <div className="border-t border-slate-100 bg-white px-4 py-3">
           <div className="flex items-end gap-2">
             <textarea
+              ref={chatInputRef}
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => {
@@ -517,8 +546,12 @@ function HelpSupportPage({ appRuntime }) {
       </div>
 
       <button
+        ref={chatToggleRef}
         type="button"
         onClick={() => setChatOpen((prev) => !prev)}
+        aria-label={chatOpen ? 'Close support assistant' : 'Open support assistant'}
+        aria-controls="support-chat-panel"
+        aria-expanded={chatOpen}
         className="fixed right-4 bottom-[5rem] sm:right-6 sm:bottom-6 z-[170] w-12 h-12 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 flex items-center justify-center"
         title="Open support assistant"
       >

@@ -36,6 +36,25 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 const normalizeAuthMode = (value) => (String(value || '').trim().toLowerCase() === 'signup' ? 'signup' : 'login');
 
+const isLocalHostname = (hostname) => ['localhost', '127.0.0.1'].includes(String(hostname || '').toLowerCase());
+
+const toSafeAbsoluteUrl = (value, { allowHttpLocalhost = false } = {}) => {
+    try {
+        const parsed = new URL(String(value || '').trim());
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return null;
+        }
+        if (isProduction && parsed.protocol !== 'https:' && !(allowHttpLocalhost && isLocalHostname(parsed.hostname))) {
+            return null;
+        }
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed;
+    } catch (_err) {
+        return null;
+    }
+};
+
 const stripTrailingSlash = (value, fallback) => {
     const raw = String(value || fallback || '').trim();
     return raw.replace(/\/+$/, '');
@@ -46,8 +65,12 @@ const getAppUrl = () => stripTrailingSlash(process.env.APP_URL, 'http://localhos
 
 const getGoogleRedirectUri = () => {
     const configured = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
-    if (configured) return configured;
-    return `${getAppUrl()}/api/auth/google/callback`;
+    const candidate = configured || `${getAppUrl()}/api/auth/google/callback`;
+    const parsed = toSafeAbsoluteUrl(candidate, { allowHttpLocalhost: true });
+    if (!parsed || !parsed.pathname.endsWith('/api/auth/google/callback')) {
+        return '';
+    }
+    return `${parsed.origin}${parsed.pathname}`;
 };
 
 const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', source = '', extraParams = {} } = {}) => {
@@ -1533,6 +1556,9 @@ router.get('/google', (req, res) => {
         return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_not_configured' }));
     }
     const redirectUri = getGoogleRedirectUri();
+    if (!redirectUri) {
+        return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_not_configured' }));
+    }
     const params = new URLSearchParams({
         client_id: process.env.GOOGLE_CLIENT_ID,
         redirect_uri: redirectUri,
@@ -1555,6 +1581,9 @@ router.get('/google/callback', async (req, res) => {
 
     try {
         const redirectUri = getGoogleRedirectUri();
+        if (!redirectUri) {
+            return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_not_configured' }));
+        }
 
         // Exchange code for access token
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {

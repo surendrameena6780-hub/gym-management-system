@@ -620,7 +620,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                           <button onClick={() => openSessionModal(null, classType.id)} className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${theme.button}`}>
                             Schedule
                           </button>
-                          <button onClick={() => openTypeModal(classType)} className="p-2 rounded-xl bg-white/80 border border-white text-slate-500 hover:text-slate-800 transition-all">
+                          <button type="button" aria-label={`Edit ${classType.title}`} onClick={() => openTypeModal(classType)} className="p-2 rounded-xl bg-white/80 border border-white text-slate-500 hover:text-slate-800 transition-all">
                             <Pencil size={13} />
                           </button>
                         </div>
@@ -732,7 +732,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                               Bookings
                             </button>
                             {canManage && (
-                              <button onClick={() => openSessionModal(session)} className="px-3 py-2.5 rounded-xl bg-white/80 border border-white text-slate-600 hover:text-slate-900 transition-all">
+                              <button type="button" aria-label={`Edit ${session.class_title}`} onClick={() => openSessionModal(session)} className="px-3 py-2.5 rounded-xl bg-white/80 border border-white text-slate-600 hover:text-slate-900 transition-all">
                                 <Pencil size={14} />
                               </button>
                             )}
@@ -750,13 +750,13 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
 
       {showTypeModal && (
         <div className="app-modal-shell z-[140] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label={editingType ? 'Edit class type' : 'Create class type'} className="app-modal-panel bg-white rounded-[28px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #334155 100%)' }}>
               <div>
                 <h2 className="text-lg font-black">{editingType ? 'Edit Class Type' : 'Create Class Type'}</h2>
                 <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Keep schedule setup crisp and repeatable</p>
               </div>
-              <button onClick={closeTypeModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <button type="button" aria-label="Close class type form" onClick={closeTypeModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
 
             <form onSubmit={handleSaveType} className="app-modal-scroll p-6 space-y-5">
@@ -825,13 +825,13 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
 
       {showSessionModal && (
         <div className="app-modal-shell z-[150] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label={editingSession ? 'Update session' : 'Schedule session'} className="app-modal-panel bg-white rounded-[28px] w-full max-w-xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)' }}>
               <div>
                 <h2 className="text-lg font-black">{editingSession ? 'Update Session' : 'Schedule Session'}</h2>
                 <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mt-1">Keep session setup fast for front-desk use</p>
               </div>
-              <button onClick={closeSessionModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <button type="button" aria-label="Close session form" onClick={closeSessionModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
 
             <form onSubmit={handleSaveSession} className="app-modal-scroll p-6 space-y-5">
@@ -955,14 +955,14 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
 
       {selectedSession && (
         <div className="app-modal-shell z-[160] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-3xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label="Class roster" className="app-modal-panel bg-white rounded-[28px] w-full max-w-3xl shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95">
             <div className="relative p-6 text-white flex justify-between items-start gap-4" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #312e81 100%)' }}>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/55 mb-1.5">Class Roster</p>
                 <h2 className="text-xl font-black">{selectedSession.class_title}</h2>
                 <p className="text-sm font-semibold text-white/65 mt-1">{formatDateLabel(selectedSession.starts_at)} • {formatTimeRange(selectedSession.starts_at, selectedSession.ends_at)}</p>
               </div>
-              <button onClick={closeBookingsModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <button type="button" aria-label="Close class roster" onClick={closeBookingsModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
 
             <div className="app-modal-scroll p-6 space-y-5">

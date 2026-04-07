@@ -351,37 +351,71 @@ router.post('/pos/sales', requirePermission('payments:write'), async (req, res) 
         const { member_id, items, payment_mode, notes } = req.body || {};
         if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items required.' });
 
+        const requestedItems = items.map((item) => ({
+            product_id: posInt(item?.product_id),
+            quantity: posInt(item?.quantity),
+        }));
+        if (requestedItems.some((item) => !item.product_id || !item.quantity)) {
+            return res.status(400).json({ error: 'Each sale item needs a valid product_id and quantity.' });
+        }
+
+        const requestedQuantities = new Map();
+        for (const item of requestedItems) {
+            requestedQuantities.set(item.product_id, (requestedQuantities.get(item.product_id) || 0) + item.quantity);
+        }
+
+        const productIds = Array.from(requestedQuantities.keys());
+
         await client.query('BEGIN');
-        let totalAmount = 0;
-        const validItems = [];
-        for (const item of items) {
-            const pid = posInt(item.product_id);
-            const qty = posInt(item.quantity, 1);
-            if (!pid) continue;
-            const prodRes = await client.query(
+        const lockedProductsRes = await client.query(
+            `SELECT id, name, price, stock_qty
+             FROM pos_products
+             WHERE id = ANY($1::int[])
+               AND gym_id = $2
+               AND deleted_at IS NULL
+             FOR UPDATE`,
+            [productIds, gid]
+        );
+
+        const lockedProducts = new Map(lockedProductsRes.rows.map((row) => [Number(row.id), row]));
+        const missingProductId = productIds.find((productId) => !lockedProducts.has(productId));
+        if (missingProductId) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: `Product ${missingProductId} not found.` });
+        }
+
+        const insufficientProductId = productIds.find((productId) => {
+            const product = lockedProducts.get(productId);
+            return Number(product?.stock_qty || 0) < (requestedQuantities.get(productId) || 0);
+        });
+        if (insufficientProductId) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: `Insufficient stock for product ${insufficientProductId}.` });
+        }
+
+        for (const [productId, quantity] of requestedQuantities.entries()) {
+            await client.query(
                 `UPDATE pos_products
                  SET stock_qty = stock_qty - $1
-                 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL AND stock_qty >= $1
-                 RETURNING id, name, price, stock_qty`,
-                [qty, pid, gid]
+                 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
+                [quantity, productId, gid]
             );
+        }
 
-            if (!prodRes.rows.length) {
-                const productExists = await client.query(
-                    'SELECT id, stock_qty FROM pos_products WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-                    [pid, gid]
-                );
-                await client.query('ROLLBACK');
-                if (!productExists.rows.length) {
-                    return res.status(404).json({ error: `Product ${pid} not found.` });
-                }
-                return res.status(409).json({ error: `Insufficient stock for product ${pid}.` });
-            }
-
-            const prod = prodRes.rows[0];
-            const lineTotal = Number(prod.price) * qty;
+        let totalAmount = 0;
+        const validItems = [];
+        for (const item of requestedItems) {
+            const product = lockedProducts.get(item.product_id);
+            const unitPrice = Number(product.price);
+            const lineTotal = unitPrice * item.quantity;
             totalAmount += lineTotal;
-            validItems.push({ product_id: pid, product_name: prod.name, quantity: qty, unit_price: Number(prod.price), total_price: lineTotal });
+            validItems.push({
+                product_id: item.product_id,
+                product_name: product.name,
+                quantity: item.quantity,
+                unit_price: unitPrice,
+                total_price: lineTotal,
+            });
         }
 
         const saleRes = await client.query(
