@@ -120,17 +120,30 @@ if (trustProxySetting) {
     app.set('trust proxy', trustProxySetting);
 }
 
-const corsOptions = {
-    credentials: true,
-    origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
+const corsOptionsDelegate = (req, callback) => {
+    const origin = req.headers.origin;
+    const opts = { credentials: true };
 
-        if (corsOrigins.includes(origin)) return callback(null, true);
+    // No Origin header (same-origin GET, server-to-server, etc.) — allow
+    if (!origin) return callback(null, { ...opts, origin: true });
 
-        if (!isProduction && defaultDevOrigins.includes(origin)) return callback(null, true);
+    // Explicitly whitelisted origin
+    if (corsOrigins.includes(origin)) return callback(null, { ...opts, origin: true });
 
-        return callback(new Error('Not allowed by CORS'));
+    // Dev-mode fallback origins
+    if (!isProduction && defaultDevOrigins.includes(origin)) return callback(null, { ...opts, origin: true });
+
+    // Proxied same-origin: Origin matches the forwarded host (e.g. Vercel rewrite)
+    const fwdHost = req.headers['x-forwarded-host'];
+    if (fwdHost) {
+        const fwdProto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+        if (origin === `${fwdProto}://${fwdHost}`) {
+            return callback(null, { ...opts, origin: true });
+        }
     }
+
+    // Soft reject — omit CORS headers instead of crashing with 500
+    return callback(null, { ...opts, origin: false });
 };
 
 // Middleware
@@ -139,7 +152,7 @@ app.use(helmet({
 }));
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
-app.use(cors(corsOptions));
+app.use(cors(corsOptionsDelegate));
 app.use(compression({ threshold: 1024 }));
 app.use(enforceRequestPayloadLimits);
 app.use(runtimeTelemetryMiddleware);
