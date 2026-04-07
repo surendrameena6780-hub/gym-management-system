@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const jwt = require('jsonwebtoken');
 
 const workspaceRoot = path.resolve(__dirname, '..');
@@ -11,6 +11,12 @@ const defaultBaseUrl = process.env.SMOKE_BASE_URL || 'http://localhost:5000';
 const normalizedBaseUrl = defaultBaseUrl.replace(/\/+$/, '');
 
 let localDbPool = null;
+let managedServerProcess = null;
+let managedServerOutput = '';
+
+const MAX_SERVER_OUTPUT_CHARS = 6000;
+const HEALTH_POLL_INTERVAL_MS = 1000;
+const HEALTH_STARTUP_TIMEOUT_MS = 90000;
 
 const isLocalSmokeBaseUrl = (value) => {
   try {
@@ -48,6 +54,81 @@ const getSmokeMessage = (payload, fallback = 'Unexpected response') => (
   || fallback
 );
 
+const appendManagedServerOutput = (chunk) => {
+  if (!chunk) return;
+
+  managedServerOutput = `${managedServerOutput}${String(chunk)}`;
+  if (managedServerOutput.length > MAX_SERVER_OUTPUT_CHARS) {
+    managedServerOutput = managedServerOutput.slice(-MAX_SERVER_OUTPUT_CHARS);
+  }
+};
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const fetchHealth = async () => fetch(`${normalizedBaseUrl}/healthz`);
+
+const waitForHealthyRuntime = async (timeoutMs = HEALTH_STARTUP_TIMEOUT_MS) => {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (managedServerProcess && managedServerProcess.exitCode !== null) {
+      break;
+    }
+
+    try {
+      const response = await fetchHealth();
+      if (response.ok) {
+        return response;
+      }
+    } catch (_error) {
+      // Keep polling until timeout or child exit.
+    }
+
+    await delay(HEALTH_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(`Local smoke server did not become healthy. Recent output:\n${managedServerOutput || 'No server output captured.'}`);
+};
+
+const ensureRuntimeServer = async () => {
+  try {
+    return await fetchHealth();
+  } catch (error) {
+    if (!isLocalSmokeBaseUrl(normalizedBaseUrl)) {
+      throw error;
+    }
+
+    managedServerProcess = spawn(process.execPath, [path.join(workspaceRoot, 'server.js')], {
+      cwd: workspaceRoot,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    managedServerOutput = '';
+    managedServerProcess.stdout.on('data', appendManagedServerOutput);
+    managedServerProcess.stderr.on('data', appendManagedServerOutput);
+
+    return waitForHealthyRuntime();
+  }
+};
+
+const stopManagedServer = async () => {
+  if (!managedServerProcess) return;
+
+  const processToStop = managedServerProcess;
+  managedServerProcess = null;
+
+  if (processToStop.exitCode !== null) {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    const finalize = () => resolve();
+    processToStop.once('exit', finalize);
+    processToStop.kill();
+    setTimeout(finalize, 5000);
+  });
+};
+
 const fetchJson = async (pathname, options = {}) => {
   const headers = {
     accept: 'application/json',
@@ -74,10 +155,30 @@ const assertOk = (response, payload, context) => {
   }
 };
 
+const assertStatus = (response, payload, expectedStatus, context) => {
+  if (response.status !== expectedStatus) {
+    throw new Error(`${context} failed (${response.status}): ${getSmokeMessage(payload, response.statusText)}`);
+  }
+};
+
+const assertMessageMatches = (payload, matcher, context) => {
+  if (!matcher.test(String(getSmokeMessage(payload, '')))) {
+    throw new Error(`${context} returned an unexpected message: ${getSmokeMessage(payload, 'Unknown response')}`);
+  }
+};
+
 const createLocalSmokeAuth = async () => {
   const explicitToken = String(process.env.SMOKE_OWNER_TOKEN || '').trim();
   if (explicitToken) {
-    return { token: explicitToken, source: 'env-token' };
+    const decoded = jwt.decode(explicitToken) || {};
+    const decodedUser = decoded.user || decoded || {};
+    return {
+      token: explicitToken,
+      source: 'env-token',
+      email: String(process.env.SMOKE_OWNER_EMAIL || '').trim().toLowerCase(),
+      gymId: Number(decodedUser.gym_id || 0) || null,
+      userId: Number(decodedUser.id || 0) || null,
+    };
   }
 
   if (!isLocalSmokeBaseUrl(normalizedBaseUrl)) {
@@ -101,6 +202,7 @@ const createLocalSmokeAuth = async () => {
          AND COALESCE(u.is_active, TRUE) = TRUE
          AND COALESCE(g.is_active, TRUE) = TRUE
          AND COALESCE(g.gym_access_status, 'ACTIVE') = 'ACTIVE'
+         AND (g.saas_valid_until IS NULL OR g.saas_valid_until >= NOW() - INTERVAL '3 days')
        ORDER BY u.id ASC
        LIMIT 1`
     : `SELECT u.id, u.gym_id, u.email, UPPER(COALESCE(u.role, 'OWNER')) AS role,
@@ -111,6 +213,7 @@ const createLocalSmokeAuth = async () => {
          AND COALESCE(u.is_active, TRUE) = TRUE
          AND COALESCE(g.is_active, TRUE) = TRUE
          AND COALESCE(g.gym_access_status, 'ACTIVE') = 'ACTIVE'
+         AND (g.saas_valid_until IS NULL OR g.saas_valid_until >= NOW() - INTERVAL '3 days')
          AND COALESCE(u.email, '') <> ''
        ORDER BY u.id ASC
        LIMIT 1`;
@@ -144,11 +247,69 @@ const createLocalSmokeAuth = async () => {
     token,
     email: user.email,
     source: 'local-db',
+    gymId: Number(user.gym_id || 0) || null,
+    userId: Number(user.id || 0) || null,
   };
 };
 
-const runAuthenticatedSettingsSmoke = async () => {
-  const auth = await createLocalSmokeAuth();
+const loadLocalSmokeFixtures = async (auth) => {
+  if (!isLocalSmokeBaseUrl(normalizedBaseUrl)) {
+    console.log('Authenticated payment/membership smoke skipped: local DB fixtures are only available for localhost runtimes.');
+    return null;
+  }
+
+  if (!auth?.gymId) {
+    console.log('Authenticated payment/membership smoke skipped: could not resolve a gym id from the owner token.');
+    return null;
+  }
+
+  const dbPool = getLocalDbPool();
+  const [memberResult, planResult, pendingPaymentResult] = await Promise.all([
+    dbPool.query(
+      `SELECT id
+       FROM members
+       WHERE gym_id = $1 AND deleted_at IS NULL
+       ORDER BY id ASC
+       LIMIT 1`,
+      [auth.gymId]
+    ),
+    dbPool.query(
+      `SELECT id
+       FROM plans
+       WHERE gym_id = $1 AND deleted_at IS NULL
+       ORDER BY id ASC
+       LIMIT 1`,
+      [auth.gymId]
+    ),
+    dbPool.query(
+      `SELECT id
+       FROM payments
+       WHERE gym_id = $1
+         AND deleted_at IS NULL
+         AND status = 'Pending'
+         AND COALESCE(amount_due, 0) > 0
+       ORDER BY payment_date DESC, id DESC
+       LIMIT 1`,
+      [auth.gymId]
+    ),
+  ]);
+
+  const memberId = Number(memberResult.rows[0]?.id || 0) || null;
+  const planId = Number(planResult.rows[0]?.id || 0) || null;
+
+  if (!memberId || !planId) {
+    console.log('Authenticated payment/membership smoke skipped: the selected gym needs at least one member and one plan.');
+    return null;
+  }
+
+  return {
+    memberId,
+    planId,
+    pendingPaymentId: Number(pendingPaymentResult.rows[0]?.id || 0) || null,
+  };
+};
+
+const runAuthenticatedSettingsSmoke = async (auth) => {
   if (!auth) return;
 
   const headers = { 'x-auth-token': auth.token };
@@ -190,6 +351,66 @@ const runAuthenticatedSettingsSmoke = async () => {
   }
 
   console.log(`Authenticated settings smoke passed using ${auth.email || auth.source}.`);
+};
+
+const runAuthenticatedPaymentMembershipSmoke = async (auth) => {
+  if (!auth) return;
+
+  const fixtures = await loadLocalSmokeFixtures(auth);
+  if (!fixtures) return;
+
+  const headers = { 'x-auth-token': auth.token };
+  const yesterday = new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+
+  const invalidPaymentRecord = await fetchJson('/api/payments/record', {
+    method: 'POST',
+    headers,
+    body: {
+      user_id: fixtures.memberId,
+      plan_id: fixtures.planId,
+      amount_paid: 1500,
+      total_amount: 1000,
+      payment_mode: 'Cash',
+    },
+  });
+  assertStatus(invalidPaymentRecord.response, invalidPaymentRecord.payload, 400, 'Reject overpaid payment record');
+  assertMessageMatches(invalidPaymentRecord.payload, /amount_paid cannot be greater than total_amount/i, 'Reject overpaid payment record');
+
+  const invalidFreeze = await fetchJson('/api/memberships/freeze', {
+    method: 'POST',
+    headers,
+    body: {
+      member_id: fixtures.memberId,
+      freeze_end_date: yesterday,
+    },
+  });
+  assertStatus(invalidFreeze.response, invalidFreeze.payload, 400, 'Reject past membership freeze date');
+  assertMessageMatches(invalidFreeze.payload, /freeze_end_date/i, 'Reject past membership freeze date');
+
+  const invalidExtend = await fetchJson('/api/memberships/extend', {
+    method: 'POST',
+    headers,
+    body: {
+      member_id: fixtures.memberId,
+      days: 0,
+    },
+  });
+  assertStatus(invalidExtend.response, invalidExtend.payload, 400, 'Reject invalid membership extension days');
+  assertMessageMatches(invalidExtend.payload, /days/i, 'Reject invalid membership extension days');
+
+  if (fixtures.pendingPaymentId) {
+    const invalidDueAmount = await fetchJson(`/api/payments/${fixtures.pendingPaymentId}/due/create-order`, {
+      method: 'POST',
+      headers,
+      body: { amount: 0 },
+    });
+    assertStatus(invalidDueAmount.response, invalidDueAmount.payload, 400, 'Reject invalid due collection amount');
+    assertMessageMatches(invalidDueAmount.payload, /valid collection amount/i, 'Reject invalid due collection amount');
+  } else {
+    console.log('Authenticated due collection smoke skipped: no pending payment was available for the selected gym.');
+  }
+
+  console.log(`Authenticated payment and membership smoke passed using ${auth.email || auth.source}.`);
 };
 
 const collectJsFiles = (dirPath) => {
@@ -235,7 +456,7 @@ if (syntaxFailures > 0) {
 }
 
 const runRuntimeSmoke = async () => {
-  const response = await fetch(`${normalizedBaseUrl}/healthz`);
+  const response = await ensureRuntimeServer();
   if (!response.ok) {
     throw new Error(`Health check returned ${response.status}`);
   }
@@ -245,7 +466,9 @@ const runRuntimeSmoke = async () => {
     throw new Error(`Unexpected health status: ${payload.status}`);
   }
 
-  await runAuthenticatedSettingsSmoke();
+  const auth = await createLocalSmokeAuth();
+  await runAuthenticatedSettingsSmoke(auth);
+  await runAuthenticatedPaymentMembershipSmoke(auth);
 
   console.log(`Runtime smoke passed against ${defaultBaseUrl}`);
 };
@@ -262,6 +485,7 @@ const runRuntimeSmoke = async () => {
     console.error(error.message || error);
     process.exit(1);
   } finally {
+    await stopManagedServer().catch(() => {});
     if (localDbPool) {
       await localDbPool.end().catch(() => {});
     }

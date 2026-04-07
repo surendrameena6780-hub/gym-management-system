@@ -98,13 +98,15 @@ router.post('/verify', async (req, res) => {
                 return res.status(400).json({ error: 'Order amount/currency mismatch.' });
             }
 
-            await pool.query('BEGIN');
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
             const targetPlan = resolved.planTier;
             const targetCycle = resolved.cycle;
             // Test plan expires in 1 day; real plans: annual=365, monthly=30
             const daysToAdd = targetPlan === 'test' ? 1 : targetCycle === 'annual' ? 365 : 30;
 
-            await pool.query(
+                await client.query(
                 `UPDATE gyms 
                  SET saas_status = 'ACTIVE', 
                      current_plan = $1,
@@ -114,10 +116,19 @@ router.post('/verify', async (req, res) => {
                 [targetPlan, targetCycle, daysToAdd, req.user.gym_id]
             );
 
-            await pool.query('COMMIT');
+                await client.query('COMMIT');
+            } catch (err) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch (_rollbackError) {
+                    // Preserve the original billing failure.
+                }
+                throw err;
+            } finally {
+                client.release();
+            }
             res.json({ message: "Subscription activated!" });
         } catch (err) {
-            await pool.query('ROLLBACK');
             res.status(500).json({ error: "DB Error" });
         }
     } else {

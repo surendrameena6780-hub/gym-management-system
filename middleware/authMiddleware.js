@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { pool } = require('../config/db');
 const { getRequestCookie, OWNER_AUTH_COOKIE } = require('../utils/authCookies');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -7,7 +8,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.en
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
 }
 
-module.exports = (req, res, next) => {
+module.exports = async (req, res, next) => {
     const headerToken = req.header('x-auth-token');
     const authHeader = req.header('authorization');
     const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
@@ -35,9 +36,73 @@ module.exports = (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // This attaches the user/gym data to the request
-        req.user = decoded.user || decoded; 
+        const decodedUser = decoded.user || decoded;
+        const userId = Number.parseInt(decodedUser?.id, 10);
+        const gymId = Number.parseInt(decodedUser?.gym_id ?? decodedUser?.gymId, 10);
+
+        if (!Number.isInteger(userId) || !Number.isInteger(gymId)) {
+            return res.status(401).json({
+                success: false,
+                code: 'AUTH_INVALID',
+                error: 'Invalid credentials. Please login again.',
+                message: 'Invalid Token'
+            });
+        }
+
+        const sessionResult = await pool.query(
+            `SELECT u.id,
+                    u.gym_id,
+                    u.role,
+                    u.staff_role,
+                    u.permissions,
+                    COALESCE(u.is_active, TRUE) AS user_is_active,
+                    COALESCE(g.is_active, TRUE) AS gym_is_active,
+                    UPPER(COALESCE(g.gym_access_status, 'ACTIVE')) AS gym_access_status
+             FROM users u
+             JOIN gyms g ON g.id = u.gym_id
+             WHERE u.id = $1 AND u.gym_id = $2
+             LIMIT 1`,
+            [userId, gymId]
+        );
+
+        const session = sessionResult.rows[0];
+        if (!session) {
+            return res.status(401).json({
+                success: false,
+                code: 'AUTH_INVALID',
+                error: 'Invalid credentials. Please login again.',
+                message: 'Invalid Token'
+            });
+        }
+
+        if (session.user_is_active === false) {
+            return res.status(403).json({
+                success: false,
+                code: 'AUTH_USER_INACTIVE',
+                error: 'Your account is inactive. Contact the gym owner.',
+                message: 'Account inactive'
+            });
+        }
+
+        if (session.gym_is_active === false || session.gym_access_status === 'BLOCKED' || session.gym_access_status === 'SUSPENDED') {
+            return res.status(403).json({
+                success: false,
+                code: 'AUTH_GYM_INACTIVE',
+                error: 'Gym access is inactive. Contact support.',
+                message: 'Gym access inactive'
+            });
+        }
+
+        req.user = {
+            ...decodedUser,
+            id: session.id,
+            gym_id: session.gym_id,
+            gymId: session.gym_id,
+            role: session.role || decodedUser.role,
+            staff_role: session.staff_role || decodedUser.staff_role,
+            permissions: Array.isArray(session.permissions) ? session.permissions : decodedUser.permissions,
+            is_active: session.user_is_active,
+        };
         req.authToken = token;
         req.authTokenSource = tokenSource;
         next();

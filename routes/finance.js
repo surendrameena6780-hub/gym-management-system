@@ -4,6 +4,12 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
+const {
+    ensureDateOnly,
+    ensureNumber,
+    ensureTrimmedString,
+    isValidationError,
+} = require('../utils/fieldValidation');
 
 const gymId = (req) => { const v = Number.parseInt(req?.user?.gym_id ?? req?.user?.gymId, 10); return Number.isInteger(v) ? v : null; };
 const posInt = (v, f = null) => { const p = Number.parseInt(v, 10); return Number.isInteger(p) && p > 0 ? p : f; };
@@ -54,6 +60,17 @@ const getFinancePeriodConfig = (value, fromValue, toValue) => {
 
     return { key: 'all', label: 'All time', startAt: null, endAt: null };
 };
+
+const normalizeExpenseInput = (value = {}) => ({
+    category: ensureTrimmedString(value.category, { field: 'category', defaultValue: 'General', max: 60 }),
+    vendor: ensureTrimmedString(value.vendor, { field: 'vendor', max: 120 }),
+    description: ensureTrimmedString(value.description, { field: 'description', max: 500 }),
+    amount: ensureNumber(value.amount, { field: 'amount', required: true, min: 0.01 }),
+    billDate: ensureDateOnly(value.bill_date, { field: 'bill_date', defaultValue: new Date().toISOString().slice(0, 10) }),
+    paymentMode: ensureTrimmedString(value.payment_mode, { field: 'payment_mode', defaultValue: 'Cash', max: 40 }),
+    isRecurring: Boolean(value.is_recurring),
+    recurrenceRule: ensureTrimmedString(value.recurrence_rule, { field: 'recurrence_rule', max: 120 }),
+});
 
 router.use(auth, saasMiddleware);
 
@@ -165,33 +182,40 @@ router.get('/expenses', requirePermission('payments:read'), async (req, res) => 
 router.post('/expenses', requirePermission('payments:write'), async (req, res) => {
     try {
         const gid = gymId(req);
-        const { category, vendor, description, amount, bill_date, payment_mode, is_recurring, recurrence_rule } = req.body || {};
-        if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'amount is required.' });
+        const expense = normalizeExpenseInput(req.body || {});
         const result = await pool.query(
             `INSERT INTO expenses (gym_id, category, vendor, description, amount, bill_date, payment_mode, is_recurring, recurrence_rule, created_by)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-            [gid, String(category||'General').trim(), String(vendor||'').trim(), String(description||'').trim(),
-             Number(amount), bill_date||new Date().toISOString().slice(0,10), String(payment_mode||'Cash').trim(),
-             Boolean(is_recurring), String(recurrence_rule||'').trim(), req.user.id]);
+            [gid, expense.category, expense.vendor, expense.description,
+             expense.amount, expense.billDate, expense.paymentMode,
+             expense.isRecurring, expense.recurrenceRule, req.user.id]);
         return res.status(201).json(result.rows[0]);
-    } catch (err) { console.error('EXPENSE CREATE:', err.message); return res.status(500).json({ error: 'Failed' }); }
+    } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
+        console.error('EXPENSE CREATE:', err.message);
+        return res.status(500).json({ error: 'Failed' });
+    }
 });
 
 router.put('/expenses/:id', requirePermission('payments:write'), async (req, res) => {
     try {
         const gid = gymId(req); const id = posInt(req.params.id);
         if (!id) return res.status(400).json({ error: 'Invalid id.' });
-        const { category, vendor, description, amount, bill_date, payment_mode, is_recurring, recurrence_rule } = req.body || {};
+        const expense = normalizeExpenseInput(req.body || {});
         const result = await pool.query(
             `UPDATE expenses SET category=$1, vendor=$2, description=$3, amount=$4, bill_date=$5,
              payment_mode=$6, is_recurring=$7, recurrence_rule=$8
              WHERE id=$9 AND gym_id=$10 AND deleted_at IS NULL RETURNING *`,
-            [String(category||'General').trim(), String(vendor||'').trim(), String(description||'').trim(),
-             Number(amount||0), bill_date||new Date().toISOString().slice(0,10), String(payment_mode||'Cash').trim(),
-             Boolean(is_recurring), String(recurrence_rule||'').trim(), id, gid]);
+            [expense.category, expense.vendor, expense.description,
+             expense.amount, expense.billDate, expense.paymentMode,
+             expense.isRecurring, expense.recurrenceRule, id, gid]);
         if (!result.rows.length) return res.status(404).json({ error: 'Not found.' });
         return res.json(result.rows[0]);
-    } catch (err) { console.error('EXPENSE UPDATE:', err.message); return res.status(500).json({ error: 'Failed' }); }
+    } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
+        console.error('EXPENSE UPDATE:', err.message);
+        return res.status(500).json({ error: 'Failed' });
+    }
 });
 
 router.delete('/expenses/:id', requirePermission('payments:write'), async (req, res) => {

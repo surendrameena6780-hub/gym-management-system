@@ -344,6 +344,25 @@ const sendUserAuthResponse = (res, user, message = 'Login successful!') => {
     return res.json(payload);
 };
 
+const withTransaction = async (work) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await work(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (error) {
+        try {
+            await client.query('ROLLBACK');
+        } catch (_rollbackError) {
+            // Preserve the original error when rollback also fails.
+        }
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 const getPasswordlessProviderMessage = (user) => {
     if (user?.google_id || String(user?.auth_provider || '').toLowerCase() === 'google') {
         return 'This account uses Google sign-in. Continue with Google.';
@@ -386,8 +405,8 @@ const getOauthAccountError = (user) => {
     return null;
 };
 
-const loadUserAuthContextById = async (userId) => {
-    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE u.id = $1`, [userId]);
+const loadUserAuthContextById = async (userId, db = pool) => {
+    const result = await db.query(`${AUTH_CONTEXT_SELECT} WHERE u.id = $1`, [userId]);
     return result.rows[0] || null;
 };
 
@@ -428,7 +447,7 @@ const loadAdminAuthContextByPhone = async (phone) => {
     return result.rows[0] || null;
 };
 
-const loadUserAuthContextByProvider = async (providerField, providerValue) => {
+const loadUserAuthContextByProvider = async (providerField, providerValue, db = pool) => {
     const allowedFields = {
         google_id: 'u.google_id',
         apple_id: 'u.apple_id',
@@ -439,7 +458,23 @@ const loadUserAuthContextByProvider = async (providerField, providerValue) => {
         throw new Error(`Unsupported auth provider field: ${providerField}`);
     }
 
-    const result = await pool.query(`${AUTH_CONTEXT_SELECT} WHERE ${fieldSql} = $1`, [providerValue]);
+    const result = await db.query(`${AUTH_CONTEXT_SELECT} WHERE ${fieldSql} = $1`, [providerValue]);
+    return result.rows[0] || null;
+};
+
+const findExistingUserByPhone = async (phone, db = pool) => {
+    const normalizedPhone = normalizeLocalIndianPhone(phone);
+    if (!normalizedPhone) return null;
+
+    const result = await db.query(
+        `SELECT id
+         FROM users
+         WHERE RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $1
+         ORDER BY id ASC
+         LIMIT 1`,
+        [normalizedPhone]
+    );
+
     return result.rows[0] || null;
 };
 
@@ -475,25 +510,25 @@ const isSignupEmailAvailable = async (email) => {
     return gymExists.rows.length === 0;
 };
 
-const findExistingOauthEmailUser = async (email) => {
-    const existing = await pool.query('SELECT id, gym_id FROM users WHERE email = $1', [email]);
+const findExistingOauthEmailUser = async (email, db = pool) => {
+    const existing = await db.query('SELECT id, gym_id FROM users WHERE email = $1', [email]);
     if (existing.rows.length === 0) return null;
 
     const userId = existing.rows[0].id;
     const gymId = existing.rows[0].gym_id;
 
     if (!gymId) {
-        await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+        await db.query('DELETE FROM users WHERE id = $1', [userId]);
         return null;
     }
 
-    const gymExists = await pool.query('SELECT id FROM gyms WHERE id = $1', [gymId]);
+    const gymExists = await db.query('SELECT id FROM gyms WHERE id = $1', [gymId]);
     if (gymExists.rows.length === 0) {
-        await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+        await db.query('DELETE FROM users WHERE id = $1', [userId]);
         return null;
     }
 
-    return loadUserAuthContextById(userId);
+    return loadUserAuthContextById(userId, db);
 };
 
 const createOauthOwnerAccount = async ({
@@ -509,7 +544,7 @@ const createOauthOwnerAccount = async ({
     gymAddress = null,
     branchesCount = 1,
     selectedPlan = 'pro',
-}) => {
+}, db = pool) => {
     if (!['google_id', 'apple_id'].includes(providerField)) {
         throw new Error(`Unsupported OAuth provider field: ${providerField}`);
     }
@@ -522,7 +557,7 @@ const createOauthOwnerAccount = async ({
     const resolvedBranchesCount = Math.max(1, Number.parseInt(branchesCount, 10) || 1);
     const normalizedPhone = String(ownerPhone || '').replace(/\D/g, '').slice(-10) || null;
 
-    const newGym = await pool.query(
+    const newGym = await db.query(
         `INSERT INTO gyms (name, address, city, branches_count, current_plan, saas_status)
          VALUES ($1, $2, $3, $4, $5, 'FREE_TRIAL') RETURNING id`,
         [resolvedGymName, gymAddress || null, gymCity || null, resolvedBranchesCount, resolvedPlan]
@@ -536,14 +571,14 @@ const createOauthOwnerAccount = async ({
         ? [providerValue, avatarUrl || null, authProvider]
         : [providerValue, authProvider];
 
-    const newUser = await pool.query(
+    const newUser = await db.query(
         `INSERT INTO users (gym_id, full_name, email, phone, password_hash, role, staff_role, is_active, ${providerColumns})
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${providerField === 'google_id' ? '$9, $10, $11' : '$9, $10'})
          RETURNING id`,
         [gymId, ownerName, email, normalizedPhone, 'OAUTH_NO_PASSWORD', 'OWNER', 'OWNER', true, ...providerValues]
     );
 
-    return loadUserAuthContextById(newUser.rows[0].id);
+    return loadUserAuthContextById(newUser.rows[0].id, db);
 };
 
 // POST /api/auth/check-email — real-time duplicate check (called on blur during signup)
@@ -599,21 +634,21 @@ router.post('/signup/send-email-otp', async (req, res) => {
         const otp = generatePasswordResetOtp();
         const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
 
-        await pool.query('BEGIN');
-        await pool.query(
-            `UPDATE password_reset_otps
-             SET consumed_at = NOW()
-             WHERE email = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [email, SIGNUP_EMAIL_VERIFY_PURPOSE]
-        );
-        await pool.query(
-            `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-             VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
-            [email, SIGNUP_EMAIL_VERIFY_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query(
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW()
+                 WHERE email = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [email, SIGNUP_EMAIL_VERIFY_PURPOSE]
+            );
+            await client.query(
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+                 VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
+                [email, SIGNUP_EMAIL_VERIFY_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
+            );
+        });
 
         const delivery = await buildSignupEmailOtpDelivery({ email, otp });
         return res.json({
@@ -627,7 +662,6 @@ router.post('/signup/send-email-otp', async (req, res) => {
             preview_notice: delivery.preview_notice,
         });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('SIGNUP SEND EMAIL OTP ERROR:', err.message);
         return res.status(500).json({ message: 'Could not prepare signup verification. Please try again.' });
     }
@@ -707,11 +741,11 @@ router.post('/signup/verify-email-otp', async (req, res) => {
 
 // POST /api/auth/check-phone — real-time duplicate check for owner phone
 router.post('/check-phone', async (req, res) => {
-    const phone = String(req.body?.phone || '').replace(/\D/g, '').slice(-10);
+    const phone = normalizeLocalIndianPhone(req.body?.phone);
     if (!phone || phone.length < 10) return res.status(400).json({ message: 'Valid 10-digit phone required.' });
     try {
-        const existing = await pool.query('SELECT id FROM users WHERE phone LIKE $1', [`%${phone}`]);
-        if (existing.rows.length > 0) return res.status(409).json({ message: 'This phone number is already registered.' });
+        const existing = await findExistingUserByPhone(phone);
+        if (existing) return res.status(409).json({ message: 'This phone number is already registered.' });
         return res.json({ available: true });
     } catch (err) {
         return res.status(500).json({ message: 'Check failed.' });
@@ -749,62 +783,58 @@ router.post('/register-owner', async (req, res) => {
     }
 
     try {
-        await pool.query('BEGIN'); // Start transaction for safety
+        const registration = await withTransaction(async (client) => {
+            const existingUser = await client.query('SELECT gym_id FROM users WHERE email = $1', [email]);
+            if (existingUser.rows.length > 0) {
+                const oldGymId = existingUser.rows[0].gym_id;
+                const gymStillExists = oldGymId
+                    ? await client.query('SELECT id FROM gyms WHERE id = $1', [oldGymId])
+                    : { rows: [] };
 
-        // 🚨 THE SELF-HEALING GHOST CHECK 🚨
-        // If the email exists, check if their gym was deleted by the Super Admin.
-        const existingUser = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-        if (existingUser.rows.length > 0) {
-            const oldGymId = existingUser.rows[0].gym_id;
-            const gymStillExists = await pool.query('SELECT id FROM gyms WHERE id = $1', [oldGymId]);
-            
-            if (gymStillExists.rows.length === 0 || oldGymId === null) {
-                // The gym was deleted! This is a ghost account. Delete it so they can register fresh.
-                await pool.query('DELETE FROM users WHERE email = $1', [email]);
-            } else {
-                // The gym still exists, so it's a real duplicate. Block it.
-                await pool.query('ROLLBACK');
-                return res.status(400).json({ message: 'An account with this email already exists.' });
+                if (gymStillExists.rows.length === 0 || oldGymId === null) {
+                    await client.query('DELETE FROM users WHERE email = $1', [email]);
+                } else {
+                    return { errorStatus: 400, errorMessage: 'An account with this email already exists.' };
+                }
             }
-        }
 
-        // Duplicate phone check (if phone provided)
-        if (owner_phone && owner_phone.length === 10) {
-            const existingPhone = await pool.query('SELECT id FROM users WHERE phone LIKE $1', [`%${owner_phone}`]);
-            if (existingPhone.rows.length > 0) {
-                await pool.query('ROLLBACK');
-                return res.status(400).json({ message: 'This phone number is already registered.' });
+            if (owner_phone && owner_phone.length === 10) {
+                const existingPhone = await findExistingUserByPhone(owner_phone, client);
+                if (existingPhone) {
+                    return { errorStatus: 400, errorMessage: 'This phone number is already registered.' };
+                }
             }
+
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(password, salt);
+
+            const newGym = await client.query(
+                `INSERT INTO gyms (name, address, city, branches_count, current_plan, saas_status)
+                 VALUES ($1, $2, $3, $4, $5, 'FREE_TRIAL') RETURNING id`,
+                [gym_name, gym_address, gym_city, branches_count, selected_plan]
+            );
+            const gymId = newGym.rows[0].id;
+
+            const newUser = await client.query(
+                `INSERT INTO users (gym_id, full_name, email, phone, password_hash, role, staff_role, is_active)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 RETURNING id`,
+                [gymId, full_name, email, owner_phone || null, hashedPassword, 'OWNER', 'OWNER', true]
+            );
+
+            return { gymId, userId: newUser.rows[0].id };
+        });
+
+        if (registration?.errorStatus) {
+            return res.status(registration.errorStatus).json({ message: registration.errorMessage });
         }
-
-        // Encrypt the password before saving
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        const newGym = await pool.query(
-            `INSERT INTO gyms (name, address, city, branches_count, current_plan, saas_status)
-             VALUES ($1, $2, $3, $4, $5, 'FREE_TRIAL') RETURNING id`,
-            [gym_name, gym_address, gym_city, branches_count, selected_plan]
-        );
-        const gymId = newGym.rows[0].id;
-
-        const newUser = await pool.query(
-            `INSERT INTO users (gym_id, full_name, email, phone, password_hash, role, staff_role, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id`,
-            [gymId, full_name, email, owner_phone || null, hashedPassword, 'OWNER', 'OWNER', true]
-        );
-
-        await pool.query('COMMIT');
 
         return res.json({
             message: "Gym and Owner created successfully!",
-            gym_id: gymId,
-            user_id: newUser.rows[0].id
+            gym_id: registration.gymId,
+            user_id: registration.userId,
         });
-
     } catch (err) {
-        await pool.query('ROLLBACK');
         console.error("REGISTER ERROR:", err.message);
         if (err.code === '23505') {
             return res.status(400).json({ message: "An account with this email already exists." });
@@ -948,21 +978,21 @@ router.post('/admin/send-otp', async (req, res) => {
             }
         }
 
-        await pool.query('BEGIN');
-        await pool.query(
-            `UPDATE user_login_otps
-             SET consumed_at = NOW()
-             WHERE user_id = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [user.id, ADMIN_LOGIN_PURPOSE]
-        );
-        await pool.query(
-            `INSERT INTO user_login_otps (user_id, phone, purpose, otp_hash, delivery_mode, provider_request_id, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW() + ($7 || ' minutes')::interval)`,
-            [user.id, phone, ADMIN_LOGIN_PURPOSE, otpHash, deliveryMode, providerRequestId, ADMIN_LOGIN_OTP_TTL_MINUTES]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query(
+                `UPDATE user_login_otps
+                 SET consumed_at = NOW()
+                 WHERE user_id = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [user.id, ADMIN_LOGIN_PURPOSE]
+            );
+            await client.query(
+                `INSERT INTO user_login_otps (user_id, phone, purpose, otp_hash, delivery_mode, provider_request_id, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, NOW() + ($7 || ' minutes')::interval)`,
+                [user.id, phone, ADMIN_LOGIN_PURPOSE, otpHash, deliveryMode, providerRequestId, ADMIN_LOGIN_OTP_TTL_MINUTES]
+            );
+        });
 
         return res.json({
             message: isProduction
@@ -982,7 +1012,6 @@ router.post('/admin/send-otp', async (req, res) => {
             user_name: String(user.full_name || '').trim().split(/\s+/)[0] || '',
         });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('ADMIN SEND OTP ERROR:', err.message);
         return res.status(500).json({ message: 'Could not prepare login OTP. Please try again.' });
     }
@@ -1083,21 +1112,20 @@ router.post('/admin/verify-otp', async (req, res) => {
             });
         }
 
-        await pool.query('BEGIN');
-        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
-        await pool.query(
-            `UPDATE user_login_otps
-             SET consumed_at = NOW()
-             WHERE user_id = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [user.id, ADMIN_LOGIN_PURPOSE]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+            await client.query(
+                `UPDATE user_login_otps
+                 SET consumed_at = NOW()
+                 WHERE user_id = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [user.id, ADMIN_LOGIN_PURPOSE]
+            );
+        });
 
         return sendUserAuthResponse(res, user, 'OTP verified. Login successful!');
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('ADMIN VERIFY OTP ERROR:', err.message);
         return res.status(500).json({ message: 'Could not complete OTP login. Please try again.' });
     }
@@ -1153,21 +1181,21 @@ router.post('/admin/send-email-otp', async (req, res) => {
         const otp = generateAdminLoginOtp();
         const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
 
-        await pool.query('BEGIN');
-        await pool.query(
-            `UPDATE password_reset_otps
-             SET consumed_at = NOW()
-             WHERE user_id = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
-        );
-        await pool.query(
-            `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-             VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
-            [user.id, email, ADMIN_EMAIL_LOGIN_PURPOSE, otpHash, ADMIN_LOGIN_OTP_TTL_MINUTES]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query(
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW()
+                 WHERE user_id = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
+            );
+            await client.query(
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
+                [user.id, email, ADMIN_EMAIL_LOGIN_PURPOSE, otpHash, ADMIN_LOGIN_OTP_TTL_MINUTES]
+            );
+        });
 
         const delivery = await buildAdminEmailOtpDelivery({ email, otp, userName: user.full_name });
         return res.json({
@@ -1182,7 +1210,6 @@ router.post('/admin/send-email-otp', async (req, res) => {
             user_name: String(user.full_name || '').trim().split(/\s+/)[0] || '',
         });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('ADMIN SEND EMAIL OTP ERROR:', err.message);
         return res.status(500).json({ message: 'Could not prepare email OTP login. Please try again.' });
     }
@@ -1259,21 +1286,20 @@ router.post('/admin/verify-email-otp', async (req, res) => {
             });
         }
 
-        await pool.query('BEGIN');
-        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
-        await pool.query(
-            `UPDATE password_reset_otps
-             SET consumed_at = NOW()
-             WHERE user_id = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+            await client.query(
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW()
+                 WHERE user_id = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
+            );
+        });
 
         return sendUserAuthResponse(res, user, 'OTP verified. Login successful!');
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('ADMIN VERIFY EMAIL OTP ERROR:', err.message);
         return res.status(500).json({ message: 'Could not complete email OTP login. Please try again.' });
     }
@@ -1346,21 +1372,21 @@ router.post('/password-reset/request', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const otpHash = await bcrypt.hash(otp, salt);
 
-        await pool.query('BEGIN');
-        await pool.query(
-            `UPDATE password_reset_otps
-             SET consumed_at = NOW()
-             WHERE user_id = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [user.id, PASSWORD_RESET_PURPOSE]
-        );
-        await pool.query(
-            `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-             VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
-            [user.id, email, PASSWORD_RESET_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query(
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW()
+                 WHERE user_id = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [user.id, PASSWORD_RESET_PURPOSE]
+            );
+            await client.query(
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
+                [user.id, email, PASSWORD_RESET_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
+            );
+        });
 
         const delivery = await buildPasswordResetDelivery({ email, otp, userName: user.full_name });
         return res.json({
@@ -1374,7 +1400,6 @@ router.post('/password-reset/request', async (req, res) => {
             preview_notice: isProduction ? '' : delivery.preview_notice,
         });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('PASSWORD RESET REQUEST ERROR:', err.message);
         return res.status(500).json({ message: 'Could not start password recovery. Please try again.' });
     }
@@ -1460,27 +1485,26 @@ router.post('/password-reset/confirm', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        await pool.query('BEGIN');
-        await pool.query(
-            `UPDATE users
-             SET password_hash = $1,
-                 auth_provider = COALESCE(NULLIF(auth_provider, ''), 'local')
-             WHERE id = $2`,
-            [hashedPassword, user.id]
-        );
-        await pool.query(
-            `UPDATE password_reset_otps
-             SET consumed_at = NOW()
-             WHERE user_id = $1
-               AND purpose = $2
-               AND consumed_at IS NULL`,
-            [user.id, PASSWORD_RESET_PURPOSE]
-        );
-        await pool.query('COMMIT');
+        await withTransaction(async (client) => {
+            await client.query(
+                `UPDATE users
+                 SET password_hash = $1,
+                     auth_provider = COALESCE(NULLIF(auth_provider, ''), 'local')
+                 WHERE id = $2`,
+                [hashedPassword, user.id]
+            );
+            await client.query(
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW()
+                 WHERE user_id = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [user.id, PASSWORD_RESET_PURPOSE]
+            );
+        });
 
         return res.json({ message: 'Password updated successfully. Sign in with your new password.' });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('PASSWORD RESET CONFIRM ERROR:', err.message);
         return res.status(500).json({ message: 'Could not reset password. Please try again.' });
     }
@@ -1594,34 +1618,36 @@ router.get('/google/callback', async (req, res) => {
             }));
         }
 
-        await pool.query('BEGIN');
+        const authResult = await withTransaction(async (client) => {
+            let user = await loadUserAuthContextByProvider('google_id', googleId, client);
+            if (!user) {
+                const emailUser = await findExistingOauthEmailUser(email, client);
+                return { redirectError: emailUser ? 'google_use_email_login' : 'google_signup_required' };
+            }
 
-        let user = await loadUserAuthContextByProvider('google_id', googleId);
-        if (!user) {
-            await pool.query('ROLLBACK');
-            const emailUser = await findExistingOauthEmailUser(email);
-            const error = emailUser ? 'google_use_email_login' : 'google_signup_required';
-            return res.redirect(buildFrontendAuthRedirect({ mode, error }));
+            const authError = getOauthAccountError(user);
+            if (authError) {
+                return { redirectError: authError };
+            }
+
+            if (String(user.password_hash || '') !== 'OAUTH_NO_PASSWORD') {
+                return { redirectError: 'google_use_email_login' };
+            }
+
+            await client.query(
+                'UPDATE users SET avatar_url = $1, last_login_at = NOW() WHERE id = $2',
+                [avatarUrl, user.id]
+            );
+            user = await loadUserAuthContextById(user.id, client);
+
+            return { user };
+        });
+
+        if (authResult.redirectError) {
+            return res.redirect(buildFrontendAuthRedirect({ mode, error: authResult.redirectError }));
         }
 
-        const authError = getOauthAccountError(user);
-        if (authError) {
-            await pool.query('ROLLBACK');
-            return res.redirect(buildFrontendAuthRedirect({ mode, error: authError }));
-        }
-
-        if (String(user.password_hash || '') !== 'OAUTH_NO_PASSWORD') {
-            await pool.query('ROLLBACK');
-            return res.redirect(buildFrontendAuthRedirect({ mode, error: 'google_use_email_login' }));
-        }
-
-        await pool.query(
-            'UPDATE users SET avatar_url = $1, last_login_at = NOW() WHERE id = $2',
-            [avatarUrl, user.id]
-        );
-        user = await loadUserAuthContextById(user.id);
-
-        await pool.query('COMMIT');
+        const user = authResult.user;
 
         const { token } = issueAuthToken({
             ...user,
@@ -1633,7 +1659,6 @@ router.get('/google/callback', async (req, res) => {
         setUserAuthCookie(res, token);
         res.redirect(buildFrontendAuthRedirect({ mode, token, source: 'google' }));
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('GOOGLE OAUTH ERROR:', err);
         res.redirect(buildFrontendAuthRedirect({ mode, error: 'server_error' }));
     }
@@ -1668,44 +1693,46 @@ router.post('/google/signup/complete', async (req, res) => {
         const avatarUrl = String(payload.avatar_url || '').trim();
         const ownerName = fullName || String(payload.full_name || '').trim();
 
-        await pool.query('BEGIN');
+        const signupResult = await withTransaction(async (client) => {
+            const existingGoogleUser = await loadUserAuthContextByProvider('google_id', googleId, client);
+            if (existingGoogleUser) {
+                return { errorStatus: 409, errorMessage: 'This Google account is already registered. Sign in with Google instead.' };
+            }
 
-        const existingGoogleUser = await loadUserAuthContextByProvider('google_id', googleId);
-        if (existingGoogleUser) {
-            await pool.query('ROLLBACK');
-            return res.status(409).json({ message: 'This Google account is already registered. Sign in with Google instead.' });
-        }
+            const existingEmailUser = await findExistingOauthEmailUser(email, client);
+            if (existingEmailUser) {
+                return { errorStatus: 409, errorMessage: 'An account with this email already exists. Use the original sign-in method.' };
+            }
 
-        const existingEmailUser = await findExistingOauthEmailUser(email);
-        if (existingEmailUser) {
-            await pool.query('ROLLBACK');
-            return res.status(409).json({ message: 'An account with this email already exists. Use the original sign-in method.' });
-        }
+            const existingPhone = await findExistingUserByPhone(ownerPhone, client);
+            if (existingPhone) {
+                return { errorStatus: 409, errorMessage: 'This phone number is already registered.' };
+            }
 
-        const existingPhone = await pool.query('SELECT id FROM users WHERE phone LIKE $1', [`%${ownerPhone}`]);
-        if (existingPhone.rows.length > 0) {
-            await pool.query('ROLLBACK');
-            return res.status(409).json({ message: 'This phone number is already registered.' });
-        }
+            const user = await createOauthOwnerAccount({
+                email,
+                fullName: ownerName,
+                authProvider: 'google',
+                providerField: 'google_id',
+                providerValue: googleId,
+                avatarUrl,
+                ownerPhone,
+                gymName,
+                gymCity,
+                gymAddress,
+                branchesCount,
+                selectedPlan,
+            }, client);
 
-        const user = await createOauthOwnerAccount({
-            email,
-            fullName: ownerName,
-            authProvider: 'google',
-            providerField: 'google_id',
-            providerValue: googleId,
-            avatarUrl,
-            ownerPhone,
-            gymName,
-            gymCity,
-            gymAddress,
-            branchesCount,
-            selectedPlan,
+            await client.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+            return { user };
         });
 
-        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        if (signupResult.errorStatus) {
+            return res.status(signupResult.errorStatus).json({ message: signupResult.errorMessage });
+        }
 
-        await pool.query('COMMIT');
+        const user = signupResult.user;
 
         const { token, permissions } = issueAuthToken({
             ...user,
@@ -1736,7 +1763,6 @@ router.post('/google/signup/complete', async (req, res) => {
         setUserAuthCookie(res, token);
         return res.json(payloadResponse);
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         if (err?.message === 'INVALID_GOOGLE_SIGNUP_TOKEN' || err?.name === 'JsonWebTokenError' || err?.name === 'TokenExpiredError') {
             return res.status(400).json({ message: 'Google signup session expired. Please continue with Google again.' });
         }
@@ -1773,46 +1799,52 @@ router.post('/apple', async (req, res) => {
             return res.status(400).json({ message: 'Apple token is invalid.' });
         }
 
-        await pool.query('BEGIN');
+        const authResult = await withTransaction(async (client) => {
+            let user = await loadUserAuthContextByProvider('apple_id', appleId, client);
 
-        let user = await loadUserAuthContextByProvider('apple_id', appleId);
-
-        if (user) {
-            const authError = getOauthAccountError(user);
-            if (authError) {
-                await pool.query('ROLLBACK');
-                return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+            if (user) {
+                const authError = getOauthAccountError(user);
+                if (authError) {
+                    return { errorStatus: 403, errorMessage: 'Account Suspended. Please contact GymVault HQ.' };
+                }
+                await client.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+                user = await loadUserAuthContextById(user.id, client);
+                return { user };
             }
-            await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
-            user = await loadUserAuthContextById(user.id);
-        } else if (email) {
-            const emailUser = await findExistingOauthEmailUser(email);
+
+            if (!email) {
+                return { errorStatus: 400, errorMessage: 'Cannot create account: Apple did not provide an email address.' };
+            }
+
+            const emailUser = await findExistingOauthEmailUser(email, client);
             if (emailUser) {
                 const authError = getOauthAccountError(emailUser);
                 if (authError) {
-                    await pool.query('ROLLBACK');
-                    return res.status(403).json({ message: 'Account Suspended. Please contact GymVault HQ.' });
+                    return { errorStatus: 403, errorMessage: 'Account Suspended. Please contact GymVault HQ.' };
                 }
-                await pool.query(
+                await client.query(
                     'UPDATE users SET apple_id = $1, auth_provider = $2, last_login_at = NOW() WHERE id = $3',
                     [appleId, 'apple', emailUser.id]
                 );
-                user = await loadUserAuthContextById(emailUser.id);
-            } else {
-                user = await createOauthOwnerAccount({
-                    email,
-                    fullName,
-                    authProvider: 'apple',
-                    providerField: 'apple_id',
-                    providerValue: appleId,
-                });
+                user = await loadUserAuthContextById(emailUser.id, client);
+                return { user };
             }
-        } else {
-            await pool.query('ROLLBACK');
-            return res.status(400).json({ message: 'Cannot create account: Apple did not provide an email address.' });
+
+            user = await createOauthOwnerAccount({
+                email,
+                fullName,
+                authProvider: 'apple',
+                providerField: 'apple_id',
+                providerValue: appleId,
+            }, client);
+            return { user };
+        });
+
+        if (authResult.errorStatus) {
+            return res.status(authResult.errorStatus).json({ message: authResult.errorMessage });
         }
 
-        await pool.query('COMMIT');
+        const user = authResult.user;
 
         const permissions = getAuthPermissions(user);
         const token = jwt.sign(
@@ -1827,7 +1859,6 @@ router.post('/apple', async (req, res) => {
             user: { id: user.id, full_name: user.full_name, email: user.email, gym_id: user.gym_id, role: user.role, permissions }
         });
     } catch (err) {
-        await pool.query('ROLLBACK').catch(() => {});
         console.error('APPLE AUTH ERROR:', err);
         return res.status(500).json({ message: 'Apple Sign-In failed. Please try again.' });
     }

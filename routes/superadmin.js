@@ -445,32 +445,59 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
     const gymId = parseInt(req.params.id, 10);
     if (!Number.isInteger(gymId)) return res.status(400).json({ error: 'Invalid gym id' });
 
+    const client = await pool.connect();
     try {
-        await pool.query('BEGIN');
+        await client.query('BEGIN');
 
-        const gym = await pool.query('SELECT id, name FROM gyms WHERE id = $1', [gymId]);
+        const gym = await client.query('SELECT row_to_json(g) AS payload, g.name FROM gyms g WHERE g.id = $1', [gymId]);
         if (gym.rows.length === 0) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Gym not found' });
         }
 
-        await pool.query('DELETE FROM users WHERE gym_id = $1', [gymId]);
-        await pool.query('DELETE FROM gyms WHERE id = $1', [gymId]);
+        await client.query(
+            `INSERT INTO operational_archives (source_table, record_id, archived_from_at, payload, archived_at)
+             VALUES ($1, $2, NOW(), $3::jsonb, NOW())
+             ON CONFLICT (source_table, record_id)
+             DO UPDATE SET archived_from_at = EXCLUDED.archived_from_at,
+                           payload = EXCLUDED.payload,
+                           archived_at = EXCLUDED.archived_at`,
+            ['gyms', gymId, JSON.stringify({
+                gym: gym.rows[0].payload,
+                archived_by: 'SUPERADMIN',
+            })]
+        );
+        await client.query('UPDATE users SET is_active = FALSE WHERE gym_id = $1', [gymId]);
+        await client.query(
+            `UPDATE gyms
+             SET is_active = FALSE,
+                 gym_access_status = 'SUSPENDED',
+                 suspended_at = COALESCE(suspended_at, NOW()),
+                 suspended_reason = COALESCE(NULLIF(suspended_reason, ''), 'Archived by superadmin')
+             WHERE id = $1`,
+            [gymId]
+        );
 
-        await pool.query('COMMIT');
+        await client.query('COMMIT');
 
         await logAudit({
-            action: 'GYM_DELETED',
+            action: 'GYM_ARCHIVED',
             targetType: 'GYM',
             targetId: gymId,
             targetLabel: gym.rows[0].name,
         });
 
-        return res.json({ message: 'Gym and all associated data completely destroyed.' });
+        return res.json({ message: 'Gym archived and access revoked.' });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        try {
+            await client.query('ROLLBACK');
+        } catch (_rollbackError) {
+            // Preserve the original failure.
+        }
         console.error('HQ DELETE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
+    } finally {
+        client.release();
     }
 });
 

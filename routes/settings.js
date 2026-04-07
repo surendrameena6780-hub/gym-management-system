@@ -37,6 +37,7 @@ const {
     getStoredProfileValue,
     resolveStoredProfileImagePath,
 } = require('../utils/profileUploads');
+const { clearUserAuthCookie } = require('../utils/authCookies');
 const { invalidateGymTimezoneCache } = require('../utils/gymTime');
 const {
     ValidationError,
@@ -2017,8 +2018,9 @@ router.delete('/nuke', auth, async (req, res) => {
         return res.status(400).json({ error: 'current_password is required to delete gym data.' });
     }
 
+    const client = await pool.connect();
     try {
-        const ownerResult = await pool.query(
+        const ownerResult = await client.query(
             `SELECT password_hash
              FROM users
              WHERE id = $1 AND gym_id = $2 AND UPPER(role) = 'OWNER'
@@ -2035,15 +2037,50 @@ router.delete('/nuke', auth, async (req, res) => {
             return res.status(401).json({ error: 'Current password is incorrect.' });
         }
 
-        await pool.query('BEGIN');
-        await pool.query('DELETE FROM users WHERE gym_id = $1', [req.user.gym_id]);
-        await pool.query('DELETE FROM gyms WHERE id = $1', [req.user.gym_id]);
-        await pool.query('COMMIT');
-        res.json({ message: "Gym data completely wiped." });
+        const archivePayloadResult = await client.query(
+            `SELECT row_to_json(g) AS payload
+             FROM gyms g
+             WHERE g.id = $1
+             LIMIT 1`,
+            [req.user.gym_id]
+        );
+
+        await client.query('BEGIN');
+        await client.query(
+            `INSERT INTO operational_archives (source_table, record_id, archived_from_at, payload, archived_at)
+             VALUES ($1, $2, NOW(), $3::jsonb, NOW())
+             ON CONFLICT (source_table, record_id)
+             DO UPDATE SET archived_from_at = EXCLUDED.archived_from_at,
+                           payload = EXCLUDED.payload,
+                           archived_at = EXCLUDED.archived_at`,
+            ['gyms', req.user.gym_id, JSON.stringify({
+                gym: archivePayloadResult.rows[0]?.payload || null,
+                archived_by: 'OWNER_SELF_SERVICE',
+            })]
+        );
+        await client.query('UPDATE users SET is_active = FALSE WHERE gym_id = $1', [req.user.gym_id]);
+        await client.query(
+            `UPDATE gyms
+             SET is_active = FALSE,
+                 gym_access_status = 'SUSPENDED',
+                 suspended_at = COALESCE(suspended_at, NOW()),
+                 suspended_reason = COALESCE(NULLIF(suspended_reason, ''), 'Archived by owner request')
+             WHERE id = $1`,
+            [req.user.gym_id]
+        );
+        await client.query('COMMIT');
+        clearUserAuthCookie(res);
+        res.json({ message: "Gym archived and access revoked." });
     } catch (err) {
-        await pool.query('ROLLBACK');
+        try {
+            await client.query('ROLLBACK');
+        } catch (_rollbackError) {
+            // Preserve the original failure.
+        }
         console.error("NUKE ERROR:", err.message);
         res.status(500).json({ error: "Server Error" });
+    } finally {
+        client.release();
     }
 });
 
