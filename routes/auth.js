@@ -366,7 +366,13 @@ const buildAuthSuccessPayload = (user, message = 'Login successful!') => {
 
 const sendUserAuthResponse = (res, user, message = 'Login successful!') => {
     const payload = buildAuthSuccessPayload(user, message);
-    setUserAuthCookie(res, payload.token);
+
+    try {
+        setUserAuthCookie(res, payload.token);
+    } catch (err) {
+        console.error('AUTH COOKIE SET ERROR:', err.message);
+    }
+
     return res.json(payload);
 };
 
@@ -557,13 +563,23 @@ const buildMemberAuthPayload = (member, message = 'Login successful.') => {
 };
 
 const sendMemberAuthResponse = async (res, member, message = 'Login successful.') => {
-    await pool.query(
-        'UPDATE members SET otp_code = NULL, otp_expires_at = NULL WHERE id = $1',
-        [member.id]
-    );
+    try {
+        await pool.query(
+            'UPDATE members SET otp_code = NULL, otp_expires_at = NULL WHERE id = $1',
+            [member.id]
+        );
+    } catch (err) {
+        console.error('MEMBER LOGIN CLEANUP ERROR:', err.message);
+    }
 
     const payload = buildMemberAuthPayload(member, message);
-    setMemberAuthCookie(res, payload.token);
+
+    try {
+        setMemberAuthCookie(res, payload.token);
+    } catch (err) {
+        console.error('MEMBER AUTH COOKIE SET ERROR:', err.message);
+    }
+
     return res.json(payload);
 };
 
@@ -1006,7 +1022,11 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ message: "Invalid email or password." });
         }
 
-        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        try {
+            await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        } catch (updateErr) {
+            console.error('LOGIN LAST_LOGIN UPDATE ERROR:', updateErr.message);
+        }
 
         return sendUserAuthResponse(res, user, 'Login successful!');
 
