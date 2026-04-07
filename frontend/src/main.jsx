@@ -231,6 +231,30 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
 }
 
 if ('serviceWorker' in navigator) {
+  const SERVICE_WORKER_URL = '/sw.js?v=20260408-2'
+  let isReloadingForServiceWorker = false
+
+  const reloadForUpdatedServiceWorker = () => {
+    if (isReloadingForServiceWorker) {
+      return
+    }
+
+    isReloadingForServiceWorker = true
+    window.location.reload()
+  }
+
+  const watchServiceWorkerInstallation = (worker) => {
+    if (!worker) {
+      return
+    }
+
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+        reloadForUpdatedServiceWorker()
+      }
+    })
+  }
+
   const refreshServiceWorker = () => {
     navigator.serviceWorker.getRegistration().then((registration) => {
       registration?.update().catch(() => undefined)
@@ -238,12 +262,18 @@ if ('serviceWorker' in navigator) {
   }
 
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+    navigator.serviceWorker.register(SERVICE_WORKER_URL, { updateViaCache: 'none' }).then((registration) => {
+      watchServiceWorkerInstallation(registration.installing)
+      registration.addEventListener('updatefound', () => {
+        watchServiceWorkerInstallation(registration.installing)
+      })
       registration.update().catch(() => undefined)
     }).catch((error) => {
       console.warn('Service worker registration failed:', error)
     })
   })
+
+  navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdatedServiceWorker)
 
   window.addEventListener('focus', refreshServiceWorker, { passive: true })
   document.addEventListener('visibilitychange', () => {

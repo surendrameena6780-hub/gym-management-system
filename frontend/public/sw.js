@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gymvault-static-v3';
+const CACHE_NAME = 'gymvault-static-v4';
 const PRECACHE_URLS = [
   '/manifest.webmanifest',
   '/gymvault-app-icon-32.png',
