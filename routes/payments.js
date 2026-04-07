@@ -1391,3 +1391,12 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.ensurePaymentCollectionsSchema = ensurePaymentCollectionsSchema;
+module.exports.roundMoney = roundMoney;
+module.exports.DUE_ZERO_THRESHOLD = DUE_ZERO_THRESHOLD;
+module.exports.getGymCollectionSetup = getGymCollectionSetup;
+module.exports.getPendingPaymentById = getPendingPaymentById;
+module.exports.createCollectionPaymentLink = createCollectionPaymentLink;
+module.exports.createCollectionRazorpayClient = createCollectionRazorpayClient;
+module.exports.resolvePaidPaymentLinkResult = resolvePaidPaymentLinkResult;
+module.exports.applyDueCollection = applyDueCollection;

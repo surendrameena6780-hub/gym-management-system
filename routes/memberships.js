@@ -1463,3 +1463,5 @@ router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:writ
 });
 
 module.exports = router;
+module.exports.ensureMemberPaymentsSchema = ensureMemberPaymentsSchema;
+module.exports.buildDeskCollectionReference = buildDeskCollectionReference;

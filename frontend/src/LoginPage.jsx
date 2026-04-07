@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import axios from 'axios';
 import { QRCodeCanvas } from 'qrcode.react';
 import { buildApiUrl } from './utils/apiUrl';
+import MemberSelfServiceHub from './MemberSelfServiceHub';
 import {
   Dumbbell, Mail, Lock, ArrowRight, Eye, EyeOff,
   Users, TrendingUp, Layers, ChevronRight, Phone, CheckCircle,
@@ -294,7 +295,7 @@ function PasswordResetModal({
 }
 
 // ─── Full-screen Member Portal Dashboard (shown after OTP verification) ──────
-function MemberPortalDashboard({ member, token, onSignOut }) {
+function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
   const qrScannerRef = useRef(null);
   const qrScannerBusyRef = useRef(false);
   const autoGeoAttemptRef = useRef(false);
@@ -910,6 +911,8 @@ function MemberPortalDashboard({ member, token, onSignOut }) {
             <p className="text-slate-500 text-xs mt-1">Contact your gym to renew.</p>
           </div>
         )}
+
+        <MemberSelfServiceHub member={member} token={token} onMemberChange={onMemberChange} />
 
         <div className="space-y-3">
           <div className="p-5 rounded-[28px] relative overflow-hidden"
@@ -1589,6 +1592,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
       <MemberPortalDashboard
         member={memberData}
         token={memberToken}
+        onMemberChange={setMemberData}
         onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setOtp(''); setOtpSent(false); setError(''); }}
       />
     );
