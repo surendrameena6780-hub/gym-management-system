@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "https://gym-management-system-4nfu.onrender.com/api/$1"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "https://gym-management-system-4nfu.onrender.com/uploads/$1"
+    },
+    {
       "source": "/hq-admin",
       "destination": "/index.html"
     },

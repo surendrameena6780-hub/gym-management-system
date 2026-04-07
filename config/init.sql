@@ -828,26 +828,30 @@ EXECUTE FUNCTION prevent_gym_hard_delete();
 -- Tenant-safe uniqueness for phone numbers (safe migration: skip if duplicates exist)
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'members_gym_phone_key'
-    )
-    AND NOT EXISTS (
-        SELECT 1
-        FROM members
-        WHERE phone IS NOT NULL
-        GROUP BY gym_id, phone
-        HAVING COUNT(*) > 1
     UPDATE members
     SET phone = NULL
     WHERE phone IS NOT NULL AND BTRIM(phone) = '';
 
-    ALTER TABLE members DROP CONSTRAINT IF EXISTS members_gym_phone_key;
-    DROP INDEX IF EXISTS members_gym_phone_key;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_members_gym_phone_active_unique
-        ON members(gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10))
-        WHERE phone IS NOT NULL AND BTRIM(phone) <> '' AND deleted_at IS NULL;
+    IF EXISTS (
+        SELECT 1
+        FROM members
+        WHERE phone IS NOT NULL
+          AND BTRIM(phone) <> ''
+          AND deleted_at IS NULL
+        GROUP BY gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10)
+        HAVING COUNT(*) > 1
+    ) THEN
+        RAISE NOTICE 'Skipping members phone uniqueness migration because duplicate active phone numbers exist.';
+    ELSE
+        ALTER TABLE members DROP CONSTRAINT IF EXISTS members_gym_phone_key;
+        DROP INDEX IF EXISTS members_gym_phone_key;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_members_gym_phone_active_unique
+            ON members(gym_id, RIGHT(REGEXP_REPLACE(BTRIM(phone), '[^0-9]', '', 'g'), 10))
+            WHERE phone IS NOT NULL AND BTRIM(phone) <> '' AND deleted_at IS NULL;
+    END IF;
+END;
+$$;
+
 CREATE INDEX IF NOT EXISTS idx_attendance_member_time  ON attendance(member_id, check_in_time DESC);
 
 -- =============================================================

@@ -1578,7 +1578,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="app-min-shell-height flex font-['Inter'] overflow-hidden" style={{ background: '#060b14' }}>
+    <div className="app-min-shell-height flex font-['Inter'] overflow-x-hidden lg:overflow-hidden" style={{ background: '#060b14' }}>
 
       {/* ════════════════════ LEFT PANEL — desktop only ═══════════════════════ */}
       <div
@@ -1665,6 +1665,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
         className="flex-1 flex flex-col items-center justify-start lg:justify-center p-5 desktop:p-12 overflow-y-auto"
         style={{
           background: 'linear-gradient(170deg, #0c1120 0%, #090c18 100%)',
+          minHeight: 'max(100vh, var(--app-viewport-height))',
           paddingTop: 'max(1rem, var(--safe-area-top))',
           paddingBottom: 'max(1rem, var(--safe-area-bottom))',
         }}
@@ -1678,7 +1679,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
           <span className="text-white font-black text-lg tracking-tight">GymVault</span>
         </div>
 
-        <div className="w-full max-w-[390px] flex min-h-full flex-col lg:min-h-0 lg:justify-center">
+        <div className="w-full max-w-[390px] flex flex-col justify-center py-4 lg:py-8">
 
           {/* Page title */}
           <div className="mb-7">
@@ -1856,7 +1857,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
 
           </div>{/* end animated tab content */}
 
-          <p className="text-center text-slate-700 text-[10px] font-medium mt-auto pt-8">
+          <p className="text-center text-slate-700 text-[10px] font-medium mt-8 lg:mt-10">
             Authorized Personnel Only &nbsp;·&nbsp; GymVault v2.0
           </p>
         </div>

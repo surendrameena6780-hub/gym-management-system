@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.jsx'
 import { clearSessionToken, getSessionToken } from './utils/authSession'
 import { applyInterfacePreferences, loadInterfacePreferencesLocal } from './utils/interfacePreferences'
+import { getApiOrigin } from './utils/apiUrl'
 
 const unwrapApiData = (payload) => {
   let current = payload
@@ -25,9 +26,7 @@ const unwrapApiData = (payload) => {
   return current
 }
 
-const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim()
-const isLocalHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
-const apiBaseUrl = configuredApiUrl || (isLocalHost ? 'http://localhost:5000' : '')
+const apiBaseUrl = getApiOrigin()
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = true
 

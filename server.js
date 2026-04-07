@@ -62,6 +62,25 @@ const parseTrustProxySetting = (value) => {
     return raw;
 };
 
+const toOrigin = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    try {
+        const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+        return new URL(normalized).origin;
+    } catch (_err) {
+        return null;
+    }
+};
+
+const collectCorsOrigins = (...values) => Array.from(new Set(
+    values
+        .flatMap((value) => String(value || '').split(','))
+        .map((entry) => toOrigin(entry))
+        .filter(Boolean)
+));
+
 const requiredEnv = ['DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'JWT_SECRET'];
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
 if (missingEnv.length > 0) {
@@ -71,10 +90,13 @@ if (process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_
     throw new Error('FATAL: JWT_SECRET is insecure. Set a strong random secret in environment.');
 }
 
-const corsOrigins = (process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
+const corsOrigins = collectCorsOrigins(
+    process.env.CORS_ORIGIN,
+    process.env.FRONTEND_URL,
+    process.env.PUBLIC_FRONTEND_URL,
+    process.env.VERCEL_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+);
 const isProduction = process.env.NODE_ENV === 'production';
 const REQUIRED_NODE_VERSION = '20.18.0';
 const currentNodeVersion = String(process.version || '').replace(/^v/, '');
@@ -91,7 +113,7 @@ const defaultDevOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'ht
 const trustProxySetting = parseTrustProxySetting(process.env.TRUST_PROXY);
 
 if (isProduction && corsOrigins.length === 0) {
-    throw new Error('FATAL: CORS_ORIGIN is required in production.');
+    throw new Error('FATAL: At least one frontend origin must be configured for CORS in production.');
 }
 
 if (trustProxySetting) {

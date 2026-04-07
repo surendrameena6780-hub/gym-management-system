@@ -8,8 +8,9 @@ import {
 } from 'lucide-react';
 import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
+import { getApiOrigin } from './utils/apiUrl';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = getApiOrigin();
 
 // ─── Animated KPI Card ──────────────────────────────────────────────────────
 function StaffKPI(props) {
