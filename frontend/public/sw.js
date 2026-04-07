@@ -1,11 +1,13 @@
-const CACHE_NAME = 'gymvault-static-v2';
+const CACHE_NAME = 'gymvault-static-v3';
 const PRECACHE_URLS = [
   '/manifest.webmanifest',
   '/gymvault-app-icon-32.png',
   '/gymvault-app-icon-64.png',
   '/gymvault-app-icon-180.png',
   '/gymvault-app-icon-192.png',
+  '/gymvault-app-icon-192-maskable.png',
   '/gymvault-app-icon-512.png',
+  '/gymvault-app-icon-512-maskable.png',
 ];
 
 self.addEventListener('install', (event) => {
