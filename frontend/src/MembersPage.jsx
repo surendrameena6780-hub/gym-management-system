@@ -27,14 +27,14 @@ const AVATAR_GRADIENTS = [
 const getInitials = (name) => name?.split(' ').filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
 const getAvatarGradient = (name) => AVATAR_GRADIENTS[(name?.charCodeAt(0) || 0) % AVATAR_GRADIENTS.length];
 
-const GradientAvatar = ({ name, src, sizePx = 36, onClick, className = '', imageFit = 'object-cover' }) => {
+const GradientAvatar = ({ name, src, sizePx = 36, onClick, className = '', imageFit = 'object-cover', ariaLabel }) => {
   const [imgError, setImgError] = useState(false);
   useEffect(() => {
     setImgError(false);
   }, [src]);
   const showInitials = !src || imgError;
-  return (
-    <div onClick={onClick} style={{ width: sizePx, height: sizePx, minWidth: sizePx, minHeight: sizePx }} className={`rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-slate-100 ${onClick ? 'cursor-pointer' : ''} ${className}`}>
+  const content = (
+    <>
       {showInitials ? (
         <div className={`w-full h-full rounded-full bg-gradient-to-br ${getAvatarGradient(name)} flex items-center justify-center`}>
           <span style={{ fontSize: Math.max(9, sizePx * 0.34) }} className="text-white font-black leading-none select-none">{getInitials(name)}</span>
@@ -42,6 +42,26 @@ const GradientAvatar = ({ name, src, sizePx = 36, onClick, className = '', image
       ) : (
         <img src={src} alt={name} className={`w-full h-full block ${imageFit}`} style={{ aspectRatio: '1 / 1', objectPosition: 'center top' }} onError={() => setImgError(true)} />
       )}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        aria-label={ariaLabel || `Open photo for ${name || 'member'}`}
+        onClick={onClick}
+        style={{ width: sizePx, height: sizePx, minWidth: sizePx, minHeight: sizePx }}
+        className={`rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-slate-100 cursor-pointer ${className}`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ width: sizePx, height: sizePx, minWidth: sizePx, minHeight: sizePx }} className={`rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center bg-slate-100 ${className}`}>
+      {content}
     </div>
   );
 };
@@ -1640,7 +1660,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             <p className="text-slate-500 text-sm mt-0.5">Manage and track your gym members</p>
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">
-            <button onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 desktop:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>
+            <button type="button" aria-pressed={isBulkMode} onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 desktop:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>
             {canWriteMembers && <button onClick={openAddMemberModal} className="flex-1 desktop:flex-none text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-95 text-sm" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}><Plus size={16} /> Add Member</button>}
           </div>
         </div>
@@ -1648,12 +1668,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative w-full sm:max-w-xs">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder="Search name, email, phone…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-sm font-medium transition-all" />
+            <input type="text" aria-label="Search members" placeholder="Search name, email, phone…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-sm font-medium transition-all" />
           </div>
           <div className="w-full">
-            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-1.5">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-1.5" role="tablist" aria-label="Member status filters">
               {FILTER_TABS.map(({ key, label, active, inactive, badgeActive, badgeInactive }) => (
-                <button key={key} onClick={() => setFilter(key)} className={`h-10 sm:h-9 w-full sm:w-auto px-2 sm:px-3.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 sm:gap-1.5 text-center leading-tight whitespace-normal sm:whitespace-nowrap border border-transparent ${filter === key ? active : inactive}`}>
+                <button key={key} type="button" role="tab" aria-selected={filter === key} onClick={() => setFilter(key)} className={`h-10 sm:h-9 w-full sm:w-auto px-2 sm:px-3.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 sm:gap-1.5 text-center leading-tight whitespace-normal sm:whitespace-nowrap border border-transparent ${filter === key ? active : inactive}`}>
                   <span>{label}</span>
                   <span className={`min-w-[18px] text-center text-[9px] px-1.5 py-0.5 rounded-full font-black ${filter === key ? badgeActive : badgeInactive}`}>{counts[key] ?? 0}</span>
                 </button>
@@ -1763,7 +1783,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                         <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-5 text-slate-300"><Search size={32} /></div>
                         <h2 className="text-xl font-black text-slate-900 mb-2">No members found</h2>
                         <p className="text-slate-500 font-bold text-sm mb-1">No results for <span className="text-slate-900 bg-slate-100 px-2 py-0.5 rounded font-black">"{searchTerm || filter}"</span></p>
-                        <button onClick={() => { setSearchTerm(''); setFilter('All'); }} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 mt-6"><X size={16} /> Clear Search</button>
+                        <button type="button" onClick={() => { setSearchTerm(''); setFilter('All'); }} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 mt-6"><X size={16} /> Clear Search</button>
                       </div>
                     </td>
                   </tr>
@@ -1779,7 +1799,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                         </td>
                         <td className="py-4 pr-2 pl-0">
                           <div className="flex items-center gap-2.5">
-                            <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={34} onClick={(e) => { e.stopPropagation(); if (member.profile_pic) setPreviewImage(member.profile_pic); }} className="border border-white/80 shadow-sm hover:scale-105 transition-transform ring-1 ring-slate-200/60" />
+                            <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={34} onClick={(e) => { e.stopPropagation(); if (member.profile_pic) setPreviewImage(member.profile_pic); }} ariaLabel={`Preview photo for ${member.full_name}`} className="border border-white/80 shadow-sm hover:scale-105 transition-transform ring-1 ring-slate-200/60" />
                             <div className="flex flex-col min-w-0"><span className="truncate font-bold text-slate-900 text-sm">{member.full_name}</span><span className="text-[10px] text-slate-400 font-medium">ID #{member.id}</span></div>
                           </div>
                         </td>
@@ -1791,11 +1811,11 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                         <td className="py-4 px-2 text-center"><span className="text-xs font-semibold text-slate-600 whitespace-nowrap">{effectiveVisitSource ? new Date(effectiveVisitSource).toLocaleDateString('en-GB') : '—'}</span></td>
                         <td className="py-4 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="ml-auto flex max-w-[220px] flex-wrap justify-end items-center gap-1.5">
-                            {canWritePayments && statusInfo.label === 'UNPAID' && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[82px] items-center justify-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
-                            {canWritePayments && (statusInfo.label === 'EXPIRED' || statusInfo.label === 'EXPIRING SOON') && <button onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[76px] items-center justify-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
-                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON' || statusInfo.label === 'EXPIRED') && <button onClick={() => sendWhatsAppReminder(member, statusInfo.label === 'INACTIVE' ? 'followup' : statusInfo.label === 'EXPIRED' ? 'expired' : 'reminder')} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex min-w-[84px] items-center justify-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
-                            {canWriteAttendance && canCheckMemberIn(member) && <button onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
-                            {canWriteMembers && <button onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
+                            {canWritePayments && statusInfo.label === 'UNPAID' && <button type="button" aria-label={`Initiate plan for ${member.full_name}`} onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[82px] items-center justify-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
+                            {canWritePayments && (statusInfo.label === 'EXPIRED' || statusInfo.label === 'EXPIRING SOON') && <button type="button" aria-label={`Renew membership for ${member.full_name}`} onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[76px] items-center justify-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
+                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON' || statusInfo.label === 'EXPIRED') && <button type="button" aria-label={`Send reminder to ${member.full_name}`} onClick={() => sendWhatsAppReminder(member, statusInfo.label === 'INACTIVE' ? 'followup' : statusInfo.label === 'EXPIRED' ? 'expired' : 'reminder')} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex min-w-[84px] items-center justify-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
+                            {canWriteAttendance && canCheckMemberIn(member) && <button type="button" aria-label={`Manual check-in for ${member.full_name}`} onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
+                            {canWriteMembers && <button type="button" aria-label={`Edit ${member.full_name}`} onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
                           </div>
                         </td>
                       </tr>
@@ -1825,9 +1845,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         <div className="fixed mobile-floating-offset left-1/2 -translate-x-1/2 w-[calc(100%-1rem)] max-w-[560px] bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-3 z-[100] border border-slate-700 backdrop-blur-md bg-opacity-95 animate-in slide-in-from-bottom-10">
           <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">Bulk Actions</span><span className="text-sm font-black">{selectedIds.length} Selected</span></div>
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={handleBulkReminder} disabled={bulkActionLoading !== ''} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">{bulkActionLoading === 'reminder' ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} fill="currentColor" />} Send Reminders</button>
-            <button onClick={handleBulkDelete} disabled={bulkActionLoading !== ''} className="flex items-center gap-2 text-xs font-bold bg-rose-500/10 text-rose-400 px-4 py-2 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">{bulkActionLoading === 'delete' ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete</button>
-            <button onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white ml-1"><X size={18} /></button>
+            <button type="button" aria-label="Send reminders to selected members" onClick={handleBulkReminder} disabled={bulkActionLoading !== ''} className="flex items-center gap-2 text-xs font-bold bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">{bulkActionLoading === 'reminder' ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} fill="currentColor" />} Send Reminders</button>
+            <button type="button" aria-label="Delete selected members" onClick={handleBulkDelete} disabled={bulkActionLoading !== ''} className="flex items-center gap-2 text-xs font-bold bg-rose-500/10 text-rose-400 px-4 py-2 rounded-xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed">{bulkActionLoading === 'delete' ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete</button>
+            <button type="button" aria-label="Clear selected members" onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white ml-1"><X size={18} /></button>
           </div>
         </div>
       )}
@@ -1851,7 +1871,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   Joined {selectedMember.joining_date ? new Date(selectedMember.joining_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}
                 </p>
               </div>
-              <button onClick={() => setShowDetailsModal(false)} className="text-white/50 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all mt-0.5"><X size={18} /></button>
+              <button type="button" aria-label="Close member details" onClick={() => setShowDetailsModal(false)} className="text-white/50 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all mt-0.5"><X size={18} /></button>
             </div>
           </div>
 
@@ -1867,9 +1887,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           {/* scrollable body */}
           <div className="flex-1 overflow-y-auto px-5 space-y-3 pt-2 pb-4" style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>
             {/* drawer tabs */}
-            <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5">
+            <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5" role="tablist" aria-label="Member details sections">
               {[{ key: 'profile', label: 'Profile' }, { key: 'notes', label: 'Notes' }, { key: 'docs', label: 'Documents' }, { key: 'waivers', label: 'Waivers' }].map(t => (
-                <button key={t.key} onClick={() => setDrawerTab(t.key)} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${drawerTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
+                <button key={t.key} type="button" role="tab" aria-selected={drawerTab === t.key} onClick={() => setDrawerTab(t.key)} className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${drawerTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
               ))}
             </div>
 
@@ -1884,8 +1904,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  <button onClick={() => handleCall(selectedMember.phone)} className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm"><Phone size={10} fill="currentColor" /></button>
-                  <button onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />}</button>
+                  <button type="button" aria-label={`Call ${selectedMember.full_name}`} onClick={() => handleCall(selectedMember.phone)} className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm"><Phone size={10} fill="currentColor" /></button>
+                  <button type="button" aria-label={`Send WhatsApp reminder to ${selectedMember.full_name}`} onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />}</button>
                 </div>
               </div>
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center gap-2">

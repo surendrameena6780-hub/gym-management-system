@@ -39,12 +39,10 @@ export const KPICard = (props) => {
     ? `${prefix}${animated.toLocaleString()}${suffix}`
     : strVal;
 
-  return (
-    <div
-      onClick={onClick}
-      className={`group relative overflow-hidden bg-white/85 backdrop-blur-sm rounded-[20px] sm:rounded-[24px] border border-white/60 p-4 sm:p-5 flex flex-col justify-between shadow-[0_2px_16px_rgba(0,0,0,0.04)] hover:shadow-[0_10px_36px_rgba(0,0,0,0.09)] hover:-translate-y-1 transition-all duration-300 ${onClick ? 'cursor-pointer' : ''}`}
-      style={{ opacity: 0, animation: `cardCascade 0.6s cubic-bezier(0.16,1,0.3,1) ${index * 75}ms forwards` }}
-    >
+  const cardClasses = `group relative overflow-hidden bg-white/85 backdrop-blur-sm rounded-[20px] sm:rounded-[24px] border border-white/60 p-4 sm:p-5 flex flex-col justify-between shadow-[0_2px_16px_rgba(0,0,0,0.04)] hover:shadow-[0_10px_36px_rgba(0,0,0,0.09)] hover:-translate-y-1 transition-all duration-300 ${onClick ? 'cursor-pointer text-left' : ''}`;
+  const cardStyle = { opacity: 0, animation: `cardCascade 0.6s cubic-bezier(0.16,1,0.3,1) ${index * 75}ms forwards` };
+  const content = (
+    <>
       <div
         className="absolute -right-4 -bottom-4 w-20 h-20 sm:w-28 sm:h-28 rounded-full opacity-[0.045] group-hover:opacity-[0.09] group-hover:scale-125 transition-all duration-700"
         style={{ background: iconGradient }}
@@ -69,6 +67,26 @@ export const KPICard = (props) => {
         <h3 className="text-[23px] sm:text-[26px] font-black text-slate-900 tracking-tight leading-none">{displayVal}</h3>
         <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-1.5">{title}</p>
       </div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={`Open ${title}`}
+        className={cardClasses}
+        style={cardStyle}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={cardClasses} style={cardStyle}>
+      {content}
     </div>
   );
 };

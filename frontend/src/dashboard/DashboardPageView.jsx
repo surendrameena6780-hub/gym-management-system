@@ -252,6 +252,7 @@ const FloatingActionBar = ({ controller }) => {
                 type="button"
                 onClick={() => launchQuickAction(label, onClick)}
                 disabled={Boolean(quickActionLoading)}
+                aria-label={label}
                 className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] hover:bg-white/5 disabled:opacity-70 ${color}`}
               >
                 {isLoading ? <RefreshCw size={15} strokeWidth={2.5} className="animate-spin" /> : icon}
@@ -479,6 +480,7 @@ const DashboardPageView = ({ controller, isActive = true }) => {
                     key={days}
                     type="button"
                     onClick={() => setChartDays(days)}
+                    aria-pressed={chartDays === days}
                     className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${chartDays === days ? 'bg-white text-slate-900 shadow-sm shadow-black/5' : 'text-slate-500 hover:text-slate-700'}`}
                   >
                     {days}D
