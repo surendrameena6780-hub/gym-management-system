@@ -990,19 +990,37 @@ const loadRazorpayScript = () => {
   };
 
   function saveIntegrationSection(saveScope = integSubTab) {
-    return axios.put('/api/settings/integrations', {
-      save_scope: saveScope,
-      ...integrationData,
-      templates: integrationData.templates,
-      member_payments: {
+    const normalizedScope = ['payments', 'messaging', 'campaigns', 'all'].includes(String(saveScope || '').trim().toLowerCase())
+      ? String(saveScope || '').trim().toLowerCase()
+      : 'all';
+
+    const payload = { save_scope: normalizedScope };
+
+    if (normalizedScope === 'messaging' || normalizedScope === 'all') {
+      payload.owner_mobile = integrationData.owner_mobile;
+      payload.whatsapp_number = integrationData.whatsapp_number;
+    }
+
+    if (normalizedScope === 'campaigns' || normalizedScope === 'all') {
+      payload.bulk_enabled = integrationData.bulk_enabled;
+      payload.bulk_monthly_limit = integrationData.bulk_monthly_limit;
+      payload.bulk_per_campaign_limit = integrationData.bulk_per_campaign_limit;
+      payload.bulk_channels = integrationData.bulk_channels;
+      payload.templates = integrationData.templates;
+    }
+
+    if (normalizedScope === 'payments' || normalizedScope === 'all') {
+      payload.member_payments = {
         enabled: Boolean(integrationData.member_payments?.enabled),
         connect_mode: String(integrationData.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
         razorpay_key_id: String(integrationData.member_payments?.razorpay_key_id || '').trim(),
         razorpay_key_secret: String(integrationData.member_payments?.razorpay_key_secret || '').trim(),
         has_razorpay_secret: Boolean(integrationData.member_payments?.has_razorpay_secret),
         upi_id: String(integrationData.member_payments?.upi_id || '').trim(),
-      },
-    }, headers);
+      };
+    }
+
+    return axios.put('/api/settings/integrations', payload, headers);
   }
 
   const switchWhatsAppOnboardingView = (nextView) => {

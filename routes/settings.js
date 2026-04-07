@@ -39,9 +39,12 @@ const {
 } = require('../utils/profileUploads');
 const { invalidateGymTimezoneCache } = require('../utils/gymTime');
 const {
+    ValidationError,
     ensureTrimmedString,
     ensureEmail,
     ensureInteger,
+    ensureChoice,
+    ensureObject,
     ensureUrl,
     isValidationError,
 } = require('../utils/fieldValidation');
@@ -163,6 +166,8 @@ const MESSAGE_TEMPLATE_DEFAULTS = [
     },
 ];
 
+const MESSAGE_TEMPLATE_KEYS = MESSAGE_TEMPLATE_DEFAULTS.map((template) => template.template_key);
+
 const toPositiveInt = (value, fallback) => {
     const n = parseInt(value, 10);
     return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -268,6 +273,99 @@ const normalizeWebhookEvents = (value) => {
     ));
 };
 
+const INTEGRATION_SAVE_SCOPES = ['payments', 'messaging', 'campaigns', 'all'];
+const MEMBER_PAYMENT_CONNECT_MODES = ['MANUAL', 'PARTNER'];
+
+const normalizeCampaignChannelsInput = (value, fallback = { whatsapp: true, sms: false }) => {
+    const source = ensureObject(value, { field: 'bulk_channels', defaultValue: {} });
+    return {
+        whatsapp: Boolean(source.whatsapp ?? fallback.whatsapp ?? true),
+        sms: false,
+    };
+};
+
+const normalizeIntegrationTemplatesInput = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return [];
+    }
+
+    if (!Array.isArray(value)) {
+        throw new ValidationError('templates must be an array.');
+    }
+
+    if (value.length > MESSAGE_TEMPLATE_KEYS.length) {
+        throw new ValidationError(`templates must contain ${MESSAGE_TEMPLATE_KEYS.length} items or fewer.`);
+    }
+
+    const seenKeys = new Set();
+    return value.map((entry, index) => {
+        const template = ensureObject(entry, { field: `templates[${index}]` });
+        const key = ensureChoice(template.template_key, {
+            field: `templates[${index}].template_key`,
+            choices: MESSAGE_TEMPLATE_KEYS,
+            required: true,
+            uppercase: true,
+        });
+
+        if (seenKeys.has(key)) {
+            throw new ValidationError(`templates contains a duplicate template_key: ${key}.`);
+        }
+        seenKeys.add(key);
+
+        const fallback = MESSAGE_TEMPLATE_DEFAULTS.find((item) => item.template_key === key);
+        const whatsappText = ensureTrimmedString(template.whatsapp_text || fallback?.whatsapp_text || '', {
+            field: `templates[${index}].whatsapp_text`,
+            required: true,
+            min: 10,
+            max: 4000,
+        });
+
+        return {
+            template_key: key,
+            title: ensureTrimmedString(template.title || fallback?.title || key, {
+                field: `templates[${index}].title`,
+                required: true,
+                min: 2,
+                max: 120,
+            }),
+            whatsapp_text: whatsappText,
+            sms_text: ensureTrimmedString(template.sms_text || fallback?.sms_text || whatsappText, {
+                field: `templates[${index}].sms_text`,
+                required: true,
+                min: 10,
+                max: 4000,
+            }),
+            is_active: template.is_active !== false,
+        };
+    });
+};
+
+const normalizeMemberPaymentSettingsInput = (value, currentConnectMode = 'MANUAL') => {
+    const settings = ensureObject(value, { field: 'member_payments' });
+    return {
+        enabled: Boolean(settings.enabled),
+        connectMode: ensureChoice(settings.connect_mode, {
+            field: 'member_payments.connect_mode',
+            choices: MEMBER_PAYMENT_CONNECT_MODES,
+            defaultValue: String(currentConnectMode || 'MANUAL').toUpperCase(),
+            uppercase: true,
+        }),
+        keyId: ensureTrimmedString(settings.razorpay_key_id, {
+            field: 'member_payments.razorpay_key_id',
+            max: 120,
+        }),
+        incomingSecret: ensureTrimmedString(settings.razorpay_key_secret, {
+            field: 'member_payments.razorpay_key_secret',
+            max: 240,
+        }),
+        upiId: ensureTrimmedString(settings.upi_id, {
+            field: 'member_payments.upi_id',
+            max: 120,
+            lowercase: true,
+        }),
+    };
+};
+
 const parseCsvLine = (line) => {
     const values = [];
     let current = '';
@@ -326,12 +424,12 @@ const summarizeTemplateSyncStatus = (templates) => {
     return 'NOT_SYNCED';
 };
 
-const seedMessageTemplates = async (gymId) => {
+const seedMessageTemplates = async (gymId, db = pool) => {
     for (const template of MESSAGE_TEMPLATE_DEFAULTS) {
         const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
         const templateCategory = pickTemplateCategory(template.template_key);
 
-        await pool.query(
+        await db.query(
             `INSERT INTO gym_message_templates (
                 gym_id,
                 template_key,
@@ -965,93 +1063,84 @@ router.get('/integrations', auth, async (req, res) => {
 });
 
 router.put('/integrations', auth, async (req, res) => {
+    let client;
+    let transactionOpen = false;
+
     try {
         await ensureMessagingSchema();
         await ensureMemberPaymentsSchema();
 
         const gymId = req.user.gym_id;
-        const {
-            save_scope,
-            owner_mobile,
-            whatsapp_number,
-            bulk_enabled,
-            bulk_monthly_limit,
-            bulk_per_campaign_limit,
-            bulk_channels,
-            templates,
-            member_payments,
-        } = req.body || {};
-
-        const saveScope = ['payments', 'messaging', 'campaigns', 'all'].includes(String(save_scope || '').trim().toLowerCase())
-            ? String(save_scope || '').trim().toLowerCase()
-            : 'all';
+        const saveScope = ensureChoice(req.body?.save_scope, {
+            field: 'save_scope',
+            choices: INTEGRATION_SAVE_SCOPES,
+            defaultValue: 'all',
+            lowercase: true,
+        });
         const shouldSavePayments = saveScope === 'payments' || saveScope === 'all';
         const shouldSaveMessaging = saveScope === 'messaging' || saveScope === 'all';
         const shouldSaveCampaigns = saveScope === 'campaigns' || saveScope === 'all';
 
-        const currentGymRes = await pool.query(
+        client = await pool.connect();
+        await client.query('BEGIN');
+        transactionOpen = true;
+
+        const currentGymRes = await client.query(
             `SELECT
                 messaging_owner_mobile,
                 messaging_whatsapp_number,
                 bulk_enabled,
                 bulk_monthly_limit,
                 bulk_per_campaign_limit,
-                bulk_channels
+                bulk_channels,
+                member_razorpay_key_secret_enc,
+                member_payments_connect_mode,
+                member_payments_onboarding_status,
+                member_razorpay_connected_account_id
              FROM gyms
              WHERE id = $1
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [gymId]
         );
+
+        if (currentGymRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
+
         const currentGym = currentGymRes.rows[0] || {};
-
-        const ownerMobileInput = String(owner_mobile || '').trim();
-        const normalizedOwnerMobile = ownerMobileInput
-            ? normalizeMessagingPhone(owner_mobile)
-            : String(currentGym.messaging_owner_mobile || '').trim();
-        const whatsappNumberInput = String(whatsapp_number || '').trim();
         const currentWhatsAppNumber = normalizeWhatsAppNumber(currentGym.messaging_whatsapp_number);
-        const normalizedWhatsAppNumber = whatsappNumberInput
-            ? normalizeWhatsAppNumber(whatsapp_number)
-            : currentWhatsAppNumber;
 
-        const monthlyLimit = Math.min(100000, Math.max(10, toPositiveInt(bulk_monthly_limit, 500)));
-        const perCampaign = Math.min(1000, Math.max(1, toPositiveInt(bulk_per_campaign_limit, 50)));
-        const channels = {
-            whatsapp: Boolean(bulk_channels?.whatsapp ?? true),
-            sms: false,
-        };
+        if (shouldSaveMessaging) {
+            const ownerMobileInput = ensureTrimmedString(req.body?.owner_mobile, { field: 'owner_mobile', max: 30 });
+            const normalizedOwnerMobile = ownerMobileInput ? normalizeMessagingPhone(ownerMobileInput) : '';
+            const whatsappNumberInput = ensureTrimmedString(req.body?.whatsapp_number, {
+                field: 'whatsapp_number',
+                required: true,
+                max: 30,
+            });
+            const normalizedWhatsAppNumber = normalizeWhatsAppNumber(whatsappNumberInput);
 
-        if (ownerMobileInput && !normalizedOwnerMobile) {
-            return res.status(400).json({ error: 'Please enter a valid owner alert mobile number in +91XXXXXXXXXX format.' });
-        }
+            if (ownerMobileInput && !normalizedOwnerMobile) {
+                throw new ValidationError('Please enter a valid owner alert mobile number in +91XXXXXXXXXX format.');
+            }
 
-        if (shouldSaveMessaging && !normalizedWhatsAppNumber) {
-            return res.status(400).json({ error: 'Please enter the gym business WhatsApp number in +91XXXXXXXXXX format.' });
-        }
+            if (!normalizedWhatsAppNumber) {
+                throw new ValidationError('Please enter the gym business WhatsApp number in +91XXXXXXXXXX format.');
+            }
 
-        if (shouldSaveMessaging || shouldSaveCampaigns) {
-            await pool.query(
+            await client.query(
                 `UPDATE gyms
                  SET messaging_owner_mobile = $1,
-                     messaging_whatsapp_number = $2,
-                     bulk_enabled = $3,
-                     bulk_monthly_limit = $4,
-                     bulk_per_campaign_limit = $5,
-                     bulk_channels = $6
-                 WHERE id = $7`,
-                [
-                    normalizedOwnerMobile || String(currentGym.messaging_owner_mobile || '').trim() || null,
-                    shouldSaveMessaging ? (normalizedWhatsAppNumber || null) : (currentWhatsAppNumber || null),
-                    shouldSaveCampaigns ? Boolean(bulk_enabled) : Boolean(currentGym.bulk_enabled),
-                    shouldSaveCampaigns ? monthlyLimit : toPositiveInt(currentGym.bulk_monthly_limit, 500),
-                    shouldSaveCampaigns ? perCampaign : toPositiveInt(currentGym.bulk_per_campaign_limit, 50),
-                    shouldSaveCampaigns ? channels : (currentGym.bulk_channels || { whatsapp: true, sms: false }),
-                    gymId,
-                ]
+                     messaging_whatsapp_number = $2
+                 WHERE id = $3`,
+                [normalizedOwnerMobile || null, normalizedWhatsAppNumber, gymId]
             );
 
-            if (shouldSaveMessaging && normalizedWhatsAppNumber !== currentWhatsAppNumber) {
-                await pool.query(
+            if (normalizedWhatsAppNumber !== currentWhatsAppNumber) {
+                await client.query(
                     `UPDATE gyms
                      SET messaging_whatsapp_display_name = NULL,
                          messaging_whatsapp_category = NULL,
@@ -1062,51 +1151,127 @@ router.put('/integrations', auth, async (req, res) => {
                          messaging_whatsapp_templates_status = 'NOT_SYNCED',
                          messaging_whatsapp_templates_last_synced_at = NULL
                      WHERE id = $2`,
-                    [normalizedWhatsAppNumber ? 'PENDING_CONNECTION' : 'NOT_CONFIGURED', gymId]
+                    ['PENDING_CONNECTION', gymId]
                 );
             }
         }
 
-        if (shouldSavePayments && member_payments && typeof member_payments === 'object') {
-            const enabled = Boolean(member_payments.enabled);
-            const keyId = String(member_payments.razorpay_key_id || '').trim();
-            const upiId = String(member_payments.upi_id || '').trim().toLowerCase();
-            const incomingSecret = String(member_payments.razorpay_key_secret || '').trim();
-            const connectModeInput = String(member_payments.connect_mode || '').trim().toUpperCase();
+        if (shouldSaveCampaigns) {
+            const bulkEnabled = Boolean(req.body?.bulk_enabled ?? currentGym.bulk_enabled);
+            const monthlyLimit = ensureInteger(req.body?.bulk_monthly_limit, {
+                field: 'bulk_monthly_limit',
+                min: 10,
+                max: 100000,
+                defaultValue: toPositiveInt(currentGym.bulk_monthly_limit, 500),
+            });
+            const perCampaign = ensureInteger(req.body?.bulk_per_campaign_limit, {
+                field: 'bulk_per_campaign_limit',
+                min: 1,
+                max: 1000,
+                defaultValue: toPositiveInt(currentGym.bulk_per_campaign_limit, 50),
+            });
+            const channels = normalizeCampaignChannelsInput(req.body?.bulk_channels, currentGym.bulk_channels || { whatsapp: true, sms: false });
 
-            const currentRes = await pool.query(
-                `SELECT
-                    member_razorpay_key_secret_enc,
-                    member_payments_connect_mode,
-                    member_razorpay_connected_account_id,
-                    member_payments_onboarding_status
-                 FROM gyms WHERE id = $1 LIMIT 1`,
-                [gymId]
+            await client.query(
+                `UPDATE gyms
+                 SET bulk_enabled = $1,
+                     bulk_monthly_limit = $2,
+                     bulk_per_campaign_limit = $3,
+                     bulk_channels = $4
+                 WHERE id = $5`,
+                [bulkEnabled, monthlyLimit, perCampaign, channels, gymId]
             );
-            const current = currentRes.rows[0] || {};
-            const existingEncryptedSecret = current.member_razorpay_key_secret_enc || '';
-            const connectMode = connectModeInput || String(current.member_payments_connect_mode || 'MANUAL').toUpperCase();
-            const connectedAccountId = String(current.member_razorpay_connected_account_id || '').trim();
-            const hasManualGateway = connectMode === 'MANUAL' && Boolean(keyId && (incomingSecret || member_payments.has_razorpay_secret === true));
-            const hasPartnerGateway = connectMode === 'PARTNER' && Boolean(connectedAccountId);
-            const hasCollectionChannel = Boolean(upiId || hasManualGateway || hasPartnerGateway);
 
-            if (enabled && !hasCollectionChannel) {
-                return res.status(400).json({ error: 'Configure Razorpay collection or a direct UPI ID before enabling member online collection.' });
+            const templateEntries = normalizeIntegrationTemplatesInput(req.body?.templates);
+            if (templateEntries.length > 0) {
+                for (const template of templateEntries) {
+                    const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
+                    const templateCategory = pickTemplateCategory(template.template_key);
+
+                    await client.query(
+                        `INSERT INTO gym_message_templates (
+                            gym_id,
+                            template_key,
+                            title,
+                            whatsapp_text,
+                            sms_text,
+                            whatsapp_template_name,
+                            whatsapp_template_language,
+                            whatsapp_template_category,
+                            whatsapp_template_status,
+                            whatsapp_template_error,
+                            is_active,
+                            updated_at
+                         )
+                         VALUES ($1, $2, $3, $4, $5, $6, 'en_US', $7, $8, NULL, $9, NOW())
+                         ON CONFLICT (gym_id, template_key)
+                         DO UPDATE SET
+                            title = EXCLUDED.title,
+                            whatsapp_text = EXCLUDED.whatsapp_text,
+                            sms_text = EXCLUDED.sms_text,
+                            whatsapp_template_name = EXCLUDED.whatsapp_template_name,
+                            whatsapp_template_language = EXCLUDED.whatsapp_template_language,
+                            whatsapp_template_category = EXCLUDED.whatsapp_template_category,
+                            whatsapp_template_status = CASE
+                                WHEN EXCLUDED.is_active = FALSE THEN 'DISABLED'
+                                WHEN COALESCE(gym_message_templates.whatsapp_template_name, '') = COALESCE(EXCLUDED.whatsapp_template_name, '')
+                                    THEN COALESCE(gym_message_templates.whatsapp_template_status, 'NOT_SYNCED')
+                                ELSE 'NOT_SYNCED'
+                            END,
+                            whatsapp_template_error = CASE
+                                WHEN EXCLUDED.is_active = FALSE THEN NULL
+                                WHEN COALESCE(gym_message_templates.whatsapp_template_name, '') = COALESCE(EXCLUDED.whatsapp_template_name, '')
+                                    THEN gym_message_templates.whatsapp_template_error
+                                ELSE NULL
+                            END,
+                            is_active = EXCLUDED.is_active,
+                            updated_at = NOW()`,
+                        [
+                            gymId,
+                            template.template_key,
+                            template.title,
+                            template.whatsapp_text,
+                            template.sms_text,
+                            templateName,
+                            templateCategory,
+                            template.is_active ? 'NOT_SYNCED' : 'DISABLED',
+                            template.is_active,
+                        ]
+                    );
+                }
+            } else {
+                await seedMessageTemplates(gymId, client);
+            }
+        }
+
+        if (shouldSavePayments) {
+            const paymentSettings = normalizeMemberPaymentSettingsInput(
+                req.body?.member_payments,
+                currentGym.member_payments_connect_mode
+            );
+            const existingEncryptedSecret = String(currentGym.member_razorpay_key_secret_enc || '');
+            const hasStoredSecret = Boolean(decryptSecret(existingEncryptedSecret));
+            const connectedAccountId = String(currentGym.member_razorpay_connected_account_id || '').trim();
+            const hasManualGateway = paymentSettings.connectMode === 'MANUAL' && Boolean(paymentSettings.keyId && (paymentSettings.incomingSecret || hasStoredSecret));
+            const hasPartnerGateway = paymentSettings.connectMode === 'PARTNER' && Boolean(connectedAccountId);
+            const hasCollectionChannel = Boolean(paymentSettings.upiId || hasManualGateway || hasPartnerGateway);
+
+            if (paymentSettings.enabled && !hasCollectionChannel) {
+                throw new ValidationError('Configure Razorpay collection or a direct UPI ID before enabling member online collection.');
             }
 
-            const secretToPersist = incomingSecret ? encryptSecret(incomingSecret) : existingEncryptedSecret;
-            const nextOnboardingStatus = !enabled
+            const secretToPersist = paymentSettings.incomingSecret ? encryptSecret(paymentSettings.incomingSecret) : existingEncryptedSecret;
+            const nextOnboardingStatus = !paymentSettings.enabled
                 ? 'NOT_CONNECTED'
                 : hasPartnerGateway
-                    ? String(current.member_payments_onboarding_status || 'NOT_CONNECTED').toUpperCase()
+                    ? String(currentGym.member_payments_onboarding_status || 'NOT_CONNECTED').toUpperCase()
                     : hasManualGateway
                         ? 'MANUAL_CONFIGURED'
-                        : upiId
+                        : paymentSettings.upiId
                             ? 'UPI_COLLECTION_READY'
                             : 'NOT_CONNECTED';
 
-            await pool.query(
+            await client.query(
                 `UPDATE gyms
                  SET member_payments_enabled = $1,
                      member_payments_connect_mode = $2,
@@ -1116,77 +1281,20 @@ router.put('/integrations', auth, async (req, res) => {
                      member_upi_id = $6,
                      member_payments_updated_at = NOW()
                  WHERE id = $7`,
-                [enabled, connectMode, nextOnboardingStatus, keyId || null, secretToPersist || null, upiId || null, gymId]
+                [
+                    paymentSettings.enabled,
+                    paymentSettings.connectMode,
+                    nextOnboardingStatus,
+                    paymentSettings.keyId || null,
+                    secretToPersist || null,
+                    paymentSettings.upiId || null,
+                    gymId,
+                ]
             );
         }
 
-        if (shouldSaveCampaigns && Array.isArray(templates) && templates.length > 0) {
-            for (const template of templates) {
-                const key = String(template.template_key || '').trim().toUpperCase();
-                const fallback = MESSAGE_TEMPLATE_DEFAULTS.find((item) => item.template_key === key);
-                const title = String(template.title || fallback?.title || key).trim().slice(0, 120);
-                const whatsappText = String(template.whatsapp_text || fallback?.whatsapp_text || '').trim();
-                const smsText = String(template.sms_text || fallback?.sms_text || whatsappText).trim();
-                const isActive = template.is_active !== false;
-                const templateName = buildTemplateName(gymId, key, whatsappText);
-                const templateCategory = pickTemplateCategory(key);
-
-                if (!key || !title || whatsappText.length < 10 || smsText.length < 10) continue;
-
-                await pool.query(
-                    `INSERT INTO gym_message_templates (
-                        gym_id,
-                        template_key,
-                        title,
-                        whatsapp_text,
-                        sms_text,
-                        whatsapp_template_name,
-                        whatsapp_template_language,
-                        whatsapp_template_category,
-                        whatsapp_template_status,
-                        whatsapp_template_error,
-                        is_active,
-                        updated_at
-                     )
-                     VALUES ($1, $2, $3, $4, $5, $6, 'en_US', $7, $8, NULL, $9, NOW())
-                     ON CONFLICT (gym_id, template_key)
-                     DO UPDATE SET
-                        title = EXCLUDED.title,
-                        whatsapp_text = EXCLUDED.whatsapp_text,
-                        sms_text = EXCLUDED.sms_text,
-                        whatsapp_template_name = EXCLUDED.whatsapp_template_name,
-                        whatsapp_template_language = EXCLUDED.whatsapp_template_language,
-                        whatsapp_template_category = EXCLUDED.whatsapp_template_category,
-                        whatsapp_template_status = CASE
-                            WHEN EXCLUDED.is_active = FALSE THEN 'DISABLED'
-                            WHEN COALESCE(gym_message_templates.whatsapp_template_name, '') = COALESCE(EXCLUDED.whatsapp_template_name, '')
-                                THEN COALESCE(gym_message_templates.whatsapp_template_status, 'NOT_SYNCED')
-                            ELSE 'NOT_SYNCED'
-                        END,
-                        whatsapp_template_error = CASE
-                            WHEN EXCLUDED.is_active = FALSE THEN NULL
-                            WHEN COALESCE(gym_message_templates.whatsapp_template_name, '') = COALESCE(EXCLUDED.whatsapp_template_name, '')
-                                THEN gym_message_templates.whatsapp_template_error
-                            ELSE NULL
-                        END,
-                        is_active = EXCLUDED.is_active,
-                        updated_at = NOW()`,
-                    [
-                        gymId,
-                        key,
-                        title,
-                        whatsappText,
-                        smsText,
-                        templateName,
-                        templateCategory,
-                        isActive ? 'NOT_SYNCED' : 'DISABLED',
-                        isActive,
-                    ]
-                );
-            }
-        } else if (shouldSaveCampaigns) {
-            await seedMessageTemplates(gymId);
-        }
+        await client.query('COMMIT');
+        transactionOpen = false;
 
         if (shouldSaveMessaging || shouldSaveCampaigns) {
             await syncGymWhatsAppState(gymId);
@@ -1202,8 +1310,28 @@ router.put('/integrations', auth, async (req, res) => {
 
         return res.json({ message });
     } catch (err) {
+        if (transactionOpen && client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackErr) {
+                console.error('INTEGRATIONS SAVE ROLLBACK ERROR:', rollbackErr.message);
+            }
+        }
+
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+
+        if (err.code === '23505' && String(err.constraint || '').trim() === 'idx_gyms_messaging_whatsapp_number_unique') {
+            return res.status(400).json({ error: 'This business WhatsApp number is already linked to another gym.' });
+        }
+
         console.error('INTEGRATIONS SAVE ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
@@ -1214,12 +1342,13 @@ router.post('/integrations/test-message', auth, async (req, res) => {
 
         const gymId = req.user.gym_id;
         const requesterId = req.user.user_id || req.user.id || null;
-        const toInput = String(req.body.to || '').trim();
-        const requestedTemplateKey = String(req.body.template_key || '').trim().toUpperCase();
-
-        if (!toInput) {
-            return res.status(400).json({ error: 'Recipient mobile number is required.' });
-        }
+        const toInput = ensureTrimmedString(req.body?.to, { field: 'to', required: true, max: 40 });
+        const requestedTemplateKey = ensureChoice(req.body?.template_key, {
+            field: 'template_key',
+            choices: MESSAGE_TEMPLATE_KEYS,
+            defaultValue: '',
+            uppercase: true,
+        });
 
         const normalizedTo = normalizeLocalIndianPhone(toInput);
         if (!normalizedTo) {
@@ -1240,6 +1369,10 @@ router.post('/integrations/test-message', auth, async (req, res) => {
         const selectedTemplate = requestedTemplateKey
             ? approvedTemplates.find((template) => template.template_key === requestedTemplateKey)
             : approvedTemplates[0];
+
+        if (requestedTemplateKey && !selectedTemplate) {
+            return res.status(400).json({ error: 'Select an approved WhatsApp template before sending a test message.' });
+        }
 
         if (!selectedTemplate) {
             return res.status(400).json({ error: 'Approve at least one WhatsApp template in Integrations before sending a test message.' });
@@ -1275,6 +1408,9 @@ router.post('/integrations/test-message', auth, async (req, res) => {
             template_key: selectedTemplate.template_key,
         });
     } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         console.error('TEST MESSAGE ERROR:', err.message);
         return res.status(500).json({
             error: 'Failed to send test message.',
