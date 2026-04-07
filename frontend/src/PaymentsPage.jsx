@@ -1690,7 +1690,6 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               pagination={ledgerPagination}
               itemLabel="payments"
               onPageChange={(nextPage) => setLedgerPagination((prev) => ({ ...prev, page: nextPage }))}
-              onLimitChange={(nextLimit) => setLedgerPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
             />
           </div>
         )}

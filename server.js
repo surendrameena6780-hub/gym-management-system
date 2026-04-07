@@ -143,6 +143,9 @@ const corsOptionsDelegate = (req, callback) => {
     }
 
     // Soft reject — omit CORS headers instead of crashing with 500
+    if (isProduction) {
+        console.warn(`CORS soft-reject: origin=${origin} fwdHost=${fwdHost || '(none)'} allowed=[${corsOrigins.join(',')}]`);
+    }
     return callback(null, { ...opts, origin: false });
 };
 

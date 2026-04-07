@@ -1480,7 +1480,6 @@ function SuperAdminDashboard({ token, onLogout }) {
                 pagination={runtimePagination}
                 itemLabel="runtime events"
                 onPageChange={(nextPage) => setRuntimePagination((prev) => ({ ...prev, page: nextPage }))}
-                onLimitChange={(nextLimit) => setRuntimePagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
               />
             )}
 

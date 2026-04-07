@@ -567,7 +567,6 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 pagination={pagination}
                 itemLabel="leads"
                 onPageChange={(nextPage) => setPagination((prev) => ({ ...prev, page: nextPage }))}
-                onLimitChange={(nextLimit) => setPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
               />
             )}
           </>

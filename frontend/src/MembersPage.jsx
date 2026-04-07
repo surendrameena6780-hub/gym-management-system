@@ -1780,7 +1780,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                       pagination={membersPagination}
                       itemLabel="members"
                       onPageChange={(nextPage) => setMembersPagination((prev) => ({ ...prev, page: nextPage }))}
-                      onLimitChange={(nextLimit) => setMembersPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
                     />
                   )}
                   <div className="gv-list-bottom-fade absolute bottom-0 inset-x-0 h-12 pointer-events-none rounded-b-2xl" style={{ background: 'linear-gradient(to top, rgba(248,250,252,0.96) 0%, transparent 100%)' }} />
@@ -1857,7 +1856,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                     pagination={membersPagination}
                     itemLabel="members"
                     onPageChange={(nextPage) => setMembersPagination((prev) => ({ ...prev, page: nextPage }))}
-                    onLimitChange={(nextLimit) => setMembersPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
                   />
                 </div>
               )}

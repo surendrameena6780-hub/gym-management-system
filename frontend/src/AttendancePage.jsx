@@ -1303,7 +1303,6 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                     pagination={recordsPagination}
                     itemLabel="records"
                     onPageChange={(nextPage) => setRecordsPagination((prev) => ({ ...prev, page: nextPage }))}
-                    onLimitChange={(nextLimit) => setRecordsPagination({ page: 1, limit: nextLimit, total: 0, totalPages: 1, hasNext: false, hasPrev: false })}
                   />
                 </div>
               )}
@@ -1417,7 +1416,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="max-h-[24rem] overflow-y-auto overscroll-contain lg:max-h-none lg:overflow-y-visible no-scrollbar grid grid-cols-1 lg:grid-cols-2 gap-3">
           {inactiveMembers.length === 0 ? (
             <div className="col-span-full py-8 text-center text-slate-400 font-bold">No inactive active-members in this range.</div>
           ) : (

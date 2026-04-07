@@ -33,7 +33,7 @@ body,
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
   --payments-mobile-list-max-height: 22rem;
-  --members-mobile-list-max-height: 22rem;
+  --members-mobile-list-max-height: clamp(22rem, calc(var(--app-viewport-height) - 22rem), 48rem);
 }
 
 .app-keyboard-open,
