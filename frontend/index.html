@@ -25,37 +25,8 @@
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
-    <script src="https://cdn.tailwindcss.com"></script>
     <!-- Apple Sign-In (only initializes when APPLE_CLIENT_ID is configured) -->
     <script src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js" defer></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          screens: {
-            sm: '640px',
-            md: '768px',
-            lg: '1024px',
-            desktop: '1100px',
-            xl: '1280px',
-            '2xl': '1536px',
-          },
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
-            colors: {
-              slate: {
-                900: '#0f172a',
-                50: '#f8fafc',
-              },
-              emerald: {
-                500: '#10b981',
-              }
-            }
-          }
-        }
-      }
-    </script>
 
     <script>
       (function () {

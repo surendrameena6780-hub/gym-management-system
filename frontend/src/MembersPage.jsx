@@ -11,7 +11,9 @@ import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelive
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import PageLoader from './PageLoader';
 import { reportClientError } from './utils/clientErrorReporter';
+import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import PaginationControls from './components/PaginationControls';
+import { getBranchLabel, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 
 const AVATAR_GRADIENTS = [
   'from-violet-500 to-purple-600',
@@ -304,6 +306,14 @@ const SuccessModal = ({ memberName, onClose, onDownload }) => {
 
 const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, focusAction = null, onFocusHandled, isActive = true }) => {
   const { token, toast, showConfirm, currentUser = null } = appRuntime;
+  const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
+  const defaultBranchId = getDefaultBranchId(branchDirectory);
+  const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const canSelectBranch = String(currentUser?.role || '').toUpperCase() === 'OWNER' && branchDirectory.length > 1;
+  const showBranchMeta = branchDirectory.length > 1;
+  const getDefaultMemberBranchId = useCallback(() => branchScopeValue || currentUser?.branch_id || defaultBranchId, [branchScopeValue, currentUser?.branch_id, defaultBranchId]);
+  const getMemberBranchLabel = useCallback((member) => getBranchLabel(branchDirectory, member?.branch_id || getDefaultMemberBranchId(), { allLabel: 'Main Branch' }), [branchDirectory, getDefaultMemberBranchId]);
   const [members, setMembers] = useState([]);
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
@@ -339,8 +349,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [selectedMember, setSelectedMember] = useState(null);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [addSelectedPlanId, setAddSelectedPlanId] = useState('');
-  const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
-  const [editFormData, setEditFormData] = useState({ id: '', full_name: '', email: '', phone: '' });
+  const [addFormData, setAddFormData] = useState(() => ({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }));
+  const [editFormData, setEditFormData] = useState(() => ({ id: '', full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }));
   const [freezeFormData, setFreezeFormData] = useState({ freeze_end_date: '', freeze_reason: '' });
 
   // Lifecycle drawer state
@@ -416,12 +426,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   };
 
   const loadMemberDetails = useCallback(async (memberId) => {
-    const res = await axios.get(`/api/members/${memberId}`, { headers: { 'x-auth-token': token } });
+    const res = await axios.get(`/api/members/${memberId}`, { headers: { 'x-auth-token': token }, params: { branch_id: branchScopeValue } });
     const normalized = normalizeMemberRecord(res.data);
     setSelectedMember(normalized);
     syncOnboardingForm(normalized);
     return normalized;
-  }, [token]);
+  }, [branchScopeValue, token]);
 
   // ── Lifecycle data fetchers ──
   const fetchMemberNotes = useCallback(async (memberId) => {
@@ -682,8 +692,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       toast?.('You do not have permission to add members.', 'warning');
       return;
     }
+    setAddFormData({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() });
+    setAddFile(null);
+    setPreviewUrl(null);
+    setAddSelectedPlanId('');
     setShowAddModal(true);
-  }, [canWriteMembers, toast]);
+  }, [canWriteMembers, getDefaultMemberBranchId, toast]);
 
   const openActivateModalForMember = useCallback((member) => {
     if (!canWritePayments) {
@@ -912,6 +926,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           limit: membersPagination.limit,
           search: deferredSearchTerm || undefined,
           status: FILTER_TO_API_STATUS[filter] || 'ALL',
+          branch_id: branchScopeValue,
         },
       });
 
@@ -946,14 +961,17 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         setIsRefreshing(false);
       }
     }
-  }, [deferredSearchTerm, filter, membersPagination.limit, membersPagination.page, toast, token]);
+  }, [branchScopeValue, deferredSearchTerm, filter, membersPagination.limit, membersPagination.page, toast, token]);
 
   const fetchMemberSummary = useCallback(async () => {
     const requestId = memberSummaryRequestIdRef.current + 1;
     memberSummaryRequestIdRef.current = requestId;
 
     try {
-      const res = await axios.get('/api/members/summary', { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/members/summary', {
+        headers: { 'x-auth-token': token },
+        params: { branch_id: branchScopeValue },
+      });
       if (requestId !== memberSummaryRequestIdRef.current) {
         return;
       }
@@ -969,7 +987,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     } catch (err) {
       reportClientError('Members fetch summary', err);
     }
-  }, [token]);
+  }, [branchScopeValue, token]);
 
   fetchMembersRef.current = fetchMembers;
   fetchMemberSummaryRef.current = fetchMemberSummary;
@@ -1047,7 +1065,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       }
 
       try {
-        const res = await axios.get(`/api/members/${targetId}`, { headers: { 'x-auth-token': token } });
+        const res = await axios.get(`/api/members/${targetId}`, { headers: { 'x-auth-token': token }, params: { branch_id: branchScopeValue } });
         if (!isMounted) return;
 
         const normalizedMember = normalizeMemberRecord(res.data);
@@ -1072,7 +1090,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return () => {
       isMounted = false;
     };
-  }, [focusAction, focusMemberId, members, onFocusHandled, openActivateModalForMember, toast, token]);
+  }, [branchScopeValue, focusAction, focusMemberId, members, onFocusHandled, openActivateModalForMember, toast, token]);
 
   const downloadReceipt = () => {
     if (!receiptData) return;
@@ -1515,12 +1533,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     formData.append('full_name', addFormData.full_name);
     formData.append('email', addFormData.email);
     formData.append('phone', normalizedPhone);
+    formData.append('branch_id', addFormData.branch_id || getDefaultMemberBranchId());
     if (addFileToUpload) formData.append('profile_pic', addFileToUpload);
     try {
       setAddMemberSubmitting(true);
       const res = await axios.post('/api/members/add', formData, { headers: { 'x-auth-token': token } });
       setShowAddModal(false);
-      setAddFormData({ full_name: '', email: '', phone: '' }); setAddFile(null); setPreviewUrl(null);
+      setAddFormData({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }); setAddFile(null); setPreviewUrl(null);
       await fetchMembers();
       notifyDashboardDataChanged();
       toast?.('Member added successfully!', 'success');
@@ -1539,7 +1558,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       toast?.('You do not have permission to edit members.', 'warning');
       return;
     }
-    setEditFormData({ id: member.id, full_name: member.full_name, email: member.email, phone: member.phone });
+    setEditFormData({ id: member.id, full_name: member.full_name, email: member.email, phone: member.phone, branch_id: member.branch_id || getDefaultMemberBranchId() });
     setShowEditModal(true);
   };
   const handleViewDetails = (member) => { setSelectedMember(member); setShowDetailsModal(true); };
@@ -1573,12 +1592,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         formData.append('full_name', editFormData.full_name);
         formData.append('email', editFormData.email);
         formData.append('phone', normalizedPhone);
+        formData.append('branch_id', editFormData.branch_id || getDefaultMemberBranchId());
         formData.append('profile_pic', editFileToUpload);
         await axios.put(`/api/members/${editFormData.id}`, formData, { headers: { 'x-auth-token': token } });
       } else {
         await axios.put(
           `/api/members/${editFormData.id}`,
-          { full_name: editFormData.full_name, email: editFormData.email, phone: normalizedPhone },
+          { full_name: editFormData.full_name, email: editFormData.email, phone: normalizedPhone, branch_id: editFormData.branch_id || getDefaultMemberBranchId() },
           { headers: { 'x-auth-token': token } }
         );
       }
@@ -1645,6 +1665,16 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           </div>
         ))}
       </div>
+
+      <OperationsBranchScopeBar
+        branchDirectory={branchDirectory}
+        branchId={operationsBranchId}
+        onChange={appRuntime.setOperationsBranchId}
+        currentUser={currentUser}
+        loading={appRuntime.branchScopeLoading}
+        title="Member scope"
+        description="Switch the working branch for member lists, summaries, and new member assignment."
+      />
 
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="flex flex-col desktop:flex-row justify-between desktop:items-center gap-3">
@@ -1732,6 +1762,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                               <div className="min-w-0 flex-1">
                                 <p className="font-bold text-slate-900 truncate">{member.full_name}</p>
                                 <p className="text-xs text-slate-500 truncate">{member.phone} • {member.email}</p>
+                                {showBranchMeta ? <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{getMemberBranchLabel(member)}</p> : null}
                               </div>
                             </div>
                             <div className="flex items-center justify-between">
@@ -1796,7 +1827,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                         <td className="py-4 pr-2 pl-0">
                           <div className="flex items-center gap-2.5">
                             <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={34} onClick={(e) => { e.stopPropagation(); if (member.profile_pic) setPreviewImage(member.profile_pic); }} ariaLabel={`Preview photo for ${member.full_name}`} className="border border-white/80 shadow-sm hover:scale-105 transition-transform ring-1 ring-slate-200/60" />
-                            <div className="flex flex-col min-w-0"><span className="truncate font-bold text-slate-900 text-sm">{member.full_name}</span><span className="text-[10px] text-slate-400 font-medium">ID #{member.id}</span></div>
+                            <div className="flex flex-col min-w-0"><span className="truncate font-bold text-slate-900 text-sm">{member.full_name}</span><span className="text-[10px] text-slate-400 font-medium">ID #{member.id}{showBranchMeta ? ` • ${getMemberBranchLabel(member)}` : ''}</span></div>
                           </div>
                         </td>
                         <td className="py-4 px-2 text-slate-600 text-sm truncate">{member.phone}</td>
@@ -1865,6 +1896,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 <h2 className="text-white text-lg font-black leading-tight">{selectedMember.full_name}</h2>
                 <p className="text-slate-400 text-[11px] mt-0.5">
                   Joined {selectedMember.joining_date ? new Date(selectedMember.joining_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}
+                  {showBranchMeta ? ` • ${getMemberBranchLabel(selectedMember)}` : ''}
                 </p>
               </div>
               <button type="button" aria-label="Close member details" onClick={() => setShowDetailsModal(false)} className="text-white/50 hover:text-white hover:bg-white/10 p-2 rounded-full transition-all mt-0.5"><X size={18} /></button>
@@ -2159,6 +2191,14 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone</label><input type="text" required inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: normalizePhoneInput(e.target.value) })} /></div>
                   <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email</label><input type="email" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.email} onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })} /></div>
                 </div>
+                  {canSelectBranch && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Branch</label>
+                      <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.branch_id || getDefaultMemberBranchId()} onChange={(e) => setEditFormData({ ...editFormData, branch_id: e.target.value })}>
+                        {branchDirectory.map((branch) => (<option key={branch.id} value={branch.id}>{branch.name}</option>))}
+                      </select>
+                    </div>
+                  )}
               </div>
               {canWritePayments && <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-2xl border border-indigo-100"><label className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-3"><Clock size={12} /> Quick Extend Membership</label><div className="grid grid-cols-3 gap-2">{[2, 5, 15].map((days) => (<button key={days} type="button" onClick={() => handleQuickExtend(days)} className="py-2.5 bg-white border border-indigo-200 text-indigo-700 text-xs font-black rounded-xl hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all shadow-sm active:scale-95">+{days} Days</button>))}</div></div>}
               <button type="submit" className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}>Save Changes</button>
@@ -2173,7 +2213,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' }}>
               <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><UserPlus size={18} /></div><div><h2 className="text-lg font-black">New Member</h2><p className="text-white/60 text-[10px] font-bold uppercase tracking-wider">Add to GymVault</p></div></div>
-              <button onClick={() => { setShowAddModal(false); setAddSelectedPlanId(''); }} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <button onClick={() => { setShowAddModal(false); setAddSelectedPlanId(''); setAddFormData({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }); }} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
             <form onSubmit={handleAddMember} className="app-modal-scroll p-6 space-y-4">
               <div className="flex flex-col items-center"><label className="cursor-pointer block"><div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">{previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <div className="flex flex-col items-center gap-1 text-slate-300"><UserPlus size={28} /><span className="text-[9px] font-bold uppercase tracking-wider">Upload</span></div>}</div><input type="file" accept="image/*" className="hidden" onChange={async (e) => { const ok = await handleProfileImageSelect(e.target.files?.[0], 'add'); if (!ok) e.target.value = ''; }} /></label><p className="text-[10px] text-slate-400 font-medium mt-2">Click to upload photo (optional)</p></div>
@@ -2182,6 +2222,14 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone *</label><input type="text" required inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" placeholder="9876543210" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.phone} onChange={(e) => setAddFormData({ ...addFormData, phone: normalizePhoneInput(e.target.value) })} /></div>
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email *</label><input type="email" required placeholder="rahul@email.com" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.email} onChange={(e) => setAddFormData({ ...addFormData, email: e.target.value })} /></div>
               </div>
+              {canSelectBranch && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Branch *</label>
+                  <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.branch_id || getDefaultMemberBranchId()} onChange={(e) => setAddFormData({ ...addFormData, branch_id: e.target.value })}>
+                    {branchDirectory.map((branch) => (<option key={branch.id} value={branch.id}>{branch.name}</option>))}
+                  </select>
+                </div>
+              )}
               {canWritePayments && <div>
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5"><Zap size={10} className="text-emerald-500" /> Assign Plan Now (optional)</label>
                 <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 text-sm font-semibold text-slate-700 appearance-none cursor-pointer transition-all" value={addSelectedPlanId} onChange={(e) => setAddSelectedPlanId(e.target.value)}><option value="">Skip — assign plan later</option>{plans.map((p) => (<option key={p.id} value={p.id}>{p.name} — ₹{p.price} / {p.duration_days}d</option>))}</select>

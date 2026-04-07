@@ -1,4 +1,4 @@
-﻿import React, { Suspense, useState, useEffect, useCallback, useRef } from 'react'
+﻿import React, { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import axios from 'axios'
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
@@ -9,6 +9,7 @@ import PageLoader from './PageLoader';
 import SuspensionOverlay from './SuspensionOverlay'; 
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import { clearSessionToken, getSessionToken, setSessionToken } from './utils/authSession';
+import { ALL_BRANCHES_VALUE, DEFAULT_BRANCH_ID, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 import { reportClientError } from './utils/clientErrorReporter';
 import { lazyWithRecovery } from './utils/lazyWithRecovery';
 import {
@@ -382,6 +383,9 @@ function App() {
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(() => getSessionToken());
   const [currentUser, setCurrentUser] = useState(() => readStoredUser());
+  const [branchDirectory, setBranchDirectory] = useState([]);
+  const [operationsBranchId, setOperationsBranchId] = useState('');
+  const [branchScopeLoading, setBranchScopeLoading] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(!isHQ);
   const [isSuspended, setIsSuspended] = useState(false); 
   const [saasGrace, setSaasGrace] = useState(false);
@@ -614,6 +618,9 @@ function App() {
     if (!token) {
       writeStoredUser(null);
       setCurrentUser(null);
+      setBranchDirectory([]);
+      setOperationsBranchId('');
+      setBranchScopeLoading(false);
       setIsAuthChecking(false);
       return undefined;
     }
@@ -713,6 +720,66 @@ function App() {
       cancelled = true;
     };
   }, [token, isHQ, currentUser?.role]);
+
+  useEffect(() => {
+    if (isHQ || !token || !currentUser) {
+      setBranchDirectory([]);
+      setOperationsBranchId('');
+      setBranchScopeLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setBranchScopeLoading(true);
+
+    axios.get('/api/settings/branches', { headers: { 'x-auth-token': token } })
+      .then((res) => {
+        if (cancelled) return;
+
+        const nextDirectory = normalizeBranchDirectory(res.data?.branch_directory);
+        const nextDefaultBranchId = getDefaultBranchId(nextDirectory);
+        const isOwnerUser = String(currentUser?.role || '').toUpperCase() === 'OWNER';
+
+        setBranchDirectory(nextDirectory);
+        setOperationsBranchId((previous) => {
+          if (!isOwnerUser) {
+            return String(currentUser?.branch_id || nextDefaultBranchId || DEFAULT_BRANCH_ID);
+          }
+
+          if (nextDirectory.length <= 1) {
+            return nextDefaultBranchId;
+          }
+
+          if (previous === ALL_BRANCHES_VALUE || nextDirectory.some((branch) => branch.id === previous)) {
+            return previous || ALL_BRANCHES_VALUE;
+          }
+
+          return ALL_BRANCHES_VALUE;
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+
+        const fallbackDirectory = normalizeBranchDirectory(
+          currentUser?.branch_id
+            ? [{ id: currentUser.branch_id, name: 'Assigned Branch' }]
+            : [{ id: DEFAULT_BRANCH_ID, name: 'Main Branch' }]
+        );
+        const fallbackBranchId = getDefaultBranchId(fallbackDirectory);
+
+        setBranchDirectory(fallbackDirectory);
+        setOperationsBranchId(String(currentUser?.branch_id || fallbackBranchId));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBranchScopeLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, isHQ, currentUser]);
 
   useEffect(() => {
     if (isHQ) return;
@@ -1015,14 +1082,39 @@ function App() {
     setCurrentPage(page);
   }, [isSuspended, canAccessPage]);
 
-  const appRuntime = {
+  const normalizedBranchDirectory = normalizeBranchDirectory(branchDirectory);
+  const defaultBranchId = getDefaultBranchId(normalizedBranchDirectory);
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const canSelectOperationsBranch = String(currentUser?.role || '').toUpperCase() === 'OWNER' && normalizedBranchDirectory.length > 1;
+
+  const appRuntime = useMemo(() => ({
     token,
     toast,
     showConfirm,
     currentUser,
     navigateTo,
     canAccessPage,
-  };
+    branchDirectory: normalizedBranchDirectory,
+    defaultBranchId,
+    operationsBranchId,
+    branchScopeValue,
+    branchScopeLoading,
+    canSelectOperationsBranch,
+    setOperationsBranchId,
+  }), [
+    token,
+    toast,
+    showConfirm,
+    currentUser,
+    navigateTo,
+    canAccessPage,
+    normalizedBranchDirectory,
+    defaultBranchId,
+    operationsBranchId,
+    branchScopeValue,
+    branchScopeLoading,
+    canSelectOperationsBranch,
+  ]);
 
   const renderPageLoader = (label) => (
     <PageLoader className="mx-auto" label={`Loading ${label}...`} />

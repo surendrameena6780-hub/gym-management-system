@@ -7,6 +7,13 @@ const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
 const { decryptSecret } = require('../utils/secretCrypto');
 const {
+    BranchAccessError,
+    branchSchemaMiddleware,
+    DEFAULT_BRANCH_ID,
+    ensureBranchAccess,
+    resolveBranchReadScope,
+} = require('../utils/branchAccess');
+const {
     ensureInteger,
     ensureNumber,
     ensureTrimmedString,
@@ -17,6 +24,7 @@ const {
 const router = express.Router();
 
 router.use(auth, saasMiddleware, requireOwner);
+router.use(branchSchemaMiddleware);
 
 const DUE_ZERO_THRESHOLD = 0.009;
 const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY_COLLECTION_LINK_TTL_SECONDS || '86400', 10));
@@ -134,6 +142,55 @@ const normalizeCollectionMode = (value, { defaultValue = 'Cash' } = {}) => {
 const normalizePaymentReference = (value, field = 'transaction_id') => ensureTrimmedString(value, { field, max: 120 });
 
 const normalizePaymentNotes = (value, field = 'notes') => ensureTrimmedString(value, { field, max: 1000 });
+
+const DEFAULT_BRANCH_SQL = `'${DEFAULT_BRANCH_ID}'`;
+
+const getBranchFilterSql = (params, branchId, columnExpression = `COALESCE(p.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL})`) => {
+    if (!branchId) {
+        return '';
+    }
+
+    params.push(branchId);
+    return ` AND ${columnExpression} = $${params.length}`;
+};
+
+const getMemberBranchId = async (db, gymId, memberId) => {
+    const result = await db.query(
+        `SELECT COALESCE(branch_id, $3) AS branch_id
+         FROM members
+         WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL
+         LIMIT 1`,
+        [memberId, gymId, DEFAULT_BRANCH_ID]
+    );
+
+    return result.rows[0]?.branch_id || null;
+};
+
+const getScopedPaymentRecord = async (db, gymId, paymentId) => {
+    const result = await db.query(
+        `SELECT p.id, COALESCE(p.branch_id, m.branch_id, $3) AS branch_id
+         FROM payments p
+         LEFT JOIN members m ON m.id = p.user_id AND m.gym_id = p.gym_id
+         WHERE p.id = $1 AND p.gym_id = $2 AND p.deleted_at IS NULL
+         LIMIT 1`,
+        [paymentId, gymId, DEFAULT_BRANCH_ID]
+    );
+
+    return result.rows[0] || null;
+};
+
+const sendPaymentRouteError = (res, err, logLabel, fallback = 'Server Error') => {
+    if (err instanceof BranchAccessError) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    if (isValidationError(err)) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    console.error(logLabel, err.message);
+    return res.status(500).json({ error: fallback });
+};
 
 const appendNote = (existingNotes, newNote) => {
     const current = String(existingNotes || '').trim();
@@ -403,6 +460,7 @@ const getPendingPaymentById = async (db, gymId, paymentId, { lock = false } = {}
         SELECT
             p.id,
             p.gym_id,
+            COALESCE(p.branch_id, m.branch_id, $3) AS branch_id,
             p.user_id,
             p.plan_id,
             p.invoice_id,
@@ -426,7 +484,7 @@ const getPendingPaymentById = async (db, gymId, paymentId, { lock = false } = {}
           AND p.deleted_at IS NULL
         ${lock ? 'FOR UPDATE OF p' : ''}
     `;
-    const result = await db.query(query, [paymentId, gymId]);
+        const result = await db.query(query, [paymentId, gymId, DEFAULT_BRANCH_ID]);
     return result.rows[0] || null;
 };
 
@@ -528,11 +586,12 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
 
         const collectionResult = await client.query(
             `INSERT INTO payment_collections
-             (gym_id, payment_id, collected_amount, payment_mode, transaction_id, notes, collected_by, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+             (gym_id, branch_id, payment_id, collected_amount, payment_mode, transaction_id, notes, collected_by, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
              RETURNING *`,
             [
                 gymId,
+                payment.branch_id || DEFAULT_BRANCH_ID,
                 normalizedPaymentId,
                 requestedAmount,
                 normalizedMode,
@@ -596,6 +655,7 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
 router.get('/', async (req, res) => {
     try {
         await ensurePaymentCollectionsSchema();
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const search = String(req.query.search || '').trim();
         const filter = String(req.query.filter || 'ALL').trim().toUpperCase();
         const fromDate = normalizeDateInput(req.query.from);
@@ -619,6 +679,7 @@ router.get('/', async (req, res) => {
                 p.status,
                 p.payment_mode,
                 p.notes,
+                COALESCE(p.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                 GREATEST(COALESCE(p.amount_paid, 0) - COALESCE(pc.collected_total, 0), 0) AS initial_amount_paid,
                 COALESCE(pc.collection_count, 0) AS collection_count,
                 COALESCE(pc.collected_total, 0) AS collected_later,
@@ -657,6 +718,7 @@ router.get('/', async (req, res) => {
               AND m.deleted_at IS NULL
         `;
         const params = [gym_id];
+        baseQuery += getBranchFilterSql(params, branchId);
 
         if (search) {
             params.push(`%${search}%`);
@@ -718,8 +780,7 @@ router.get('/', async (req, res) => {
             },
         });
     } catch (err) {
-        console.error('GET PAYMENTS ERROR:', err.message);
-        res.status(500).json({ error: 'Server Error' });
+        return sendPaymentRouteError(res, err, 'GET PAYMENTS ERROR:');
     }
 });
 
@@ -752,8 +813,8 @@ router.post('/record', async (req, res) => {
 
         const [memberResult, planResult] = await Promise.all([
             client.query(
-                'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-                [userId, gym_id]
+                'SELECT id, COALESCE(branch_id, $3) AS branch_id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                [userId, gym_id, DEFAULT_BRANCH_ID]
             ),
             client.query(
                 'SELECT id, duration_days FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
@@ -768,6 +829,9 @@ router.post('/record', async (req, res) => {
         if (planResult.rows.length === 0) {
             return res.status(404).json({ error: 'Plan not found.' });
         }
+
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const memberBranchId = ensureBranchAccess(branchScope, memberResult.rows[0].branch_id || DEFAULT_BRANCH_ID);
 
         await client.query('BEGIN');
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payment-record:${gym_id}:${userId}:${planId}`]);
@@ -795,13 +859,13 @@ router.post('/record', async (req, res) => {
         const newPayment = await client.query(
             `INSERT INTO payments
              (gym_id, user_id, plan_id, amount_paid, amount_due, total_amount,
-              payment_mode, status, invoice_id, transaction_id, notes, payment_date)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+              payment_mode, status, invoice_id, transaction_id, notes, payment_date, branch_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12)
              RETURNING *`,
             [
                 gym_id, userId, planId,
                 parsedAmountPaid, amount_due, parsedTotalAmount,
-                final_mode, status, final_invoice_id, final_txn_id, normalizedNotes,
+                final_mode, status, final_invoice_id, final_txn_id, normalizedNotes, memberBranchId,
             ]
         );
 
@@ -809,9 +873,9 @@ router.post('/record', async (req, res) => {
 
         const days = planResult.rows[0].duration_days || 30;
         await client.query(
-            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
-             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
-            [gym_id, userId, planId, days]
+            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE', $5)`,
+            [gym_id, userId, planId, days, memberBranchId]
         );
 
         await client.query(
@@ -824,9 +888,9 @@ router.post('/record', async (req, res) => {
         );
 
         await client.query(
-            `INSERT INTO attendance (gym_id, member_id, check_in_time)
-             VALUES ($1, $2, NOW())`,
-            [gym_id, userId]
+            `INSERT INTO attendance (gym_id, member_id, check_in_time, branch_id)
+             VALUES ($1, $2, NOW(), $3)`,
+            [gym_id, userId, memberBranchId]
         );
 
         await client.query('COMMIT');
@@ -835,11 +899,7 @@ router.post('/record', async (req, res) => {
         if (client) {
             await client.query('ROLLBACK').catch(() => {});
         }
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('RECORD PAYMENT ERROR:', err.message);
-        res.status(500).json({ error: 'Server Error' });
+        return sendPaymentRouteError(res, err, 'RECORD PAYMENT ERROR:');
     } finally {
         if (client) {
             client.release();
@@ -850,11 +910,13 @@ router.post('/record', async (req, res) => {
 router.get('/stats', async (req, res) => {
     try {
         await ensurePaymentCollectionsSchema();
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gym_id = req.user.gym_id;
         const fromDate = normalizeDateInput(req.query.from);
         const toDate = normalizeDateInput(req.query.to);
         const params = [gym_id];
         let paymentDateClause = '';
+        const paymentBranchClause = getBranchFilterSql(params, branchId, `COALESCE(branch_id, ${DEFAULT_BRANCH_SQL})`);
 
         if (fromDate) {
             params.push(fromDate);
@@ -870,7 +932,7 @@ router.get('/stats', async (req, res) => {
             pool.query(
                 `SELECT COALESCE(SUM(amount_paid), 0) AS total
                  FROM payments
-                 WHERE gym_id = $1 AND deleted_at IS NULL${paymentDateClause}`,
+                 WHERE gym_id = $1 AND deleted_at IS NULL${paymentBranchClause}${paymentDateClause}`,
                 params
             ),
             pool.query(
@@ -881,6 +943,7 @@ router.get('/stats', async (req, res) => {
                     FROM payment_collections pc
                     JOIN payments p ON p.id = pc.payment_id AND p.deleted_at IS NULL
                     WHERE pc.gym_id = $1
+                                            ${branchId ? `AND COALESCE(p.branch_id, ${DEFAULT_BRANCH_SQL}) = $${params.indexOf(branchId) + 1}` : ''}
                     GROUP BY pc.payment_id
                 ),
                 initial_payments_today AS (
@@ -889,6 +952,7 @@ router.get('/stats', async (req, res) => {
                     LEFT JOIN collection_totals ct ON ct.payment_id = p.id
                     WHERE p.gym_id = $1
                       AND p.deleted_at IS NULL
+                                            ${branchId ? `AND COALESCE(p.branch_id, ${DEFAULT_BRANCH_SQL}) = $${params.indexOf(branchId) + 1}` : ''}
                       ${paymentDateClause}
                       AND p.payment_date::date = CURRENT_DATE
                 ),
@@ -906,7 +970,7 @@ router.get('/stats', async (req, res) => {
                  FROM payments
                  WHERE gym_id = $1
                    AND status = 'Pending'
-                   AND deleted_at IS NULL${paymentDateClause}`,
+                   AND deleted_at IS NULL${paymentBranchClause}${paymentDateClause}`,
                 params
             ),
         ]);
@@ -917,16 +981,25 @@ router.get('/stats', async (req, res) => {
             pending_dues: parseFloat(pending.rows[0].pending),
         });
     } catch (err) {
-        console.error('PAYMENT STATS ERROR:', err.message);
-        res.status(500).json({ error: 'Server Error' });
+        return sendPaymentRouteError(res, err, 'PAYMENT STATS ERROR:');
     }
 });
 
 router.get('/chart', async (req, res) => {
     try {
         await ensurePaymentCollectionsSchema();
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gym_id = req.user.gym_id;
         const days = req.query.days === '7' ? 7 : 30;
+        const params = [gym_id, days];
+        let paymentBranchClause = '';
+        let dueBranchClause = '';
+
+        if (branchId) {
+            params.push(branchId);
+            paymentBranchClause = ` AND COALESCE(p.branch_id, ${DEFAULT_BRANCH_SQL}) = $3`;
+            dueBranchClause = ` AND COALESCE(p.branch_id, ${DEFAULT_BRANCH_SQL}) = $3`;
+        }
 
         const chartData = await pool.query(
             `WITH collection_totals AS (
@@ -936,6 +1009,7 @@ router.get('/chart', async (req, res) => {
                 FROM payment_collections pc
                 JOIN payments p ON p.id = pc.payment_id AND p.deleted_at IS NULL
                 WHERE pc.gym_id = $1
+                  ${dueBranchClause}
                 GROUP BY pc.payment_id
             ),
             payment_events AS (
@@ -946,6 +1020,7 @@ router.get('/chart', async (req, res) => {
                 LEFT JOIN collection_totals ct ON ct.payment_id = p.id
                 WHERE p.gym_id = $1
                   AND p.deleted_at IS NULL
+                                    ${paymentBranchClause}
             ),
             due_events AS (
                 SELECT
@@ -955,6 +1030,7 @@ router.get('/chart', async (req, res) => {
                 JOIN payments p ON p.id = pc.payment_id
                 WHERE pc.gym_id = $1
                   AND p.deleted_at IS NULL
+                                    ${dueBranchClause}
             ),
             all_events AS (
                 SELECT event_date, revenue FROM payment_events
@@ -968,13 +1044,12 @@ router.get('/chart', async (req, res) => {
             WHERE event_date >= CURRENT_DATE - (($2::int - 1) * INTERVAL '1 day')
             GROUP BY event_date
             ORDER BY event_date ASC`,
-            [gym_id, days]
+            params
         );
 
         res.json(chartData.rows.map((row) => ({ date: row.date, revenue: row.revenue || 0 })));
     } catch (err) {
-        console.error('CHART ERROR:', err.message);
-        res.status(500).json({ error: 'Server Error' });
+        return sendPaymentRouteError(res, err, 'CHART ERROR:');
     }
 });
 
@@ -986,6 +1061,12 @@ router.get('/history/:member_id', async (req, res) => {
         if (!member_id || member_id === 'undefined' || member_id === 'null') {
             return res.json([]);
         }
+
+        const memberBranchId = await getMemberBranchId(pool, gym_id, member_id);
+        if (!memberBranchId) {
+            return res.json([]);
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), memberBranchId);
 
         const history = await pool.query(
             `WITH collection_totals AS (
@@ -1043,8 +1124,7 @@ router.get('/history/:member_id', async (req, res) => {
 
         res.json(history.rows);
     } catch (err) {
-        console.error('HISTORY ERROR:', err.message);
-        res.status(500).json({ error: 'Server Error' });
+        return sendPaymentRouteError(res, err, 'HISTORY ERROR:');
     }
 });
 
@@ -1056,6 +1136,12 @@ router.post('/:id/due/create-order', async (req, res) => {
             ? req.body?.amount
             : ensureNumber(req.body?.amount, { field: 'amount', min: 0, max: 1000000 });
         await ensurePaymentCollectionsSchema();
+
+        const scopedPayment = await getScopedPaymentRecord(pool, gym_id, paymentId);
+        if (!scopedPayment) {
+            return res.status(404).json({ error: 'Payment record not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), scopedPayment.branch_id);
 
         const payment = await getPendingPaymentById(pool, gym_id, paymentId);
         if (!payment) {
@@ -1132,11 +1218,7 @@ router.post('/:id/due/create-order', async (req, res) => {
             },
         });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('DUE COLLECTION CONTEXT ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to prepare due collection details.' });
+        return sendPaymentRouteError(res, err, 'DUE COLLECTION CONTEXT ERROR:', 'Failed to prepare due collection details.');
     }
 });
 
@@ -1150,6 +1232,12 @@ router.post('/:id/due/payment-link-status', async (req, res) => {
             : ensureNumber(req.body?.amount, { field: 'amount', min: 0, max: 1000000 });
         const notes = normalizePaymentNotes(req.body?.notes);
         await ensurePaymentCollectionsSchema();
+
+        const scopedPayment = await getScopedPaymentRecord(pool, gym_id, paymentId);
+        if (!scopedPayment) {
+            return res.status(404).json({ error: 'Payment record not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), scopedPayment.branch_id);
 
         const collectionSetup = await getGymCollectionSetup(gym_id);
         if (!collectionSetup.ok) {
@@ -1239,11 +1327,7 @@ router.post('/:id/due/payment-link-status', async (req, res) => {
             payment_method: settledPayment.method || null,
         });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('DUE PAYMENT LINK STATUS ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to verify Razorpay due collection.' });
+        return sendPaymentRouteError(res, err, 'DUE PAYMENT LINK STATUS ERROR:', 'Failed to verify Razorpay due collection.');
     }
 });
 
@@ -1251,6 +1335,11 @@ router.post('/:id/due/collect', async (req, res) => {
     try {
         const paymentId = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
         const gym_id = req.user.gym_id;
+        const scopedPayment = await getScopedPaymentRecord(pool, gym_id, paymentId);
+        if (!scopedPayment) {
+            return res.status(404).json({ error: 'Payment record not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), scopedPayment.branch_id);
         const result = await applyDueCollection({
             gymId: gym_id,
             paymentId,
@@ -1267,11 +1356,7 @@ router.post('/:id/due/collect', async (req, res) => {
 
         return res.json(result.data);
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('DUE COLLECTION ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to collect pending due.' });
+        return sendPaymentRouteError(res, err, 'DUE COLLECTION ERROR:', 'Failed to collect pending due.');
     }
 });
 
@@ -1287,6 +1372,12 @@ router.post('/:id/due/verify', async (req, res) => {
         const razorpay_payment_id = ensureTrimmedString(req.body?.razorpay_payment_id, { field: 'razorpay_payment_id', required: true, max: 120 });
         const razorpay_signature = ensureTrimmedString(req.body?.razorpay_signature, { field: 'razorpay_signature', required: true, max: 256 });
         await ensurePaymentCollectionsSchema();
+
+        const scopedPayment = await getScopedPaymentRecord(pool, gym_id, paymentId);
+        if (!scopedPayment) {
+            return res.status(404).json({ error: 'Payment record not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), scopedPayment.branch_id);
 
         const gatewayConfig = await getGymGatewayConfig(gym_id);
         if (!gatewayConfig.ok) {
@@ -1340,11 +1431,7 @@ router.post('/:id/due/verify', async (req, res) => {
 
         return res.json(result.data);
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('ONLINE DUE VERIFY ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to verify due payment.' });
+        return sendPaymentRouteError(res, err, 'ONLINE DUE VERIFY ERROR:', 'Failed to verify due payment.');
     }
 });
 
@@ -1353,6 +1440,11 @@ router.delete('/:id', async (req, res) => {
     try {
         const id = ensureInteger(req.params.id, { field: 'payment id', required: true, min: 1 });
         const gym_id = req.user.gym_id;
+        const scopedPayment = await getScopedPaymentRecord(pool, gym_id, id);
+        if (!scopedPayment) {
+            return res.status(404).json({ msg: 'Record not found' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), scopedPayment.branch_id);
         client = await pool.connect();
 
         await client.query('BEGIN');
@@ -1378,11 +1470,7 @@ router.delete('/:id', async (req, res) => {
         if (client) {
             await client.query('ROLLBACK').catch(() => {});
         }
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('DELETE PAYMENT ERROR:', err.message);
-        res.status(500).json({ error: 'Server Error' });
+        return sendPaymentRouteError(res, err, 'DELETE PAYMENT ERROR:');
     } finally {
         if (client) {
             client.release();

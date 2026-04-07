@@ -5,6 +5,14 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
 const {
+    BranchAccessError,
+    branchSchemaMiddleware,
+    DEFAULT_BRANCH_ID,
+    ensureBranchAccess,
+    resolveBranchReadScope,
+    resolveBranchWriteScope,
+} = require('../utils/branchAccess');
+const {
     ValidationError,
     ensureTrimmedString,
     ensureInteger,
@@ -30,6 +38,55 @@ const parseTimestamp = (value) => {
     if (!value) return null;
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
+const DEFAULT_BRANCH_SQL = `'${DEFAULT_BRANCH_ID}'`;
+
+const getBranchFilterSql = (params, branchId, columnExpression = `COALESCE(branch_id, ${DEFAULT_BRANCH_SQL})`) => {
+    if (!branchId) {
+        return '';
+    }
+
+    params.push(branchId);
+    return ` AND ${columnExpression} = $${params.length}`;
+};
+
+const getClassTypeRecord = async (db, gymId, classTypeId) => {
+    const result = await db.query(
+        `SELECT *, COALESCE(branch_id, $3) AS branch_id
+         FROM class_types
+         WHERE id = $1 AND gym_id = $2
+         LIMIT 1`,
+        [classTypeId, gymId, DEFAULT_BRANCH_ID]
+    );
+
+    return result.rows[0] || null;
+};
+
+const getSessionRecord = async (db, gymId, sessionId) => {
+    const result = await db.query(
+        `SELECT cs.*, COALESCE(cs.branch_id, ct.branch_id, $3) AS branch_id
+         FROM class_sessions cs
+         INNER JOIN class_types ct ON ct.id = cs.class_type_id AND ct.gym_id = cs.gym_id
+         WHERE cs.id = $1 AND cs.gym_id = $2
+         LIMIT 1`,
+        [sessionId, gymId, DEFAULT_BRANCH_ID]
+    );
+
+    return result.rows[0] || null;
+};
+
+const sendClassesRouteError = (res, err, logLabel, fallback = 'Failed to process class request.') => {
+    if (err instanceof BranchAccessError) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    if (isValidationError(err)) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    console.error(logLabel, err.message);
+    return res.status(500).json({ error: fallback });
 };
 
 const REPEAT_MODES = new Set(['DAILY', 'WEEKDAYS', 'WEEKLY', 'CUSTOM']);
@@ -139,45 +196,55 @@ const ensureEndsAfterStarts = (startsAt, endsAt) => {
 };
 
 router.use(auth, saasMiddleware);
+router.use(branchSchemaMiddleware);
 
 router.get('/summary', requirePermission('attendance:read'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
+        const { branchId } = await resolveBranchReadScope(pool, req);
+        const typeParams = [gymId];
+        const typeBranchClause = getBranchFilterSql(typeParams, branchId);
+        const todayParams = [gymId];
+        const todayBranchClause = getBranchFilterSql(todayParams, branchId, `COALESCE(branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const bookingParams = [gymId];
+        const bookingBranchClause = getBranchFilterSql(bookingParams, branchId, `COALESCE(cb.branch_id, cs.branch_id, ct.branch_id, ${DEFAULT_BRANCH_SQL})`);
         const [typesRes, todayRes, upcomingRes, bookedRes, checkinRes] = await Promise.all([
-            pool.query('SELECT COUNT(*)::INTEGER AS count FROM class_types WHERE gym_id = $1 AND is_active = TRUE', [gymId]),
+            pool.query(`SELECT COUNT(*)::INTEGER AS count FROM class_types WHERE gym_id = $1 AND is_active = TRUE${typeBranchClause}`, typeParams),
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM class_sessions
                  WHERE gym_id = $1
                    AND status = 'SCHEDULED'
-                   AND starts_at::date = CURRENT_DATE`,
-                [gymId]
+                   AND starts_at::date = CURRENT_DATE${todayBranchClause}`,
+                todayParams
             ),
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM class_sessions
                  WHERE gym_id = $1
                    AND status = 'SCHEDULED'
-                   AND starts_at >= NOW()`,
-                [gymId]
+                   AND starts_at >= NOW()${todayBranchClause}`,
+                todayParams
             ),
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM class_bookings cb
                  INNER JOIN class_sessions cs ON cs.id = cb.class_session_id
+                 INNER JOIN class_types ct ON ct.id = cs.class_type_id AND ct.gym_id = cs.gym_id
                  WHERE cb.gym_id = $1
                    AND cs.starts_at::date = CURRENT_DATE
-                   AND cb.status IN ('BOOKED', 'CHECKED_IN', 'WAITLISTED')`,
-                [gymId]
+                   AND cb.status IN ('BOOKED', 'CHECKED_IN', 'WAITLISTED')${bookingBranchClause}`,
+                bookingParams
             ),
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM class_bookings cb
                  INNER JOIN class_sessions cs ON cs.id = cb.class_session_id
+                 INNER JOIN class_types ct ON ct.id = cs.class_type_id AND ct.gym_id = cs.gym_id
                  WHERE cb.gym_id = $1
                    AND cs.starts_at::date = CURRENT_DATE
-                   AND cb.status = 'CHECKED_IN'`,
-                [gymId]
+                   AND cb.status = 'CHECKED_IN'${bookingBranchClause}`,
+                bookingParams
             ),
         ]);
 
@@ -189,15 +256,17 @@ router.get('/summary', requirePermission('attendance:read'), async (req, res) =>
             checked_in_today: checkinRes.rows[0]?.count || 0,
         });
     } catch (err) {
-        console.error('CLASSES SUMMARY ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to load class summary.' });
+        return sendClassesRouteError(res, err, 'CLASSES SUMMARY ERROR:', 'Failed to load class summary.');
     }
 });
 
 router.get('/types', requirePermission('attendance:read'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const includeInactive = String(req.query.include_inactive || '').toLowerCase() === 'true';
+        const params = [gymId, includeInactive];
+        const branchClause = getBranchFilterSql(params, branchId);
         const result = await pool.query(
             `SELECT
                 ct.*,
@@ -206,15 +275,15 @@ router.get('/types', requirePermission('attendance:read'), async (req, res) => {
              LEFT JOIN class_sessions cs ON cs.class_type_id = ct.id AND cs.gym_id = ct.gym_id
              WHERE ct.gym_id = $1
                AND ($2::BOOLEAN = TRUE OR ct.is_active = TRUE)
+               ${branchClause}
              GROUP BY ct.id
              ORDER BY ct.is_active DESC, ct.title ASC`,
-            [gymId, includeInactive]
+            params
         );
 
-        return res.json(result.rows);
+        return res.json(result.rows.map((row) => ({ ...row, branch_id: row.branch_id || DEFAULT_BRANCH_ID })));
     } catch (err) {
-        console.error('CLASS TYPES ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to load class types.' });
+        return sendClassesRouteError(res, err, 'CLASS TYPES ERROR:', 'Failed to load class types.');
     }
 });
 
@@ -222,23 +291,21 @@ router.post('/types', requirePermission('attendance:write'), async (req, res) =>
     try {
         const gymId = getGymIdFromRequest(req);
         const payload = normalizeClassTypePayload(req.body || {});
+        const branchScope = await resolveBranchWriteScope(pool, req);
+        const branchId = branchScope.branchId || branchScope.defaultBranchId;
 
         const result = await pool.query(
             `INSERT INTO class_types (
                 gym_id, title, category, description, trainer_name, capacity,
-                duration_minutes, location, color_theme
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                duration_minutes, location, color_theme, branch_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              RETURNING *`,
-            [gymId, payload.title, payload.category, payload.description, payload.trainer_name, payload.capacity, payload.duration_minutes, payload.location, payload.color_theme]
+            [gymId, payload.title, payload.category, payload.description, payload.trainer_name, payload.capacity, payload.duration_minutes, payload.location, payload.color_theme, branchId]
         );
 
-        return res.status(201).json(result.rows[0]);
+        return res.status(201).json({ ...result.rows[0], branch_id: result.rows[0]?.branch_id || branchId });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS TYPE CREATE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to create class type.' });
+        return sendClassesRouteError(res, err, 'CLASS TYPE CREATE ERROR:', 'Failed to create class type.');
     }
 });
 
@@ -248,6 +315,13 @@ router.put('/types/:id', requirePermission('attendance:write'), async (req, res)
         const classTypeId = ensureInteger(req.params.id, { field: 'class type id', required: true, min: 1 });
         const payload = normalizeClassTypePayload(req.body || {});
         const isActive = typeof req.body?.is_active === 'boolean' ? req.body.is_active : true;
+        const existingType = await getClassTypeRecord(pool, gymId, classTypeId);
+
+        if (!existingType) {
+            return res.status(404).json({ error: 'Class type not found.' });
+        }
+
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), existingType.branch_id);
 
         const result = await pool.query(
             `UPDATE class_types
@@ -266,29 +340,25 @@ router.put('/types/:id', requirePermission('attendance:write'), async (req, res)
             [payload.title, payload.category, payload.description, payload.trainer_name, payload.capacity, payload.duration_minutes, payload.location, payload.color_theme, isActive, classTypeId, gymId]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Class type not found.' });
-        }
-
-        return res.json(result.rows[0]);
+        return res.json({ ...result.rows[0], branch_id: result.rows[0]?.branch_id || existingType.branch_id });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS TYPE UPDATE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to update class type.' });
+        return sendClassesRouteError(res, err, 'CLASS TYPE UPDATE ERROR:', 'Failed to update class type.');
     }
 });
 
 router.get('/schedule', requirePermission('attendance:read'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const from = parseTimestamp(req.query.from) || new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
         const to = parseTimestamp(req.query.to) || new Date(Date.now() + (14 * 24 * 60 * 60 * 1000)).toISOString();
+        const params = [gymId, from, to];
+        const branchClause = getBranchFilterSql(params, branchId, `COALESCE(cs.branch_id, ct.branch_id, ${DEFAULT_BRANCH_SQL})`);
 
         const result = await pool.query(
             `SELECT
                 cs.*,
+                COALESCE(cs.branch_id, ct.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                 ct.title AS class_title,
                 ct.category,
                 ct.description,
@@ -305,15 +375,15 @@ router.get('/schedule', requirePermission('attendance:read'), async (req, res) =
              LEFT JOIN class_bookings cb ON cb.class_session_id = cs.id AND cb.gym_id = cs.gym_id
              WHERE cs.gym_id = $1
                AND cs.starts_at BETWEEN $2 AND $3
+               ${branchClause}
              GROUP BY cs.id, ct.id
              ORDER BY cs.starts_at ASC`,
-            [gymId, from, to]
+            params
         );
 
         return res.json(result.rows);
     } catch (err) {
-        console.error('CLASS SCHEDULE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to load class schedule.' });
+        return sendClassesRouteError(res, err, 'CLASS SCHEDULE ERROR:', 'Failed to load class schedule.');
     }
 });
 
@@ -325,15 +395,11 @@ router.post('/sessions', requirePermission('attendance:write'), async (req, res)
         const status = normalizeClassSessionStatus(req.body?.status, 'SCHEDULED');
         const notes = normalizeSessionNotes(req.body?.notes);
 
-        const classTypeRes = await pool.query(
-            'SELECT * FROM class_types WHERE id = $1 AND gym_id = $2 LIMIT 1',
-            [classTypeId, gymId]
-        );
-        if (classTypeRes.rows.length === 0) {
+        const classType = await getClassTypeRecord(pool, gymId, classTypeId);
+        if (!classType) {
             return res.status(404).json({ error: 'Class type not found.' });
         }
-
-        const classType = classTypeRes.rows[0];
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), classType.branch_id);
         const capacity = ensureInteger(req.body?.capacity, { field: 'capacity', min: 1, max: 500, defaultValue: classType.capacity || 20 });
         const trainerName = ensureTrimmedString(req.body?.trainer_name, { field: 'trainer_name', max: 120, defaultValue: classType.trainer_name || '' });
         const startsDate = new Date(startsAt);
@@ -344,19 +410,15 @@ router.post('/sessions', requirePermission('attendance:write'), async (req, res)
 
         const result = await pool.query(
             `INSERT INTO class_sessions (
-                gym_id, class_type_id, starts_at, ends_at, trainer_name, capacity, status, notes
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                gym_id, class_type_id, starts_at, ends_at, trainer_name, capacity, status, notes, branch_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              RETURNING *`,
-            [gymId, classTypeId, startsAt, endsAt, trainerName, capacity, status, notes]
+            [gymId, classTypeId, startsAt, endsAt, trainerName, capacity, status, notes, classType.branch_id]
         );
 
-        return res.status(201).json(result.rows[0]);
+        return res.status(201).json({ ...result.rows[0], branch_id: result.rows[0]?.branch_id || classType.branch_id });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS SESSION CREATE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to create class session.' });
+        return sendClassesRouteError(res, err, 'CLASS SESSION CREATE ERROR:', 'Failed to create class session.');
     }
 });
 
@@ -382,15 +444,11 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
             return res.status(400).json({ error: 'repeat_until must be on or after starts_at.' });
         }
 
-        const classTypeRes = await pool.query(
-            'SELECT * FROM class_types WHERE id = $1 AND gym_id = $2 LIMIT 1',
-            [classTypeId, gymId]
-        );
-        if (classTypeRes.rows.length === 0) {
+        const classType = await getClassTypeRecord(pool, gymId, classTypeId);
+        if (!classType) {
             return res.status(404).json({ error: 'Class type not found.' });
         }
-
-        const classType = classTypeRes.rows[0];
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), classType.branch_id);
         const durationMinutes = ensureInteger(req.body?.duration_minutes, { field: 'duration_minutes', min: 5, max: 720, defaultValue: classType.duration_minutes || 60 });
         const capacity = ensureInteger(req.body?.capacity, { field: 'capacity', min: 1, max: 500, defaultValue: classType.capacity || 20 });
         const trainerName = ensureTrimmedString(req.body?.trainer_name, { field: 'trainer_name', max: 120, defaultValue: classType.trainer_name || '' });
@@ -409,10 +467,10 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
             const endsAt = new Date(startDate.getTime() + (durationMinutes * 60 * 1000)).toISOString();
             const insertRes = await client.query(
                 `INSERT INTO class_sessions (
-                    gym_id, class_type_id, starts_at, ends_at, trainer_name, capacity, status, notes
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    gym_id, class_type_id, starts_at, ends_at, trainer_name, capacity, status, notes, branch_id
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  RETURNING *`,
-                [gymId, classTypeId, occurrence, endsAt, trainerName, capacity, status, notes]
+                [gymId, classTypeId, occurrence, endsAt, trainerName, capacity, status, notes, classType.branch_id]
             );
             createdSessions.push(insertRes.rows[0]);
         }
@@ -420,7 +478,7 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
 
         return res.status(201).json({
             created_count: createdSessions.length,
-            sessions: createdSessions,
+            sessions: createdSessions.map((session) => ({ ...session, branch_id: session.branch_id || classType.branch_id })),
             repeat_mode: repeatMode,
             repeat_until: repeatUntil,
         });
@@ -428,11 +486,7 @@ router.post('/sessions/recurring', requirePermission('attendance:write'), async 
         if (client) {
             await client.query('ROLLBACK').catch(() => {});
         }
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS SESSION RECURRING CREATE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to create recurring sessions.' });
+        return sendClassesRouteError(res, err, 'CLASS SESSION RECURRING CREATE ERROR:', 'Failed to create recurring sessions.');
     } finally {
         if (client) {
             client.release();
@@ -446,12 +500,13 @@ router.put('/sessions/:id', requirePermission('attendance:write'), async (req, r
         const sessionId = ensureInteger(req.params.id, { field: 'class session id', required: true, min: 1 });
 
         const currentSessionRes = await pool.query(
-            `SELECT cs.*, ct.capacity AS default_capacity, ct.duration_minutes, ct.trainer_name AS default_trainer_name
+            `SELECT cs.*, ct.capacity AS default_capacity, ct.duration_minutes, ct.trainer_name AS default_trainer_name,
+                    COALESCE(cs.branch_id, ct.branch_id, $3) AS branch_id
              FROM class_sessions cs
              INNER JOIN class_types ct ON ct.id = cs.class_type_id AND ct.gym_id = cs.gym_id
              WHERE cs.id = $1 AND cs.gym_id = $2
              LIMIT 1`,
-            [sessionId, gymId]
+            [sessionId, gymId, DEFAULT_BRANCH_ID]
         );
 
         if (currentSessionRes.rows.length === 0) {
@@ -459,6 +514,7 @@ router.put('/sessions/:id', requirePermission('attendance:write'), async (req, r
         }
 
         const currentSession = currentSessionRes.rows[0];
+    ensureBranchAccess(await resolveBranchReadScope(pool, req), currentSession.branch_id);
         const startsAt = ensureTimestamp(req.body?.starts_at, { field: 'starts_at', defaultValue: currentSession.starts_at }) || currentSession.starts_at;
         const durationMinutes = ensureInteger(req.body?.duration_minutes, { field: 'duration_minutes', min: 5, max: 720, defaultValue: currentSession.duration_minutes || 60 });
         const endsAt = ensureTimestamp(req.body?.ends_at, { field: 'ends_at' })
@@ -477,19 +533,16 @@ router.put('/sessions/:id', requirePermission('attendance:write'), async (req, r
                  capacity = $4,
                  status = $5,
                  notes = $6,
+                 branch_id = $7,
                  updated_at = NOW()
-             WHERE id = $7 AND gym_id = $8
+             WHERE id = $8 AND gym_id = $9
              RETURNING *`,
-            [startsAt, endsAt, trainerName, capacity, status, notes, sessionId, gymId]
+            [startsAt, endsAt, trainerName, capacity, status, notes, currentSession.branch_id, sessionId, gymId]
         );
 
-        return res.json(result.rows[0]);
+        return res.json({ ...result.rows[0], branch_id: result.rows[0]?.branch_id || currentSession.branch_id });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS SESSION UPDATE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to update class session.' });
+        return sendClassesRouteError(res, err, 'CLASS SESSION UPDATE ERROR:', 'Failed to update class session.');
     }
 });
 
@@ -500,6 +553,12 @@ router.get('/sessions/:id/bookings', requirePermission('attendance:read'), async
         if (!sessionId) {
             return res.status(400).json({ error: 'Invalid class session id.' });
         }
+
+        const session = await getSessionRecord(pool, gymId, sessionId);
+        if (!session) {
+            return res.status(404).json({ error: 'Class session not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), session.branch_id);
 
         const result = await pool.query(
             `SELECT
@@ -522,10 +581,9 @@ router.get('/sessions/:id/bookings', requirePermission('attendance:read'), async
             [gymId, sessionId]
         );
 
-        return res.json(result.rows);
+        return res.json(result.rows.map((row) => ({ ...row, branch_id: row.branch_id || session.branch_id })));
     } catch (err) {
-        console.error('CLASS BOOKINGS ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to load bookings.' });
+        return sendClassesRouteError(res, err, 'CLASS BOOKINGS ERROR:', 'Failed to load bookings.');
     }
 });
 
@@ -537,23 +595,31 @@ router.post('/sessions/:id/bookings', requirePermission('attendance:write'), asy
         const notes = normalizeSessionNotes(req.body?.notes);
 
         const sessionRes = await pool.query(
-            `SELECT cs.id, COALESCE(cs.capacity, ct.capacity, 20) AS effective_capacity
+            `SELECT cs.id, COALESCE(cs.capacity, ct.capacity, 20) AS effective_capacity,
+                    COALESCE(cs.branch_id, ct.branch_id, $3) AS branch_id
              FROM class_sessions cs
              INNER JOIN class_types ct ON ct.id = cs.class_type_id AND ct.gym_id = cs.gym_id
              WHERE cs.id = $1 AND cs.gym_id = $2
              LIMIT 1`,
-            [sessionId, gymId]
+            [sessionId, gymId, DEFAULT_BRANCH_ID]
         );
         if (sessionRes.rows.length === 0) {
             return res.status(404).json({ error: 'Class session not found.' });
         }
 
+        const sessionBranchId = sessionRes.rows[0].branch_id || DEFAULT_BRANCH_ID;
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), sessionBranchId);
+
         const memberRes = await pool.query(
-            'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-            [memberId, gymId]
+            'SELECT id, COALESCE(branch_id, $3) AS branch_id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+            [memberId, gymId, DEFAULT_BRANCH_ID]
         );
         if (memberRes.rows.length === 0) {
             return res.status(404).json({ error: 'Member not found.' });
+        }
+
+        if ((memberRes.rows[0].branch_id || DEFAULT_BRANCH_ID) !== sessionBranchId) {
+            return res.status(400).json({ error: 'Member belongs to a different branch.' });
         }
 
         const existingBooking = await pool.query(
@@ -582,24 +648,21 @@ router.post('/sessions/:id/bookings', requirePermission('attendance:write'), asy
         const bookingStatus = currentBookings >= effectiveCapacity ? 'WAITLISTED' : 'BOOKED';
 
         const result = await pool.query(
-            `INSERT INTO class_bookings (gym_id, class_session_id, member_id, status, booked_at, notes)
-             VALUES ($1, $2, $3, $4, NOW(), $5)
+            `INSERT INTO class_bookings (gym_id, branch_id, class_session_id, member_id, status, booked_at, notes)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)
              ON CONFLICT (class_session_id, member_id)
              DO UPDATE SET
+                branch_id = EXCLUDED.branch_id,
                 status = EXCLUDED.status,
                 booked_at = NOW(),
                 notes = EXCLUDED.notes
              RETURNING *`,
-            [gymId, sessionId, memberId, bookingStatus, notes]
+            [gymId, sessionBranchId, sessionId, memberId, bookingStatus, notes]
         );
 
-        return res.status(201).json(result.rows[0]);
+        return res.status(201).json({ ...result.rows[0], branch_id: result.rows[0]?.branch_id || sessionBranchId });
     } catch (err) {
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS BOOKING CREATE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to create booking.' });
+        return sendClassesRouteError(res, err, 'CLASS BOOKING CREATE ERROR:', 'Failed to create booking.');
     }
 });
 
@@ -612,6 +675,12 @@ router.delete('/sessions/:sessionId/bookings/:memberId', requirePermission('atte
         if (!sessionId || !memberId) {
             return res.status(400).json({ error: 'Invalid booking identifier.' });
         }
+
+        const session = await getSessionRecord(pool, gymId, sessionId);
+        if (!session) {
+            return res.status(404).json({ error: 'Class session not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), session.branch_id);
 
         const result = await pool.query(
             `UPDATE class_bookings
@@ -627,8 +696,7 @@ router.delete('/sessions/:sessionId/bookings/:memberId', requirePermission('atte
 
         return res.json({ message: 'Booking removed.' });
     } catch (err) {
-        console.error('CLASS BOOKING DELETE ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to remove booking.' });
+        return sendClassesRouteError(res, err, 'CLASS BOOKING DELETE ERROR:', 'Failed to remove booking.');
     }
 });
 
@@ -639,6 +707,11 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
         const gymId = getGymIdFromRequest(req);
         const sessionId = ensureInteger(req.params.sessionId, { field: 'session id', required: true, min: 1 });
         const memberId = ensureInteger(req.params.memberId, { field: 'member id', required: true, min: 1 });
+        const session = await getSessionRecord(pool, gymId, sessionId);
+        if (!session) {
+            return res.status(404).json({ error: 'Class session not found.' });
+        }
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), session.branch_id);
         client = await pool.connect();
         await client.query('BEGIN');
 
@@ -703,8 +776,8 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
         let attendanceCreated = false;
         if (attendanceRes.rows.length === 0) {
             await client.query(
-                'INSERT INTO attendance (gym_id, member_id, check_in_time) VALUES ($1, $2, NOW())',
-                [gymId, memberId]
+                'INSERT INTO attendance (gym_id, member_id, check_in_time, branch_id) VALUES ($1, $2, NOW(), $3)',
+                [gymId, memberId, session.branch_id]
             );
             attendanceCreated = true;
         }
@@ -720,11 +793,7 @@ router.post('/sessions/:sessionId/bookings/:memberId/check-in', requirePermissio
         if (client) {
             await client.query('ROLLBACK').catch(() => {});
         }
-        if (isValidationError(err)) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        console.error('CLASS BOOKING CHECK-IN ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to check member into class.' });
+        return sendClassesRouteError(res, err, 'CLASS BOOKING CHECK-IN ERROR:', 'Failed to check member into class.');
     } finally {
         if (client) {
             client.release();

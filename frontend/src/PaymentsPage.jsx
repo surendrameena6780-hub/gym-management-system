@@ -12,7 +12,9 @@ import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import PaginationControls from './components/PaginationControls';
+import { getBranchLabel, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 
 const extractArray = (value, keys = []) => {
   if (Array.isArray(value)) return value;
@@ -143,6 +145,13 @@ const INSIGHT_TONE_STYLES = {
 const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled, isActive = true }) => {
   const { token, toast, showConfirm, currentUser = null } = appRuntime;
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
+  const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
+  const defaultBranchId = getDefaultBranchId(branchDirectory);
+  const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const branchParams = useMemo(() => (branchScopeValue ? { branch_id: branchScopeValue } : {}), [branchScopeValue]);
+  const showBranchMeta = branchDirectory.length > 1;
+  const getRecordBranchLabel = useCallback((record) => getBranchLabel(branchDirectory, record?.branch_id || branchScopeValue || defaultBranchId, { allLabel: 'Main Branch' }), [branchDirectory, branchScopeValue, defaultBranchId]);
   const [payments, setPayments] = useState([]);
   const [ledgerPayments, setLedgerPayments] = useState([]);
   const [ledgerPagination, setLedgerPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
@@ -301,30 +310,65 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const fetchPosProducts = useCallback(async () => {
     try {
-      const res = await axios.get('/api/finance/pos/products', { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/finance/pos/products', { headers: { 'x-auth-token': token }, params: branchParams });
       setPosProducts(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPosProducts([]);
     }
-  }, [token]);
+  }, [branchParams, token]);
 
   const fetchPosSales = useCallback(async () => {
     try {
-      const res = await axios.get('/api/finance/pos/sales', { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/finance/pos/sales', { headers: { 'x-auth-token': token }, params: branchParams });
       setPosSales(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPosSales([]);
     }
-  }, [token]);
+  }, [branchParams, token]);
 
   const fetchStaffOptions = useCallback(async () => {
     try {
-      const res = await axios.get('/api/users/staff', { headers: { 'x-auth-token': token } });
+      const res = await axios.get('/api/users/staff', { headers: { 'x-auth-token': token }, params: branchParams });
       setStaffOptions(Array.isArray(res.data) ? res.data : []);
     } catch {
       setStaffOptions([]);
     }
-  }, [token]);
+  }, [branchParams, token]);
+
+  const fetchExpenses = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/finance/expenses', { headers: { 'x-auth-token': token }, params: branchParams });
+      setExpenses(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setExpenses([]);
+    }
+  }, [branchParams, token]);
+
+  const fetchPayroll = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/finance/payroll', { headers: { 'x-auth-token': token }, params: branchParams });
+      setPayrollEntries(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setPayrollEntries([]);
+    }
+  }, [branchParams, token]);
+
+  const fetchFinanceOverview = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/finance/overview', {
+        headers: { 'x-auth-token': token },
+        params: {
+          period: dateRange,
+          from: financeOverviewParams.from,
+          to: financeOverviewParams.to,
+          ...branchParams,
+        },
+      });
+      setFinanceOverview(res.data || null);
+    } catch {
+      setFinanceOverview(null);
+    }
+  }, [branchParams, dateRange, financeOverviewParams.from, financeOverviewParams.to, token]);
 
   useEffect(() => {
     if (financeTab === 'expenses') {
@@ -342,7 +386,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const handleSaveExpense = async () => {
     try {
-      await axios.post('/api/finance/expenses', expenseForm, { headers: { 'x-auth-token': token } });
+      await axios.post('/api/finance/expenses', { ...expenseForm, branch_id: branchScopeValue }, { headers: { 'x-auth-token': token } });
       toast?.('Expense added', 'success');
       setShowExpenseModal(false);
       setExpenseForm({ category: '', vendor: '', description: '', amount: '', bill_date: '', payment_mode: 'Cash' });
@@ -357,7 +401,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       return;
     }
     try {
-      await axios.post('/api/finance/payroll', payrollForm, { headers: { 'x-auth-token': token } });
+      await axios.post('/api/finance/payroll', { ...payrollForm, branch_id: branchScopeValue }, { headers: { 'x-auth-token': token } });
       toast?.('Payroll entry added', 'success');
       setShowPayrollModal(false);
       setPayrollForm({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
@@ -368,7 +412,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const handleSavePosProduct = async () => {
     try {
-      await axios.post('/api/finance/pos/products', posForm, { headers: { 'x-auth-token': token } });
+      await axios.post('/api/finance/pos/products', { ...posForm, branch_id: branchScopeValue }, { headers: { 'x-auth-token': token } });
       toast?.('Product added', 'success');
       setShowPosModal(false);
       setPosForm({ name: '', category: 'supplement', price: '', stock_qty: '' });
@@ -420,6 +464,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         member_id: posCheckout.member_id ? Number.parseInt(posCheckout.member_id, 10) : null,
         payment_mode: posCheckout.payment_mode,
         notes: posCheckout.notes,
+        branch_id: branchScopeValue,
         items: posCart.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
       }, { headers: { 'x-auth-token': token } });
       toast?.('POS sale recorded.', 'success');
@@ -442,6 +487,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         commission: entry.commission,
         deductions: entry.deductions,
         notes: entry.notes,
+        branch_id: branchScopeValue,
         ...updates,
       }, { headers: { 'x-auth-token': token } });
       toast?.(successMessage, 'success');
@@ -450,7 +496,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to update payroll status.', 'error');
     }
-  }, [fetchFinanceOverview, fetchPayroll, toast, token]);
+  }, [branchScopeValue, fetchFinanceOverview, fetchPayroll, toast, token]);
 
   const approvePayroll = useCallback((entry) => {
     updatePayrollStatus(entry, {
@@ -598,13 +644,14 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         params: {
           search: query || undefined,
           limit: 20,
+          ...branchParams,
         },
       });
       setMembers(extractArray(res.data, ['members', 'rows', 'items']));
     } catch (_err) {
       setMembers([]);
     }
-  }, [token]);
+  }, [branchParams, token]);
 
   const loadLedger = useCallback(async () => {
     try {
@@ -618,6 +665,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           filter: activeFilter,
           from: financeOverviewParams.from,
           to: financeOverviewParams.to,
+          ...branchParams,
         },
       });
 
@@ -634,16 +682,16 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       reportClientError('Payments load ledger', err);
       setLedgerPayments([]);
     }
-  }, [activeFilter, deferredSearchTerm, financeOverviewParams.from, financeOverviewParams.to, ledgerPagination.limit, ledgerPagination.page, token]);
+  }, [activeFilter, branchParams, deferredSearchTerm, financeOverviewParams.from, financeOverviewParams.to, ledgerPagination.limit, ledgerPagination.page, token]);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const headers = { 'x-auth-token': token };
       const [paymentsRes, statsRes, membersRes, plansRes] = await Promise.all([
-        axios.get('/api/payments', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to } }),
-        axios.get('/api/payments/stats', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to } }),
-        axios.get('/api/members/options', { headers, params: { limit: 20 } }),
+        axios.get('/api/payments', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to, ...branchParams } }),
+        axios.get('/api/payments/stats', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to, ...branchParams } }),
+        axios.get('/api/members/options', { headers, params: { limit: 20, ...branchParams } }),
         axios.get('/api/plans', { headers })
       ]);
 
@@ -663,7 +711,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       reportClientError('Payments load data', err);
       setLoading(false);
     }
-  }, [financeOverviewParams.from, financeOverviewParams.to, token]);
+  }, [branchParams, financeOverviewParams.from, financeOverviewParams.to, token]);
 
   const refreshAllData = useCallback(async () => {
     await Promise.all([fetchData(), loadLedger()]);
@@ -734,6 +782,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     try {
       const finalPayload = {
         ...formData,
+        branch_id: branchScopeValue,
         payment_mode: (formData.transaction_id && formData.transaction_id.trim() !== "") ? "Online" : formData.payment_mode
       };
       await axios.post('/api/payments/record', finalPayload, { headers: { 'x-auth-token': token } });
@@ -760,7 +809,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       onConfirm: async () => {
         try {
           await axios.delete(`/api/payments/${id}`, {
-            headers: { 'x-auth-token': token }
+            headers: { 'x-auth-token': token },
+            params: branchParams,
           });
           setShowReceipt(false);
           await refreshAllData();
@@ -788,7 +838,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     if (!payment.user_id) { setHistoryLoading(false); return; }
     try {
       const res = await axios.get(`/api/payments/history/${payment.user_id}`, {
-        headers: { 'x-auth-token': token }
+        headers: { 'x-auth-token': token },
+        params: branchParams,
       });
       setMemberHistory(extractArray(res.data, ['history', 'payments', 'rows', 'items']));
     } catch (_err) {
@@ -796,7 +847,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } finally {
       setHistoryLoading(false);
     }
-  }, [token]);
+  }, [branchParams, token]);
 
   const resetDueModal = useCallback(() => {
     setDueModalPayment(null);
@@ -861,6 +912,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           payment_link_id: paymentLinkId,
           amount: dueFormData.amount,
           notes: dueFormData.notes,
+          branch_id: branchScopeValue,
         },
         { headers: { 'x-auth-token': token } }
       );
@@ -883,7 +935,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } finally {
       dueRazorpayPollBusyRef.current = false;
     }
-  }, [dueFormData.amount, dueFormData.notes, dueModalPayment, dueRazorpayContext, settleDueLocally, toast, token]);
+  }, [branchScopeValue, dueFormData.amount, dueFormData.notes, dueModalPayment, dueRazorpayContext, settleDueLocally, toast, token]);
 
   checkDueRazorpayStatusRef.current = checkDueRazorpayStatus;
   dueResumeStateRef.current = {
@@ -971,7 +1023,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
             const collectionRes = await axios.post(
               `/api/payments/${dueModalPayment.id}/due/create-order`,
-              { amount: requestedAmount, notes: dueFormData.notes },
+              { amount: requestedAmount, notes: dueFormData.notes, branch_id: branchScopeValue },
               { headers: { 'x-auth-token': token } }
             );
 
@@ -1002,6 +1054,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               payment_mode: 'Online',
               transaction_id: dueFormData.transaction_id || dueCollectionContext.reference,
               notes: dueFormData.notes,
+                branch_id: branchScopeValue,
             },
             { headers: { 'x-auth-token': token } }
           );
@@ -1016,7 +1069,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
           const orderRes = await axios.post(
             `/api/payments/${dueModalPayment.id}/due/create-order`,
-            { amount: requestedAmount, notes: dueFormData.notes },
+            { amount: requestedAmount, notes: dueFormData.notes, branch_id: branchScopeValue },
             { headers: { 'x-auth-token': token } }
           );
 
@@ -1050,6 +1103,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
             payment_mode: 'Cash',
             transaction_id: dueFormData.transaction_id,
             notes: dueFormData.notes,
+            branch_id: branchScopeValue,
           },
           { headers: { 'x-auth-token': token } }
         );
@@ -1068,7 +1122,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } finally {
       setDueSubmitting(false);
     }
-  }, [checkDueRazorpayStatus, dueCollectionContext, dueFormData.amount, dueFormData.notes, dueFormData.payment_mode, dueFormData.transaction_id, dueModalPayment, dueOnlineMode, dueRazorpayContext, dueSubmitting, settleDueLocally, toast, token]);
+  }, [branchScopeValue, checkDueRazorpayStatus, dueCollectionContext, dueFormData.amount, dueFormData.notes, dueFormData.payment_mode, dueFormData.transaction_id, dueModalPayment, dueOnlineMode, dueRazorpayContext, dueSubmitting, settleDueLocally, toast, token]);
 
   useEffect(() => {
     if (!focusPaymentId) return;
@@ -1293,6 +1347,16 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
         </div>
       </div>
+
+      <OperationsBranchScopeBar
+        branchDirectory={branchDirectory}
+        branchId={operationsBranchId}
+        onChange={appRuntime.setOperationsBranchId}
+        currentUser={currentUser}
+        loading={appRuntime.branchScopeLoading}
+        title="Finance scope"
+        description="Switch the branch lens for collections, expenses, payroll, and POS flows."
+      />
 
       {/* ═══════ COLLECTIONS TAB ═══════ */}
       {financeTab === 'collections' && (<>
@@ -1552,6 +1616,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                         )}
                       </div>
                       <p className="text-xs text-slate-500 truncate mt-1">{payment.member_phone || payment.member_email || 'No contact saved'}</p>
+                      {showBranchMeta ? <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{getRecordBranchLabel(payment)}</p> : null}
                     </div>
                     <p className="font-black text-emerald-600 shrink-0">₹{parseFloat(payment.amount_paid).toLocaleString()}</p>
                   </div>
@@ -1606,7 +1671,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               ) : (
                 filteredPayments.map((payment) => (
                   <tr key={payment.id} className="group hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-100">{payment.profile_pic ? (<img src={getImageUrl(payment.profile_pic)} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} alt="Member" className="w-full h-full object-cover" />) : (<div className="w-full h-full flex items-center justify-center font-black text-xs text-slate-500 bg-slate-200">{(payment.member_name || '?').charAt(0).toUpperCase()}</div>)}</div><div><div className="flex items-center gap-2"><div className="font-bold text-slate-900">{payment.member_name}</div>{parseFloat(payment.amount_due) > 0 && (<div className="flex items-center gap-1"><button type="button" onClick={() => handleDueWhatsApp(payment)} disabled={dueReminderLoadingId === payment.id} className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed" aria-label={`Send WhatsApp reminder to ${payment.member_name}`} title="Send WhatsApp reminder">{dueReminderLoadingId === payment.id ? <RefreshCw size={13} className="animate-spin" /> : <MessageCircle size={13} />}</button><button type="button" onClick={() => handleDueCall(payment)} className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center" aria-label={`Call ${payment.member_name}`} title="Call member"><Phone size={13} /></button></div>)}</div><div className="text-xs font-bold text-slate-400">{payment.plan_name}</div></div></div></td>
+                    <td className="p-6"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-100">{payment.profile_pic ? (<img src={getImageUrl(payment.profile_pic)} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} alt="Member" className="w-full h-full object-cover" />) : (<div className="w-full h-full flex items-center justify-center font-black text-xs text-slate-500 bg-slate-200">{(payment.member_name || '?').charAt(0).toUpperCase()}</div>)}</div><div><div className="flex items-center gap-2"><div className="font-bold text-slate-900">{payment.member_name}</div>{parseFloat(payment.amount_due) > 0 && (<div className="flex items-center gap-1"><button type="button" onClick={() => handleDueWhatsApp(payment)} disabled={dueReminderLoadingId === payment.id} className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed" aria-label={`Send WhatsApp reminder to ${payment.member_name}`} title="Send WhatsApp reminder">{dueReminderLoadingId === payment.id ? <RefreshCw size={13} className="animate-spin" /> : <MessageCircle size={13} />}</button><button type="button" onClick={() => handleDueCall(payment)} className="w-7 h-7 rounded-full bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center" aria-label={`Call ${payment.member_name}`} title="Call member"><Phone size={13} /></button></div>)}</div><div className="text-xs font-bold text-slate-400">{payment.plan_name}{showBranchMeta ? ` • ${getRecordBranchLabel(payment)}` : ''}</div></div></div></td>
                     <td className="p-6"><div className={`font-mono text-xs font-bold px-2 py-1 rounded w-fit ${payment.transaction_id || payment.invoice_id ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400'}`}>{(payment.transaction_id && payment.transaction_id.trim() !== "" && payment.transaction_id !== "Processing...") ? payment.transaction_id : (payment.invoice_id || `ID-${payment.id}`)}</div></td>
                     <td className="p-6"><div className="text-sm font-bold text-slate-600">{new Date(payment.payment_date).toLocaleDateString()}</div><div className="text-xs font-bold text-slate-400 mt-0.5">{new Date(payment.payment_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></td>
                     <td className="p-6"><div className="font-black text-slate-900">₹{parseFloat(payment.amount_paid).toLocaleString()}</div>{parseFloat(payment.amount_due) > 0 && (<div className="text-[10px] font-bold text-orange-500">Due: ₹{payment.amount_due}</div>)}</td>

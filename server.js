@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { PROFILE_UPLOAD_DIR, allowedProfileImageExtensions } = require('./utils/profileUploads');
 const { setUserAuthCookie } = require('./utils/authCookies');
+const { DEFAULT_BRANCH_ID } = require('./utils/branchAccess');
 const { enforceRequestPayloadLimits } = require('./utils/requestPayloadGuards');
 const {
     runtimeTelemetryMiddleware,
@@ -310,11 +311,12 @@ app.get('/api/auth/me', auth, async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT u.id, u.gym_id, u.full_name, u.email, u.role, u.staff_role, u.is_active, u.permissions,
+                    COALESCE(u.branch_id, $2) AS branch_id,
                     g.saas_status, g.saas_valid_until, g.current_plan
              FROM users u
              LEFT JOIN gyms g ON g.id = u.gym_id
              WHERE u.id = $1`,
-            [req.user.id]
+            [req.user.id, DEFAULT_BRANCH_ID]
         );
 
         if (result.rows.length === 0) {
@@ -335,6 +337,7 @@ app.get('/api/auth/me', auth, async (req, res) => {
                 email: row.email,
                 role: row.role,
                 staff_role: row.staff_role,
+                branch_id: row.branch_id,
                 is_active: row.is_active,
                 permissions: row.permissions,
             },

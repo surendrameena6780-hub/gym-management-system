@@ -51,6 +51,7 @@ const {
 } = require('../utils/fieldValidation');
 const {
     branchSchemaMiddleware,
+    getGymBranchDirectory,
     getBranchName,
     getOutOfDirectoryBranchUsage,
 } = require('../utils/branchAccess');
@@ -110,6 +111,21 @@ router.post('/platform/whatsapp-delivery/webhook', async (req, res) => {
     } catch (err) {
         console.error('WHATSAPP DELIVERY WEBHOOK ERROR:', err.message);
         return res.status(500).json({ error: 'Webhook processing failed.' });
+    }
+});
+
+router.get('/branches', auth, branchSchemaMiddleware, async (req, res) => {
+    try {
+        const branchDirectory = await getGymBranchDirectory(pool, req.user.gym_id);
+        return res.json({
+            branch_directory: branchDirectory,
+            default_branch_id: branchDirectory[0]?.id || 'branch-1',
+            current_branch_id: String(req.user.branch_id || branchDirectory[0]?.id || 'branch-1'),
+            can_select_all_branches: String(req.user.role || '').trim().toUpperCase() === 'OWNER' && branchDirectory.length > 1,
+        });
+    } catch (err) {
+        console.error('BRANCH DIRECTORY FETCH ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load branch directory.' });
     }
 });
 

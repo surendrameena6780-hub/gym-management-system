@@ -8,6 +8,7 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner, requirePermission } = require('../middleware/rbac');
 const { decryptSecret } = require('../utils/secretCrypto');
+const { DEFAULT_BRANCH_ID } = require('../utils/branchAccess');
 const {
     ensureInteger,
     ensureNumber,
@@ -458,8 +459,8 @@ const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentM
                 [normalizedPlanId, normalizedGymId]
             ),
             client.query(
-                'SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
-                [normalizedMemberId, normalizedGymId]
+                'SELECT id, COALESCE(branch_id, $3) AS branch_id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                [normalizedMemberId, normalizedGymId, DEFAULT_BRANCH_ID]
             ),
         ]);
 
@@ -472,6 +473,7 @@ const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentM
         }
 
         const plan = planResult.rows[0];
+    const memberBranchId = memberResult.rows[0].branch_id || DEFAULT_BRANCH_ID;
         const days = plan.duration_days || (plan.duration_months * 30) || 30;
         const price = parseFloat(plan.price) || 0;
         const normalizedPaymentId = normalizePaymentReference(paymentId);
@@ -516,15 +518,15 @@ const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentM
             [normalizedMemberId, normalizedGymId]
         );
         await client.query(
-            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
-             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE')`,
-            [normalizedGymId, normalizedMemberId, normalizedPlanId, days]
+            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE', $5)`,
+            [normalizedGymId, normalizedMemberId, normalizedPlanId, days, memberBranchId]
         );
         await client.query(
             `INSERT INTO payments
-             (gym_id, user_id, plan_id, amount_paid, total_amount, payment_date, status, payment_mode, transaction_id, invoice_id)
-             VALUES ($1, $2, $3, $4, $5, NOW(), 'Completed', $6, $7, $8)`,
-            [normalizedGymId, normalizedMemberId, normalizedPlanId, price, price, finalMode, finalTxnId, finalTxnId]
+             (gym_id, user_id, plan_id, amount_paid, total_amount, payment_date, status, payment_mode, transaction_id, invoice_id, branch_id)
+             VALUES ($1, $2, $3, $4, $5, NOW(), 'Completed', $6, $7, $8, $9)`,
+            [normalizedGymId, normalizedMemberId, normalizedPlanId, price, price, finalMode, finalTxnId, finalTxnId, memberBranchId]
         );
         await client.query('COMMIT');
 

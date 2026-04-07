@@ -4,8 +4,10 @@ import {
   CalendarDays, Clock3, Users, Plus, X, Search, CheckCircle2,
   MapPin, User, Layers, Pencil, Trash2, Sparkles, ArrowRight,
 } from 'lucide-react';
+import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
+import { getBranchLabel, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 
 const COLOR_THEMES = {
   indigo: {
@@ -54,6 +56,7 @@ const CLASS_TYPE_FORM = {
   capacity: '20',
   duration_minutes: '60',
   location: '',
+  branch_id: '',
   color_theme: 'indigo',
   is_active: true,
 };
@@ -185,7 +188,13 @@ const MemberAvatar = ({ name, profilePic }) => {
 };
 
 const ClassesPage = ({ appRuntime, canManage = false }) => {
-  const { token, toast, showConfirm } = appRuntime;
+  const { token, toast, showConfirm, currentUser = null } = appRuntime;
+  const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
+  const defaultBranchId = getDefaultBranchId(branchDirectory);
+  const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const showBranchMeta = branchDirectory.length > 1;
+  const getClassBranchLabel = useCallback((record) => getBranchLabel(branchDirectory, record?.branch_id || branchScopeValue || defaultBranchId, { allLabel: 'Main Branch' }), [branchDirectory, branchScopeValue, defaultBranchId]);
   const [summary, setSummary] = useState(null);
   const [classTypes, setClassTypes] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -193,7 +202,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [editingType, setEditingType] = useState(null);
-  const [typeForm, setTypeForm] = useState(CLASS_TYPE_FORM);
+  const [typeForm, setTypeForm] = useState(() => ({ ...CLASS_TYPE_FORM, branch_id: branchScopeValue || defaultBranchId }));
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [editingSession, setEditingSession] = useState(null);
   const [sessionForm, setSessionForm] = useState({ ...SESSION_FORM, starts_at: getDefaultSessionTime() });
@@ -204,6 +213,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   const [memberResults, setMemberResults] = useState([]);
   const [memberSearchLoading, setMemberSearchLoading] = useState(false);
   const loadCompletedRef = useRef(false);
+  const selectedSession = sessions.find((session) => Number(session.id) === Number(selectedSessionId)) || null;
 
   const fetchClassesData = useCallback(async ({ soft = false } = {}) => {
     if (!token) return;
@@ -216,13 +226,14 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
 
     try {
       const [summaryRes, typesRes, scheduleRes] = await Promise.all([
-        axios.get('/api/classes/summary', { headers: { 'x-auth-token': token } }),
-        axios.get('/api/classes/types', { headers: { 'x-auth-token': token }, params: { include_inactive: true } }),
+        axios.get('/api/classes/summary', { headers: { 'x-auth-token': token }, params: { branch_id: branchScopeValue } }),
+        axios.get('/api/classes/types', { headers: { 'x-auth-token': token }, params: { include_inactive: true, branch_id: branchScopeValue } }),
         axios.get('/api/classes/schedule', {
           headers: { 'x-auth-token': token },
           params: {
             from: from.toISOString(),
             to: to.toISOString(),
+            branch_id: branchScopeValue,
           },
         }),
       ]);
@@ -237,13 +248,13 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast, token]);
+  }, [branchScopeValue, toast, token]);
 
   const fetchBookings = async (sessionId) => {
     if (!sessionId) return;
     setBookingsLoading(true);
     try {
-      const res = await axios.get(`/api/classes/sessions/${sessionId}/bookings`, { headers: { 'x-auth-token': token } });
+      const res = await axios.get(`/api/classes/sessions/${sessionId}/bookings`, { headers: { 'x-auth-token': token }, params: { branch_id: branchScopeValue } });
       setBookings(Array.isArray(res.data) ? res.data : []);
     } catch (_err) {
       toast?.('Unable to load class bookings.', 'error');
@@ -277,7 +288,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       try {
         const res = await axios.get('/api/members', {
           headers: { 'x-auth-token': token },
-          params: { search: memberSearch.trim() },
+          params: { search: memberSearch.trim(), branch_id: selectedSession?.branch_id || branchScopeValue },
         });
         setMemberResults(extractMembers(res.data).slice(0, 8));
       } catch (_err) {
@@ -288,9 +299,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
     }, 200);
 
     return () => window.clearTimeout(timer);
-  }, [selectedSessionId, memberSearch, token]);
-
-  const selectedSession = sessions.find((session) => Number(session.id) === Number(selectedSessionId)) || null;
+  }, [branchScopeValue, memberSearch, selectedSession?.branch_id, selectedSessionId, token]);
 
   const groupedSessions = [];
   sessions.forEach((session) => {
@@ -313,7 +322,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   const closeTypeModal = () => {
     setShowTypeModal(false);
     setEditingType(null);
-    setTypeForm(CLASS_TYPE_FORM);
+    setTypeForm({ ...CLASS_TYPE_FORM, branch_id: branchScopeValue || defaultBranchId });
   };
 
   const closeSessionModal = () => {
@@ -337,12 +346,13 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
         capacity: String(classType.capacity || 20),
         duration_minutes: String(classType.duration_minutes || 60),
         location: String(classType.location || ''),
+        branch_id: String(classType.branch_id || branchScopeValue || defaultBranchId),
         color_theme: String(classType.color_theme || 'indigo'),
         is_active: Boolean(classType.is_active),
       });
     } else {
       setEditingType(null);
-      setTypeForm(CLASS_TYPE_FORM);
+      setTypeForm({ ...CLASS_TYPE_FORM, branch_id: branchScopeValue || defaultBranchId });
     }
     setShowTypeModal(true);
   };
@@ -419,6 +429,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       location: typeForm.location.trim(),
       capacity: Number.parseInt(typeForm.capacity, 10) || 20,
       duration_minutes: Number.parseInt(typeForm.duration_minutes, 10) || 60,
+      branch_id: typeForm.branch_id || branchScopeValue || defaultBranchId,
       color_theme: typeForm.color_theme || 'indigo',
     };
 
@@ -460,6 +471,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       repeat_until: sessionForm.repeat_until || '',
       repeat_days: Array.isArray(sessionForm.repeat_days) ? sessionForm.repeat_days : [],
       notes: sessionForm.notes.trim(),
+      branch_id: branchScopeValue,
     };
 
     try {
@@ -484,7 +496,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   const handleAddBooking = async (member) => {
     if (!selectedSessionId || !canManage) return;
     try {
-      await axios.post(`/api/classes/sessions/${selectedSessionId}/bookings`, { member_id: member.id }, { headers: { 'x-auth-token': token } });
+      await axios.post(`/api/classes/sessions/${selectedSessionId}/bookings`, { member_id: member.id, branch_id: selectedSession?.branch_id || branchScopeValue }, { headers: { 'x-auth-token': token } });
       toast?.(`Booked ${member.full_name}.`, 'success');
       setMemberSearch('');
       setMemberResults([]);
@@ -503,7 +515,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       variant: 'danger',
       onConfirm: async () => {
         try {
-          await axios.delete(`/api/classes/sessions/${selectedSessionId}/bookings/${booking.member_id}`, { headers: { 'x-auth-token': token } });
+          await axios.delete(`/api/classes/sessions/${selectedSessionId}/bookings/${booking.member_id}`, { headers: { 'x-auth-token': token }, params: { branch_id: selectedSession?.branch_id || branchScopeValue } });
           toast?.('Booking removed.', 'success');
           await Promise.all([fetchBookings(selectedSessionId), fetchClassesData({ soft: true })]);
         } catch (err) {
@@ -516,7 +528,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
   const handleCheckInBooking = async (booking) => {
     if (!selectedSessionId || !canManage) return;
     try {
-      await axios.post(`/api/classes/sessions/${selectedSessionId}/bookings/${booking.member_id}/check-in`, {}, { headers: { 'x-auth-token': token } });
+      await axios.post(`/api/classes/sessions/${selectedSessionId}/bookings/${booking.member_id}/check-in`, { branch_id: selectedSession?.branch_id || branchScopeValue }, { headers: { 'x-auth-token': token } });
       toast?.('Member checked in from class roster.', 'success');
       requestDataRefresh('classes-checkin');
       await Promise.all([fetchBookings(selectedSessionId), fetchClassesData({ soft: true })]);
@@ -544,6 +556,16 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
           </div>
         ))}
       </div>
+
+      <OperationsBranchScopeBar
+        branchDirectory={branchDirectory}
+        branchId={operationsBranchId}
+        onChange={appRuntime.setOperationsBranchId}
+        currentUser={currentUser}
+        loading={appRuntime.branchScopeLoading}
+        title="Class scope"
+        description="Filter class formats, sessions, and roster actions by branch before scheduling or check-in."
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
         <div className="xl:col-span-4 bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
@@ -589,7 +611,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                           </div>
                           <div className="min-w-0">
                             <p className="font-black text-slate-900 truncate">{classType.title}</p>
-                            <p className="text-xs font-semibold text-slate-500 truncate">{classType.category || 'General class'} • {classType.duration_minutes || 60} min</p>
+                            <p className="text-xs font-semibold text-slate-500 truncate">{classType.category || 'General class'} • {classType.duration_minutes || 60} min{showBranchMeta ? ` • ${getClassBranchLabel(classType)}` : ''}</p>
                           </div>
                         </div>
                       </div>
@@ -693,7 +715,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                                 <p className="font-black text-slate-900 truncate">{session.class_title}</p>
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${SESSION_STATUS_STYLES[String(session.status || 'SCHEDULED').toUpperCase()] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{session.status}</span>
                               </div>
-                              <p className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><Clock3 size={12} /> {formatTimeRange(session.starts_at, session.ends_at)}</p>
+                              <p className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><Clock3 size={12} /> {formatTimeRange(session.starts_at, session.ends_at)}{showBranchMeta ? ` • ${getClassBranchLabel(session)}` : ''}</p>
                             </div>
                             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.icon}`}>
                               <CalendarDays size={17} />
@@ -793,6 +815,16 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                     ))}
                   </select>
                 </div>
+                {!editingType && branchDirectory.length > 1 && (
+                  <div className="md:col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Branch *</label>
+                    <select value={typeForm.branch_id || branchScopeValue || defaultBranchId} onChange={(event) => setTypeForm((prev) => ({ ...prev, branch_id: event.target.value }))} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 font-semibold text-slate-900 text-sm transition-all">
+                      {branchDirectory.map((branch) => (
+                        <option key={branch.id} value={branch.id}>{branch.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -960,7 +992,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/55 mb-1.5">Class Roster</p>
                 <h2 className="text-xl font-black">{selectedSession.class_title}</h2>
-                <p className="text-sm font-semibold text-white/65 mt-1">{formatDateLabel(selectedSession.starts_at)} • {formatTimeRange(selectedSession.starts_at, selectedSession.ends_at)}</p>
+                <p className="text-sm font-semibold text-white/65 mt-1">{formatDateLabel(selectedSession.starts_at)} • {formatTimeRange(selectedSession.starts_at, selectedSession.ends_at)}{showBranchMeta ? ` • ${getClassBranchLabel(selectedSession)}` : ''}</p>
               </div>
               <button type="button" aria-label="Close class roster" onClick={closeBookingsModal} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>

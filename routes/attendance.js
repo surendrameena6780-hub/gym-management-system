@@ -6,6 +6,13 @@ const auth = require('../middleware/authMiddleware');
 const memberAuth = require('../middleware/memberAuthMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner, requirePermission } = require('../middleware/rbac');
+const {
+    BranchAccessError,
+    branchSchemaMiddleware,
+    DEFAULT_BRANCH_ID,
+    ensureBranchAccess,
+    resolveBranchReadScope,
+} = require('../utils/branchAccess');
 const { writeAuditLog } = require('../utils/auditLog');
 const { getGymTimezone } = require('../utils/gymTime');
 const { signAttendanceToken, verifyAttendanceToken } = require('../utils/attendanceTokens');
@@ -22,6 +29,7 @@ const ACCESS_ALERT_DEDUP_SECONDS = Number.parseInt(process.env.ATTENDANCE_ALERT_
 const ACCESS_ALERT_ROLES = ['OWNER', 'STAFF'];
 const DEFAULT_ATTENDANCE_MODE = 'STAFF';
 const DEFAULT_GYM_RADIUS_METERS = 200;
+const DEFAULT_BRANCH_SQL = `'${DEFAULT_BRANCH_ID}'`;
 
 const METHOD_LABELS = {
     STAFF: 'staff desk',
@@ -49,6 +57,15 @@ const safeCompareSecret = (expected, provided) => {
         return false;
     }
     return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+};
+
+const getBranchFilterSql = (params, branchId, columnExpression = `COALESCE(a.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL})`) => {
+    if (!branchId) {
+        return '';
+    }
+
+    params.push(branchId);
+    return ` AND ${columnExpression} = $${params.length}`;
 };
 
 const maskRfidTagId = (value) => {
@@ -102,6 +119,7 @@ const getMemberSnapshot = async (gym_id, member_id, db = pool) => {
             m.full_name,
             m.phone,
             m.email,
+            COALESCE(m.branch_id, $3) AS branch_id,
             m.rfid_tag_id,
             m.last_visit,
             m.joining_date,
@@ -121,10 +139,20 @@ const getMemberSnapshot = async (gym_id, member_id, db = pool) => {
          ) ms_latest ON true
             WHERE m.gym_id = $1 AND m.id = $2 AND m.deleted_at IS NULL
          LIMIT 1`,
-        [gym_id, member_id]
+        [gym_id, member_id, DEFAULT_BRANCH_ID]
     );
 
     return result.rows[0] || null;
+};
+
+const ensureScopedMemberAccess = async (scope, gymId, memberId, db = pool) => {
+    const member = await getMemberSnapshot(gymId, memberId, db);
+    if (!member) {
+        return null;
+    }
+
+    ensureBranchAccess(scope, member.branch_id || DEFAULT_BRANCH_ID);
+    return member;
 };
 
 const createAttendanceError = (statusCode, payload) => {
@@ -135,6 +163,10 @@ const createAttendanceError = (statusCode, payload) => {
 };
 
 const sendAttendanceError = (res, err) => {
+    if (err instanceof BranchAccessError) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
     if (err?.statusCode && err?.payload) {
         return res.status(err.statusCode).json(err.payload);
     }
@@ -325,6 +357,8 @@ const evaluateAccessPolicy = async ({ gym_id, member, policy, allow_override, db
     return null;
 };
 
+router.use(branchSchemaMiddleware);
+
 const notifyUnknownRfidAttempt = async ({ gym_id, reader_name, tag_id }) => {
     const safeTag = String(tag_id || '').slice(-6) || 'UNKNOWN';
     const title = 'Unknown RFID Tag';
@@ -486,8 +520,8 @@ const processAttendanceCheckin = async ({
 
         const newRecord = await client.query(
             `INSERT INTO attendance
-             (gym_id, member_id, check_in_time, checkin_method, staff_user_id, checkin_status, was_override, notes, latitude, longitude)
-             VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)
+             (gym_id, member_id, check_in_time, checkin_method, staff_user_id, checkin_status, was_override, notes, latitude, longitude, branch_id)
+             VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10)
              RETURNING *`,
             [
                 gym_id,
@@ -499,6 +533,7 @@ const processAttendanceCheckin = async ({
                 notes || '',
                 latitude ? parseFloat(latitude) : null,
                 longitude ? parseFloat(longitude) : null,
+                member.branch_id || DEFAULT_BRANCH_ID,
             ]
         );
 
@@ -620,6 +655,12 @@ router.post('/checkin', auth, saasMiddleware, requirePermission('attendance:writ
     if (!member_id) return res.status(400).json({ message: "member_id is required." });
 
     try {
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const member = await ensureScopedMemberAccess(branchScope, gym_id, member_id);
+        if (!member) {
+            return res.status(404).json({ message: 'Member not found.' });
+        }
+
         const payload = await processAttendanceCheckin({
             gym_id,
             member_id,
@@ -639,7 +680,8 @@ router.post('/checkin', auth, saasMiddleware, requirePermission('attendance:writ
 router.get('/qr/member/:member_id', auth, saasMiddleware, requirePermission('attendance:write'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
-        const member = await getMemberSnapshot(gym_id, req.params.member_id);
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const member = await ensureScopedMemberAccess(branchScope, gym_id, req.params.member_id);
         if (!member) {
             return res.status(404).json({ error: 'Member not found.' });
         }
@@ -733,6 +775,12 @@ router.post('/checkin/qr', auth, saasMiddleware, requirePermission('attendance:w
         }
         if (Number(payload.gym_id) !== Number(req.user.gym_id)) {
             return res.status(403).json({ error: 'This member QR belongs to another gym.' });
+        }
+
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const member = await ensureScopedMemberAccess(branchScope, req.user.gym_id, payload.member_id);
+        if (!member) {
+            return res.status(404).json({ error: 'Member not found.' });
         }
 
         const result = await processAttendanceCheckin({
@@ -1238,8 +1286,12 @@ router.post('/rfid/event', async (req, res) => {
 router.get('/search', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const q = String(req.query.q || '').trim();
         if (!q || q.length < 2) return res.json([]);
+
+        const params = [gym_id, `%${q}%`];
+        const branchClause = getBranchFilterSql(params, branchId, `COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL})`);
 
         const result = await pool.query(
             `SELECT
@@ -1247,6 +1299,7 @@ router.get('/search', auth, saasMiddleware, requirePermission('attendance:read')
                 m.full_name,
                 m.phone,
                 m.email,
+                COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                 m.rfid_tag_id,
                 m.last_visit,
                 COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
@@ -1263,10 +1316,11 @@ router.get('/search', auth, saasMiddleware, requirePermission('attendance:read')
              ) ms_latest ON true
              WHERE m.gym_id = $1
                              AND m.deleted_at IS NULL
+                             ${branchClause}
                AND (m.full_name ILIKE $2 OR m.phone ILIKE $2 OR m.email ILIKE $2)
              ORDER BY m.full_name ASC
              LIMIT 12`,
-            [gym_id, `%${q}%`]
+                        params
         );
 
         res.json(result.rows);
@@ -1279,7 +1333,10 @@ router.get('/search', auth, saasMiddleware, requirePermission('attendance:read')
 // --- 2. TODAY'S ATTENDANCE LIST ---
 router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, req.user.gym_id);
+        const params = [req.user.gym_id, gymTimezone];
+        const branchClause = getBranchFilterSql(params, branchId);
         const list = await pool.query(
             `WITH day_bounds AS (
                 SELECT
@@ -1304,10 +1361,11 @@ router.get('/today', auth, saasMiddleware, requirePermission('attendance:read'),
              WHERE a.gym_id = $1
                AND a.deleted_at IS NULL
                AND m.deleted_at IS NULL
+                             ${branchClause}
                AND a.check_in_time >= db.day_start_utc
                AND a.check_in_time < db.day_end_utc
              ORDER BY a.check_in_time DESC`,
-            [req.user.gym_id, gymTimezone]
+                        params
         );
         res.json(list.rows);
     } catch (err) {
@@ -1322,6 +1380,11 @@ router.get('/history/:member_id', auth, saasMiddleware, requirePermission('atten
     if (!member_id || member_id === 'undefined') return res.json([]);
 
     try {
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const member = await ensureScopedMemberAccess(branchScope, req.user.gym_id, member_id);
+        if (!member) {
+            return res.json([]);
+        }
         const gymTimezone = await getGymTimezone(pool, req.user.gym_id);
         const history = await pool.query(
             `SELECT
@@ -1348,7 +1411,10 @@ router.get('/history/:member_id', auth, saasMiddleware, requirePermission('atten
 router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     const gym_id = req.user.gym_id;
     try {
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, gym_id);
+        const params = [gym_id, gymTimezone];
+        const branchClause = getBranchFilterSql(params, branchId, `COALESCE(a.branch_id, ${DEFAULT_BRANCH_SQL})`);
         const result = await pool.query(
             `WITH window_bounds AS (
                 SELECT
@@ -1362,11 +1428,12 @@ router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'
              CROSS JOIN window_bounds wb
              WHERE a.gym_id = $1
                AND a.deleted_at IS NULL
+                             ${branchClause}
                AND a.check_in_time >= wb.range_start_utc
                AND a.check_in_time < wb.range_end_utc
              GROUP BY EXTRACT(HOUR FROM timezone($2, a.check_in_time))
              ORDER BY hour ASC`,
-            [gym_id, gymTimezone]
+                        params
         );
         res.json(result.rows);
     } catch (err) {
@@ -1379,7 +1446,12 @@ router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'
 router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, gym_id);
+        const todayParams = [gym_id, gymTimezone];
+        const todayBranchClause = getBranchFilterSql(todayParams, branchId, `COALESCE(branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const activeParams = [gym_id, gymTimezone];
+        const activeBranchClause = getBranchFilterSql(activeParams, branchId, `COALESCE(a.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL})`);
 
         const [today, yesterday, activeToday, peakHour] = await Promise.all([
             pool.query(
@@ -1387,38 +1459,43 @@ router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read
                  FROM attendance
                  WHERE gym_id = $1
                    AND deleted_at IS NULL
+                   ${todayBranchClause}
                    AND timezone($2, check_in_time)::date = timezone($2, NOW())::date`,
-                [gym_id, gymTimezone]
+                todayParams
             ),
             pool.query(
                 `SELECT COUNT(*)::INTEGER AS count
                  FROM attendance
                  WHERE gym_id = $1
                    AND deleted_at IS NULL
+                   ${todayBranchClause}
                    AND timezone($2, check_in_time)::date = (timezone($2, NOW())::date - 1)`,
-                [gym_id, gymTimezone]
+                todayParams
             ),
             pool.query(
                 `SELECT COUNT(DISTINCT a.member_id)::INTEGER AS count
                  FROM attendance a
+                 JOIN members m ON m.id = a.member_id AND m.gym_id = a.gym_id AND m.deleted_at IS NULL
                  JOIN memberships ms ON ms.member_id = a.member_id AND ms.gym_id = a.gym_id
                  WHERE a.gym_id = $1
-                         AND a.deleted_at IS NULL
-                         AND ms.deleted_at IS NULL
+                   AND a.deleted_at IS NULL
+                   AND ms.deleted_at IS NULL
+                   ${activeBranchClause}
                    AND timezone($2, a.check_in_time)::date = timezone($2, NOW())::date
                    AND ms.status = 'ACTIVE'`,
-                [gym_id, gymTimezone]
+                activeParams
             ),
             pool.query(
                 `SELECT EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour, COUNT(*)::INTEGER AS count
                  FROM attendance
                  WHERE gym_id = $1
                    AND deleted_at IS NULL
+                   ${todayBranchClause}
                    AND timezone($2, check_in_time)::date = timezone($2, NOW())::date
                  GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
                  ORDER BY count DESC
                  LIMIT 1`,
-                [gym_id, gymTimezone]
+                todayParams
             )
         ]);
 
@@ -1440,7 +1517,10 @@ router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read
 router.get('/feed', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+        const params = [gym_id, limit];
+        const branchClause = getBranchFilterSql(params, branchId);
 
         const result = await pool.query(
             `SELECT
@@ -1449,6 +1529,7 @@ router.get('/feed', auth, saasMiddleware, requirePermission('attendance:read'), 
                 a.checkin_method,
                 a.checkin_status,
                 a.was_override,
+                COALESCE(a.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                 m.id AS member_id,
                 m.full_name,
                 m.profile_pic,
@@ -1457,11 +1538,12 @@ router.get('/feed', auth, saasMiddleware, requirePermission('attendance:read'), 
              JOIN members m ON m.id = a.member_id
              LEFT JOIN users u ON u.id = a.staff_user_id
              WHERE a.gym_id = $1
-                             AND a.deleted_at IS NULL
-                             AND m.deleted_at IS NULL
+               AND a.deleted_at IS NULL
+               AND m.deleted_at IS NULL
+               ${branchClause}
              ORDER BY a.check_in_time DESC
              LIMIT $2`,
-            [gym_id, limit]
+            params
         );
 
         res.json(result.rows);
@@ -1475,6 +1557,7 @@ router.get('/feed', auth, saasMiddleware, requirePermission('attendance:read'), 
 router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, gym_id);
         const range = String(req.query.range || 'today').toLowerCase();
         const from = req.query.from ? String(req.query.from) : null;
@@ -1494,6 +1577,8 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
             dateClause = `timezone($2, a.check_in_time)::date BETWEEN $3::date AND $4::date`;
         }
 
+        const branchClause = getBranchFilterSql(params, branchId);
+
         const query = `
             SELECT
                 a.id,
@@ -1501,6 +1586,7 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
                 a.checkin_method,
                 a.checkin_status,
                 a.was_override,
+                COALESCE(a.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                 m.id AS member_id,
                 m.full_name AS member_name,
                 m.phone,
@@ -1518,7 +1604,7 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
                 ORDER BY ms.end_date DESC NULLS LAST
                 LIMIT 1
             ) ms_latest ON true
-            WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}
+            WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}${branchClause}
             ORDER BY a.check_in_time DESC
             ${paginate ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}` : 'LIMIT 500'}
         `;
@@ -1533,7 +1619,7 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
             `SELECT COUNT(*)::INTEGER AS total
              FROM attendance a
              JOIN members m ON m.id = a.member_id
-             WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}`,
+             WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}${branchClause}`,
             params
         );
 
@@ -1559,8 +1645,16 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
 router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, gym_id);
         const days = Math.min(Math.max(parseInt(req.query.days || '90', 10), 7), 365);
+        const params = [gym_id, gymTimezone, days];
+        let branchClause = '';
+
+        if (branchId) {
+            params.push(branchId);
+            branchClause = ` AND COALESCE(branch_id, ${DEFAULT_BRANCH_SQL}) = $4`;
+        }
 
         const result = await pool.query(
             `WITH date_series AS (
@@ -1576,12 +1670,13 @@ router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'
                 SELECT timezone($2, check_in_time)::date AS d, COUNT(*)::INTEGER AS count
                 FROM attendance
                 WHERE gym_id = $1
-                                    AND deleted_at IS NULL
+                  AND deleted_at IS NULL
+                  ${branchClause}
                   AND timezone($2, check_in_time)::date >= timezone($2, NOW())::date - ($3::int - 1)
                 GROUP BY timezone($2, check_in_time)::date
             ) a ON a.d = ds.d
             ORDER BY ds.d ASC`,
-            [gym_id, gymTimezone, days]
+            params
         );
 
         res.json(result.rows);
@@ -1595,11 +1690,14 @@ router.get('/heatmap', auth, saasMiddleware, requirePermission('attendance:read'
 router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, gym_id);
         const todayOnly = req.query.today === 'true';
 
         let result;
         if (todayOnly) {
+            const params = [gym_id, gymTimezone];
+            const branchClause = getBranchFilterSql(params, branchId, `COALESCE(branch_id, ${DEFAULT_BRANCH_SQL})`);
             result = await pool.query(
                 `SELECT
                     EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
@@ -1607,13 +1705,22 @@ router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:re
                  FROM attendance
                  WHERE gym_id = $1
                    AND deleted_at IS NULL
+                   ${branchClause}
                    AND timezone($2, check_in_time)::date = timezone($2, NOW())::date
                  GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
                  ORDER BY hour ASC`,
-                [gym_id, gymTimezone]
+                params
             );
         } else {
             const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 1), 90);
+            const params = [gym_id, gymTimezone, days];
+            let branchClause = '';
+
+            if (branchId) {
+                params.push(branchId);
+                branchClause = ` AND COALESCE(branch_id, ${DEFAULT_BRANCH_SQL}) = $4`;
+            }
+
             result = await pool.query(
                 `SELECT
                     EXTRACT(HOUR FROM timezone($2, check_in_time))::INTEGER AS hour,
@@ -1621,10 +1728,11 @@ router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:re
                  FROM attendance
                  WHERE gym_id = $1
                    AND deleted_at IS NULL
+                   ${branchClause}
                    AND check_in_time >= NOW() - ($3::int || ' day')::interval
                  GROUP BY EXTRACT(HOUR FROM timezone($2, check_in_time))
                  ORDER BY hour ASC`,
-                [gym_id, gymTimezone, days]
+                params
             );
         }
 
@@ -1639,6 +1747,7 @@ router.get('/peak-hours', auth, saasMiddleware, requirePermission('attendance:re
 router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const days = Math.min(Math.max(parseInt(req.query.days || '7', 10), 1), 120);
         const inactiveBucket = (() => {
             if (days <= 7) {
@@ -1650,6 +1759,9 @@ router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read
             return { minDays: 15, maxDays: null };
         })();
 
+        const params = [gym_id, inactiveBucket.minDays, inactiveBucket.maxDays];
+        const branchClause = getBranchFilterSql(params, branchId, `COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL})`);
+
         const result = await pool.query(
             `WITH inactive_pool AS (
                 SELECT
@@ -1657,6 +1769,7 @@ router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read
                     m.full_name,
                     m.phone,
                     m.email,
+                    COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                     m.last_visit,
                     COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
                     ms_latest.plan_name,
@@ -1675,6 +1788,7 @@ router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read
                 ) ms_latest ON true
                 WHERE m.gym_id = $1
                   AND m.deleted_at IS NULL
+                                    ${branchClause}
                   AND COALESCE(ms_latest.status, 'UNPAID') = 'ACTIVE'
             )
             SELECT *
@@ -1683,7 +1797,7 @@ router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read
               AND ($3::int IS NULL OR days_inactive <= $3)
             ORDER BY days_inactive DESC, full_name ASC
             LIMIT 100`,
-            [gym_id, inactiveBucket.minDays, inactiveBucket.maxDays]
+                        params
         );
 
         res.json(result.rows);
@@ -1697,14 +1811,23 @@ router.get('/inactive', auth, saasMiddleware, requirePermission('attendance:read
 router.get('/leaderboard', auth, saasMiddleware, requirePermission('attendance:read'), async (req, res) => {
     try {
         const gym_id = req.user.gym_id;
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const days = Math.min(Math.max(parseInt(req.query.days || '30', 10), 7), 180);
         const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10), 3), 50);
+        const params = [gym_id, days, limit];
+        const branchClause = branchId
+            ? (() => {
+                params.push(branchId);
+                return ` AND COALESCE(a.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL}) = $4`;
+            })()
+            : '';
 
         const result = await pool.query(
             `SELECT
                 m.id,
                 m.full_name,
                 m.profile_pic,
+                COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
                 COUNT(a.id)::INTEGER AS visits,
                 MAX(a.check_in_time) AS last_check_in,
                 ROUND((COUNT(a.id)::decimal / GREATEST($2::decimal / 7, 1)), 2) AS avg_visits_per_week
@@ -1720,12 +1843,13 @@ router.get('/leaderboard', auth, saasMiddleware, requirePermission('attendance:r
              WHERE a.gym_id = $1
                AND a.deleted_at IS NULL
                AND m.deleted_at IS NULL
+                             ${branchClause}
                AND a.check_in_time >= NOW() - ($2::int || ' day')::interval
                AND COALESCE(ms_latest.status, 'UNPAID') = 'ACTIVE'
              GROUP BY m.id, m.full_name, m.profile_pic
              ORDER BY visits DESC, last_check_in DESC
              LIMIT $3`,
-            [gym_id, days, limit]
+                        params
         );
 
         res.json(result.rows);

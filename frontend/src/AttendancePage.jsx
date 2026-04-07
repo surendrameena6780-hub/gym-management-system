@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import PageLoader from './PageLoader';
+import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import PaginationControls from './components/PaginationControls';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
 import { QRCodeCanvas } from 'qrcode.react';
+import { getBranchLabel, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import {
@@ -142,6 +144,13 @@ const hasPermission = (user, permission) => {
 
 function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSection = null, onSectionHandled }) {
   const { token, toast, showConfirm, currentUser = null } = appRuntime;
+  const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
+  const defaultBranchId = getDefaultBranchId(branchDirectory);
+  const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const branchQueryParams = useMemo(() => (branchScopeValue ? { branch_id: branchScopeValue } : {}), [branchScopeValue]);
+  const showBranchMeta = branchDirectory.length > 1;
+  const getAttendanceBranchLabel = useCallback((record) => getBranchLabel(branchDirectory, record?.branch_id || branchScopeValue || defaultBranchId, { allLabel: 'Main Branch' }), [branchDirectory, branchScopeValue, defaultBranchId]);
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
@@ -380,6 +389,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         checkin_method: methodUsed,
         staff_name: detail.staff_name || currentUser?.full_name || currentUser?.name || null,
         was_override: Boolean(detail.was_override),
+        branch_id: detail.branch_id || member.branch_id || branchScopeValue || defaultBranchId,
       }, ...prev].slice(0, 25));
     }
 
@@ -391,7 +401,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
     refreshAttendanceViewsRef.current().catch(() => {});
     window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'attendance' } }));
-  }, [checkinMethod, currentUser?.full_name, currentUser?.name, toast]);
+  }, [branchScopeValue, checkinMethod, currentUser?.full_name, currentUser?.name, defaultBranchId, toast]);
 
   const copyText = async (value, successMessage, errorMessage) => {
     if (!value || typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -521,7 +531,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
     setBusyQrAction(true);
     try {
-      const res = await axios.get(`/api/attendance/qr/member/${selectedMember.id}`, headers);
+      const res = await axios.get(`/api/attendance/qr/member/${selectedMember.id}`, { ...headers, params: { branch_id: selectedMember.branch_id || branchScopeValue } });
       const payload = asObject(unwrapApiData(res.data), {});
       setQrModalState({
         type: 'member',
@@ -542,7 +552,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   const openGymQr = async () => {
     setBusyQrAction(true);
     try {
-      const res = await axios.get('/api/attendance/qr/gym', headers);
+      const res = await axios.get('/api/attendance/qr/gym', { ...headers, params: branchQueryParams });
       const payload = asObject(unwrapApiData(res.data), {});
       setQrModalState({
         type: 'gym',
@@ -566,6 +576,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       const res = await axios.post('/api/attendance/checkin/qr', {
         token: decodedText,
         notes: checkinNote,
+        branch_id: branchScopeValue,
       }, headers);
       handleCheckinSuccess(unwrapApiData(res.data), null, 'QR');
     } catch (err) {
@@ -587,13 +598,13 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     } finally {
       setBusyQrAction(false);
     }
-  }, [checkinNote, headers, handleCheckinSuccess, selectedMember, toast]);
+  }, [branchScopeValue, checkinNote, headers, handleCheckinSuccess, selectedMember, toast]);
 
   const loadOverviewBundle = useCallback(async () => {
     const [overviewRes, feedRes, heatmapRes, modeRes] = await Promise.all([
-      axios.get('/api/attendance/overview', headers),
-      axios.get('/api/attendance/feed?limit=25', headers),
-      axios.get('/api/attendance/heatmap?days=84', headers),
+      axios.get('/api/attendance/overview', { ...headers, params: branchQueryParams }),
+      axios.get('/api/attendance/feed', { ...headers, params: { ...branchQueryParams, limit: 25 } }),
+      axios.get('/api/attendance/heatmap', { ...headers, params: { ...branchQueryParams, days: 84 } }),
       axios.get('/api/attendance/mode', headers),
     ]);
 
@@ -611,22 +622,24 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       gym_radius_meters: modeData.gym_radius_meters || DEFAULT_GYM_RADIUS_METERS,
       allow_expired_checkin: Boolean(modeData.allow_expired_checkin),
     }));
-  }, [headers]);
+  }, [branchQueryParams, headers]);
 
   loadOverviewBundleRef.current = loadOverviewBundle;
 
   const loadPeakHours = useCallback(async (period) => {
-    const url = period === 'today'
-      ? '/api/attendance/peak-hours?today=true'
-      : `/api/attendance/peak-hours?days=${period}`;
-    const res = await axios.get(url, headers);
+    const res = await axios.get('/api/attendance/peak-hours', {
+      ...headers,
+      params: period === 'today'
+        ? { ...branchQueryParams, today: true }
+        : { ...branchQueryParams, days: period },
+    });
     setPeakHours(
       asArray(unwrapApiData(res.data)).map((item) => ({
         hourLabel: `${String(item.hour).padStart(2, '0')}:00`,
         count: item.count || 0,
       }))
     );
-  }, [headers]);
+  }, [branchQueryParams, headers]);
 
   const loadRecords = useCallback(async () => {
     const res = await axios.get('/api/attendance/records', {
@@ -636,6 +649,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         page: recordsPagination.page,
         limit: recordsPagination.limit,
         range,
+        ...branchQueryParams,
         from: range === 'custom' && fromDate ? fromDate : undefined,
         to: range === 'custom' && toDate ? toDate : undefined,
       },
@@ -645,24 +659,24 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       ...prev,
       ...(res.data?.pagination || {}),
     }));
-  }, [fromDate, headers, range, recordsPagination.limit, recordsPagination.page, toDate]);
+  }, [branchQueryParams, fromDate, headers, range, recordsPagination.limit, recordsPagination.page, toDate]);
 
   const loadInactive = useCallback(async (days = inactiveDays) => {
     const requestId = inactiveRequestSeqRef.current + 1;
     inactiveRequestSeqRef.current = requestId;
 
-    const res = await axios.get(`/api/attendance/inactive?days=${days}`, headers);
+    const res = await axios.get('/api/attendance/inactive', { ...headers, params: { ...branchQueryParams, days } });
     if (inactiveRequestSeqRef.current !== requestId) {
       return;
     }
 
     setInactiveMembers(asArray(unwrapApiData(res.data)));
-  }, [headers, inactiveDays]);
+  }, [branchQueryParams, headers, inactiveDays]);
 
   const loadLeaderboard = useCallback(async () => {
-    const res = await axios.get('/api/attendance/leaderboard?days=30&limit=6', headers);
+    const res = await axios.get('/api/attendance/leaderboard', { ...headers, params: { ...branchQueryParams, days: 30, limit: 6 } });
     setLeaderboard(asArray(unwrapApiData(res.data)));
-  }, [headers]);
+  }, [branchQueryParams, headers]);
 
   const refreshAttendanceViews = useCallback(() => Promise.all([
     loadOverviewBundle(),
@@ -792,7 +806,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
     const timer = setTimeout(async () => {
       try {
-        const res = await axios.get(`/api/attendance/search?q=${encodeURIComponent(q)}`, headers);
+        const res = await axios.get('/api/attendance/search', { ...headers, params: { ...branchQueryParams, q } });
         setSearchResults(asArray(unwrapApiData(res.data)));
       } catch (_err) {
         setSearchResults([]);
@@ -800,7 +814,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     }, 220);
 
     return () => clearTimeout(timer);
-  }, [headers, searchText, token]);
+  }, [branchQueryParams, headers, searchText, token]);
 
   const saveModeSettings = async () => {
     if (!isOwner) {
@@ -834,6 +848,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         method: 'STAFF',
         notes: checkinNote,
         allow_override: allowOverride,
+        branch_id: selectedMember.branch_id || branchScopeValue,
       };
 
       const res = await axios.post('/api/attendance/checkin', checkinPayload, headers);
@@ -982,6 +997,16 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         </div>
       </div>
 
+      <OperationsBranchScopeBar
+        branchDirectory={branchDirectory}
+        branchId={operationsBranchId}
+        onChange={appRuntime.setOperationsBranchId}
+        currentUser={currentUser}
+        loading={appRuntime.branchScopeLoading}
+        title="Attendance scope"
+        description="Filter search, check-ins, live feed, and retention views by branch without leaving the page."
+      />
+
       {/* ── Attendance Hub Tab Bar ── */}
       <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5 w-fit">
         <button onClick={() => setAttendanceTab('checkin')} className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${attendanceTab === 'checkin' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Check-in Ops</button>
@@ -1103,7 +1128,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                   className="w-full text-left px-3 py-2.5 hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
                 >
                   <p className="text-sm font-bold text-slate-900">{m.full_name}</p>
-                  <p className="text-xs text-slate-500 font-medium">{m.phone} · {m.plan_name || 'No plan'}</p>
+                  <p className="text-xs text-slate-500 font-medium">{m.phone} · {m.plan_name || 'No plan'}{showBranchMeta ? ` · ${getAttendanceBranchLabel(m)}` : ''}</p>
                 </button>
               ))}
             </div>
@@ -1165,6 +1190,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
               <div className="space-y-1.5 text-xs font-semibold text-slate-600">
                 <p><span className="text-slate-400">Name:</span> {selectedMember.full_name}</p>
                 <p><span className="text-slate-400">Plan:</span> {selectedMember.plan_name || 'No active plan'}</p>
+                {showBranchMeta ? <p><span className="text-slate-400">Branch:</span> {getAttendanceBranchLabel(selectedMember)}</p> : null}
                 <p><span className="text-slate-400">Status:</span> <span className={`px-1.5 py-0.5 rounded-full ml-1 ${statusBadge(selectedMember.membership_status)}`}>{selectedMember.membership_status || 'UNPAID'}</span></p>
                 <p><span className="text-slate-400">Last Visit:</span> {selectedMember.last_visit ? formatDateTime(selectedMember.last_visit) : 'Never'}</p>
               </div>
@@ -1210,7 +1236,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                   <div key={entry.id} className="flex items-center justify-between border border-slate-100 rounded-xl p-3 bg-white">
                     <div className="min-w-0">
                       <p className="text-sm font-black text-slate-900 truncate">{entry.full_name}</p>
-                      <p className="text-xs font-medium text-slate-500">{formatDateTime(entry.check_in_time)} {entry.staff_name ? `· Staff: ${entry.staff_name}` : ''}</p>
+                      <p className="text-xs font-medium text-slate-500">{formatDateTime(entry.check_in_time)} {entry.staff_name ? `· Staff: ${entry.staff_name}` : ''}{showBranchMeta ? ` · ${getAttendanceBranchLabel(entry)}` : ''}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-3">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-black ${methodBadge(entry.checkin_method)}`}>{entry.checkin_method}</span>
@@ -1258,7 +1284,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                     ) : (
                       records.map((row) => (
                         <tr key={row.id} className="border-b border-slate-50">
-                          <td className="py-3 px-2 font-bold text-slate-900">{row.member_name}</td>
+                          <td className="py-3 px-2 font-bold text-slate-900">{row.member_name}{showBranchMeta ? <div className="text-[11px] font-semibold text-slate-400 mt-1">{getAttendanceBranchLabel(row)}</div> : null}</td>
                           <td className="py-3 px-2 font-semibold text-slate-600">{formatDateTime(row.check_in_time)}</td>
                           <td className="py-3 px-2 font-semibold text-slate-700">{row.plan_name || '—'}</td>
                           <td className="py-3 px-2"><span className={`px-2 py-1 rounded-full text-[10px] font-black ${statusBadge(row.membership_status)}`}>{row.membership_status || 'UNPAID'}</span></td>
@@ -1399,7 +1425,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
               <div key={m.id} className="p-3 rounded-xl border border-slate-100 bg-white flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-black text-slate-900 truncate">{m.full_name}</p>
-                  <p className="text-xs text-slate-500 font-medium truncate">{m.plan_name || 'No plan'} · {m.days_inactive} days inactive</p>
+                  <p className="text-xs text-slate-500 font-medium truncate">{m.plan_name || 'No plan'} · {m.days_inactive} days inactive{showBranchMeta ? ` · ${getAttendanceBranchLabel(m)}` : ''}</p>
                 </div>
                 <button
                   onClick={() => sendReminder(m)}
@@ -1434,7 +1460,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                       </span>
                       <div className="min-w-0">
                         <p className="text-sm font-black text-slate-900 truncate">{item.full_name}</p>
-                        <p className="text-xs text-slate-500 font-semibold">Last visit: {formatDateTime(item.last_check_in)}</p>
+                        <p className="text-xs text-slate-500 font-semibold">Last visit: {formatDateTime(item.last_check_in)}{showBranchMeta ? ` · ${getAttendanceBranchLabel(item)}` : ''}</p>
                       </div>
                     </div>
                     <div className="text-right shrink-0">

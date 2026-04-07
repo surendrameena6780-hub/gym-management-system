@@ -1,4 +1,14 @@
-/* No @tailwind rules here - we are using the CDN in index.html instead */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Inter, sans-serif;
+  --breakpoint-desktop: 1100px;
+  --color-slate-50: #f8fafc;
+  --color-slate-900: #0f172a;
+  --color-emerald-500: #10b981;
+}
+
+/* Tailwind is compiled through Vite. Keep this file for app layout variables and custom component styling. */
 html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
