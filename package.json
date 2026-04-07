@@ -8,6 +8,7 @@
     "dev:all": "node scripts/dev-all.js",
     "backup:db": "node scripts/backup-db.js",
     "smoke:backend": "node scripts/test-backend.js --runtime",
+    "smoke:production": "node scripts/smoke-production.js",
     "seed:bot-members": "node scripts/seed-bot-members.js",
     "clean:bot-members": "node scripts/remove-bot-members.js",
     "rfid:simulate": "node scripts/rfid-bridge-simulator.js",

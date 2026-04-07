@@ -5,12 +5,6 @@ const defaultFallback = (
   <div className="h-full w-full rounded-2xl border border-slate-100 bg-slate-50" />
 );
 
-const hasPositiveSize = (element) => {
-  if (!element) return false;
-  const rect = element.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
-};
-
 function SafeResponsiveContainer({
   children,
   fallback = null,
