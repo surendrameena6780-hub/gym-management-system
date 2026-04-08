@@ -508,6 +508,9 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
         const payoutNotes = nextStatus === 'PAID'
             ? ensureTrimmedString(req.body?.payout_notes, { field: 'payout_notes', max: 1000 })
             : '';
+                const shouldMarkApproved = ['APPROVED', 'PAID'].includes(nextStatus);
+                const shouldClearApproval = nextStatus === 'REJECTED';
+                const shouldMarkPaid = nextStatus === 'PAID';
 
         const result = await pool.query(
             `UPDATE payroll_entries
@@ -518,31 +521,32 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
                  notes = $5,
                  status = $6,
                  approved_at = CASE
-                    WHEN $6 IN ('APPROVED', 'PAID') THEN COALESCE(approved_at, NOW())
-                    WHEN $6 = 'REJECTED' THEN NULL
+                          WHEN $7 THEN COALESCE(approved_at, NOW())
+                          WHEN $8 THEN NULL
                     ELSE approved_at
                  END,
                  approved_by = CASE
-                    WHEN $6 IN ('APPROVED', 'PAID') THEN COALESCE(approved_by, $7)
-                    WHEN $6 = 'REJECTED' THEN NULL
+                          WHEN $7 THEN COALESCE(approved_by, $9)
+                          WHEN $8 THEN NULL
                     ELSE approved_by
                  END,
                  paid_at = CASE
-                    WHEN $6 = 'PAID' THEN COALESCE(paid_at, NOW())
+                          WHEN $10 THEN COALESCE(paid_at, NOW())
                     ELSE NULL
                  END,
                  paid_by = CASE
-                    WHEN $6 = 'PAID' THEN $7
+                          WHEN $10 THEN $9
                     ELSE NULL
                  END,
-                 payout_mode = CASE WHEN $6 = 'PAID' THEN $8 ELSE '' END,
-                 payout_reference = CASE WHEN $6 = 'PAID' THEN $9 ELSE '' END,
-                 payout_notes = CASE WHEN $6 = 'PAID' THEN $10 ELSE '' END,
-                 rejection_reason = CASE WHEN $6 = 'REJECTED' THEN $11 ELSE '' END
-             WHERE id = $12 AND gym_id = $13
+                      payout_mode = CASE WHEN $10 THEN $11 ELSE '' END,
+                      payout_reference = CASE WHEN $10 THEN $12 ELSE '' END,
+                      payout_notes = CASE WHEN $10 THEN $13 ELSE '' END,
+                      rejection_reason = CASE WHEN $8 THEN $14 ELSE '' END
+                 WHERE id = $15 AND gym_id = $16
              RETURNING *`,
-            [normalizedBasePay, normalizedCommission, normalizedDeductions, net, normalizedNotes,
-             nextStatus, req.user.id, payoutMode, payoutReference, payoutNotes, rejectionReason, id, gid]);
+                [normalizedBasePay, normalizedCommission, normalizedDeductions, net, normalizedNotes,
+                 nextStatus, shouldMarkApproved, shouldClearApproval, req.user.id, shouldMarkPaid,
+                 payoutMode, payoutReference, payoutNotes, rejectionReason, id, gid]);
         return res.json({
             ...result.rows[0],
             branch_id: existing.branch_id || DEFAULT_BRANCH_ID,
