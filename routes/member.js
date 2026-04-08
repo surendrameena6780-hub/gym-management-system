@@ -24,6 +24,8 @@ const {
     createCollectionPaymentLink,
     createCollectionRazorpayClient,
     resolvePaidPaymentLinkResult,
+    serializeCollectionPaymentLink,
+    fetchCollectionPaymentLinkSafely,
     applyDueCollection,
 } = require('./payments');
 const {
@@ -929,18 +931,32 @@ router.post('/payments/dues/:paymentId/payment-link-status', async (req, res) =>
         }
 
         const razorpayClient = createCollectionRazorpayClient(collectionSetup.data.razorpay);
-        const paymentLink = await razorpayClient.paymentLink.fetch(paymentLinkId);
+        const paymentLinkFetch = await fetchCollectionPaymentLinkSafely(razorpayClient, paymentLinkId);
+        if (!paymentLinkFetch.ok) {
+            return res.json({
+                paid: false,
+                status: 'NOT_FOUND',
+                payment_link: {
+                    id: paymentLinkId,
+                    short_url: '',
+                    status: 'not_found',
+                    environment: collectionSetup.data.razorpay.environment,
+                    gateway_source: collectionSetup.data.razorpay.source,
+                },
+            });
+        }
+
+        const paymentLink = paymentLinkFetch.paymentLink;
         const settledPayment = await resolvePaidPaymentLinkResult(razorpayClient, paymentLink);
 
         if (!settledPayment) {
             return res.json({
                 paid: false,
                 status: String(paymentLink.status || 'created').toUpperCase(),
-                payment_link: {
-                    id: paymentLink.id,
-                    short_url: paymentLink.short_url,
-                    status: paymentLink.status,
-                },
+                payment_link: serializeCollectionPaymentLink(paymentLink, {
+                    environment: collectionSetup.data.razorpay.environment,
+                    gatewaySource: collectionSetup.data.razorpay.source,
+                }),
             });
         }
 
@@ -1149,18 +1165,32 @@ router.post('/membership/renew/payment-link-status', async (req, res) => {
         }
 
         const razorpayClient = createCollectionRazorpayClient(collectionSetup.data.razorpay);
-        const paymentLink = await razorpayClient.paymentLink.fetch(paymentLinkId);
+        const paymentLinkFetch = await fetchCollectionPaymentLinkSafely(razorpayClient, paymentLinkId);
+        if (!paymentLinkFetch.ok) {
+            return res.json({
+                paid: false,
+                status: 'NOT_FOUND',
+                payment_link: {
+                    id: paymentLinkId,
+                    short_url: '',
+                    status: 'not_found',
+                    environment: collectionSetup.data.razorpay.environment,
+                    gateway_source: collectionSetup.data.razorpay.source,
+                },
+            });
+        }
+
+        const paymentLink = paymentLinkFetch.paymentLink;
         const settledPayment = await resolvePaidPaymentLinkResult(razorpayClient, paymentLink);
 
         if (!settledPayment) {
             return res.json({
                 paid: false,
                 status: String(paymentLink.status || 'created').toUpperCase(),
-                payment_link: {
-                    id: paymentLink.id,
-                    short_url: paymentLink.short_url,
-                    status: paymentLink.status,
-                },
+                payment_link: serializeCollectionPaymentLink(paymentLink, {
+                    environment: collectionSetup.data.razorpay.environment,
+                    gatewaySource: collectionSetup.data.razorpay.source,
+                }),
             });
         }
 

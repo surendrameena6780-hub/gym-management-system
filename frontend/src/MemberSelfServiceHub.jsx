@@ -37,6 +37,28 @@ const TABS = [
   { key: 'profile', label: 'Profile', Icon: User },
 ];
 
+const TERMINAL_RAZORPAY_LINK_STATUSES = new Set(['PAID', 'EXPIRED', 'CANCELLED', 'FAILED', 'NOT_FOUND']);
+
+const getRazorpayLinkStatus = (paymentLink) => String(paymentLink?.status || '').trim().toUpperCase();
+
+const canReuseRazorpayLink = (paymentLink) => Boolean(paymentLink?.id) && !TERMINAL_RAZORPAY_LINK_STATUSES.has(getRazorpayLinkStatus(paymentLink));
+
+const mergeMemberPaymentLinkContext = (currentContext, nextPayload) => {
+  const nextPaymentLink = nextPayload?.payment_link;
+  if (!nextPaymentLink) return currentContext;
+
+  return {
+    ...(currentContext || {}),
+    razorpay: {
+      ...(currentContext?.razorpay || {}),
+      payment_link: {
+        ...(currentContext?.razorpay?.payment_link || {}),
+        ...nextPaymentLink,
+      },
+    },
+  };
+};
+
 const formatDate = (value) => {
   if (!value) return '—';
   const rawValue = typeof value === 'string' && !value.includes('T') ? `${value}T00:00:00` : value;
@@ -479,7 +501,24 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
         payment_link_id: paymentLinkId,
       }, memberHeaders);
 
+      if (res.data?.payment_link) {
+        setRenewalContext((current) => mergeMemberPaymentLinkContext(current, res.data));
+      }
+
       if (!res.data?.paid) {
+        const latestLinkStatus = getRazorpayLinkStatus(res.data?.payment_link || renewalContext?.razorpay?.payment_link);
+        if (TERMINAL_RAZORPAY_LINK_STATUSES.has(latestLinkStatus) && latestLinkStatus !== 'PAID') {
+          if (manual) {
+            setNotice({
+              type: 'warning',
+              message: latestLinkStatus === 'NOT_FOUND'
+                ? 'This Razorpay link is no longer available. Start the payment again.'
+                : `This Razorpay link is ${latestLinkStatus.toLowerCase()}. Start the payment again.`,
+            });
+          }
+          return;
+        }
+
         if (manual) {
           setNotice({ type: 'warning', message: 'Payment is still pending on Razorpay.' });
         }
@@ -490,7 +529,9 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
       setNotice({ type: 'success', message: res.data?.message || 'Membership renewed successfully.' });
       await loadDashboard({ silent: true });
     } catch (err) {
-      setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not verify the renewal payment.' });
+      if (manual) {
+        setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not verify the renewal payment.' });
+      }
     } finally {
       setRenewalBusy(false);
     }
@@ -531,7 +572,24 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
         amount: dueContext?.amount,
       }, memberHeaders);
 
+      if (res.data?.payment_link) {
+        setDueContext((current) => mergeMemberPaymentLinkContext(current, res.data));
+      }
+
       if (!res.data?.paid) {
+        const latestLinkStatus = getRazorpayLinkStatus(res.data?.payment_link || dueContext?.razorpay?.payment_link);
+        if (TERMINAL_RAZORPAY_LINK_STATUSES.has(latestLinkStatus) && latestLinkStatus !== 'PAID') {
+          if (manual) {
+            setNotice({
+              type: 'warning',
+              message: latestLinkStatus === 'NOT_FOUND'
+                ? 'This Razorpay link is no longer available. Start the payment again.'
+                : `This Razorpay link is ${latestLinkStatus.toLowerCase()}. Start the payment again.`,
+            });
+          }
+          return;
+        }
+
         if (manual) {
           setNotice({ type: 'warning', message: 'Payment is still pending on Razorpay.' });
         }
@@ -542,7 +600,9 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
       setNotice({ type: 'success', message: res.data?.message || 'Pending due cleared successfully.' });
       await refreshPaymentsState();
     } catch (err) {
-      setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not verify the due payment.' });
+      if (manual) {
+        setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not verify the due payment.' });
+      }
     } finally {
       setDueBusyKey('');
     }
@@ -654,7 +714,7 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
 
   useEffect(() => {
     const paymentLinkId = renewalContext?.razorpay?.payment_link?.id;
-    if (!paymentLinkId) return undefined;
+    if (!paymentLinkId || !canReuseRazorpayLink(renewalContext?.razorpay?.payment_link)) return undefined;
 
     const intervalId = window.setInterval(() => {
       handleCheckRenewalStatus();
@@ -667,7 +727,7 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
 
   useEffect(() => {
     const paymentLinkId = dueContext?.razorpay?.payment_link?.id;
-    if (!paymentLinkId) return undefined;
+    if (!paymentLinkId || !canReuseRazorpayLink(dueContext?.razorpay?.payment_link)) return undefined;
 
     const intervalId = window.setInterval(() => {
       handleCheckDueStatus();

@@ -236,10 +236,13 @@ const PaymentModal = ({ controller }) => {
         return aPriority - bPriority || (a.full_name || '').localeCompare(b.full_name || '');
       });
   })();
+  const razorpayLinkStatus = String(paymentRazorpayContext?.payment_link?.status || '').toUpperCase();
+  const canReuseRazorpayLink = Boolean(paymentRazorpayContext?.payment_link?.id)
+    && !['PAID', 'EXPIRED', 'CANCELLED', 'FAILED', 'NOT_FOUND'].includes(razorpayLinkStatus);
   const paymentSubmitLabel = paymentSubmitting
     ? paymentMode === 'Online'
       ? paymentOnlineMode === 'RAZORPAY'
-        ? paymentRazorpayContext
+        ? canReuseRazorpayLink
           ? 'Checking Razorpay Payment...'
           : 'Sending Razorpay Link...'
         : paymentCollectionContext
@@ -248,9 +251,9 @@ const PaymentModal = ({ controller }) => {
       : 'Please wait...'
     : paymentMode === 'Online'
       ? paymentOnlineMode === 'RAZORPAY'
-        ? paymentRazorpayContext
+        ? canReuseRazorpayLink
           ? 'Check Razorpay Payment'
-          : 'Send Razorpay Link & Show QR'
+          : 'Send New Razorpay Link & Show QR'
         : paymentCollectionContext
           ? 'Record Direct UPI Collection'
           : 'Show Direct UPI QR'

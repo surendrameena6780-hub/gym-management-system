@@ -29,6 +29,7 @@ router.use(branchSchemaMiddleware);
 const DUE_ZERO_THRESHOLD = 0.009;
 const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY_COLLECTION_LINK_TTL_SECONDS || '86400', 10));
 const PAYMENT_DEDUPE_WINDOW_SECONDS = Math.max(10, parseInt(process.env.PAYMENT_DEDUPE_WINDOW_SECONDS || '45', 10));
+const IS_PRODUCTION_RUNTIME = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
 let ensurePaymentCollectionsSchemaPromise;
 
 const ensurePaymentCollectionsSchema = async () => {
@@ -321,6 +322,151 @@ const resolvePaidPaymentLinkResult = async (razorpayClient, paymentLink) => {
     }
 };
 
+const getRazorpayKeyEnvironment = (keyId) => {
+    const normalizedKeyId = String(keyId || '').trim().toLowerCase();
+    if (!normalizedKeyId) return 'UNKNOWN';
+    if (normalizedKeyId.startsWith('rzp_test_')) return 'TEST';
+    if (normalizedKeyId.startsWith('rzp_live_')) return 'LIVE';
+    return 'UNKNOWN';
+};
+
+const buildManualCollectionRazorpayConfig = (gymConfig = {}) => {
+    const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
+    const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
+    if (!keyId || !keySecret) {
+        return null;
+    }
+
+    return {
+        connectMode: 'MANUAL',
+        connectedAccount: '',
+        keyId,
+        keySecret,
+        environment: getRazorpayKeyEnvironment(keyId),
+        source: 'MANUAL',
+    };
+};
+
+const buildPartnerCollectionRazorpayConfig = (gymConfig = {}) => {
+    const connectedAccount = String(gymConfig.member_razorpay_connected_account_id || '').trim();
+    const platformKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
+    const platformKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+    if (!connectedAccount || !platformKeyId || !platformKeySecret) {
+        return null;
+    }
+
+    return {
+        connectMode: 'PARTNER',
+        connectedAccount,
+        keyId: platformKeyId,
+        keySecret: platformKeySecret,
+        environment: getRazorpayKeyEnvironment(platformKeyId),
+        source: 'PARTNER',
+    };
+};
+
+const serializeCollectionPaymentLink = (paymentLink, {
+    referenceId = '',
+    contact = '',
+    email = '',
+    notify = {},
+    environment = 'UNKNOWN',
+    gatewaySource = 'UNKNOWN',
+} = {}) => ({
+    id: paymentLink?.id,
+    short_url: paymentLink?.short_url || '',
+    status: paymentLink?.status || 'created',
+    amount: Number.isFinite(Number(paymentLink?.amount)) ? Math.round(Number(paymentLink.amount)) / 100 : 0,
+    currency: paymentLink?.currency || 'INR',
+    reference: paymentLink?.reference_id || referenceId || '',
+    customer_contact: contact || normalizeCollectionContact(paymentLink?.customer?.contact),
+    customer_email: email || String(paymentLink?.customer?.email || '').trim(),
+    notify: {
+        sms: paymentLink?.notify?.sms ?? Boolean(notify.sms),
+        email: paymentLink?.notify?.email ?? Boolean(notify.email),
+    },
+    created_at: Number.isFinite(Number(paymentLink?.created_at)) ? Number(paymentLink.created_at) : null,
+    expire_by: Number.isFinite(Number(paymentLink?.expire_by)) ? Number(paymentLink.expire_by) : null,
+    expired_at: Number.isFinite(Number(paymentLink?.expired_at)) ? Number(paymentLink.expired_at) : null,
+    environment,
+    gateway_source: gatewaySource,
+});
+
+const resolveCollectionRazorpayConfig = (gymConfig = {}) => {
+    const requestedMode = String(gymConfig.member_payments_connect_mode || 'MANUAL').trim().toUpperCase() || 'MANUAL';
+    const manualConfig = buildManualCollectionRazorpayConfig(gymConfig);
+    const partnerConfig = buildPartnerCollectionRazorpayConfig(gymConfig);
+
+    if (requestedMode === 'PARTNER') {
+        if (partnerConfig && (!IS_PRODUCTION_RUNTIME || partnerConfig.environment !== 'TEST')) {
+            return { razorpay: partnerConfig, gatewayNotice: '' };
+        }
+
+        if (manualConfig && manualConfig.environment === 'LIVE') {
+            return {
+                razorpay: {
+                    ...manualConfig,
+                    source: 'MANUAL_FALLBACK',
+                },
+                gatewayNotice: 'Partner mode was unavailable, so GymVault switched this payment to your saved live Razorpay keys.',
+            };
+        }
+
+        if (partnerConfig && IS_PRODUCTION_RUNTIME && partnerConfig.environment === 'TEST') {
+            return {
+                razorpay: null,
+                gatewayNotice: '',
+                error: 'Razorpay partner setup is still using test-mode server keys. Switch Member Payments to Manual with live Razorpay keys or update the server to live partner keys.',
+            };
+        }
+
+        if (manualConfig) {
+            return {
+                razorpay: {
+                    ...manualConfig,
+                    source: 'MANUAL_FALLBACK',
+                },
+                gatewayNotice: 'Partner mode was unavailable, so GymVault used your saved manual Razorpay keys for this payment.',
+            };
+        }
+    }
+
+    if (manualConfig) {
+        return { razorpay: manualConfig, gatewayNotice: '' };
+    }
+
+    return { razorpay: null, gatewayNotice: '' };
+};
+
+const isMissingRazorpayEntityError = (err) => {
+    const statusCode = Number(
+        err?.statusCode
+        || err?.error?.statusCode
+        || err?.response?.status
+        || err?.error?.status_code
+        || 0
+    );
+    const message = String(err?.error?.description || err?.error?.reason || err?.message || '').toLowerCase();
+    return statusCode === 404 || message.includes('not found') || message.includes('does not exist');
+};
+
+const fetchCollectionPaymentLinkSafely = async (razorpayClient, paymentLinkId) => {
+    try {
+        return {
+            ok: true,
+            paymentLink: await razorpayClient.paymentLink.fetch(paymentLinkId),
+        };
+    } catch (err) {
+        if (isMissingRazorpayEntityError(err)) {
+            return {
+                ok: false,
+                missing: true,
+            };
+        }
+        throw err;
+    }
+};
+
 const createCollectionRazorpayClient = (razorpayConfig) => {
     const headers = razorpayConfig.connectMode === 'PARTNER' && razorpayConfig.connectedAccount
         ? { 'X-Razorpay-Account': razorpayConfig.connectedAccount }
@@ -365,17 +511,14 @@ const createCollectionPaymentLink = async ({
 
     return {
         merchant_name: payeeName,
-        payment_link: {
-            id: paymentLink.id,
-            short_url: paymentLink.short_url,
-            status: paymentLink.status,
-            amount: amountPaise / 100,
-            currency: paymentLink.currency || 'INR',
-            reference: paymentLink.reference_id || referenceId,
-            customer_contact: contact,
-            customer_email: email,
+        payment_link: serializeCollectionPaymentLink(paymentLink, {
+            referenceId,
+            contact,
+            email,
             notify,
-        },
+            environment: razorpayConfig.environment,
+            gatewaySource: razorpayConfig.source,
+        }),
     };
 };
 
@@ -409,32 +552,10 @@ const getGymCollectionSetup = async (gymId) => {
         }
         : null;
 
-    const connectMode = String(gymConfig.member_payments_connect_mode || 'MANUAL').toUpperCase();
-    const connectedAccount = String(gymConfig.member_razorpay_connected_account_id || '').trim();
-    let razorpay = null;
+    const { razorpay, gatewayNotice, error: gatewayError } = resolveCollectionRazorpayConfig(gymConfig);
 
-    if (connectMode === 'PARTNER') {
-        const platformKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
-        const platformKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
-        if (connectedAccount && platformKeyId && platformKeySecret) {
-            razorpay = {
-                connectMode,
-                connectedAccount,
-                keyId: platformKeyId,
-                keySecret: platformKeySecret,
-            };
-        }
-    } else {
-        const keyId = String(gymConfig.member_razorpay_key_id || '').trim();
-        const keySecret = decryptSecret(gymConfig.member_razorpay_key_secret_enc || '');
-        if (keyId && keySecret) {
-            razorpay = {
-                connectMode,
-                connectedAccount: '',
-                keyId,
-                keySecret,
-            };
-        }
+    if (gatewayError) {
+        return { ok: false, status: 400, error: gatewayError };
     }
 
     if (!upi && !razorpay) {
@@ -451,6 +572,7 @@ const getGymCollectionSetup = async (gymId) => {
             payeeName,
             upi,
             razorpay,
+            gatewayNotice,
         },
     };
 };
@@ -1270,18 +1392,32 @@ router.post('/:id/due/payment-link-status', async (req, res) => {
         }
 
         const razorpayClient = createCollectionRazorpayClient(collectionSetup.data.razorpay);
-    const paymentLink = await razorpayClient.paymentLink.fetch(paymentLinkId);
+        const paymentLinkFetch = await fetchCollectionPaymentLinkSafely(razorpayClient, paymentLinkId);
+        if (!paymentLinkFetch.ok) {
+            return res.json({
+                paid: false,
+                status: 'NOT_FOUND',
+                payment_link: {
+                    id: paymentLinkId,
+                    short_url: '',
+                    status: 'not_found',
+                    environment: collectionSetup.data.razorpay.environment,
+                    gateway_source: collectionSetup.data.razorpay.source,
+                },
+            });
+        }
+
+        const paymentLink = paymentLinkFetch.paymentLink;
         const settledPayment = await resolvePaidPaymentLinkResult(razorpayClient, paymentLink);
 
         if (!settledPayment) {
             return res.json({
                 paid: false,
                 status: String(paymentLink.status || 'created').toUpperCase(),
-                payment_link: {
-                    id: paymentLink.id,
-                    short_url: paymentLink.short_url,
-                    status: paymentLink.status,
-                },
+                payment_link: serializeCollectionPaymentLink(paymentLink, {
+                    environment: collectionSetup.data.razorpay.environment,
+                    gatewaySource: collectionSetup.data.razorpay.source,
+                }),
             });
         }
 
@@ -1509,4 +1645,6 @@ module.exports.getPendingPaymentById = getPendingPaymentById;
 module.exports.createCollectionPaymentLink = createCollectionPaymentLink;
 module.exports.createCollectionRazorpayClient = createCollectionRazorpayClient;
 module.exports.resolvePaidPaymentLinkResult = resolvePaidPaymentLinkResult;
+module.exports.serializeCollectionPaymentLink = serializeCollectionPaymentLink;
+module.exports.fetchCollectionPaymentLinkSafely = fetchCollectionPaymentLinkSafely;
 module.exports.applyDueCollection = applyDueCollection;

@@ -12,6 +12,7 @@ import {
 
 const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
 const MAX_WARMUP_RETRIES = 8;
+const TERMINAL_RAZORPAY_LINK_STATUSES = new Set(['PAID', 'EXPIRED', 'CANCELLED', 'FAILED', 'NOT_FOUND']);
 
 const unwrapApiData = (payload) => {
   if (payload && typeof payload === 'object' && 'data' in payload) {
@@ -25,6 +26,27 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 const asObject = (value, fallback = {}) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
 );
+
+const getRazorpayLinkStatus = (paymentLink) => String(paymentLink?.status || '').trim().toUpperCase();
+
+const canReuseRazorpayLink = (paymentLink) => Boolean(paymentLink?.id) && !TERMINAL_RAZORPAY_LINK_STATUSES.has(getRazorpayLinkStatus(paymentLink));
+
+const mergeRazorpayContextPayload = (currentContext, nextPayload) => {
+  const nextRoot = asObject(nextPayload, null);
+  const nextPaymentLink = asObject(nextPayload?.payment_link, null);
+  if (!nextRoot || !nextPaymentLink) {
+    return currentContext;
+  }
+
+  return {
+    ...asObject(currentContext, {}),
+    ...nextRoot,
+    payment_link: {
+      ...asObject(currentContext?.payment_link, {}),
+      ...nextPaymentLink,
+    },
+  };
+};
 
 const audienceToSegment = (audience) => ({
   All: 'ALL',
@@ -273,6 +295,11 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     await fetchData();
   }, [authHeaders, closePaymentModal, fetchData]);
 
+  const syncDashboardRazorpayContext = useCallback((payload) => {
+    if (!payload?.payment_link) return;
+    setPaymentRazorpayContext((current) => mergeRazorpayContextPayload(current, payload));
+  }, []);
+
   const checkDashboardRazorpayStatus = useCallback(async ({ manual = false } = {}) => {
     const paymentLinkId = paymentRazorpayContext?.payment_link?.id;
     if (!selectedMemberForPay || !selectedPlanForPay || !paymentLinkId || paymentRazorpayPollBusyRef.current) {
@@ -291,7 +318,25 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         authHeaders,
       );
 
+      if (statusRes.data?.payment_link) {
+        syncDashboardRazorpayContext(statusRes.data);
+      }
+
       if (!statusRes.data?.paid) {
+        const latestLinkStatus = getRazorpayLinkStatus(statusRes.data?.payment_link || paymentRazorpayContext?.payment_link);
+        if (TERMINAL_RAZORPAY_LINK_STATUSES.has(latestLinkStatus) && latestLinkStatus !== 'PAID') {
+          setPaymentStep('idle');
+          if (manual) {
+            toast?.(
+              latestLinkStatus === 'NOT_FOUND'
+                ? 'This Razorpay link is no longer available. Send a new link.'
+                : `This Razorpay link is ${latestLinkStatus.toLowerCase()}. Send a new link.`,
+              'warning',
+            );
+          }
+          return false;
+        }
+
         if (manual) {
           toast?.('Payment is still pending on Razorpay.', 'warning');
         }
@@ -309,10 +354,10 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     } finally {
       paymentRazorpayPollBusyRef.current = false;
     }
-  }, [authHeaders, finalizeDashboardPaymentSuccess, paymentRazorpayContext, selectedMemberForPay, selectedPlanForPay, toast]);
+  }, [authHeaders, finalizeDashboardPaymentSuccess, paymentRazorpayContext, selectedMemberForPay, selectedPlanForPay, syncDashboardRazorpayContext, toast]);
 
   useEffect(() => {
-    if (!showPaymentModal || paymentMode !== 'Online' || paymentOnlineMode !== 'RAZORPAY' || !paymentRazorpayContext?.payment_link?.id) {
+    if (!showPaymentModal || paymentMode !== 'Online' || paymentOnlineMode !== 'RAZORPAY' || !canReuseRazorpayLink(paymentRazorpayContext?.payment_link)) {
       return undefined;
     }
 
@@ -493,9 +538,13 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
           return;
         }
 
-        if (paymentRazorpayContext?.payment_link?.id) {
+        if (canReuseRazorpayLink(paymentRazorpayContext?.payment_link)) {
           await checkDashboardRazorpayStatus({ manual: true });
           return;
+        }
+
+        if (paymentRazorpayContext?.payment_link?.id) {
+          setPaymentRazorpayContext(null);
         }
 
         setPaymentStep('processing');
@@ -516,6 +565,10 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         setPaymentCollectionContext(null);
         setPaymentRazorpayContext(razorpay);
         setPaymentStep('idle');
+
+        if (String(paymentLink.environment || '').toUpperCase() === 'TEST') {
+          toast('Razorpay is currently using test mode for this link. Live payments will not complete until live credentials are configured.', 'warning');
+        }
 
         const delivery = describeCollectionLinkDelivery(paymentLink);
         toast(
