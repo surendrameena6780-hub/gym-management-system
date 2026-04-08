@@ -81,6 +81,15 @@ const normalizeActionPayments = (sourcePayments) => {
   return Array.from(uniquePayments.values());
 };
 
+const normalizeBroadcastTemplates = (sourceTemplates) => asArray(sourceTemplates)
+  .map((template) => ({
+    ...template,
+    template_key: String(template?.template_key || '').trim().toUpperCase(),
+  }))
+  .filter((template) => Boolean(template.template_key))
+  .filter((template) => template.is_active !== false)
+  .filter((template) => String(template.whatsapp_template_status || '').toUpperCase() === 'APPROVED');
+
 export default function useDashboardPageController({ appRuntime, setCurrentPage, startTour, isActive = true }) {
   const { token, toast, navigateTo: navTo } = appRuntime;
   const navigateTo = useMemo(() => navTo || ((...args) => setCurrentPage?.(...args)), [navTo, setCurrentPage]);
@@ -112,11 +121,15 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [showCheckinModal, setShowCheckinModal] = useState(false);
   const [checkinQuery, setCheckinQuery] = useState('');
-  const [checkinBusyMemberId, setCheckinBusyMemberId] = useState(null);
+  const [checkinBusyMemberIds, setCheckinBusyMemberIds] = useState(() => new Set());
   const [todayAttendance, setTodayAttendance] = useState([]);
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [quickActionLoading, setQuickActionLoading] = useState('');
   const quickActionTimerRef = useRef(null);
+  const dashboardRefreshTimerRef = useRef(null);
+  const checkinBusyIdsRef = useRef(new Set());
+  const broadcastComposerRequestRef = useRef(null);
+  const broadcastComposerLoadedRef = useRef(false);
   const paymentRazorpayPollBusyRef = useRef(false);
 
   const [addFormData, setAddFormData] = useState({ full_name: '', email: '', phone: '' });
@@ -139,8 +152,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastSearch, setBroadcastSearch] = useState('');
   const [broadcastCustomIds, setBroadcastCustomIds] = useState([]);
-  const [campaignPreviewCount, setCampaignPreviewCount] = useState(0);
-  const [campaignPreviewLoading, setCampaignPreviewLoading] = useState(false);
   const [broadcastTemplates, setBroadcastTemplates] = useState([]);
   const [gymName, setGymName] = useState('');
   const [gymBilling, setGymBilling] = useState({
@@ -375,6 +386,9 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       if (quickActionTimerRef.current) {
         window.clearTimeout(quickActionTimerRef.current);
       }
+      if (dashboardRefreshTimerRef.current) {
+        window.clearTimeout(dashboardRefreshTimerRef.current);
+      }
       if (warmupRetryTimerRef.current) {
         window.clearTimeout(warmupRetryTimerRef.current);
       }
@@ -442,7 +456,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       action();
       setQuickActionLoading('');
       quickActionTimerRef.current = null;
-    }, 160);
+    }, 40);
   }, [quickActionLoading]);
 
   const handleAddMember = useCallback(async (event) => {
@@ -609,72 +623,59 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     toast,
   ]);
 
-  const loadCampaignPreview = useCallback(async (audience) => {
-    if (!token || !showBroadcastModal) return;
-    if (broadcastCustomIds.length > 0) {
-      setCampaignPreviewCount(broadcastCustomIds.length);
-      setCampaignPreviewLoading(false);
+  const ensureBroadcastComposer = useCallback(async ({ preferCache = true } = {}) => {
+    if (!token) return [];
+    if (preferCache && broadcastComposerLoadedRef.current) {
+      return broadcastTemplates;
+    }
+    if (broadcastComposerRequestRef.current) {
+      return broadcastComposerRequestRef.current;
+    }
+
+    const requestConfig = { ...authHeaders, timeout: DASHBOARD_REQUEST_TIMEOUT_MS };
+    const request = axios.get('/api/notifications/campaign/composer', requestConfig)
+      .then((res) => {
+        const payload = asObject(unwrapApiData(res.data), {});
+        const templates = normalizeBroadcastTemplates(payload.templates);
+        const nextGymName = String(payload.gym_name || '').trim();
+
+        setBroadcastTemplates(templates);
+        if (nextGymName) {
+          setGymName(nextGymName);
+        }
+        broadcastComposerLoadedRef.current = true;
+        return templates;
+      })
+      .finally(() => {
+        broadcastComposerRequestRef.current = null;
+      });
+
+    broadcastComposerRequestRef.current = request;
+    return request;
+  }, [authHeaders, broadcastTemplates, token]);
+
+  useEffect(() => {
+    if (!token) return;
+    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+  }, [ensureBroadcastComposer, token]);
+
+  useEffect(() => {
+    if (!showBroadcastModal) return;
+    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+  }, [ensureBroadcastComposer, showBroadcastModal]);
+
+  useEffect(() => {
+    if (!showBroadcastModal || broadcastTemplates.length === 0) return;
+
+    const hasCurrentTemplate = broadcastTemplates.some((item) => item.template_key === broadcastTemplateKey);
+    if (broadcastTemplateKey && hasCurrentTemplate) {
       return;
     }
 
-    setCampaignPreviewLoading(true);
-    try {
-      const segment = audienceToSegment(audience);
-      const res = await axios.get(`/api/notifications/campaign/segments?segment=${segment}&limit=200`, authHeaders);
-      const payload = unwrapApiData(res.data) || {};
-      setCampaignPreviewCount(Number(payload.total || 0));
-    } catch (_err) {
-      setCampaignPreviewCount(0);
-    } finally {
-      setCampaignPreviewLoading(false);
-    }
-  }, [authHeaders, broadcastCustomIds, showBroadcastModal, token]);
-
-  useEffect(() => {
-    loadCampaignPreview(broadcastAudience);
-  }, [broadcastAudience, loadCampaignPreview]);
-
-  useEffect(() => {
-    const loadTemplatesAndGymName = async () => {
-      if (!showBroadcastModal) return;
-
-      try {
-        const [intRes, settRes] = await Promise.allSettled([
-          axios.get('/api/settings/integrations', authHeaders),
-          axios.get('/api/settings', authHeaders),
-        ]);
-
-        if (intRes.status === 'fulfilled') {
-          const data = intRes.value.data || {};
-          const templates = Array.isArray(data.templates)
-            ? data.templates.filter((item) => item.is_active !== false && String(item.whatsapp_template_status || '').toUpperCase() === 'APPROVED')
-            : [];
-          setBroadcastTemplates(templates);
-          if (!broadcastTemplateKey) {
-            const suggestedKey = resolveBroadcastTemplateSuggestion(broadcastAudience);
-            const nextTemplate = templates.find((item) => item.template_key === suggestedKey) || templates[0] || null;
-            setBroadcastTemplateKey(nextTemplate?.template_key || '');
-          }
-        } else {
-          setBroadcastTemplates([]);
-        }
-
-        if (settRes.status === 'fulfilled') {
-          const payload = settRes.value.data || {};
-          const gym = payload.gym || payload.data?.gym || {};
-          const account = payload.account || payload.data?.account || {};
-          const name = String(gym.name || account.gym_name || '').trim();
-          if (name) {
-            setGymName(name);
-          }
-        }
-      } catch (_err) {
-        setBroadcastTemplates([]);
-      }
-    };
-
-    loadTemplatesAndGymName();
-  }, [authHeaders, broadcastAudience, broadcastTemplateKey, showBroadcastModal]);
+    const suggestedKey = resolveBroadcastTemplateSuggestion(broadcastAudience);
+    const nextTemplate = broadcastTemplates.find((item) => item.template_key === suggestedKey) || broadcastTemplates[0] || null;
+    setBroadcastTemplateKey(nextTemplate?.template_key || '');
+  }, [broadcastAudience, broadcastTemplateKey, broadcastTemplates, showBroadcastModal]);
 
   useEffect(() => {
     if (!broadcastTemplateKey) {
@@ -702,7 +703,8 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     setBroadcastCustomIds([]);
     setBroadcastMessage('');
     setShowBroadcastModal(true);
-  }, []);
+    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+  }, [ensureBroadcastComposer]);
 
   const openBroadcastDraftForMembers = useCallback(({ memberIds = [], audience = 'All' }) => {
     const normalizedIds = Array.from(new Set(
@@ -717,7 +719,8 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     setBroadcastCustomIds(normalizedIds);
     setBroadcastMessage('');
     setShowBroadcastModal(true);
-  }, []);
+    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+  }, [ensureBroadcastComposer]);
 
   const buildSmartMemberCta = useCallback(({
     members: sourceMembers,
@@ -849,24 +852,105 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     }
   }, [authHeaders, broadcastAudience, broadcastCustomIds, broadcastMessage, broadcastTemplateKey, fetchData, toast]);
 
-  const handleQuickCheckIn = useCallback(async (member) => {
-    if (!member?.id || checkinBusyMemberId) return;
+  const setCheckinBusyState = useCallback((memberId, isBusy) => {
+    const normalizedId = Number(memberId);
+    if (!Number.isInteger(normalizedId)) return;
 
-    setCheckinBusyMemberId(member.id);
+    if (isBusy) {
+      checkinBusyIdsRef.current.add(normalizedId);
+    } else {
+      checkinBusyIdsRef.current.delete(normalizedId);
+    }
+
+    setCheckinBusyMemberIds(new Set(checkinBusyIdsRef.current));
+  }, []);
+
+  const queueDashboardRefresh = useCallback((delayMs = 900) => {
+    if (dashboardRefreshTimerRef.current) {
+      return;
+    }
+
+    dashboardRefreshTimerRef.current = window.setTimeout(() => {
+      dashboardRefreshTimerRef.current = null;
+      fetchData().catch(() => {});
+    }, delayMs);
+  }, [fetchData]);
+
+  const applyLocalDashboardCheckin = useCallback((member, payload = {}) => {
+    const fallbackMember = asObject(member, {});
+    const resolvedMember = {
+      ...fallbackMember,
+      ...asObject(payload.member, {}),
+    };
+    const memberId = Number(resolvedMember.id || fallbackMember.id);
+    if (!Number.isInteger(memberId)) return;
+
+    const details = asObject(payload.details, {});
+    const checkInTime = details.check_in_time || new Date().toISOString();
+
+    setTodayAttendance((prev) => {
+      if (prev.some((row) => Number(row.member_id) === memberId)) {
+        return prev;
+      }
+
+      return [{
+        id: details.id || `dash-checkin-${memberId}-${Date.now()}`,
+        member_id: memberId,
+        full_name: resolvedMember.full_name || fallbackMember.full_name || '',
+        check_in_time: checkInTime,
+        checkin_method: details.checkin_method || 'STAFF',
+        profile_pic: resolvedMember.profile_pic || fallbackMember.profile_pic || '',
+        branch_id: details.branch_id || resolvedMember.branch_id || fallbackMember.branch_id || null,
+      }, ...prev];
+    });
+
+    if (!checkedInMemberIds.has(memberId)) {
+      setTodayCheckins((prev) => prev + 1);
+    }
+
+    setMembers((prev) => prev.map((existing) => (
+      Number(existing.id) === memberId
+        ? { ...existing, last_visit: checkInTime }
+        : existing
+    )));
+  }, [checkedInMemberIds]);
+
+  const handleQuickCheckIn = useCallback(async (member) => {
+    const memberId = Number(member?.id);
+    if (!Number.isInteger(memberId)) return;
+    if (checkedInMemberIds.has(memberId) || checkinBusyIdsRef.current.has(memberId)) return;
+
+    setCheckinBusyState(memberId, true);
     try {
-      await axios.post('/api/attendance/checkin', {
-        member_id: member.id,
+      const res = await axios.post('/api/attendance/checkin', {
+        member_id: memberId,
         method: 'STAFF',
       }, authHeaders);
+
+      applyLocalDashboardCheckin(member, asObject(unwrapApiData(res.data), {}));
       toast?.(`Checked in ${member.full_name}.`, 'success');
-      await fetchData();
+      queueDashboardRefresh();
       window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'dashboard-checkin' } }));
     } catch (err) {
-      toast?.(err?.response?.data?.message || err?.response?.data?.error || 'Check-in failed.', 'error');
+      const errorBody = asObject(err?.response?.data, {});
+
+      if (errorBody.code === 'DUPLICATE_CHECKIN') {
+        applyLocalDashboardCheckin(member, {
+          member,
+          details: {
+            check_in_time: errorBody.last_checkin_time || new Date().toISOString(),
+            checkin_method: 'STAFF',
+          },
+        });
+        toast?.(`${member.full_name} is already checked in.`, 'warning');
+        queueDashboardRefresh(250);
+      } else {
+        toast?.(errorBody.message || errorBody.error || 'Check-in failed.', 'error');
+      }
     } finally {
-      setCheckinBusyMemberId(null);
+      setCheckinBusyState(memberId, false);
     }
-  }, [authHeaders, checkinBusyMemberId, fetchData, toast]);
+  }, [applyLocalDashboardCheckin, authHeaders, checkedInMemberIds, queueDashboardRefresh, setCheckinBusyState, toast]);
 
   const dashboardData = useMemo(() => {
     const today = new Date();
@@ -1446,6 +1530,29 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     todayCheckins,
   ]);
 
+  const campaignPreviewCount = useMemo(() => {
+    if (broadcastCustomIds.length > 0) {
+      return broadcastCustomIds.length;
+    }
+
+    switch (broadcastAudience) {
+      case 'Active':
+        return Number(dashboardData.active || 0);
+      case 'Expiring':
+        return Number(dashboardData.expiring7 || 0);
+      case 'Expired':
+        return Number(dashboardData.expired || 0);
+      case 'Ghosts':
+        return Number(dashboardData.ghosts || 0);
+      case 'HighChurn':
+        return Number(dashboardData.churnHigh || 0);
+      default:
+        return members.length;
+    }
+  }, [broadcastAudience, broadcastCustomIds.length, dashboardData.active, dashboardData.churnHigh, dashboardData.expired, dashboardData.expiring7, dashboardData.ghosts, members.length]);
+
+  const campaignPreviewLoading = false;
+
   const displayChartData = useMemo(() => {
     const data = chartDays === 7 ? chart7 : chart30;
     return data.map((day) => ({
@@ -1527,7 +1634,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     chartTotal,
     checkDashboardRazorpayStatus,
     checkedInMemberIds,
-    checkinBusyMemberId,
+    checkinBusyMemberIds,
     checkinMembers,
     checkinQuery,
     closePaymentModal,

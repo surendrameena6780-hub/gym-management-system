@@ -726,7 +726,7 @@ const BroadcastModal = ({ controller }) => {
 const CheckinModal = ({ controller }) => {
   const {
     checkedInMemberIds,
-    checkinBusyMemberId,
+    checkinBusyMemberIds,
     checkinMembers,
     checkinQuery,
     handleQuickCheckIn,
@@ -775,6 +775,7 @@ const CheckinModal = ({ controller }) => {
             <div className="space-y-2 max-h-[34vh] overflow-y-auto pr-1">
               {checkinMembers.map((member) => {
                 const isCheckedIn = checkedInMemberIds.has(Number(member.id));
+                const isBusy = checkinBusyMemberIds.has(Number(member.id));
                 const membershipStatus = String(member.membership_status || 'UNPAID').toUpperCase();
                 const statusClass = membershipStatus === 'ACTIVE'
                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -790,7 +791,15 @@ const CheckinModal = ({ controller }) => {
                   .toUpperCase();
 
                 return (
-                  <div key={member.id} className="p-3 rounded-2xl border border-slate-100 bg-white flex items-center justify-between gap-3">
+                  <div
+                    key={member.id}
+                    onClick={() => {
+                      if (!isCheckedIn && !isBusy) {
+                        handleQuickCheckIn(member);
+                      }
+                    }}
+                    className={`p-3 rounded-2xl border bg-white flex items-center justify-between gap-3 transition-colors ${isCheckedIn || isBusy ? 'border-slate-100' : 'border-slate-100 cursor-pointer hover:border-sky-200 hover:bg-sky-50/50'}`}
+                  >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-200 bg-slate-100 shrink-0 relative">
                         <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-[11px] font-black">
@@ -816,11 +825,14 @@ const CheckinModal = ({ controller }) => {
                     <button
                       type="button"
                       aria-label={`${isCheckedIn ? 'Already checked in' : 'Check in'} ${member.full_name}`}
-                      onClick={() => handleQuickCheckIn(member)}
-                      disabled={isCheckedIn || checkinBusyMemberId === member.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleQuickCheckIn(member);
+                      }}
+                      disabled={isCheckedIn || isBusy}
                       className="shrink-0 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-sky-600 text-white hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors"
                     >
-                      {checkinBusyMemberId === member.id ? 'Checking...' : isCheckedIn ? 'Checked' : 'Check In'}
+                      {isBusy ? 'Checking...' : isCheckedIn ? 'Checked' : 'Check In'}
                     </button>
                   </div>
                 );

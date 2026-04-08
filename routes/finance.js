@@ -937,47 +937,6 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
         );
         const existing = existingResult.rows[0];
         if (!existing) return res.status(404).json({ error: 'Not found.' });
-
-
-router.delete('/payroll/:id', requirePermission('payments:write'), async (req, res) => {
-    try {
-        if (!isOwnerUser(req)) {
-            return res.status(403).json({ error: 'Only owners can delete payroll entries.' });
-        }
-
-        const gid = gymId(req);
-        const id = posInt(req.params.id);
-        if (!id) return res.status(400).json({ error: 'Invalid id.' });
-
-        const existingResult = await pool.query(
-            `SELECT id, branch_id
-             FROM payroll_entries
-             WHERE id = $1 AND gym_id = $2
-             LIMIT 1`,
-            [id, gid]
-        );
-        const existing = existingResult.rows[0];
-        if (!existing) {
-            return res.status(404).json({ error: 'Payroll entry not found.' });
-        }
-
-        await resolveBranchWriteScope(pool, req, existing.branch_id || DEFAULT_BRANCH_ID);
-
-        await pool.query(
-            `DELETE FROM payroll_entries
-             WHERE id = $1 AND gym_id = $2`,
-            [id, gid]
-        );
-
-        return res.json({ message: 'Payroll entry deleted.' });
-    } catch (err) {
-        console.error('PAYROLL DELETE:', err.message);
-        if (err instanceof BranchAccessError) {
-            return res.status(err.statusCode).json({ error: err.message });
-        }
-        return res.status(500).json({ error: 'Failed' });
-    }
-});
         const { base_pay, commission, deductions, notes } = req.body || {};
         const branchScope = await resolveBranchWriteScope(pool, req, existing.branch_id || DEFAULT_BRANCH_ID);
         const nextStatus = normalizePayrollStatus(req.body?.status, existing.status || 'PENDING_APPROVAL');
@@ -1103,6 +1062,46 @@ router.delete('/payroll/:id', requirePermission('payments:write'), async (req, r
             return res.status(err.statusCode).json({ error: err.message });
         }
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+router.delete('/payroll/:id', requirePermission('payments:write'), async (req, res) => {
+    try {
+        if (!isOwnerUser(req)) {
+            return res.status(403).json({ error: 'Only owners can delete payroll entries.' });
+        }
+
+        const gid = gymId(req);
+        const id = posInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid id.' });
+
+        const existingResult = await pool.query(
+            `SELECT id, branch_id
+             FROM payroll_entries
+             WHERE id = $1 AND gym_id = $2
+             LIMIT 1`,
+            [id, gid]
+        );
+        const existing = existingResult.rows[0];
+        if (!existing) {
+            return res.status(404).json({ error: 'Payroll entry not found.' });
+        }
+
+        await resolveBranchWriteScope(pool, req, existing.branch_id || DEFAULT_BRANCH_ID);
+
+        await pool.query(
+            `DELETE FROM payroll_entries
+             WHERE id = $1 AND gym_id = $2`,
+            [id, gid]
+        );
+
+        return res.json({ message: 'Payroll entry deleted.' });
+    } catch (err) {
+        console.error('PAYROLL DELETE:', err.message);
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         return res.status(500).json({ error: 'Failed' });

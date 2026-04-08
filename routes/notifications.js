@@ -786,7 +786,49 @@ router.post('/reminders/send', auth, saasMiddleware, reminderRequestLimiter, asy
     }
 });
 
-// --- 6. SEGMENT PREVIEW (automation pipeline) ---
+// --- 6. CAMPAIGN COMPOSER DATA (dashboard modal preload) ---
+router.get('/campaign/composer', auth, saasMiddleware, requireOwner, async (req, res) => {
+    try {
+        await ensureMessagingSchema();
+
+        const gymId = req.user.gym_id;
+        const [gymResult, templatesResult] = await Promise.all([
+            pool.query(
+                `SELECT name
+                 FROM gyms
+                 WHERE id = $1
+                 LIMIT 1`,
+                [gymId]
+            ),
+            pool.query(
+                `SELECT template_key, title, whatsapp_text, whatsapp_template_status, is_active
+                 FROM gym_message_templates
+                 WHERE gym_id = $1
+                 ORDER BY updated_at DESC, title ASC`,
+                [gymId]
+            ),
+        ]);
+
+        const templates = templatesResult.rows
+            .map((row) => ({
+                ...row,
+                template_key: String(row.template_key || '').trim().toUpperCase(),
+            }))
+            .filter((row) => row.template_key)
+            .filter((row) => row.is_active !== false)
+            .filter((row) => normalizeTemplateStatus(row.whatsapp_template_status) === 'APPROVED');
+
+        return ok(res, {
+            gym_name: String(gymResult.rows[0]?.name || '').trim(),
+            templates,
+        });
+    } catch (err) {
+        console.error('CAMPAIGN COMPOSER ERROR:', err.message);
+        return fail(res, 500, 'CAMPAIGN_COMPOSER_FAILED', 'Failed to load campaign composer data.');
+    }
+});
+
+// --- 7. SEGMENT PREVIEW (automation pipeline) ---
 router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
@@ -806,7 +848,7 @@ router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req,
     }
 });
 
-// --- 7. RUN CAMPAIGN (returns links + writes audit log) ---
+// --- 8. RUN CAMPAIGN (returns links + writes audit log) ---
 router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
         await ensureMessagingSchema();
