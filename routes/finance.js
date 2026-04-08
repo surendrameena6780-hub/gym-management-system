@@ -198,7 +198,7 @@ const maskUpiId = (value) => {
 
 const buildPayrollDestinationLabel = ({ payoutChannel, upiId = '', bankName = '', accountMasked = '' }) => {
     if (payoutChannel === 'UPI_INTENT') {
-        return upiId ? `UPI • ${upiId}` : 'UPI';
+        return upiId ? `UPI • ${maskUpiId(upiId)}` : 'UPI';
     }
 
     if (payoutChannel === 'BANK_TRANSFER') {
@@ -280,6 +280,15 @@ const loadScopedRecordBranch = async (db, tableName, recordId, gymId) => {
         return null;
     }
     return result.rows[0].branch_id || DEFAULT_BRANCH_ID;
+};
+
+const clearStoredPayrollDestinationLabels = async (db, gymIdValue, userId) => {
+    await db.query(
+        `UPDATE payroll_entries
+         SET payout_destination_label = ''
+         WHERE gym_id = $1 AND user_id = $2 AND COALESCE(payout_destination_label, '') <> ''`,
+        [gymIdValue, userId]
+    );
 };
 
 router.use(auth, saasMiddleware);
@@ -629,6 +638,24 @@ router.put('/payroll/staff-destinations/:userId', requirePermission('payments:wr
         }
 
         const branchScope = await resolveBranchWriteScope(pool, req, staff.branch_id || DEFAULT_BRANCH_ID);
+        const removeDestination = Boolean(req.body?.remove_destination);
+
+        if (removeDestination) {
+            await pool.query(
+                `DELETE FROM payroll_staff_destinations
+                 WHERE gym_id = $1 AND user_id = $2`,
+                [gid, userId]
+            );
+            await clearStoredPayrollDestinationLabels(pool, gid, userId);
+
+            return res.json(serializePayrollStaffDestination({
+                user_id: userId,
+                staff_name: staff.full_name,
+                staff_role: staff.staff_role,
+                branch_id: branchScope.branchId,
+            }, branchScope.branchDirectory));
+        }
+
         const existingResult = await pool.query(
             `SELECT *
              FROM payroll_staff_destinations
@@ -639,34 +666,79 @@ router.put('/payroll/staff-destinations/:userId', requirePermission('payments:wr
         const existing = existingResult.rows[0] || {};
 
         const clearBankAccount = Boolean(req.body?.clear_bank_account);
-        const nextUpiId = hasOwn(req.body, 'upi_id')
+        const normalizedUpiId = hasOwn(req.body, 'upi_id')
             ? normalizePayrollUpiId(req.body?.upi_id, { defaultValue: '' })
+            : undefined;
+        const normalizedBankAccountHolder = hasOwn(req.body, 'bank_account_holder')
+            ? ensureTrimmedString(req.body?.bank_account_holder, { field: 'bank_account_holder', max: 120 })
+            : undefined;
+        const normalizedBankIfsc = hasOwn(req.body, 'bank_ifsc')
+            ? normalizePayrollIfscCode(req.body?.bank_ifsc, { defaultValue: '' })
+            : undefined;
+        const normalizedBankName = hasOwn(req.body, 'bank_name')
+            ? ensureTrimmedString(req.body?.bank_name, { field: 'bank_name', max: 120 })
+            : undefined;
+        const normalizedNotes = hasOwn(req.body, 'notes')
+            ? ensureTrimmedString(req.body?.notes, { field: 'notes', max: 500 })
+            : undefined;
+        const rawBankAccountNumber = hasOwn(req.body, 'bank_account_number')
+            ? String(req.body?.bank_account_number || '').trim()
+            : null;
+
+        const hasExistingBankAccount = Boolean(existing.bank_account_number_enc);
+        const bankMetadataWillChange = !clearBankAccount && hasExistingBankAccount && (
+            (normalizedBankAccountHolder !== undefined && normalizedBankAccountHolder !== String(existing.bank_account_holder || ''))
+            || (normalizedBankIfsc !== undefined && normalizedBankIfsc !== String(existing.bank_ifsc || ''))
+            || (normalizedBankName !== undefined && normalizedBankName !== String(existing.bank_name || ''))
+        );
+
+        if (bankMetadataWillChange && !rawBankAccountNumber) {
+            throw new ValidationError('Enter the full replacement bank account number when editing bank details, or remove the bank route first.');
+        }
+
+        const nextUpiId = normalizedUpiId !== undefined
+            ? normalizedUpiId
             : String(existing.upi_id || '');
         const nextBankAccountHolder = clearBankAccount
             ? ''
-            : (hasOwn(req.body, 'bank_account_holder')
-                ? ensureTrimmedString(req.body?.bank_account_holder, { field: 'bank_account_holder', max: 120 })
+            : (normalizedBankAccountHolder !== undefined
+                ? normalizedBankAccountHolder
                 : String(existing.bank_account_holder || ''));
         const nextBankIfsc = clearBankAccount
             ? ''
-            : (hasOwn(req.body, 'bank_ifsc')
-                ? normalizePayrollIfscCode(req.body?.bank_ifsc, { defaultValue: '' })
+            : (normalizedBankIfsc !== undefined
+                ? normalizedBankIfsc
                 : String(existing.bank_ifsc || ''));
         const nextBankName = clearBankAccount
             ? ''
-            : (hasOwn(req.body, 'bank_name')
-                ? ensureTrimmedString(req.body?.bank_name, { field: 'bank_name', max: 120 })
+            : (normalizedBankName !== undefined
+                ? normalizedBankName
                 : String(existing.bank_name || ''));
-        const nextNotes = hasOwn(req.body, 'notes')
-            ? ensureTrimmedString(req.body?.notes, { field: 'notes', max: 500 })
+        const nextNotes = normalizedNotes !== undefined
+            ? normalizedNotes
             : String(existing.notes || '');
 
         let nextBankAccountNumberEnc = clearBankAccount ? '' : String(existing.bank_account_number_enc || '');
-        if (!clearBankAccount && hasOwn(req.body, 'bank_account_number')) {
-            const rawBankAccountNumber = String(req.body?.bank_account_number || '').trim();
-            if (rawBankAccountNumber) {
-                nextBankAccountNumberEnc = encryptSecret(normalizePayrollBankAccountNumber(rawBankAccountNumber, { required: true }));
-            }
+        if (!clearBankAccount && rawBankAccountNumber !== null) {
+            nextBankAccountNumberEnc = rawBankAccountNumber
+                ? encryptSecret(normalizePayrollBankAccountNumber(rawBankAccountNumber, { required: true }))
+                : '';
+        }
+
+        if (!nextUpiId && !nextBankAccountHolder && !nextBankAccountNumberEnc && !nextBankIfsc && !nextBankName && !nextNotes) {
+            await pool.query(
+                `DELETE FROM payroll_staff_destinations
+                 WHERE gym_id = $1 AND user_id = $2`,
+                [gid, userId]
+            );
+            await clearStoredPayrollDestinationLabels(pool, gid, userId);
+
+            return res.json(serializePayrollStaffDestination({
+                user_id: userId,
+                staff_name: staff.full_name,
+                staff_role: staff.staff_role,
+                branch_id: branchScope.branchId,
+            }, branchScope.branchDirectory));
         }
 
         const result = await pool.query(
@@ -685,6 +757,8 @@ router.put('/payroll/staff-destinations/:userId', requirePermission('payments:wr
             [gid, userId, nextUpiId, nextBankAccountHolder, nextBankAccountNumberEnc, nextBankIfsc, nextBankName, nextNotes, req.user.id]
         );
 
+        await clearStoredPayrollDestinationLabels(pool, gid, userId);
+
         return res.json(serializePayrollStaffDestination({
             ...result.rows[0],
             staff_name: staff.full_name,
@@ -698,6 +772,53 @@ router.put('/payroll/staff-destinations/:userId', requirePermission('payments:wr
             return res.status(err.statusCode).json({ error: err.message });
         }
         if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+router.delete('/payroll/staff-destinations/:userId', requirePermission('payments:write'), async (req, res) => {
+    try {
+        if (!isOwnerUser(req)) {
+            return res.status(403).json({ error: 'Only owners can remove payroll staff destinations.' });
+        }
+
+        const gid = gymId(req);
+        const userId = posInt(req.params.userId);
+        if (!userId) {
+            return res.status(400).json({ error: 'Invalid staff member.' });
+        }
+
+        const staffResult = await pool.query(
+            `SELECT id, full_name, role, staff_role, COALESCE(branch_id, $3) AS branch_id
+             FROM users
+             WHERE id = $1 AND gym_id = $2
+             LIMIT 1`,
+            [userId, gid, DEFAULT_BRANCH_ID]
+        );
+        const staff = staffResult.rows[0];
+        if (!staff || String(staff.role || '').trim().toUpperCase() === 'OWNER') {
+            return res.status(404).json({ error: 'Staff member not found.' });
+        }
+
+        const branchScope = await resolveBranchWriteScope(pool, req, staff.branch_id || DEFAULT_BRANCH_ID);
+        await pool.query(
+            `DELETE FROM payroll_staff_destinations
+             WHERE gym_id = $1 AND user_id = $2`,
+            [gid, userId]
+        );
+        await clearStoredPayrollDestinationLabels(pool, gid, userId);
+
+        return res.json(serializePayrollStaffDestination({
+            user_id: userId,
+            staff_name: staff.full_name,
+            staff_role: staff.staff_role,
+            branch_id: branchScope.branchId,
+        }, branchScope.branchDirectory));
+    } catch (err) {
+        console.error('PAYROLL STAFF DESTINATIONS DELETE:', err.message);
+        if (err instanceof BranchAccessError) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         return res.status(500).json({ error: 'Failed' });

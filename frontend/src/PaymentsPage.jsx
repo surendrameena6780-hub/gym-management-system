@@ -370,6 +370,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [payrollActionLoadingId, setPayrollActionLoadingId] = useState(null);
   const [payrollPayoutSettings, setPayrollPayoutSettings] = useState(() => createPayrollPayoutSettingsForm());
   const [payrollPayoutSettingsSaving, setPayrollPayoutSettingsSaving] = useState(false);
+  const [showPayrollPayoutSetupEditor, setShowPayrollPayoutSetupEditor] = useState(true);
   const [payrollStaffDestinations, setPayrollStaffDestinations] = useState([]);
   const [payrollDestinationEntry, setPayrollDestinationEntry] = useState(null);
   const [payrollDestinationForm, setPayrollDestinationForm] = useState(() => createPayrollDestinationForm());
@@ -440,14 +441,19 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const fetchPayrollPayoutSettings = useCallback(async () => {
     if (!isOwner) {
       setPayrollPayoutSettings(createPayrollPayoutSettingsForm());
+      setShowPayrollPayoutSetupEditor(false);
       return;
     }
 
     try {
       const res = await axios.get('/api/finance/payroll/payout-settings', { headers: { 'x-auth-token': token } });
-      setPayrollPayoutSettings(createPayrollPayoutSettingsForm(res.data || {}));
+      const nextSettings = createPayrollPayoutSettingsForm(res.data || {});
+      setPayrollPayoutSettings(nextSettings);
+      setShowPayrollPayoutSetupEditor(!nextSettings.updated_at);
     } catch {
-      setPayrollPayoutSettings(createPayrollPayoutSettingsForm());
+      const nextSettings = createPayrollPayoutSettingsForm();
+      setPayrollPayoutSettings(nextSettings);
+      setShowPayrollPayoutSetupEditor(true);
     }
   }, [isOwner, token]);
 
@@ -540,7 +546,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const resolvePayrollDestinationLabel = useCallback((payoutChannel, destination) => {
     if (payoutChannel === 'UPI_INTENT') {
-      return destination?.upi_id ? `UPI • ${destination.upi_id}` : 'UPI';
+      return destination?.upi_id_masked ? `UPI • ${destination.upi_id_masked}` : 'UPI';
     }
 
     if (payoutChannel === 'BANK_TRANSFER') {
@@ -614,6 +620,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         allow_manual_bank_transfer: payrollPayoutSettings.allow_manual_bank_transfer,
       }, { headers: { 'x-auth-token': token } });
       setPayrollPayoutSettings(createPayrollPayoutSettingsForm(res.data || payrollPayoutSettings));
+      setShowPayrollPayoutSetupEditor(false);
       toast?.('Payroll payout setup saved.', 'success');
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to save payroll payout setup.', 'error');
@@ -639,16 +646,21 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
     setPayrollDestinationSavingId(payrollDestinationEntry.user_id);
     try {
-      await axios.put(`/api/finance/payroll/staff-destinations/${payrollDestinationEntry.user_id}`, {
+      const payload = {
         user_id: payrollDestinationEntry.user_id,
         upi_id: payrollDestinationForm.upi_id,
         bank_account_holder: payrollDestinationForm.bank_account_holder,
-        bank_account_number: payrollDestinationForm.bank_account_number,
         bank_ifsc: payrollDestinationForm.bank_ifsc,
         bank_name: payrollDestinationForm.bank_name,
         notes: payrollDestinationForm.notes,
         clear_bank_account: payrollDestinationForm.clear_bank_account,
-      }, { headers: { 'x-auth-token': token } });
+      };
+
+      if (String(payrollDestinationForm.bank_account_number || '').trim()) {
+        payload.bank_account_number = payrollDestinationForm.bank_account_number;
+      }
+
+      await axios.put(`/api/finance/payroll/staff-destinations/${payrollDestinationEntry.user_id}`, payload, { headers: { 'x-auth-token': token } });
       toast?.('Staff payout destination saved.', 'success');
       closePayrollDestinationModal();
       fetchPayrollStaffDestinations();
@@ -658,6 +670,43 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       setPayrollDestinationSavingId(null);
     }
   }, [closePayrollDestinationModal, fetchPayrollStaffDestinations, payrollDestinationEntry, payrollDestinationForm, toast, token]);
+
+  const handleRemovePayrollDestination = useCallback(async () => {
+    if (!payrollDestinationEntry?.user_id) {
+      return;
+    }
+
+    const runRemove = async () => {
+      setPayrollDestinationSavingId(payrollDestinationEntry.user_id);
+      try {
+        await axios.delete(`/api/finance/payroll/staff-destinations/${payrollDestinationEntry.user_id}`, { headers: { 'x-auth-token': token } });
+        toast?.('Staff payout destination removed completely.', 'success');
+        closePayrollDestinationModal();
+        fetchPayrollStaffDestinations();
+      } catch (err) {
+        toast?.(err?.response?.data?.error || 'Failed to remove the staff payout destination.', 'error');
+      } finally {
+        setPayrollDestinationSavingId(null);
+      }
+    };
+
+    const confirmMessage = `This will permanently remove the saved UPI and bank destination for ${payrollDestinationEntry.staff_name || 'this staff member'} and clear stored payout destination labels from payroll history. This cannot be undone.`;
+
+    if (showConfirm) {
+      showConfirm({
+        title: 'Remove Staff Payout Destination',
+        message: confirmMessage,
+        confirmLabel: 'Remove Destination',
+        variant: 'warning',
+        onConfirm: runRemove,
+      });
+      return;
+    }
+
+    if (window.confirm(confirmMessage)) {
+      await runRemove();
+    }
+  }, [closePayrollDestinationModal, fetchPayrollStaffDestinations, payrollDestinationEntry, showConfirm, toast, token]);
 
   const handleSaveExpense = async () => {
     try {
@@ -2105,70 +2154,90 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {financeTab === 'payroll' && (
         <div ref={payrollListRef} className="space-y-4 scroll-mt-28">
           {isOwner ? (
-            <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-4">
-              <div className="rounded-[24px] border border-slate-100 bg-white p-5 space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payroll Payout Setup</p>
-                    <h3 className="text-lg font-black text-slate-900 mt-2">Owner payroll controls</h3>
-                    <p className="text-sm font-semibold text-slate-500 mt-1">These settings are used only for staff salary payouts from the payroll page.</p>
+            <div className={`grid grid-cols-1 gap-4 ${showPayrollPayoutSetupEditor ? 'xl:grid-cols-[0.95fr_1.05fr]' : ''}`}>
+              {showPayrollPayoutSetupEditor ? (
+                <div className="rounded-[24px] border border-slate-100 bg-white p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payroll Payout Setup</p>
+                      <h3 className="text-lg font-black text-slate-900 mt-2">Owner payroll controls</h3>
+                      <p className="text-sm font-semibold text-slate-500 mt-1">This setup appears only for first-time payroll configuration or when you explicitly edit it again.</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-700">Payroll only</span>
+                      {payrollPayoutSettings.updated_at ? (
+                        <button onClick={() => setShowPayrollPayoutSetupEditor(false)} className="text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-slate-800">
+                          Hide setup
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-700">Payroll only</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1">Default Online Route</label>
-                    <select value={payrollPayoutSettings.default_online_channel} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, default_online_channel: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
-                      <option value="UPI">UPI app / QR from payroll</option>
-                      <option value="BANK_TRANSFER">Manual bank transfer</option>
-                    </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1">Default Online Route</label>
+                      <select value={payrollPayoutSettings.default_online_channel} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, default_online_channel: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
+                        <option value="UPI">UPI app / QR from payroll</option>
+                        <option value="BANK_TRANSFER">Manual bank transfer</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1">Payroll Note Prefix</label>
+                      <input value={payrollPayoutSettings.payout_note_prefix} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, payout_note_prefix: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="Salary" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1">Payroll Note Prefix</label>
-                    <input value={payrollPayoutSettings.payout_note_prefix} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, payout_note_prefix: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="Salary" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                      <input type="checkbox" checked={payrollPayoutSettings.allow_cash_payouts} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, allow_cash_payouts: e.target.checked }))} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
+                      <span>
+                        <span className="block text-sm font-black text-slate-900">Allow cash payouts</span>
+                        <span className="block text-xs font-semibold text-slate-500 mt-1">Keep cash settlement available as a fallback.</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                      <input type="checkbox" checked={payrollPayoutSettings.allow_manual_bank_transfer} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, allow_manual_bank_transfer: e.target.checked }))} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
+                      <span>
+                        <span className="block text-sm font-black text-slate-900">Allow manual bank transfer</span>
+                        <span className="block text-xs font-semibold text-slate-500 mt-1">Use saved bank details and log the bank reference only when needed.</span>
+                      </span>
+                    </label>
+                  </div>
+                  <div className="rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
+                    Payroll payouts stay completely separate from member collections and GymVault billing Razorpay. This setup only affects salary settlement inside the payroll tab.
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-xs font-semibold text-slate-500">
+                      {payrollPayoutSettings.updated_at
+                        ? `Updated ${new Date(payrollPayoutSettings.updated_at).toLocaleString()}${payrollPayoutSettings.updated_by_name ? ` by ${payrollPayoutSettings.updated_by_name}` : ''}`
+                        : 'Save your payroll payout preferences once and then this setup stays hidden until you need to edit it again.'}
+                    </p>
+                    <button onClick={handleSavePayrollPayoutSettings} disabled={payrollPayoutSettingsSaving} className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                      {payrollPayoutSettingsSaving ? 'Saving...' : 'Save Payroll Setup'}
+                    </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
-                    <input type="checkbox" checked={payrollPayoutSettings.allow_cash_payouts} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, allow_cash_payouts: e.target.checked }))} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
-                    <span>
-                      <span className="block text-sm font-black text-slate-900">Allow cash payouts</span>
-                      <span className="block text-xs font-semibold text-slate-500 mt-1">Keep cash settlement available as a fallback.</span>
-                    </span>
-                  </label>
-                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
-                    <input type="checkbox" checked={payrollPayoutSettings.allow_manual_bank_transfer} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, allow_manual_bank_transfer: e.target.checked }))} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
-                    <span>
-                      <span className="block text-sm font-black text-slate-900">Allow manual bank transfer</span>
-                      <span className="block text-xs font-semibold text-slate-500 mt-1">Use saved bank details and log the bank reference only when needed.</span>
-                    </span>
-                  </label>
-                </div>
-                <div className="rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
-                  Payroll payouts stay completely separate from member collections and GymVault billing Razorpay. This setup only affects salary settlement inside the payroll tab.
-                </div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <p className="text-xs font-semibold text-slate-500">
-                    {payrollPayoutSettings.updated_at
-                      ? `Updated ${new Date(payrollPayoutSettings.updated_at).toLocaleString()}${payrollPayoutSettings.updated_by_name ? ` by ${payrollPayoutSettings.updated_by_name}` : ''}`
-                      : 'Save your payroll payout preferences once and reuse them for every salary payout.'}
-                  </p>
-                  <button onClick={handleSavePayrollPayoutSettings} disabled={payrollPayoutSettingsSaving} className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
-                    {payrollPayoutSettingsSaving ? 'Saving...' : 'Save Payroll Setup'}
-                  </button>
-                </div>
-              </div>
+              ) : null}
 
               <div className="rounded-[24px] border border-slate-100 bg-white p-5 space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Staff Payout Destinations</p>
                     <h3 className="text-lg font-black text-slate-900 mt-2">UPI and bank details</h3>
-                    <p className="text-sm font-semibold text-slate-500 mt-1">Manage every staff destination here so payroll stays self-contained.</p>
+                    <p className="text-sm font-semibold text-slate-500 mt-1">
+                      {showPayrollPayoutSetupEditor
+                        ? 'Manage every staff destination here so payroll stays self-contained.'
+                        : 'Owner payroll setup is saved and hidden. Open it again only when you need to edit payroll-wide payout rules.'}
+                    </p>
                   </div>
-                  <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-right shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Configured</p>
-                    <p className="text-sm font-black text-slate-900 mt-1">{payrollStaffDestinations.filter(entry => entry.upi_id || entry.has_bank_account).length}/{payrollStaffDestinations.length}</p>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {!showPayrollPayoutSetupEditor && Boolean(payrollPayoutSettings.updated_at) ? (
+                      <button onClick={() => setShowPayrollPayoutSetupEditor(true)} className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-700 hover:bg-slate-100">
+                        Edit Payroll Setup
+                      </button>
+                    ) : null}
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-right shrink-0">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Configured</p>
+                      <p className="text-sm font-black text-slate-900 mt-1">{payrollStaffDestinations.filter(entry => entry.upi_id || entry.has_bank_account).length}/{payrollStaffDestinations.length}</p>
+                    </div>
                   </div>
                 </div>
                 {payrollStaffDestinations.length === 0 ? (
@@ -3093,8 +3162,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1">Bank Account Number</label>
-                  <input value={payrollDestinationForm.bank_account_number} disabled={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, bank_account_number: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm disabled:bg-slate-100 disabled:text-slate-400" placeholder={payrollDestinationForm.bank_account_number_masked ? `Leave blank to keep ${payrollDestinationForm.bank_account_number_masked}` : 'Enter bank account number'} />
-                  {payrollDestinationForm.bank_account_number_masked && !payrollDestinationForm.clear_bank_account ? <p className="text-[11px] font-semibold text-slate-500 mt-1">Leave this empty to keep the saved account.</p> : null}
+                    <input value={payrollDestinationForm.bank_account_number} disabled={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, bank_account_number: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm disabled:bg-slate-100 disabled:text-slate-400" placeholder={payrollDestinationForm.bank_account_number_masked ? 'Enter the full replacement account number' : 'Enter bank account number'} />
+                    {payrollDestinationForm.bank_account_number_masked && !payrollDestinationForm.clear_bank_account ? <p className="text-[11px] font-semibold text-slate-500 mt-1">Saved bank route: {payrollDestinationForm.bank_account_number_masked}. Enter the full replacement account number to edit it, or remove the bank route completely.</p> : null}
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1">IFSC Code</label>
@@ -3103,10 +3172,15 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               </div>
               {payrollDestinationForm.bank_account_number_masked ? (
                 <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, clear_bank_account: e.target.checked, bank_account_number: e.target.checked ? '' : prev.bank_account_number }))} className="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500" />
+                  <input type="checkbox" checked={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => (e.target.checked
+                    ? { ...prev, clear_bank_account: true, bank_account_number: '', bank_account_holder: '', bank_ifsc: '', bank_name: '' }
+                    : { ...prev, clear_bank_account: false }))} className="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500" />
                   <span className="text-sm font-bold text-slate-700">Remove the saved bank account for this staff member</span>
                 </label>
               ) : null}
+              <div className="rounded-2xl bg-rose-50 border border-rose-100 px-4 py-3 text-xs font-semibold text-rose-700">
+                Replacing a saved bank route requires the full new account number. Removing a destination deletes the saved payroll route and clears stored destination labels from payroll history for this staff member.
+              </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1">Notes</label>
                 <textarea value={payrollDestinationForm.notes} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional payout note for the payroll team" />
@@ -3114,9 +3188,16 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs font-semibold text-slate-600">
                 Staff payout destinations are saved only for payroll. They do not change member collection settings or GymVault billing flows.
               </div>
-              <button onClick={handleSavePayrollDestination} disabled={payrollDestinationSavingId === payrollDestinationEntry.user_id} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
-                {payrollDestinationSavingId === payrollDestinationEntry.user_id ? 'Saving...' : 'Save Staff Destination'}
-              </button>
+              <div className="flex flex-col-reverse sm:flex-row gap-3">
+                {(payrollDestinationEntry?.upi_id || payrollDestinationEntry?.has_bank_account || payrollDestinationEntry?.notes) ? (
+                  <button onClick={handleRemovePayrollDestination} disabled={payrollDestinationSavingId === payrollDestinationEntry.user_id} className="sm:w-auto w-full py-3 px-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 font-black hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                    {payrollDestinationSavingId === payrollDestinationEntry.user_id ? 'Removing...' : 'Remove Destination Completely'}
+                  </button>
+                ) : null}
+                <button onClick={handleSavePayrollDestination} disabled={payrollDestinationSavingId === payrollDestinationEntry.user_id} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                  {payrollDestinationSavingId === payrollDestinationEntry.user_id ? 'Saving...' : 'Save Staff Destination'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

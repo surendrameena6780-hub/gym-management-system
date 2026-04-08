@@ -260,6 +260,8 @@ Full-stack feature added:
 - Keep gym-owner payroll preferences and staff payout destinations on the payroll page. Do not move payroll payout setup into Settings.
 - Payroll online payout uses a payroll-only UPI intent / QR flow launched from the Payroll tab, then the owner explicitly confirms the salary payout back in the app.
 - Staff bank details stay on the payroll page as a separate fallback for manual bank transfer records.
+- After the owner saves payroll-wide payout setup once, keep that editor hidden until they explicitly choose to edit it again; let the staff destination section take the full row by default.
+- Removing a staff payout destination must delete the saved destination record and clear stored destination labels from payroll history for that staff member.
 - Payroll payout must remain separate from member collection Route flows and separate from GymVault billing Razorpay checkout.
 - Do not reuse member payment helpers, connected accounts, or billing credentials for salary payouts.
 - For manual bank transfer fallback, keep requiring a transfer reference before marking payroll as paid.
