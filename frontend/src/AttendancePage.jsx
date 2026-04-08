@@ -979,7 +979,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   return (
     <div className="space-y-5 p-2">
-      <div className="flex justify-end">
+      <div className="flex items-start justify-end">
         <OperationsBranchScopeBar
           branchDirectory={branchDirectory}
           branchId={operationsBranchId}
@@ -988,7 +988,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
           loading={appRuntime.branchScopeLoading}
           title="Attendance scope"
           description="Filter search, check-ins, live feed, and retention views by branch without leaving the page."
-          className="ml-auto w-full max-w-[11rem] sm:max-w-none sm:w-auto shrink-0"
+          className="shrink-0"
         />
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

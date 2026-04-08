@@ -557,7 +557,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
         ))}
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex items-start justify-end">
         <OperationsBranchScopeBar
           branchDirectory={branchDirectory}
           branchId={operationsBranchId}
@@ -566,7 +566,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
           loading={appRuntime.branchScopeLoading}
           title="Class scope"
           description="Filter class formats, sessions, and roster actions by branch before scheduling or check-in."
-          className="ml-auto w-full max-w-[11rem] sm:max-w-none sm:w-auto shrink-0"
+          className="shrink-0"
         />
       </div>
 
