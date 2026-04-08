@@ -254,6 +254,16 @@ Full-stack feature added:
 - That direct connected-account link path regressed in production, stopped behaving like the working Apr 4 setup, and broke new member link storage/checkout.
 - SaaS billing is separate and continues to use the platform Razorpay checkout flow.
 
+### Payroll-Only Payout Rule
+**Permanent rule:** payroll payout setup and staff payout destinations must live only inside the Payroll tab.
+
+- Keep gym-owner payroll preferences and staff payout destinations on the payroll page. Do not move payroll payout setup into Settings.
+- Payroll online payout uses a payroll-only UPI intent / QR flow launched from the Payroll tab, then the owner explicitly confirms the salary payout back in the app.
+- Staff bank details stay on the payroll page as a separate fallback for manual bank transfer records.
+- Payroll payout must remain separate from member collection Route flows and separate from GymVault billing Razorpay checkout.
+- Do not reuse member payment helpers, connected accounts, or billing credentials for salary payouts.
+- For manual bank transfer fallback, keep requiring a transfer reference before marking payroll as paid.
+
 ---
 
 ## 7. Working Rules & Conventions

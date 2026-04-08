@@ -100,6 +100,8 @@ const ensureBranchScopeSchema = async () => {
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS paid_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_mode VARCHAR(40) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_channel VARCHAR(40) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_destination_label VARCHAR(160) DEFAULT '';
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_reference VARCHAR(120) DEFAULT '';
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_notes TEXT DEFAULT '';
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT '';

@@ -11,6 +11,7 @@ import { normalizeProfileImageUrl } from './utils/profileImage';
 import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
+import { buildPayrollPayoutReference, buildPayrollUpiUri, copyPayrollText, openPayrollUpiIntent } from './utils/payrollPayouts';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
 import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import PaginationControls from './components/PaginationControls';
@@ -60,15 +61,66 @@ const getPayrollStatusMeta = (value) => {
   return PAYROLL_STATUS_META[normalized] || PAYROLL_STATUS_META.PENDING_APPROVAL;
 };
 
-const PAYROLL_PAYOUT_MODE_OPTIONS = [
-  { value: 'Cash', label: 'Cash payout' },
-  { value: 'Online', label: 'Online bank transfer / UPI' },
-];
+const PAYROLL_PAYOUT_ROUTE_META = {
+  UPI_INTENT: {
+    label: 'UPI app / QR',
+    shortLabel: 'UPI',
+    description: 'Launch the owner’s UPI app or scan a QR right from payroll.',
+    chip: 'bg-indigo-50 text-indigo-700 border-indigo-100',
+  },
+  BANK_TRANSFER: {
+    label: 'Manual bank transfer',
+    shortLabel: 'Bank transfer',
+    description: 'Use the saved bank details and record the transfer reference.',
+    chip: 'bg-sky-50 text-sky-700 border-sky-100',
+  },
+  CASH: {
+    label: 'Cash payout',
+    shortLabel: 'Cash',
+    description: 'Record an offline cash salary payout.',
+    chip: 'bg-amber-50 text-amber-700 border-amber-100',
+  },
+};
 
-const createPayrollSettlementForm = (entry = null) => ({
-  payout_mode: entry?.payout_mode || 'Online',
-  payout_reference: entry?.payout_reference || '',
-  payout_notes: entry?.payout_notes || '',
+const PAYROLL_PAYOUT_ROUTE_OPTIONS = ['UPI_INTENT', 'BANK_TRANSFER', 'CASH'];
+
+const getPayrollPayoutRouteMeta = (value) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  return PAYROLL_PAYOUT_ROUTE_META[normalized] || PAYROLL_PAYOUT_ROUTE_META.BANK_TRANSFER;
+};
+
+const createPayrollPayoutSettingsForm = (value = {}) => ({
+  default_online_channel: String(value.default_online_channel || 'UPI').trim().toUpperCase() === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'UPI',
+  payout_note_prefix: value.payout_note_prefix || 'Salary',
+  allow_cash_payouts: value.allow_cash_payouts !== false,
+  allow_manual_bank_transfer: value.allow_manual_bank_transfer !== false,
+  updated_at: value.updated_at || null,
+  updated_by_name: value.updated_by_name || '',
+});
+
+const createPayrollDestinationForm = (entry = null) => ({
+  user_id: entry?.user_id ? String(entry.user_id) : '',
+  staff_name: entry?.staff_name || '',
+  upi_id: entry?.upi_id || '',
+  bank_account_holder: entry?.bank_account_holder || '',
+  bank_account_number: '',
+  bank_account_number_masked: entry?.bank_account_number_masked || '',
+  bank_ifsc: entry?.bank_ifsc || '',
+  bank_name: entry?.bank_name || '',
+  notes: entry?.notes || '',
+  clear_bank_account: false,
+});
+
+const createPayrollSettlementForm = (entry = null, overrides = {}) => ({
+  payout_mode: overrides.payout_mode ?? entry?.payout_mode ?? 'Online',
+  payout_channel: overrides.payout_channel ?? entry?.payout_channel ?? 'UPI_INTENT',
+  payout_reference: overrides.payout_reference ?? entry?.payout_reference ?? '',
+  payout_notes: overrides.payout_notes ?? entry?.payout_notes ?? '',
+  payout_destination_label: overrides.payout_destination_label ?? entry?.payout_destination_label ?? '',
+  upi_uri: overrides.upi_uri ?? '',
+  upi_note: overrides.upi_note ?? '',
+  upi_id: overrides.upi_id ?? '',
+  has_opened_upi: Boolean(overrides.has_opened_upi),
 });
 
 const formatPayrollDateTime = (value) => {
@@ -76,6 +128,13 @@ const formatPayrollDateTime = (value) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return '';
   return parsed.toLocaleString();
+};
+
+const getPayrollPaidSummary = (entry) => {
+  const fallbackChannel = String(entry?.payout_mode || '').trim().toLowerCase() === 'cash' ? 'CASH' : 'BANK_TRANSFER';
+  const routeMeta = getPayrollPayoutRouteMeta(entry?.payout_channel || fallbackChannel);
+  const routeText = entry?.payout_destination_label || routeMeta.shortLabel;
+  return [routeText, entry?.payout_reference].filter(Boolean).join(' • ');
 };
 
 const getTodayInputValue = () => new Date().toISOString().slice(0, 10);
@@ -309,7 +368,14 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [payrollForm, setPayrollForm] = useState({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
   const [payrollActionLoadingId, setPayrollActionLoadingId] = useState(null);
+  const [payrollPayoutSettings, setPayrollPayoutSettings] = useState(() => createPayrollPayoutSettingsForm());
+  const [payrollPayoutSettingsSaving, setPayrollPayoutSettingsSaving] = useState(false);
+  const [payrollStaffDestinations, setPayrollStaffDestinations] = useState([]);
+  const [payrollDestinationEntry, setPayrollDestinationEntry] = useState(null);
+  const [payrollDestinationForm, setPayrollDestinationForm] = useState(() => createPayrollDestinationForm());
+  const [payrollDestinationSavingId, setPayrollDestinationSavingId] = useState(null);
   const [payrollSettlementEntry, setPayrollSettlementEntry] = useState(null);
+  const [payrollSettlementDestination, setPayrollSettlementDestination] = useState(null);
   const [payrollSettlementForm, setPayrollSettlementForm] = useState(() => createPayrollSettlementForm());
   const [autoPayConfigs, setAutoPayConfigs] = useState([]);
   const [showAutoPaySetup, setShowAutoPaySetup] = useState(false);
@@ -371,6 +437,34 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     }
   }, [branchParams, token]);
 
+  const fetchPayrollPayoutSettings = useCallback(async () => {
+    if (!isOwner) {
+      setPayrollPayoutSettings(createPayrollPayoutSettingsForm());
+      return;
+    }
+
+    try {
+      const res = await axios.get('/api/finance/payroll/payout-settings', { headers: { 'x-auth-token': token } });
+      setPayrollPayoutSettings(createPayrollPayoutSettingsForm(res.data || {}));
+    } catch {
+      setPayrollPayoutSettings(createPayrollPayoutSettingsForm());
+    }
+  }, [isOwner, token]);
+
+  const fetchPayrollStaffDestinations = useCallback(async () => {
+    if (!isOwner) {
+      setPayrollStaffDestinations([]);
+      return;
+    }
+
+    try {
+      const res = await axios.get('/api/finance/payroll/staff-destinations', { headers: { 'x-auth-token': token }, params: branchParams });
+      setPayrollStaffDestinations(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setPayrollStaffDestinations([]);
+    }
+  }, [branchParams, isOwner, token]);
+
   const fetchAutoPayConfigs = useCallback(async () => {
     try {
       const res = await axios.get('/api/finance/payroll/auto-config', { headers: { 'x-auth-token': token } });
@@ -423,13 +517,147 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       fetchPayroll();
       fetchAutoPayConfigs();
       fetchStaffOptions();
+      fetchPayrollPayoutSettings();
+      fetchPayrollStaffDestinations();
     } else if (financeTab === 'pos') {
       fetchPosProducts();
       fetchPosSales();
     } else if (financeTab === 'collections') {
       fetchFinanceOverview();
     }
-  }, [financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchStaffOptions]);
+  }, [financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchPayrollPayoutSettings, fetchPayrollStaffDestinations, fetchStaffOptions]);
+
+  const payrollDestinationByUserId = useMemo(() => {
+    const nextMap = new Map();
+    payrollStaffDestinations.forEach((entry) => {
+      const userId = Number.parseInt(entry?.user_id, 10);
+      if (Number.isInteger(userId) && userId > 0) {
+        nextMap.set(userId, entry);
+      }
+    });
+    return nextMap;
+  }, [payrollStaffDestinations]);
+
+  const resolvePayrollDestinationLabel = useCallback((payoutChannel, destination) => {
+    if (payoutChannel === 'UPI_INTENT') {
+      return destination?.upi_id ? `UPI • ${destination.upi_id}` : 'UPI';
+    }
+
+    if (payoutChannel === 'BANK_TRANSFER') {
+      const bankParts = [destination?.bank_name, destination?.bank_account_number_masked].filter(Boolean);
+      return bankParts.length > 0 ? `Bank • ${bankParts.join(' • ')}` : 'Bank transfer';
+    }
+
+    return 'Cash';
+  }, []);
+
+  const buildPayrollUpiNote = useCallback((entry) => {
+    const prefix = String(payrollPayoutSettings.payout_note_prefix || '').trim() || 'Salary';
+    return [prefix, entry?.staff_name || '', entry?.pay_period || ''].filter(Boolean).join(' • ');
+  }, [payrollPayoutSettings.payout_note_prefix]);
+
+  const getPreferredPayrollPayoutChannel = useCallback((destination) => {
+    const prefersBankTransfer = String(payrollPayoutSettings.default_online_channel || 'UPI').trim().toUpperCase() === 'BANK_TRANSFER';
+    const hasUpi = Boolean(destination?.upi_id);
+    const hasBank = Boolean(destination?.has_bank_account);
+
+    if (prefersBankTransfer && payrollPayoutSettings.allow_manual_bank_transfer !== false && hasBank) {
+      return 'BANK_TRANSFER';
+    }
+
+    if (hasUpi) {
+      return 'UPI_INTENT';
+    }
+
+    if (payrollPayoutSettings.allow_manual_bank_transfer !== false && hasBank) {
+      return 'BANK_TRANSFER';
+    }
+
+    return payrollPayoutSettings.allow_cash_payouts !== false ? 'CASH' : 'UPI_INTENT';
+  }, [payrollPayoutSettings.allow_cash_payouts, payrollPayoutSettings.allow_manual_bank_transfer, payrollPayoutSettings.default_online_channel]);
+
+  const buildPayrollSettlementDraft = useCallback((entry, destination) => {
+    const payoutChannel = getPreferredPayrollPayoutChannel(destination);
+    const payoutMode = payoutChannel === 'CASH' ? 'Cash' : 'Online';
+    const payoutReference = payoutChannel === 'UPI_INTENT' ? buildPayrollPayoutReference(entry?.id) : '';
+    const upiNote = buildPayrollUpiNote(entry);
+    const upiId = destination?.upi_id || '';
+
+    return createPayrollSettlementForm(entry, {
+      payout_mode: payoutMode,
+      payout_channel: payoutChannel,
+      payout_reference: payoutReference,
+      payout_notes: '',
+      payout_destination_label: resolvePayrollDestinationLabel(payoutChannel, destination),
+      upi_uri: payoutChannel === 'UPI_INTENT' && upiId
+        ? buildPayrollUpiUri({
+            upiId,
+            payeeName: destination?.staff_name || entry?.staff_name || 'Staff Salary',
+            amount: entry?.net_pay,
+            note: upiNote,
+            reference: payoutReference,
+          })
+        : '',
+      upi_note: upiNote,
+      upi_id: upiId,
+      has_opened_upi: false,
+    });
+  }, [buildPayrollUpiNote, getPreferredPayrollPayoutChannel, resolvePayrollDestinationLabel]);
+
+  const handleSavePayrollPayoutSettings = useCallback(async () => {
+    setPayrollPayoutSettingsSaving(true);
+    try {
+      const res = await axios.put('/api/finance/payroll/payout-settings', {
+        default_online_channel: payrollPayoutSettings.default_online_channel,
+        payout_note_prefix: payrollPayoutSettings.payout_note_prefix,
+        allow_cash_payouts: payrollPayoutSettings.allow_cash_payouts,
+        allow_manual_bank_transfer: payrollPayoutSettings.allow_manual_bank_transfer,
+      }, { headers: { 'x-auth-token': token } });
+      setPayrollPayoutSettings(createPayrollPayoutSettingsForm(res.data || payrollPayoutSettings));
+      toast?.('Payroll payout setup saved.', 'success');
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to save payroll payout setup.', 'error');
+    } finally {
+      setPayrollPayoutSettingsSaving(false);
+    }
+  }, [payrollPayoutSettings, toast, token]);
+
+  const closePayrollDestinationModal = useCallback(() => {
+    setPayrollDestinationEntry(null);
+    setPayrollDestinationForm(createPayrollDestinationForm());
+  }, []);
+
+  const openPayrollDestinationModal = useCallback((entry) => {
+    setPayrollDestinationEntry(entry);
+    setPayrollDestinationForm(createPayrollDestinationForm(entry));
+  }, []);
+
+  const handleSavePayrollDestination = useCallback(async () => {
+    if (!payrollDestinationEntry?.user_id) {
+      return;
+    }
+
+    setPayrollDestinationSavingId(payrollDestinationEntry.user_id);
+    try {
+      await axios.put(`/api/finance/payroll/staff-destinations/${payrollDestinationEntry.user_id}`, {
+        user_id: payrollDestinationEntry.user_id,
+        upi_id: payrollDestinationForm.upi_id,
+        bank_account_holder: payrollDestinationForm.bank_account_holder,
+        bank_account_number: payrollDestinationForm.bank_account_number,
+        bank_ifsc: payrollDestinationForm.bank_ifsc,
+        bank_name: payrollDestinationForm.bank_name,
+        notes: payrollDestinationForm.notes,
+        clear_bank_account: payrollDestinationForm.clear_bank_account,
+      }, { headers: { 'x-auth-token': token } });
+      toast?.('Staff payout destination saved.', 'success');
+      closePayrollDestinationModal();
+      fetchPayrollStaffDestinations();
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to save the staff payout destination.', 'error');
+    } finally {
+      setPayrollDestinationSavingId(null);
+    }
+  }, [closePayrollDestinationModal, fetchPayrollStaffDestinations, payrollDestinationEntry, payrollDestinationForm, toast, token]);
 
   const handleSaveExpense = async () => {
     try {
@@ -529,8 +757,37 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const closePayrollSettlementModal = useCallback(() => {
     setPayrollSettlementEntry(null);
+    setPayrollSettlementDestination(null);
     setPayrollSettlementForm(createPayrollSettlementForm());
   }, []);
+
+  const updatePayrollSettlementChannel = useCallback((nextChannel) => {
+    if (!payrollSettlementEntry) return;
+
+    const nextReference = nextChannel === 'UPI_INTENT' ? buildPayrollPayoutReference(payrollSettlementEntry.id) : '';
+    const nextUpiNote = buildPayrollUpiNote(payrollSettlementEntry);
+    const nextUpiId = payrollSettlementDestination?.upi_id || '';
+
+    setPayrollSettlementForm((prev) => createPayrollSettlementForm(payrollSettlementEntry, {
+      payout_mode: nextChannel === 'CASH' ? 'Cash' : 'Online',
+      payout_channel: nextChannel,
+      payout_reference: nextReference,
+      payout_notes: prev.payout_notes,
+      payout_destination_label: resolvePayrollDestinationLabel(nextChannel, payrollSettlementDestination),
+      upi_uri: nextChannel === 'UPI_INTENT' && nextUpiId
+        ? buildPayrollUpiUri({
+            upiId: nextUpiId,
+            payeeName: payrollSettlementDestination?.staff_name || payrollSettlementEntry.staff_name || 'Staff Salary',
+            amount: payrollSettlementEntry.net_pay,
+            note: nextUpiNote,
+            reference: nextReference,
+          })
+        : '',
+      upi_note: nextUpiNote,
+      upi_id: nextChannel === 'UPI_INTENT' ? nextUpiId : '',
+      has_opened_upi: false,
+    }));
+  }, [buildPayrollUpiNote, payrollSettlementDestination, payrollSettlementEntry, resolvePayrollDestinationLabel]);
 
   const updatePayrollStatus = useCallback(async (entry, updates, successMessage) => {
     setPayrollActionLoadingId(entry.id);
@@ -577,29 +834,59 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   }, [toast, updatePayrollStatus]);
 
   const markPayrollPaid = useCallback((entry) => {
+    const destination = payrollDestinationByUserId.get(Number(entry.user_id)) || null;
     setPayrollSettlementEntry(entry);
-    setPayrollSettlementForm(createPayrollSettlementForm(entry));
-  }, []);
+    setPayrollSettlementDestination(destination);
+    setPayrollSettlementForm(buildPayrollSettlementDraft(entry, destination));
+  }, [buildPayrollSettlementDraft, payrollDestinationByUserId]);
+
+  const launchPayrollUpi = useCallback(async () => {
+    if (!payrollSettlementForm.upi_uri) {
+      toast?.('Save a valid staff UPI ID before launching the payroll payout.', 'warning');
+      return;
+    }
+
+    const didOpen = openPayrollUpiIntent(payrollSettlementForm.upi_uri);
+    if (!didOpen) {
+      toast?.('Could not open a UPI app from this device.', 'error');
+      return;
+    }
+
+    setPayrollSettlementForm((prev) => ({ ...prev, has_opened_upi: true }));
+    toast?.('Complete the payment in your UPI app, then come back and confirm it here.', 'info');
+  }, [payrollSettlementForm.upi_uri, toast]);
 
   const handleConfirmPayrollSettlement = useCallback(async () => {
     if (!payrollSettlementEntry) return;
 
-    if (payrollSettlementForm.payout_mode === 'Online' && !String(payrollSettlementForm.payout_reference || '').trim()) {
-      toast?.('Add the bank transfer or UPI reference before marking this payroll as paid.', 'warning');
+    if (payrollSettlementForm.payout_channel === 'UPI_INTENT' && !String(payrollSettlementDestination?.upi_id || '').trim()) {
+      toast?.('Save a staff UPI ID in the payroll page before using the in-app UPI payout flow.', 'warning');
+      return;
+    }
+
+    if (payrollSettlementForm.payout_channel === 'BANK_TRANSFER' && !Boolean(payrollSettlementDestination?.has_bank_account)) {
+      toast?.('Save the staff bank details in the payroll page before using the bank transfer route.', 'warning');
+      return;
+    }
+
+    if (payrollSettlementForm.payout_channel === 'BANK_TRANSFER' && !String(payrollSettlementForm.payout_reference || '').trim()) {
+      toast?.('Add the transfer reference before marking this bank payout as paid.', 'warning');
       return;
     }
 
     const didUpdate = await updatePayrollStatus(payrollSettlementEntry, {
       status: 'PAID',
       payout_mode: payrollSettlementForm.payout_mode,
+      payout_channel: payrollSettlementForm.payout_channel,
+      payout_destination_label: payrollSettlementForm.payout_destination_label,
       payout_reference: String(payrollSettlementForm.payout_reference || '').trim(),
       payout_notes: String(payrollSettlementForm.payout_notes || '').trim(),
-    }, 'Payroll marked as paid.');
+    }, payrollSettlementForm.payout_channel === 'UPI_INTENT' ? 'Payroll marked as paid via UPI.' : 'Payroll marked as paid.');
 
     if (didUpdate) {
       closePayrollSettlementModal();
     }
-  }, [closePayrollSettlementModal, payrollSettlementEntry, payrollSettlementForm, toast, updatePayrollStatus]);
+  }, [closePayrollSettlementModal, payrollSettlementDestination, payrollSettlementEntry, payrollSettlementForm, toast, updatePayrollStatus]);
 
   const getImageUrl = (path) => normalizeProfileImageUrl(path);
 
@@ -1817,6 +2104,115 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {/* ═══════ PAYROLL TAB ═══════ */}
       {financeTab === 'payroll' && (
         <div ref={payrollListRef} className="space-y-4 scroll-mt-28">
+          {isOwner ? (
+            <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-4">
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payroll Payout Setup</p>
+                    <h3 className="text-lg font-black text-slate-900 mt-2">Owner payroll controls</h3>
+                    <p className="text-sm font-semibold text-slate-500 mt-1">These settings are used only for staff salary payouts from the payroll page.</p>
+                  </div>
+                  <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-700">Payroll only</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1">Default Online Route</label>
+                    <select value={payrollPayoutSettings.default_online_channel} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, default_online_channel: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
+                      <option value="UPI">UPI app / QR from payroll</option>
+                      <option value="BANK_TRANSFER">Manual bank transfer</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1">Payroll Note Prefix</label>
+                    <input value={payrollPayoutSettings.payout_note_prefix} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, payout_note_prefix: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="Salary" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                    <input type="checkbox" checked={payrollPayoutSettings.allow_cash_payouts} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, allow_cash_payouts: e.target.checked }))} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
+                    <span>
+                      <span className="block text-sm font-black text-slate-900">Allow cash payouts</span>
+                      <span className="block text-xs font-semibold text-slate-500 mt-1">Keep cash settlement available as a fallback.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                    <input type="checkbox" checked={payrollPayoutSettings.allow_manual_bank_transfer} onChange={e => setPayrollPayoutSettings(prev => ({ ...prev, allow_manual_bank_transfer: e.target.checked }))} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500" />
+                    <span>
+                      <span className="block text-sm font-black text-slate-900">Allow manual bank transfer</span>
+                      <span className="block text-xs font-semibold text-slate-500 mt-1">Use saved bank details and log the bank reference only when needed.</span>
+                    </span>
+                  </label>
+                </div>
+                <div className="rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
+                  Payroll payouts stay completely separate from member collections and GymVault billing Razorpay. This setup only affects salary settlement inside the payroll tab.
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <p className="text-xs font-semibold text-slate-500">
+                    {payrollPayoutSettings.updated_at
+                      ? `Updated ${new Date(payrollPayoutSettings.updated_at).toLocaleString()}${payrollPayoutSettings.updated_by_name ? ` by ${payrollPayoutSettings.updated_by_name}` : ''}`
+                      : 'Save your payroll payout preferences once and reuse them for every salary payout.'}
+                  </p>
+                  <button onClick={handleSavePayrollPayoutSettings} disabled={payrollPayoutSettingsSaving} className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                    {payrollPayoutSettingsSaving ? 'Saving...' : 'Save Payroll Setup'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Staff Payout Destinations</p>
+                    <h3 className="text-lg font-black text-slate-900 mt-2">UPI and bank details</h3>
+                    <p className="text-sm font-semibold text-slate-500 mt-1">Manage every staff destination here so payroll stays self-contained.</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-right shrink-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Configured</p>
+                    <p className="text-sm font-black text-slate-900 mt-1">{payrollStaffDestinations.filter(entry => entry.upi_id || entry.has_bank_account).length}/{payrollStaffDestinations.length}</p>
+                  </div>
+                </div>
+                {payrollStaffDestinations.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm font-semibold text-slate-500 text-center">
+                    No staff members found in this branch scope yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+                    {payrollStaffDestinations.map((destination) => (
+                      <div key={`payroll-destination-${destination.user_id}`} className="rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-black text-slate-900">{destination.staff_name}</p>
+                            <p className="text-xs font-semibold text-slate-500 mt-1">{destination.staff_role || 'Staff'}{destination.branch_name ? ` • ${destination.branch_name}` : ''}</p>
+                          </div>
+                          <button onClick={() => openPayrollDestinationModal(destination)} className="self-start px-3 py-2 rounded-xl bg-white border border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-700 hover:bg-slate-100">
+                            Edit Destination
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">UPI Route</p>
+                            <p className="text-sm font-black text-slate-900">{destination.upi_id_masked || 'Not saved yet'}</p>
+                            <p className="text-xs font-semibold text-slate-500 mt-1">{destination.upi_id ? 'Ready for in-app UPI payout.' : 'Add a UPI ID to pay salary from inside the app.'}</p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Bank Route</p>
+                            <p className="text-sm font-black text-slate-900">{destination.has_bank_account ? [destination.bank_name || 'Saved account', destination.bank_account_number_masked].filter(Boolean).join(' • ') : 'Not saved yet'}</p>
+                            <p className="text-xs font-semibold text-slate-500 mt-1">{destination.has_bank_account ? `${destination.bank_account_holder || 'Account holder'}${destination.bank_ifsc ? ` • ${destination.bank_ifsc}` : ''}` : 'Save bank details for manual bank transfer fallback.'}</p>
+                          </div>
+                        </div>
+                        {destination.notes ? <p className="mt-3 text-xs font-semibold text-slate-500">{destination.notes}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-500">
+              Payroll setup and salary payout actions are owner-only. Staff can still review payroll status from this tab.
+            </div>
+          )}
+
           {/* Auto-Pay Active Configs */}
           {isOwner && autoPayConfigs.filter(c => c.auto_enabled).length > 0 && (
             <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
@@ -1879,7 +2275,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                         <p>{entry.pay_period || 'No pay period set'}</p>
                         <p>{statusKey === 'PAID' ? paidSummary || statusMeta.note : approvalSummary}</p>
                         {statusKey === 'REJECTED' && entry.rejection_reason ? <p className="text-rose-600">Reason: {entry.rejection_reason}</p> : null}
-                        {statusKey === 'PAID' && entry.payout_mode ? <p>Mode: {entry.payout_mode}{entry.payout_reference ? ` • ${entry.payout_reference}` : ''}</p> : null}
+                        {statusKey === 'PAID' && entry.payout_mode ? <p>{getPayrollPaidSummary(entry)}</p> : null}
                       </div>
                       <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-semibold text-slate-500">
                         {statusKey === 'PENDING_APPROVAL' && isOwner ? (
@@ -1894,7 +2290,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                         ) : null}
                         {statusKey === 'APPROVED' && isOwner ? (
                           <button disabled={isBusy} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
-                            {isBusy ? 'Saving...' : 'Mark Paid'}
+                            {isBusy ? 'Saving...' : 'Pay Salary'}
                           </button>
                         ) : null}
                         {statusKey === 'REJECTED' && isOwner ? (
@@ -1932,7 +2328,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                     const statusMeta = getPayrollStatusMeta(statusKey);
                     const isBusy = payrollActionLoadingId === entry.id;
                     const progressText = statusKey === 'PAID'
-                      ? `${entry.payout_mode || 'Manual'}${entry.payout_reference ? ` • ${entry.payout_reference}` : ''}`
+                      ? getPayrollPaidSummary(entry)
                       : statusKey === 'REJECTED'
                         ? (entry.rejection_reason || statusMeta.note)
                         : entry.approved_at
@@ -1965,7 +2361,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                             ) : null}
                             {statusKey === 'APPROVED' && isOwner ? (
                               <button disabled={isBusy} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
-                                {isBusy ? 'Saving...' : 'Mark Paid'}
+                                {isBusy ? 'Saving...' : 'Pay Salary'}
                               </button>
                             ) : null}
                             {statusKey === 'REJECTED' && isOwner ? (
@@ -2513,14 +2909,14 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         </div>
       )}
 
-      {/* ── Add Payroll Modal ── */}
+      {/* ── Payroll Settlement Modal ── */}
       {payrollSettlementEntry && (
         <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-3xl shadow-2xl overflow-hidden">
             <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div>
-                <h2 className="text-xl font-black text-slate-900">Settle Payroll</h2>
-                <p className="text-xs font-bold text-slate-400 mt-0.5">Record how the owner paid this staff salary</p>
+                <h2 className="text-xl font-black text-slate-900">Pay Staff Salary</h2>
+                <p className="text-xs font-bold text-slate-400 mt-0.5">Launch the payout here, then confirm it once the owner has sent the salary.</p>
               </div>
               <button onClick={closePayrollSettlementModal} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
             </div>
@@ -2530,28 +2926,197 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                 <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementEntry.staff_name}</p>
                 <p className="text-sm font-semibold text-slate-500 mt-1">₹{Number(payrollSettlementEntry.net_pay || 0).toLocaleString()} for {payrollSettlementEntry.pay_period || 'this pay period'}</p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1">Payout Mode</label>
-                  <select value={payrollSettlementForm.payout_mode} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_mode: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
-                    {PAYROLL_PAYOUT_MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1">Reference / Transfer ID</label>
-                  <input value={payrollSettlementForm.payout_reference} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_reference: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder={payrollSettlementForm.payout_mode === 'Online' ? 'Required for online payout' : 'Optional for cash payout'} />
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-2">Payout Route</label>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {PAYROLL_PAYOUT_ROUTE_OPTIONS
+                    .filter((route) => route !== 'BANK_TRANSFER' || payrollPayoutSettings.allow_manual_bank_transfer !== false)
+                    .filter((route) => route !== 'CASH' || payrollPayoutSettings.allow_cash_payouts !== false)
+                    .map((route) => {
+                      const routeMeta = getPayrollPayoutRouteMeta(route);
+                      const isDisabled = (route === 'UPI_INTENT' && !payrollSettlementDestination?.upi_id)
+                        || (route === 'BANK_TRANSFER' && !payrollSettlementDestination?.has_bank_account);
+                      const isActive = payrollSettlementForm.payout_channel === route;
+
+                      return (
+                        <button
+                          key={route}
+                          type="button"
+                          disabled={isDisabled}
+                          onClick={() => updatePayrollSettlementChannel(route)}
+                          className={`rounded-2xl border px-4 py-4 text-left transition-all ${isActive ? 'border-slate-900 bg-slate-900 text-white shadow-lg' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'} ${isDisabled ? 'opacity-45 cursor-not-allowed hover:border-slate-200' : ''}`}
+                        >
+                          <p className="text-[11px] font-black uppercase tracking-wider">{routeMeta.label}</p>
+                          <p className={`text-xs font-semibold mt-2 leading-relaxed ${isActive ? 'text-white/80' : 'text-slate-500'}`}>{routeMeta.description}</p>
+                          <p className={`text-[11px] font-bold mt-3 ${isActive ? 'text-white/90' : 'text-slate-400'}`}>
+                            {route === 'UPI_INTENT'
+                              ? (payrollSettlementDestination?.upi_id ? payrollSettlementDestination.upi_id_masked || payrollSettlementDestination.upi_id : 'Save a UPI ID first')
+                              : route === 'BANK_TRANSFER'
+                                ? (payrollSettlementDestination?.has_bank_account ? [payrollSettlementDestination?.bank_name || 'Saved bank', payrollSettlementDestination?.bank_account_number_masked].filter(Boolean).join(' • ') : 'Save bank details first')
+                                : 'Owner records a cash payout'}
+                          </p>
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
+
+              {payrollSettlementForm.payout_channel === 'UPI_INTENT' && (
+                <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-4 space-y-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500/70">Saved UPI Destination</p>
+                      <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementDestination?.upi_id || 'No UPI ID saved'}</p>
+                      <p className="text-sm font-semibold text-slate-500 mt-1">Pay this salary from the owner’s own UPI app, then confirm it back in payroll.</p>
+                    </div>
+                    <div className="rounded-2xl bg-white border border-indigo-100 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Note</p>
+                      <p className="text-sm font-black text-slate-900 mt-1">{payrollSettlementForm.upi_note || 'Salary payout'}</p>
+                      <p className="text-xs font-semibold text-slate-500 mt-2">Internal payroll ref: {payrollSettlementForm.payout_reference}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={launchPayrollUpi} disabled={!payrollSettlementForm.upi_uri} className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">Open UPI App</button>
+                      <button type="button" onClick={async () => {
+                        const didCopy = await copyPayrollText(payrollSettlementDestination?.upi_id || '');
+                        toast?.(didCopy ? 'Staff UPI ID copied.' : 'Could not copy the UPI ID.', didCopy ? 'success' : 'warning');
+                      }} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-black text-slate-700 hover:bg-slate-50">Copy UPI ID</button>
+                      <button type="button" onClick={async () => {
+                        const didCopy = await copyPayrollText(payrollSettlementForm.upi_note || '');
+                        toast?.(didCopy ? 'Payroll payment note copied.' : 'Could not copy the payment note.', didCopy ? 'success' : 'warning');
+                      }} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-black text-slate-700 hover:bg-slate-50">Copy Note</button>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 flex flex-col items-center justify-center text-center">
+                    {payrollSettlementForm.upi_uri ? (
+                      <>
+                        <QRCodeCanvas value={payrollSettlementForm.upi_uri} size={180} includeMargin className="rounded-2xl" />
+                        <p className="text-sm font-black text-slate-900 mt-4">Scan to pay this salary</p>
+                        <p className="text-xs font-semibold text-slate-500 mt-1">Open the QR on desktop or let the owner scan it from another device.</p>
+                      </>
+                    ) : (
+                      <div className="rounded-2xl bg-slate-50 border border-dashed border-slate-200 px-4 py-8 w-full">
+                        <p className="text-sm font-black text-slate-700">Save a staff UPI ID first</p>
+                        <p className="text-xs font-semibold text-slate-500 mt-1">The payroll page can only launch an in-app UPI payout when the staff destination has a UPI handle.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {payrollSettlementForm.payout_channel === 'BANK_TRANSFER' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/50 px-4 py-4 space-y-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-sky-500/70">Saved Bank Destination</p>
+                      <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementDestination?.has_bank_account ? [payrollSettlementDestination?.bank_name || 'Saved bank account', payrollSettlementDestination?.bank_account_number_masked].filter(Boolean).join(' • ') : 'No bank details saved'}</p>
+                      <p className="text-sm font-semibold text-slate-500 mt-1">{payrollSettlementDestination?.bank_account_holder || 'Add account holder and bank details in the payroll destination manager.'}</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-semibold text-slate-600">
+                      <div className="rounded-xl bg-white border border-sky-100 px-3 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Bank Name</p>
+                        <p className="font-black text-slate-900">{payrollSettlementDestination?.bank_name || 'Not saved'}</p>
+                      </div>
+                      <div className="rounded-xl bg-white border border-sky-100 px-3 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">IFSC</p>
+                        <p className="font-black text-slate-900">{payrollSettlementDestination?.bank_ifsc || 'Not saved'}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1">Transfer Reference</label>
+                      <input value={payrollSettlementForm.payout_reference} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_reference: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="Required for manual bank transfer" />
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs font-semibold text-slate-500">
+                      This route stays inside payroll but still depends on the owner completing the bank transfer externally, then confirming it here with the bank reference.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {payrollSettlementForm.payout_channel === 'CASH' && (
+                <div className="rounded-2xl bg-amber-50 border border-amber-100 px-4 py-4 text-sm font-semibold text-amber-800">
+                  Cash payout keeps the payroll record clean and separate. Use this only when the owner is handing over the staff salary offline.
+                </div>
+              )}
+
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1">Payout Notes</label>
-                <textarea value={payrollSettlementForm.payout_notes} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional note like bank transfer, UPI, envelope handoff, or partial context" />
+                <textarea value={payrollSettlementForm.payout_notes} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional note like salary sent from owner UPI, handoff confirmation, or bank transfer context" />
               </div>
+
               <div className="rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
-                This records a staff salary payout only. It does not use the member payment collection flow or the GymVault billing Razorpay flow.
+                This payroll payout flow is fully separate from member collections and GymVault billing Razorpay. It only records salary settlement inside payroll.
               </div>
-              <button onClick={handleConfirmPayrollSettlement} disabled={payrollActionLoadingId === payrollSettlementEntry.id} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">{payrollActionLoadingId === payrollSettlementEntry.id ? 'Saving...' : 'Confirm Settlement'}</button>
+
+              <button onClick={handleConfirmPayrollSettlement} disabled={payrollActionLoadingId === payrollSettlementEntry.id} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                {payrollActionLoadingId === payrollSettlementEntry.id
+                  ? 'Saving...'
+                  : payrollSettlementForm.payout_channel === 'UPI_INTENT'
+                    ? 'Confirm UPI Salary Paid'
+                    : payrollSettlementForm.payout_channel === 'BANK_TRANSFER'
+                      ? 'Mark Bank Transfer Paid'
+                      : 'Mark Cash Payout Paid'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Staff Payout Destination Modal ── */}
+      {payrollDestinationEntry && (
+        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">Edit Staff Payout Destination</h2>
+                <p className="text-xs font-bold text-slate-400 mt-0.5">{payrollDestinationEntry.staff_name} • {payrollDestinationEntry.staff_role || 'Staff'}</p>
+              </div>
+              <button onClick={closePayrollDestinationModal} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="app-modal-scroll p-4 sm:p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">UPI ID</label>
+                <input value={payrollDestinationForm.upi_id} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, upi_id: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="name@bank" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Bank Name</label>
+                  <input value={payrollDestinationForm.bank_name} disabled={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, bank_name: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm disabled:bg-slate-100 disabled:text-slate-400" placeholder="e.g. HDFC Bank" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Account Holder</label>
+                  <input value={payrollDestinationForm.bank_account_holder} disabled={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, bank_account_holder: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm disabled:bg-slate-100 disabled:text-slate-400" placeholder="Staff account holder name" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Bank Account Number</label>
+                  <input value={payrollDestinationForm.bank_account_number} disabled={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, bank_account_number: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm disabled:bg-slate-100 disabled:text-slate-400" placeholder={payrollDestinationForm.bank_account_number_masked ? `Leave blank to keep ${payrollDestinationForm.bank_account_number_masked}` : 'Enter bank account number'} />
+                  {payrollDestinationForm.bank_account_number_masked && !payrollDestinationForm.clear_bank_account ? <p className="text-[11px] font-semibold text-slate-500 mt-1">Leave this empty to keep the saved account.</p> : null}
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">IFSC Code</label>
+                  <input value={payrollDestinationForm.bank_ifsc} disabled={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, bank_ifsc: e.target.value.toUpperCase() }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm disabled:bg-slate-100 disabled:text-slate-400" placeholder="HDFC0001234" />
+                </div>
+              </div>
+              {payrollDestinationForm.bank_account_number_masked ? (
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={payrollDestinationForm.clear_bank_account} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, clear_bank_account: e.target.checked, bank_account_number: e.target.checked ? '' : prev.bank_account_number }))} className="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500" />
+                  <span className="text-sm font-bold text-slate-700">Remove the saved bank account for this staff member</span>
+                </label>
+              ) : null}
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Notes</label>
+                <textarea value={payrollDestinationForm.notes} onChange={e => setPayrollDestinationForm(prev => ({ ...prev, notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional payout note for the payroll team" />
+              </div>
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs font-semibold text-slate-600">
+                Staff payout destinations are saved only for payroll. They do not change member collection settings or GymVault billing flows.
+              </div>
+              <button onClick={handleSavePayrollDestination} disabled={payrollDestinationSavingId === payrollDestinationEntry.user_id} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                {payrollDestinationSavingId === payrollDestinationEntry.user_id ? 'Saving...' : 'Save Staff Destination'}
+              </button>
             </div>
           </div>
         </div>
@@ -2619,7 +3184,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                 <span className="text-sm font-bold text-slate-700">Enable auto-pay for this staff</span>
               </label>
               <div className="rounded-2xl bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs font-semibold text-indigo-600">
-                A payroll entry with status "Pending Approval" will be auto-created on day {autoPayForm.pay_day || '1'} of each month. You can then approve and mark it paid.
+                A payroll entry with status "Pending Approval" will be auto-created on day {autoPayForm.pay_day || '1'} of each month. You can then approve and pay it.
               </div>
               <button onClick={handleSaveAutoPay} disabled={autoPaySaving} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-50">{autoPaySaving ? 'Saving...' : 'Save Auto-Pay Config'}</button>
             </div>

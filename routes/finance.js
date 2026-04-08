@@ -5,12 +5,14 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
 const {
+    ValidationError,
     ensureDateOnly,
     ensureNumber,
     ensureTrimmedString,
     ensureChoice,
     isValidationError,
 } = require('../utils/fieldValidation');
+const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
 const {
     BranchAccessError,
     DEFAULT_BRANCH_ID,
@@ -102,6 +104,151 @@ const normalizePayrollPayoutMode = (value, { required = false, defaultValue = ''
     }
 
     return normalized === 'ONLINE' ? 'Online' : 'Cash';
+};
+
+const normalizePayrollOnlineChannel = (value, { defaultValue = 'UPI' } = {}) => ensureChoice(value, {
+    field: 'default_online_channel',
+    choices: ['UPI', 'BANK_TRANSFER'],
+    defaultValue: String(defaultValue || 'UPI').trim().toUpperCase(),
+    uppercase: true,
+}) || 'UPI';
+
+const normalizePayrollPayoutChannel = (value, { required = false, defaultValue = '' } = {}) => ensureChoice(value, {
+    field: 'payout_channel',
+    choices: ['CASH', 'UPI_INTENT', 'BANK_TRANSFER'],
+    required,
+    defaultValue: String(defaultValue || '').trim().toUpperCase(),
+    uppercase: true,
+}) || '';
+
+const normalizePayrollUpiId = (value, { defaultValue = '' } = {}) => {
+    const normalized = ensureTrimmedString(value, {
+        field: 'upi_id',
+        max: 120,
+        defaultValue,
+        lowercase: true,
+    });
+
+    if (!normalized) {
+        return '';
+    }
+
+    if (!/^[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}$/i.test(normalized)) {
+        throw new ValidationError('upi_id is invalid.');
+    }
+
+    return normalized;
+};
+
+const normalizePayrollBankAccountNumber = (value, { required = false, defaultValue = '' } = {}) => {
+    const normalized = ensureTrimmedString(value, {
+        field: 'bank_account_number',
+        required,
+        max: 40,
+        defaultValue,
+    }).replace(/\s+/g, '');
+
+    if (!normalized) {
+        return '';
+    }
+
+    if (!/^\d{6,24}$/.test(normalized)) {
+        throw new ValidationError('bank_account_number is invalid.');
+    }
+
+    return normalized;
+};
+
+const normalizePayrollIfscCode = (value, { defaultValue = '' } = {}) => {
+    const normalized = ensureTrimmedString(value, {
+        field: 'bank_ifsc',
+        max: 20,
+        defaultValue,
+        uppercase: true,
+    });
+
+    if (!normalized) {
+        return '';
+    }
+
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalized)) {
+        throw new ValidationError('bank_ifsc is invalid.');
+    }
+
+    return normalized;
+};
+
+const maskAccountNumber = (value) => {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length <= 4) return digits;
+    return `${'•'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
+};
+
+const maskUpiId = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || !normalized.includes('@')) return normalized;
+    const [handle, domain] = normalized.split('@');
+    if (!handle) return normalized;
+    const visibleHead = handle.slice(0, Math.min(3, handle.length));
+    const visibleTail = handle.length > 3 ? handle.slice(-1) : '';
+    const maskedMiddle = handle.length > 4 ? '•'.repeat(handle.length - visibleHead.length - visibleTail.length) : '•';
+    return `${visibleHead}${maskedMiddle}${visibleTail}@${domain}`;
+};
+
+const buildPayrollDestinationLabel = ({ payoutChannel, upiId = '', bankName = '', accountMasked = '' }) => {
+    if (payoutChannel === 'UPI_INTENT') {
+        return upiId ? `UPI • ${upiId}` : 'UPI';
+    }
+
+    if (payoutChannel === 'BANK_TRANSFER') {
+        const bankParts = [bankName, accountMasked].filter(Boolean);
+        return bankParts.length > 0 ? `Bank • ${bankParts.join(' • ')}` : 'Bank transfer';
+    }
+
+    return 'Cash';
+};
+
+const buildGeneratedPayrollReference = (payrollId, prefix = 'PAY') => {
+    const normalizedPrefix = String(prefix || 'PAY').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') || 'PAY';
+    return `${normalizedPrefix}-${payrollId}-${Date.now().toString(36).toUpperCase()}`;
+};
+
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
+
+const serializePayrollPayoutSettings = (row = {}) => ({
+    default_online_channel: normalizePayrollOnlineChannel(row.default_online_channel, { defaultValue: 'UPI' }),
+    payout_note_prefix: ensureTrimmedString(row.payout_note_prefix, { field: 'payout_note_prefix', max: 120, defaultValue: 'Salary' }) || 'Salary',
+    allow_cash_payouts: row.allow_cash_payouts !== false,
+    allow_manual_bank_transfer: row.allow_manual_bank_transfer !== false,
+    updated_at: row.updated_at || null,
+    updated_by_name: row.updated_by_name || '',
+});
+
+const serializePayrollStaffDestination = (row = {}, branchDirectory = []) => {
+    const accountNumber = decryptSecret(row.bank_account_number_enc || '');
+    const accountMasked = maskAccountNumber(accountNumber);
+    const upiId = String(row.upi_id || '').trim();
+    const branchId = row.branch_id || DEFAULT_BRANCH_ID;
+
+    return {
+        id: row.id || null,
+        user_id: row.user_id,
+        staff_name: row.staff_name || '',
+        staff_role: row.staff_role || '',
+        branch_id: branchId,
+        branch_name: getBranchName(branchDirectory, branchId),
+        upi_id: upiId,
+        upi_id_masked: maskUpiId(upiId),
+        bank_account_holder: row.bank_account_holder || '',
+        has_bank_account: Boolean(accountNumber),
+        bank_account_number_masked: accountMasked,
+        bank_ifsc: row.bank_ifsc || '',
+        bank_name: row.bank_name || '',
+        notes: row.notes || '',
+        updated_at: row.updated_at || null,
+        updated_by_name: row.updated_by_name || '',
+    };
 };
 
 const isOwnerUser = (req) => String(req?.user?.role || '').trim().toUpperCase() === 'OWNER';
@@ -346,6 +493,218 @@ router.delete('/expenses/:id', requirePermission('payments:write'), async (req, 
 });
 
 // ═══════════════════════════════════════════════════════════
+//   PAYROLL PAYOUT SETUP
+// ═══════════════════════════════════════════════════════════
+router.get('/payroll/payout-settings', requirePermission('payments:read'), async (req, res) => {
+    try {
+        if (!isOwnerUser(req)) {
+            return res.status(403).json({ error: 'Only owners can view payroll payout settings.' });
+        }
+
+        const gid = gymId(req);
+        const result = await pool.query(
+            `SELECT pps.*, updated_user.full_name AS updated_by_name
+             FROM payroll_payout_settings pps
+             LEFT JOIN users updated_user ON updated_user.id = pps.updated_by
+             WHERE pps.gym_id = $1
+             LIMIT 1`,
+            [gid]
+        );
+
+        return res.json(serializePayrollPayoutSettings(result.rows[0] || {}));
+    } catch (err) {
+        console.error('PAYROLL PAYOUT SETTINGS FETCH:', err.message);
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+router.put('/payroll/payout-settings', requirePermission('payments:write'), async (req, res) => {
+    try {
+        if (!isOwnerUser(req)) {
+            return res.status(403).json({ error: 'Only owners can update payroll payout settings.' });
+        }
+
+        const gid = gymId(req);
+        const defaultOnlineChannel = normalizePayrollOnlineChannel(req.body?.default_online_channel, { defaultValue: 'UPI' });
+        const payoutNotePrefix = ensureTrimmedString(req.body?.payout_note_prefix, {
+            field: 'payout_note_prefix',
+            max: 120,
+            defaultValue: 'Salary',
+        }) || 'Salary';
+        const allowCashPayouts = req.body?.allow_cash_payouts !== false;
+        const allowManualBankTransfer = req.body?.allow_manual_bank_transfer !== false;
+
+        if (defaultOnlineChannel === 'BANK_TRANSFER' && !allowManualBankTransfer) {
+            return res.status(400).json({ error: 'Enable manual bank transfer if it is the default online payout channel.' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO payroll_payout_settings (gym_id, default_online_channel, payout_note_prefix, allow_cash_payouts, allow_manual_bank_transfer, updated_by, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+             ON CONFLICT (gym_id)
+             DO UPDATE SET default_online_channel = $2,
+                           payout_note_prefix = $3,
+                           allow_cash_payouts = $4,
+                           allow_manual_bank_transfer = $5,
+                           updated_by = $6,
+                           updated_at = NOW()
+             RETURNING *`,
+            [gid, defaultOnlineChannel, payoutNotePrefix, allowCashPayouts, allowManualBankTransfer, req.user.id]
+        );
+
+        return res.json(serializePayrollPayoutSettings({
+            ...result.rows[0],
+            updated_by_name: req.user.full_name || '',
+        }));
+    } catch (err) {
+        console.error('PAYROLL PAYOUT SETTINGS SAVE:', err.message);
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+router.get('/payroll/staff-destinations', requirePermission('payments:read'), async (req, res) => {
+    try {
+        if (!isOwnerUser(req)) {
+            return res.status(403).json({ error: 'Only owners can view payroll staff destinations.' });
+        }
+
+        const gid = gymId(req);
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const params = [gid, DEFAULT_BRANCH_ID];
+        let branchFilter = '';
+
+        if (branchScope.branchId) {
+            params.push(branchScope.branchId);
+            branchFilter = ` AND COALESCE(u.branch_id, $2) = $${params.length}`;
+        }
+
+        const result = await pool.query(
+            `SELECT psd.*, u.id AS user_id, u.full_name AS staff_name, u.staff_role,
+                    COALESCE(u.branch_id, $2) AS branch_id,
+                    updated_user.full_name AS updated_by_name
+             FROM users u
+             LEFT JOIN payroll_staff_destinations psd ON psd.user_id = u.id AND psd.gym_id = u.gym_id
+             LEFT JOIN users updated_user ON updated_user.id = psd.updated_by
+             WHERE u.gym_id = $1
+               AND UPPER(COALESCE(u.role, '')) <> 'OWNER'${branchFilter}
+             ORDER BY u.full_name ASC`,
+            params
+        );
+
+        return res.json(result.rows.map((row) => serializePayrollStaffDestination(row, branchScope.branchDirectory)));
+    } catch (err) {
+        console.error('PAYROLL STAFF DESTINATIONS FETCH:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+router.put('/payroll/staff-destinations/:userId', requirePermission('payments:write'), async (req, res) => {
+    try {
+        if (!isOwnerUser(req)) {
+            return res.status(403).json({ error: 'Only owners can update payroll staff destinations.' });
+        }
+
+        const gid = gymId(req);
+        const userId = posInt(req.body?.user_id || req.params.userId);
+        if (!userId) {
+            return res.status(400).json({ error: 'Invalid staff member.' });
+        }
+
+        const staffResult = await pool.query(
+            `SELECT id, full_name, role, staff_role, COALESCE(branch_id, $3) AS branch_id
+             FROM users
+             WHERE id = $1 AND gym_id = $2
+             LIMIT 1`,
+            [userId, gid, DEFAULT_BRANCH_ID]
+        );
+        const staff = staffResult.rows[0];
+        if (!staff || String(staff.role || '').trim().toUpperCase() === 'OWNER') {
+            return res.status(404).json({ error: 'Staff member not found.' });
+        }
+
+        const branchScope = await resolveBranchWriteScope(pool, req, staff.branch_id || DEFAULT_BRANCH_ID);
+        const existingResult = await pool.query(
+            `SELECT *
+             FROM payroll_staff_destinations
+             WHERE gym_id = $1 AND user_id = $2
+             LIMIT 1`,
+            [gid, userId]
+        );
+        const existing = existingResult.rows[0] || {};
+
+        const clearBankAccount = Boolean(req.body?.clear_bank_account);
+        const nextUpiId = hasOwn(req.body, 'upi_id')
+            ? normalizePayrollUpiId(req.body?.upi_id, { defaultValue: '' })
+            : String(existing.upi_id || '');
+        const nextBankAccountHolder = clearBankAccount
+            ? ''
+            : (hasOwn(req.body, 'bank_account_holder')
+                ? ensureTrimmedString(req.body?.bank_account_holder, { field: 'bank_account_holder', max: 120 })
+                : String(existing.bank_account_holder || ''));
+        const nextBankIfsc = clearBankAccount
+            ? ''
+            : (hasOwn(req.body, 'bank_ifsc')
+                ? normalizePayrollIfscCode(req.body?.bank_ifsc, { defaultValue: '' })
+                : String(existing.bank_ifsc || ''));
+        const nextBankName = clearBankAccount
+            ? ''
+            : (hasOwn(req.body, 'bank_name')
+                ? ensureTrimmedString(req.body?.bank_name, { field: 'bank_name', max: 120 })
+                : String(existing.bank_name || ''));
+        const nextNotes = hasOwn(req.body, 'notes')
+            ? ensureTrimmedString(req.body?.notes, { field: 'notes', max: 500 })
+            : String(existing.notes || '');
+
+        let nextBankAccountNumberEnc = clearBankAccount ? '' : String(existing.bank_account_number_enc || '');
+        if (!clearBankAccount && hasOwn(req.body, 'bank_account_number')) {
+            const rawBankAccountNumber = String(req.body?.bank_account_number || '').trim();
+            if (rawBankAccountNumber) {
+                nextBankAccountNumberEnc = encryptSecret(normalizePayrollBankAccountNumber(rawBankAccountNumber, { required: true }));
+            }
+        }
+
+        const result = await pool.query(
+            `INSERT INTO payroll_staff_destinations (gym_id, user_id, upi_id, bank_account_holder, bank_account_number_enc, bank_ifsc, bank_name, notes, updated_by, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+             ON CONFLICT (gym_id, user_id)
+             DO UPDATE SET upi_id = $3,
+                           bank_account_holder = $4,
+                           bank_account_number_enc = $5,
+                           bank_ifsc = $6,
+                           bank_name = $7,
+                           notes = $8,
+                           updated_by = $9,
+                           updated_at = NOW()
+             RETURNING *`,
+            [gid, userId, nextUpiId, nextBankAccountHolder, nextBankAccountNumberEnc, nextBankIfsc, nextBankName, nextNotes, req.user.id]
+        );
+
+        return res.json(serializePayrollStaffDestination({
+            ...result.rows[0],
+            staff_name: staff.full_name,
+            staff_role: staff.staff_role,
+            branch_id: branchScope.branchId,
+            updated_by_name: req.user.full_name || '',
+        }, branchScope.branchDirectory));
+    } catch (err) {
+        console.error('PAYROLL STAFF DESTINATIONS SAVE:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════
 //   PAYROLL CRUD
 // ═══════════════════════════════════════════════════════════
 router.get('/payroll', requirePermission('payments:read'), async (req, res) => {
@@ -448,7 +807,8 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
         const gid = gymId(req); const id = posInt(req.params.id);
         if (!id) return res.status(400).json({ error: 'Invalid id.' });
         const existingResult = await pool.query(
-            `SELECT id, status, branch_id, base_pay, commission, deductions, notes
+            `SELECT id, status, branch_id, user_id, base_pay, commission, deductions, notes,
+                    payout_mode, payout_channel, payout_destination_label, payout_reference
              FROM payroll_entries
              WHERE id = $1 AND gym_id = $2
              LIMIT 1`,
@@ -498,19 +858,41 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
         const payoutMode = nextStatus === 'PAID'
             ? normalizePayrollPayoutMode(req.body?.payout_mode, { required: true, defaultValue: 'ONLINE' })
             : '';
-        const payoutReference = nextStatus === 'PAID'
+        const payoutChannel = nextStatus === 'PAID'
+            ? normalizePayrollPayoutChannel(req.body?.payout_channel, {
+                required: true,
+                defaultValue: payoutMode === 'Cash' ? 'CASH' : 'UPI_INTENT',
+            })
+            : '';
+        if (nextStatus === 'PAID' && payoutMode === 'Cash' && payoutChannel !== 'CASH') {
+            return res.status(400).json({ error: 'Cash payroll payouts must use the cash channel.' });
+        }
+        if (nextStatus === 'PAID' && payoutMode === 'Online' && payoutChannel === 'CASH') {
+            return res.status(400).json({ error: 'Online payroll payouts must use an online payroll channel.' });
+        }
+        const payoutDestinationLabel = nextStatus === 'PAID'
+            ? ensureTrimmedString(req.body?.payout_destination_label, {
+                field: 'payout_destination_label',
+                required: payoutChannel !== 'CASH',
+                max: 160,
+            })
+            : '';
+        let payoutReference = nextStatus === 'PAID'
             ? ensureTrimmedString(req.body?.payout_reference, {
                 field: 'payout_reference',
-                required: payoutMode === 'Online',
+                required: payoutChannel === 'BANK_TRANSFER',
                 max: 120,
             })
             : '';
+        if (nextStatus === 'PAID' && payoutChannel === 'UPI_INTENT' && !payoutReference) {
+            payoutReference = buildGeneratedPayrollReference(id, 'UPI');
+        }
         const payoutNotes = nextStatus === 'PAID'
             ? ensureTrimmedString(req.body?.payout_notes, { field: 'payout_notes', max: 1000 })
             : '';
-                const shouldMarkApproved = ['APPROVED', 'PAID'].includes(nextStatus);
-                const shouldClearApproval = nextStatus === 'REJECTED';
-                const shouldMarkPaid = nextStatus === 'PAID';
+        const shouldMarkApproved = ['APPROVED', 'PAID'].includes(nextStatus);
+        const shouldClearApproval = nextStatus === 'REJECTED';
+        const shouldMarkPaid = nextStatus === 'PAID';
 
         const result = await pool.query(
             `UPDATE payroll_entries
@@ -539,14 +921,16 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
                     ELSE NULL
                  END,
                       payout_mode = CASE WHEN $10 THEN $11 ELSE '' END,
-                      payout_reference = CASE WHEN $10 THEN $12 ELSE '' END,
-                      payout_notes = CASE WHEN $10 THEN $13 ELSE '' END,
-                      rejection_reason = CASE WHEN $8 THEN $14 ELSE '' END
-                 WHERE id = $15 AND gym_id = $16
+                      payout_channel = CASE WHEN $10 THEN $12 ELSE '' END,
+                      payout_destination_label = CASE WHEN $10 THEN $13 ELSE '' END,
+                      payout_reference = CASE WHEN $10 THEN $14 ELSE '' END,
+                      payout_notes = CASE WHEN $10 THEN $15 ELSE '' END,
+                      rejection_reason = CASE WHEN $8 THEN $16 ELSE '' END
+                 WHERE id = $17 AND gym_id = $18
              RETURNING *`,
                 [normalizedBasePay, normalizedCommission, normalizedDeductions, net, normalizedNotes,
                  nextStatus, shouldMarkApproved, shouldClearApproval, req.user.id, shouldMarkPaid,
-                 payoutMode, payoutReference, payoutNotes, rejectionReason, id, gid]);
+                 payoutMode, payoutChannel, payoutDestinationLabel, payoutReference, payoutNotes, rejectionReason, id, gid]);
         return res.json({
             ...result.rows[0],
             branch_id: existing.branch_id || DEFAULT_BRANCH_ID,

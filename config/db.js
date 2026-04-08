@@ -658,6 +658,8 @@ const connectDB = async () => {
                 paid_at         TIMESTAMPTZ,
                 paid_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
                 payout_mode     VARCHAR(40) DEFAULT '',
+                payout_channel  VARCHAR(40) DEFAULT '',
+                payout_destination_label VARCHAR(160) DEFAULT '',
                 payout_reference VARCHAR(120) DEFAULT '',
                 payout_notes    TEXT DEFAULT '',
                 rejection_reason TEXT DEFAULT '',
@@ -676,7 +678,54 @@ const connectDB = async () => {
                 updated_at      TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE(gym_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS payroll_payout_settings (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE UNIQUE,
+                default_online_channel VARCHAR(40) DEFAULT 'UPI',
+                payout_note_prefix VARCHAR(120) DEFAULT 'Salary',
+                allow_cash_payouts BOOLEAN DEFAULT TRUE,
+                allow_manual_bank_transfer BOOLEAN DEFAULT TRUE,
+                updated_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS payroll_staff_destinations (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                upi_id          VARCHAR(120) DEFAULT '',
+                bank_account_holder VARCHAR(120) DEFAULT '',
+                bank_account_number_enc TEXT DEFAULT '',
+                bank_ifsc       VARCHAR(20) DEFAULT '',
+                bank_name       VARCHAR(120) DEFAULT '',
+                notes           TEXT DEFAULT '',
+                updated_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(gym_id, user_id)
+            );
+            ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_channel VARCHAR(40) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_destination_label VARCHAR(160) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS default_online_channel VARCHAR(40) DEFAULT 'UPI';
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS payout_note_prefix VARCHAR(120) DEFAULT 'Salary';
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS allow_cash_payouts BOOLEAN DEFAULT TRUE;
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS allow_manual_bank_transfer BOOLEAN DEFAULT TRUE;
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+            ALTER TABLE IF EXISTS payroll_payout_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS upi_id VARCHAR(120) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS bank_account_holder VARCHAR(120) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS bank_account_number_enc TEXT DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS bank_ifsc VARCHAR(20) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS bank_name VARCHAR(120) DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+            ALTER TABLE IF EXISTS payroll_staff_destinations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
             CREATE INDEX IF NOT EXISTS idx_payroll_auto_config_gym ON payroll_auto_config(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_payroll_entries_gym_period_status ON payroll_entries(gym_id, pay_period, status);
+            CREATE INDEX IF NOT EXISTS idx_payroll_payout_settings_gym ON payroll_payout_settings(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_payroll_staff_destinations_gym ON payroll_staff_destinations(gym_id);
             CREATE TABLE IF NOT EXISTS pos_products (
                 id           SERIAL PRIMARY KEY,
                 gym_id       INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
