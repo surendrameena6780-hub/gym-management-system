@@ -26,32 +26,35 @@ const OperationsBranchScopeBar = ({
     <div className={`inline-flex min-w-0 max-w-full justify-end ${className}`.trim()}>
       <span className="sr-only">{title}</span>
       {canSelect ? (
-        <label className="relative inline-flex w-full min-w-[132px] max-w-[8.75rem] sm:max-w-full sm:min-w-[220px]">
-          <Building2 size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <label className="operations-branch-shell relative inline-flex w-full min-w-[132px] max-w-[8.75rem] sm:max-w-full sm:min-w-[220px]">
+          <div className="operations-branch-surface pointer-events-none inline-flex w-full items-center gap-2 rounded-[18px] border px-3 py-2 text-[12px] font-bold shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:px-3.5 sm:py-2.5 sm:text-[13px]">
+            <Building2 size={15} className="operations-branch-icon shrink-0" />
+            <span className="operations-branch-label min-w-0 flex-1 truncate">{loading ? 'Loading branch...' : activeLabel}</span>
+            {loading ? (
+              <LoaderCircle size={15} className="operations-branch-caret shrink-0 animate-spin" />
+            ) : (
+              <ChevronDown size={15} className="operations-branch-caret shrink-0" />
+            )}
+          </div>
           <select
             value={branchId || options[0]?.value || ''}
             onChange={(event) => onChange(event.target.value)}
             aria-label={title}
             title={description}
-            className="w-full appearance-none rounded-[18px] border border-slate-200/90 bg-white/92 pl-9 pr-9 py-2 text-[12px] font-bold text-slate-900 shadow-[0_10px_28px_rgba(15,23,42,0.08)] outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 sm:pl-10 sm:pr-10 sm:py-2.5 sm:text-[13px]"
+            className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-[18px] opacity-0"
           >
             {options.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-          {loading ? (
-            <LoaderCircle size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
-          ) : (
-            <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          )}
         </label>
       ) : (
         <div
-          className="inline-flex max-w-[8.75rem] items-center gap-2 rounded-[18px] border border-slate-200/90 bg-white/92 px-3 py-2 text-[12px] font-bold text-slate-900 shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:max-w-full sm:px-3.5 sm:py-2.5 sm:text-[13px]"
+          className="operations-branch-surface inline-flex max-w-[8.75rem] items-center gap-2 rounded-[18px] border px-3 py-2 text-[12px] font-bold shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:max-w-full sm:px-3.5 sm:py-2.5 sm:text-[13px]"
           title={loading ? 'Loading branch access...' : `Locked to ${activeLabel}`}
         >
-          {loading ? <LoaderCircle size={15} className="animate-spin text-slate-400 shrink-0" /> : <Building2 size={15} className="text-slate-400 shrink-0" />}
-          <span className="max-w-[7rem] truncate sm:max-w-[10rem]">{loading ? 'Loading branch...' : activeLabel}</span>
+          {loading ? <LoaderCircle size={15} className="operations-branch-caret animate-spin shrink-0" /> : <Building2 size={15} className="operations-branch-icon shrink-0" />}
+          <span className="operations-branch-label max-w-[7rem] truncate sm:max-w-[10rem]">{loading ? 'Loading branch...' : activeLabel}</span>
         </div>
       )}
     </div>

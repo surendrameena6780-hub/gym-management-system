@@ -336,6 +336,8 @@ const connectDB = async () => {
         await pool.query('SELECT NOW()');
         console.log('✅ Database Connected!');
 
+        const runMaintenance = async () => {
+
         // Always run idempotent column migrations (safe to run every boot)
         await pool.query(`
             ALTER TABLE gyms ADD COLUMN IF NOT EXISTS city            VARCHAR(100);
@@ -951,9 +953,41 @@ const connectDB = async () => {
         await runSchemaMigrations();
         console.log('✅ Schema migrations checked');
 
+        };
+
+        const isProductionBoot = process.env.NODE_ENV === 'production';
+        const maintenanceMode = String(process.env.DB_BOOT_MAINTENANCE_MODE || (isProductionBoot ? 'deferred' : 'blocking')).trim().toLowerCase();
+
+        if (maintenanceMode === 'deferred') {
+            console.log('ℹ️ Scheduling database maintenance in background after startup.');
+            const maintenancePromise = new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    void runMaintenance()
+                        .then(() => {
+                            console.log('✅ Background database maintenance completed');
+                            resolve();
+                        })
+                        .catch((err) => {
+                            console.error('❌ Background database maintenance error:', err.message);
+                            reject(err);
+                        });
+                }, 0);
+            });
+            return {
+                maintenanceMode,
+                maintenancePromise,
+            };
+        }
+
+        await runMaintenance();
+        return {
+            maintenanceMode,
+            maintenancePromise: Promise.resolve(),
+        };
+
     } catch (err) {
         console.error('❌ Database Error:', err.message);
-        process.exit(1);
+        throw err;
     }
 };
 

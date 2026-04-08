@@ -574,13 +574,31 @@ process.on('uncaughtException', (err) => {
 
 const bootstrap = async () => {
     try {
-        await connectDB();
+        const { maintenanceMode, maintenancePromise } = await connectDB();
+
+        const startJobsWhenReady = () => {
+            if (!stopBackgroundJobRunner) {
+                stopBackgroundJobRunner = startBackgroundJobs();
+            }
+        };
 
         httpServer = app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });
 
-        stopBackgroundJobRunner = startBackgroundJobs();
+        if (maintenanceMode === 'deferred') {
+            console.log('ℹ️ Background jobs will start after database maintenance completes.');
+            maintenancePromise
+                .then(() => {
+                    startJobsWhenReady();
+                })
+                .catch((err) => {
+                    console.error('BACKGROUND JOB STARTUP ERROR:', err.message);
+                });
+            return;
+        }
+
+        startJobsWhenReady();
     } catch (err) {
         console.error('STARTUP ERROR:', err.message);
         process.exit(1);
