@@ -1164,6 +1164,58 @@ html.gv-dark-mode .gv-pay-card-emerald { background: rgba(16,185,129,0.1) !impor
 html.gv-dark-mode .gv-pay-card-blue   { background: rgba(59,130,246,0.1) !important;  border-color: rgba(59,130,246,0.2) !important; }
 html.gv-dark-mode .gv-pay-card-orange { background: rgba(249,115,22,0.1) !important;  border-color: rgba(249,115,22,0.2) !important; }
 
+html.gv-dark-mode .payroll-settlement-panel {
+  background: #101726 !important;
+  border-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+html.gv-dark-mode .payroll-settlement-header {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(19, 28, 45, 0.96) 100%) !important;
+  border-bottom-color: rgba(255,255,255,0.08) !important;
+}
+
+html.gv-dark-mode .payroll-settlement-section,
+html.gv-dark-mode .payroll-settlement-note-card,
+html.gv-dark-mode .payroll-settlement-qr-card,
+html.gv-dark-mode .payroll-settlement-destination-card,
+html.gv-dark-mode .payroll-settlement-bank-card,
+html.gv-dark-mode .payroll-settlement-info {
+  color: #e7eefc !important;
+}
+
+html.gv-dark-mode .payroll-settlement-section {
+  background: rgba(18, 24, 38, 0.94) !important;
+  border-color: rgba(148, 163, 184, 0.12) !important;
+}
+
+html.gv-dark-mode .payroll-settlement-destination-card {
+  background: linear-gradient(180deg, rgba(43, 55, 95, 0.92) 0%, rgba(28, 37, 67, 0.96) 100%) !important;
+  border-color: rgba(129, 140, 248, 0.34) !important;
+}
+
+html.gv-dark-mode .payroll-settlement-bank-card {
+  background: linear-gradient(180deg, rgba(17, 54, 83, 0.92) 0%, rgba(15, 38, 58, 0.96) 100%) !important;
+  border-color: rgba(56, 189, 248, 0.28) !important;
+}
+
+html.gv-dark-mode .payroll-settlement-note-card,
+html.gv-dark-mode .payroll-settlement-qr-card {
+  background: rgba(12, 18, 31, 0.96) !important;
+  border-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+html.gv-dark-mode .payroll-settlement-info {
+  background: rgba(18, 54, 82, 0.5) !important;
+  border-color: rgba(56, 189, 248, 0.24) !important;
+  color: #c8edff !important;
+}
+
+html.gv-dark-mode .payroll-settlement-muted,
+html.gv-dark-mode .payroll-settlement-panel .text-slate-500,
+html.gv-dark-mode .payroll-settlement-panel .text-slate-400 {
+  color: #afc0dd !important;
+}
+
 /* ── Member list bottom fade ── */
 html.gv-dark-mode .gv-list-bottom-fade { background: linear-gradient(to top, var(--dm-bg) 0%, transparent 100%) !important; }
 html.gv-dark-mode .gv-fab-shell { box-shadow: 0 8px 48px rgba(0,0,0,0.65) !important; border-color: rgba(255,255,255,0.04) !important; }

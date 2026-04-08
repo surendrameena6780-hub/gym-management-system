@@ -368,6 +368,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [payrollForm, setPayrollForm] = useState({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
   const [payrollActionLoadingId, setPayrollActionLoadingId] = useState(null);
+  const [payrollDeleteLoadingId, setPayrollDeleteLoadingId] = useState(null);
   const [payrollPayoutSettings, setPayrollPayoutSettings] = useState(() => createPayrollPayoutSettingsForm());
   const [payrollPayoutSettingsSaving, setPayrollPayoutSettingsSaving] = useState(false);
   const [showPayrollPayoutSetupEditor, setShowPayrollPayoutSetupEditor] = useState(true);
@@ -888,6 +889,44 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     setPayrollSettlementDestination(destination);
     setPayrollSettlementForm(buildPayrollSettlementDraft(entry, destination));
   }, [buildPayrollSettlementDraft, payrollDestinationByUserId]);
+
+  const handleDeletePayroll = useCallback(async (entry) => {
+    if (!entry?.id) return;
+
+    const runDelete = async () => {
+      setPayrollDeleteLoadingId(entry.id);
+      try {
+        await axios.delete(`/api/finance/payroll/${entry.id}`, { headers: { 'x-auth-token': token } });
+        if (payrollSettlementEntry?.id === entry.id) {
+          closePayrollSettlementModal();
+        }
+        toast?.('Payroll entry deleted.', 'success');
+        fetchPayroll();
+        fetchFinanceOverview();
+      } catch (err) {
+        toast?.(err?.response?.data?.error || 'Failed to delete payroll entry.', 'error');
+      } finally {
+        setPayrollDeleteLoadingId(null);
+      }
+    };
+
+    const confirmMessage = `Delete the payroll entry for ${entry.staff_name || 'this staff member'}${entry.pay_period ? ` (${entry.pay_period})` : ''}? This removes the payroll record from the main payroll page.`;
+
+    if (showConfirm) {
+      showConfirm({
+        title: 'Delete Payroll Entry',
+        message: confirmMessage,
+        confirmLabel: 'Delete Payroll',
+        variant: 'warning',
+        onConfirm: runDelete,
+      });
+      return;
+    }
+
+    if (window.confirm(confirmMessage)) {
+      await runDelete();
+    }
+  }, [closePayrollSettlementModal, fetchFinanceOverview, fetchPayroll, payrollSettlementEntry?.id, showConfirm, toast, token]);
 
   const launchPayrollUpi = useCallback(async () => {
     if (!payrollSettlementForm.upi_uri) {
@@ -2312,6 +2351,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                   const paidSummary = entry.paid_at ? `Paid ${formatPayrollDateTime(entry.paid_at)}` : '';
                   const approvalSummary = entry.approved_at ? `Approved ${formatPayrollDateTime(entry.approved_at)}` : statusMeta.note;
                   const isBusy = payrollActionLoadingId === entry.id;
+                  const isDeleting = payrollDeleteLoadingId === entry.id;
 
                   return (
                     <div key={`payroll-mobile-${entry.id}`} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
@@ -2349,22 +2389,27 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                       <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-semibold text-slate-500">
                         {statusKey === 'PENDING_APPROVAL' && isOwner ? (
                           <>
-                            <button disabled={isBusy} onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                            <button disabled={isBusy || isDeleting} onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
                               {isBusy ? 'Saving...' : 'Reject'}
                             </button>
-                            <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                            <button disabled={isBusy || isDeleting} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
                               {isBusy ? 'Saving...' : 'Approve'}
                             </button>
                           </>
                         ) : null}
                         {statusKey === 'APPROVED' && isOwner ? (
-                          <button disabled={isBusy} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                          <button disabled={isBusy || isDeleting} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
                             {isBusy ? 'Saving...' : 'Pay Salary'}
                           </button>
                         ) : null}
                         {statusKey === 'REJECTED' && isOwner ? (
-                          <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                          <button disabled={isBusy || isDeleting} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
                             {isBusy ? 'Saving...' : 'Re-Approve'}
+                          </button>
+                        ) : null}
+                        {isOwner ? (
+                          <button disabled={isBusy || isDeleting} onClick={() => handleDeletePayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                            {isDeleting ? 'Deleting...' : 'Delete Payroll'}
                           </button>
                         ) : null}
                         {!isOwner && statusKey !== 'PAID' ? <span className="text-slate-400 font-bold">Owner action required</span> : null}
@@ -2396,6 +2441,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                     const statusKey = String(entry.status || 'PENDING_APPROVAL').toUpperCase();
                     const statusMeta = getPayrollStatusMeta(statusKey);
                     const isBusy = payrollActionLoadingId === entry.id;
+                    const isDeleting = payrollDeleteLoadingId === entry.id;
                     const progressText = statusKey === 'PAID'
                       ? getPayrollPaidSummary(entry)
                       : statusKey === 'REJECTED'
@@ -2420,22 +2466,27 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                           <div className="flex flex-wrap items-center justify-end gap-2">
                             {statusKey === 'PENDING_APPROVAL' && isOwner ? (
                               <>
-                                <button disabled={isBusy} onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                                <button disabled={isBusy || isDeleting} onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
                                   {isBusy ? 'Saving...' : 'Reject'}
                                 </button>
-                                <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                                <button disabled={isBusy || isDeleting} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
                                   {isBusy ? 'Saving...' : 'Approve'}
                                 </button>
                               </>
                             ) : null}
                             {statusKey === 'APPROVED' && isOwner ? (
-                              <button disabled={isBusy} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                              <button disabled={isBusy || isDeleting} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
                                 {isBusy ? 'Saving...' : 'Pay Salary'}
                               </button>
                             ) : null}
                             {statusKey === 'REJECTED' && isOwner ? (
-                              <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                              <button disabled={isBusy || isDeleting} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
                                 {isBusy ? 'Saving...' : 'Re-Approve'}
+                              </button>
+                            ) : null}
+                            {isOwner ? (
+                              <button disabled={isBusy || isDeleting} onClick={() => handleDeletePayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                                {isDeleting ? 'Deleting...' : 'Delete'}
                               </button>
                             ) : null}
                             {!isOwner && statusKey !== 'PAID' ? <span className="text-xs font-bold text-slate-400">Owner action required</span> : null}
@@ -2981,19 +3032,19 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {/* ── Payroll Settlement Modal ── */}
       {payrollSettlementEntry && (
         <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-3xl shadow-2xl overflow-hidden">
-            <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="app-modal-panel payroll-settlement-panel bg-white rounded-[28px] w-full max-w-3xl shadow-2xl overflow-hidden border border-slate-100">
+            <div className="payroll-settlement-header p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div>
                 <h2 className="text-xl font-black text-slate-900">Pay Staff Salary</h2>
-                <p className="text-xs font-bold text-slate-400 mt-0.5">Launch the payout here, then confirm it once the owner has sent the salary.</p>
+                <p className="payroll-settlement-muted text-xs font-bold text-slate-400 mt-0.5">Launch the payout here, then confirm it once the owner has sent the salary.</p>
               </div>
               <button onClick={closePayrollSettlementModal} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
             </div>
             <div className="app-modal-scroll p-4 sm:p-6 space-y-4">
-              <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+              <div className="payroll-settlement-section rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payroll Entry</p>
                 <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementEntry.staff_name}</p>
-                <p className="text-sm font-semibold text-slate-500 mt-1">₹{Number(payrollSettlementEntry.net_pay || 0).toLocaleString()} for {payrollSettlementEntry.pay_period || 'this pay period'}</p>
+                <p className="payroll-settlement-muted text-sm font-semibold text-slate-500 mt-1">₹{Number(payrollSettlementEntry.net_pay || 0).toLocaleString()} for {payrollSettlementEntry.pay_period || 'this pay period'}</p>
               </div>
 
               <div>
@@ -3033,16 +3084,16 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
               {payrollSettlementForm.payout_channel === 'UPI_INTENT' && (
                 <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
-                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-4 space-y-4">
+                  <div className="payroll-settlement-destination-card rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-4 space-y-4">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500/70">Saved UPI Destination</p>
                       <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementDestination?.upi_id || 'No UPI ID saved'}</p>
-                      <p className="text-sm font-semibold text-slate-500 mt-1">Pay this salary from the owner’s own UPI app, then confirm it back in payroll.</p>
+                      <p className="payroll-settlement-muted text-sm font-semibold text-slate-500 mt-1">Pay this salary from the owner’s own UPI app, then confirm it back in payroll.</p>
                     </div>
-                    <div className="rounded-2xl bg-white border border-indigo-100 px-4 py-3">
+                    <div className="payroll-settlement-note-card rounded-2xl bg-white border border-indigo-100 px-4 py-3">
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Note</p>
                       <p className="text-sm font-black text-slate-900 mt-1">{payrollSettlementForm.upi_note || 'Salary payout'}</p>
-                      <p className="text-xs font-semibold text-slate-500 mt-2">Internal payroll ref: {payrollSettlementForm.payout_reference}</p>
+                      <p className="payroll-settlement-muted text-xs font-semibold text-slate-500 mt-2">Internal payroll ref: {payrollSettlementForm.payout_reference}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={launchPayrollUpi} disabled={!payrollSettlementForm.upi_uri} className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">Open UPI App</button>
@@ -3056,17 +3107,17 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                       }} className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-black text-slate-700 hover:bg-slate-50">Copy Note</button>
                     </div>
                   </div>
-                  <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 flex flex-col items-center justify-center text-center">
+                  <div className="payroll-settlement-qr-card rounded-2xl border border-slate-100 bg-white px-4 py-4 flex flex-col items-center justify-center text-center">
                     {payrollSettlementForm.upi_uri ? (
                       <>
                         <QRCodeCanvas value={payrollSettlementForm.upi_uri} size={180} includeMargin className="rounded-2xl" />
                         <p className="text-sm font-black text-slate-900 mt-4">Scan to pay this salary</p>
-                        <p className="text-xs font-semibold text-slate-500 mt-1">Open the QR on desktop or let the owner scan it from another device.</p>
+                        <p className="payroll-settlement-muted text-xs font-semibold text-slate-500 mt-1">Open the QR on desktop or let the owner scan it from another device.</p>
                       </>
                     ) : (
-                      <div className="rounded-2xl bg-slate-50 border border-dashed border-slate-200 px-4 py-8 w-full">
+                      <div className="payroll-settlement-section rounded-2xl bg-slate-50 border border-dashed border-slate-200 px-4 py-8 w-full">
                         <p className="text-sm font-black text-slate-700">Save a staff UPI ID first</p>
-                        <p className="text-xs font-semibold text-slate-500 mt-1">The payroll page can only launch an in-app UPI payout when the staff destination has a UPI handle.</p>
+                        <p className="payroll-settlement-muted text-xs font-semibold text-slate-500 mt-1">The payroll page can only launch an in-app UPI payout when the staff destination has a UPI handle.</p>
                       </div>
                     )}
                   </div>
@@ -3075,29 +3126,29 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
               {payrollSettlementForm.payout_channel === 'BANK_TRANSFER' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="rounded-2xl border border-sky-100 bg-sky-50/50 px-4 py-4 space-y-3">
+                  <div className="payroll-settlement-bank-card rounded-2xl border border-sky-100 bg-sky-50/50 px-4 py-4 space-y-3">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-widest text-sky-500/70">Saved Bank Destination</p>
                       <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementDestination?.has_bank_account ? [payrollSettlementDestination?.bank_name || 'Saved bank account', payrollSettlementDestination?.bank_account_number_masked].filter(Boolean).join(' • ') : 'No bank details saved'}</p>
-                      <p className="text-sm font-semibold text-slate-500 mt-1">{payrollSettlementDestination?.bank_account_holder || 'Add account holder and bank details in the payroll destination manager.'}</p>
+                      <p className="payroll-settlement-muted text-sm font-semibold text-slate-500 mt-1">{payrollSettlementDestination?.bank_account_holder || 'Add account holder and bank details in the payroll destination manager.'}</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-semibold text-slate-600">
-                      <div className="rounded-xl bg-white border border-sky-100 px-3 py-3">
+                      <div className="payroll-settlement-note-card rounded-xl bg-white border border-sky-100 px-3 py-3">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Bank Name</p>
                         <p className="font-black text-slate-900">{payrollSettlementDestination?.bank_name || 'Not saved'}</p>
                       </div>
-                      <div className="rounded-xl bg-white border border-sky-100 px-3 py-3">
+                      <div className="payroll-settlement-note-card rounded-xl bg-white border border-sky-100 px-3 py-3">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">IFSC</p>
                         <p className="font-black text-slate-900">{payrollSettlementDestination?.bank_ifsc || 'Not saved'}</p>
                       </div>
                     </div>
                   </div>
-                  <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 space-y-4">
+                  <div className="payroll-settlement-qr-card rounded-2xl border border-slate-100 bg-white px-4 py-4 space-y-4">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1">Transfer Reference</label>
                       <input value={payrollSettlementForm.payout_reference} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_reference: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="Required for manual bank transfer" />
                     </div>
-                    <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs font-semibold text-slate-500">
+                    <div className="payroll-settlement-section rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs font-semibold text-slate-500">
                       This route stays inside payroll but still depends on the owner completing the bank transfer externally, then confirming it here with the bank reference.
                     </div>
                   </div>
@@ -3115,7 +3166,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                 <textarea value={payrollSettlementForm.payout_notes} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional note like salary sent from owner UPI, handoff confirmation, or bank transfer context" />
               </div>
 
-              <div className="rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
+              <div className="payroll-settlement-info rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
                 This payroll payout flow is fully separate from member collections and GymVault billing Razorpay. It only records salary settlement inside payroll.
               </div>
 
