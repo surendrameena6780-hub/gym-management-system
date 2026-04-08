@@ -237,7 +237,7 @@ function SplashScreen({ exiting }) {
       </div>
 
       <div
-        className="relative w-20 h-20 rounded-[22px] flex items-center justify-center mb-6 animate-in zoom-in-50 duration-700"
+        className="relative w-20 h-20 rounded-[22px] flex items-center justify-center mb-6 animate-in zoom-in-50 duration-700 overflow-visible"
         style={{
           background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
           boxShadow: '0 0 80px rgba(99,102,241,0.5), 0 0 160px rgba(99,102,241,0.2), 0 20px 40px rgba(0,0,0,0.4)'
@@ -398,6 +398,7 @@ function App() {
   const [showMobileMoreNav, setShowMobileMoreNav] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const authTransitionRef = useRef(false);
   const [showSignup, setShowSignup] = useState(normalizedPathname === '/signup');
 
   // ðŸš¨ MASTERCLASS TOUR STATE ðŸš¨
@@ -415,6 +416,7 @@ function App() {
   const dashboardFallbackNotifiedRef = useRef(false);
   const mainRef = useRef(null);
   const [visitedPages, setVisitedPages] = useState(() => new Set(['Dashboard']));
+  const animatedPagesRef = useRef(new Set());
 
   useEffect(() => {
     toastRef.current = toast;
@@ -465,6 +467,13 @@ function App() {
     setIsAuthChecking(true);
     window.history.replaceState({}, '', '/dashboard');
   }, [isHQ, stabilizeViewportAfterAuth]);
+
+  const getPageVisibility = useCallback((pageName) => {
+    if (currentPage !== pageName) return 'hidden';
+    if (animatedPagesRef.current.has(pageName)) return '';
+    animatedPagesRef.current.add(pageName);
+    return 'gv-page-fade';
+  }, [currentPage]);
 
   useEffect(() => {
     const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '');
@@ -547,6 +556,7 @@ function App() {
     setSaasGrace(false);
     setSaasGraceNoticeKey('');
     setVisitedPages(new Set(['Dashboard']));
+    animatedPagesRef.current = new Set();
     setCurrentPage('Dashboard');
     setShowNotifications(false);
     setShowProfileMenu(false);
@@ -1288,8 +1298,11 @@ function App() {
 
     const storeToken = (t, user) => {
       stabilizeViewportAfterAuth();
+      authTransitionRef.current = true;
+      setTimeout(() => { authTransitionRef.current = false; }, 600);
       const nextToken = setSessionToken(t);
       setIsAuthChecking(false);
+      setShowProfileMenu(false);
       setToken(nextToken);
       if (user) {
         writeStoredUser(user);
@@ -1299,6 +1312,7 @@ function App() {
         setCurrentUser(null);
       }
         setVisitedPages(new Set(['Dashboard']));
+        animatedPagesRef.current = new Set();
         setCurrentPage('Dashboard');
         setSaasGrace(false);
         setSaasGraceNoticeKey('');
@@ -1575,7 +1589,7 @@ function App() {
                {/* PROFILE MENU */}
                 <div className="relative">
                 <button 
-                  onClick={() => setShowProfileMenu(!showProfileMenu)}
+                  onClick={() => { if (!authTransitionRef.current) setShowProfileMenu(!showProfileMenu); }}
                   className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-black shadow-md bg-gradient-to-tr from-indigo-500 to-purple-500 hover:scale-105 transition-transform ring-2 ring-white"
                 >
                   G
@@ -1637,7 +1651,7 @@ function App() {
           <main ref={mainRef} className="app-scroll-shell flex-1 overflow-y-auto">
 
             {/* Dashboard */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll-dashboard ${currentPage === 'Dashboard' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll-dashboard ${getPageVisibility('Dashboard')}`}>
               {visitedPages.has('Dashboard') && (
                 <PageErrorBoundary pageName="Dashboard" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Dashboard')}>
@@ -1650,7 +1664,7 @@ function App() {
             </div>
 
             {/* Members */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Members' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Members')}`}>
               {visitedPages.has('Members') && (
                 <PageErrorBoundary pageName="Members" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Members')}>
@@ -1661,7 +1675,7 @@ function App() {
             </div>
 
             {/* Leads */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Leads' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Leads')}`}>
               {visitedPages.has('Leads') && (
                 <PageErrorBoundary pageName="Leads" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Leads')}>
@@ -1672,7 +1686,7 @@ function App() {
             </div>
 
             {/* Plans */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Plans' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Plans')}`}>
               {visitedPages.has('Plans') && (
                 <PageErrorBoundary pageName="Plans" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Plans')}>
@@ -1683,7 +1697,7 @@ function App() {
             </div>
 
             {/* Payments */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Payments' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Payments')}`}>
               {visitedPages.has('Payments') && (
                 <PageErrorBoundary pageName="Payments" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Payments')}>
@@ -1703,7 +1717,7 @@ function App() {
             </div>
 
             {/* Attendance */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Attendance' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Attendance')}`}>
               {visitedPages.has('Attendance') && (
                 <PageErrorBoundary pageName="Attendance" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Attendance')}>
@@ -1720,7 +1734,7 @@ function App() {
             </div>
 
             {/* Classes */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Classes' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Classes')}`}>
               {visitedPages.has('Classes') && (
                 <PageErrorBoundary pageName="Classes" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Classes')}>
@@ -1731,7 +1745,7 @@ function App() {
             </div>
 
             {/* RFID Setup */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'RFID Setup' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('RFID Setup')}`}>
               {visitedPages.has('RFID Setup') && (
                 <PageErrorBoundary pageName="RFID Setup" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('RFID Setup')}>
@@ -1745,7 +1759,7 @@ function App() {
             </div>
 
             {/* Insights */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Insights' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Insights')}`}>
               {visitedPages.has('Insights') && (
                 <PageErrorBoundary pageName="Insights" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Insights')}>
@@ -1756,7 +1770,7 @@ function App() {
             </div>
 
             {/* Settings */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Settings' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Settings')}`}>
               {visitedPages.has('Settings') && (
                 <PageErrorBoundary pageName="Settings" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Settings')}>
@@ -1767,7 +1781,7 @@ function App() {
             </div>
 
             {/* Help & Support */}
-            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${currentPage === 'Help & Support' ? 'gv-page-fade' : 'hidden'}`}>
+            <div className={`max-w-[1400px] mx-auto w-full p-4 desktop:p-6 lg:p-8 app-main-scroll ${getPageVisibility('Help & Support')}`}>
               {visitedPages.has('Help & Support') && (
                 <PageErrorBoundary pageName="Help & Support" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Help & Support')}>

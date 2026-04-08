@@ -254,6 +254,18 @@ CREATE TABLE IF NOT EXISTS payroll_entries (
     created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS payroll_auto_config (
+    id              SERIAL PRIMARY KEY,
+    gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+    user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    base_pay        DECIMAL(10,2) DEFAULT 0,
+    auto_enabled    BOOLEAN DEFAULT FALSE,
+    pay_day         INTEGER DEFAULT 1,
+    created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(gym_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_auto_config_gym ON payroll_auto_config(gym_id);
 CREATE TABLE IF NOT EXISTS pos_products (
     id           SERIAL PRIMARY KEY,
     gym_id       INTEGER REFERENCES gyms(id) ON DELETE CASCADE,

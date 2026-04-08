@@ -385,12 +385,43 @@ const processAttendanceCheckin = async ({
         await client.query('BEGIN');
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`attendance-checkin:${gym_id}:${member_id}`]);
 
-        const gymConfig = await getGymAttendanceConfig(gym_id, client);
+        // Combined gym config + member snapshot in one round-trip
+        const combinedRes = await client.query(
+            `WITH gym_cfg AS (
+                SELECT id, name, attendance_mode, attendance_geo_enabled, gym_latitude, gym_longitude, gym_radius_meters, allow_expired_checkin
+                FROM gyms WHERE id = $1
+            )
+            SELECT
+                (SELECT row_to_json(gym_cfg) FROM gym_cfg) AS gym_config,
+                row_to_json(member_snap) AS member
+            FROM (
+                SELECT
+                    m.id, m.full_name, m.phone, m.email,
+                    COALESCE(m.branch_id, $3) AS branch_id,
+                    m.rfid_tag_id, m.last_visit, m.joining_date, m.status AS member_status,
+                    COALESCE(ms_latest.status, 'UNPAID') AS membership_status,
+                    ms_latest.plan_id, ms_latest.end_date, ms_latest.plan_name
+                FROM members m
+                LEFT JOIN LATERAL (
+                    SELECT ms.status, ms.plan_id, ms.end_date, p.name AS plan_name
+                    FROM memberships ms
+                    LEFT JOIN plans p ON p.id = ms.plan_id
+                    WHERE ms.member_id = m.id AND ms.gym_id = $1 AND ms.deleted_at IS NULL
+                    ORDER BY ms.end_date DESC NULLS LAST
+                    LIMIT 1
+                ) ms_latest ON true
+                WHERE m.gym_id = $1 AND m.id = $2 AND m.deleted_at IS NULL
+                LIMIT 1
+            ) member_snap`,
+            [gym_id, member_id, DEFAULT_BRANCH_ID]
+        );
+
+        const gymConfig = combinedRes.rows[0]?.gym_config;
         if (!gymConfig) {
             throw createAttendanceError(404, { message: 'Gym not found.' });
         }
 
-        const member = await getMemberSnapshot(gym_id, member_id, client);
+        const member = combinedRes.rows[0]?.member;
         if (!member) {
             throw createAttendanceError(404, { message: 'Member not found.' });
         }
@@ -537,13 +568,14 @@ const processAttendanceCheckin = async ({
             ]
         );
 
-        await client.query(
-            'UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2',
-            [member_id, gym_id]
-        );
-
         await client.query('COMMIT');
         transactionFinished = true;
+
+        // Fire-and-forget: update last_visit outside transaction to reduce latency
+        pool.query(
+            'UPDATE members SET last_visit = NOW() WHERE id = $1 AND gym_id = $2',
+            [member_id, gym_id]
+        ).catch(() => {});
 
         return {
             message: checkinStatus === 'OVERRIDE' ? 'Check-in recorded with override.' : 'Check-in Successful!',

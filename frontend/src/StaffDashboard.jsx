@@ -4,7 +4,7 @@ import {
   Users, ClipboardCheck, MessageSquare, UserPlus, Target, CreditCard,
   CalendarDays, DollarSign, AlertTriangle, Clock, TrendingUp, UserCheck,
   BarChart3, Dumbbell, ShieldCheck, Bell, ChevronRight, RefreshCw,
-  CheckCircle, Activity, Zap, Sparkles, Wallet, ArrowUpRight, ArrowRight,
+  CheckCircle, Activity, Zap, Sparkles, Wallet, ArrowUpRight, ArrowRight, Send,
 } from 'lucide-react';
 import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
@@ -34,6 +34,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     recentCheckins: [],
   });
   const [loading, setLoading] = useState(true);
+  const [reminderLoadingId, setReminderLoadingId] = useState(null);
 
   const staffRole = String(currentUser?.staff_role || '').toUpperCase();
   const perms = useMemo(() => Array.isArray(currentUser?.permissions) ? currentUser.permissions : [], [currentUser?.permissions]);
@@ -121,6 +122,21 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     };
   }, [fetchStats, isActive, token]);
 
+  const sendExpiryReminder = useCallback(async (memberId) => {
+    if (!token || reminderLoadingId) return;
+    setReminderLoadingId(memberId);
+    try {
+      await axios.post(`${API}/api/notifications/reminders/send`, {
+        member_ids: [memberId],
+        template_key: 'EXPIRY_REMINDER',
+      }, { headers: { 'x-auth-token': token } });
+    } catch (_err) {
+      // silent — toast not available in StaffDashboard
+    } finally {
+      setReminderLoadingId(null);
+    }
+  }, [token, reminderLoadingId]);
+
   const isReception = ['RECEPTION', 'MANAGER'].includes(staffRole) || hasPerm('members:write');
   const isTrainer = staffRole === 'TRAINER' || hasPerm('attendance:write');
   const isAccountant = staffRole === 'ACCOUNTANT' || hasPerm('payments:write');
@@ -140,7 +156,6 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     if (canLeads) actions.push({ label: 'Leads', icon: Target, gradient: 'linear-gradient(135deg, #f97316, #ea580c)', action: () => navigateTo('Leads') });
     if (canClasses) actions.push({ label: 'Classes', icon: CalendarDays, gradient: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', action: () => navigateTo('Classes') });
     if (canMembers) actions.push({ label: 'Members', icon: Users, gradient: 'linear-gradient(135deg, #3b82f6, #2563eb)', action: () => navigateTo('Members') });
-    if (canSupport) actions.push({ label: 'Support', icon: MessageSquare, gradient: 'linear-gradient(135deg, #64748b, #475569)', action: () => navigateTo('Help & Support') });
     return actions.slice(0, 8);
   }, [canAttendance, canMembers, canPayments, canLeads, canClasses, canSupport, isReception, hasPerm, navigateTo]);
 
@@ -303,7 +318,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
           {canAttendance && (
             <button type="button" onClick={() => navigateTo('Attendance')}
-              className="sd-card sd-card-3 relative overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-4 text-left hover:shadow-lg hover:border-emerald-200 transition-all active:scale-[0.98] group">
+              className="sd-card sd-card-3 relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-4 text-left hover:shadow-lg hover:border-emerald-300 transition-all active:scale-[0.98] group">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center shadow-sm"><CheckCircle size={16} className="text-white" /></div>
                 <ArrowUpRight size={14} className="text-emerald-300 group-hover:text-emerald-500 transition-colors" />
@@ -314,7 +329,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
           )}
           {canMembers && (
             <button type="button" onClick={() => navigateTo('Members', 'Active')}
-              className="sd-card sd-card-3 relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-4 text-left hover:shadow-lg hover:border-blue-200 transition-all active:scale-[0.98] group">
+              className="sd-card sd-card-3 relative overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100/50 p-4 text-left hover:shadow-lg hover:border-blue-300 transition-all active:scale-[0.98] group">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-9 h-9 rounded-xl bg-blue-500 flex items-center justify-center shadow-sm"><Users size={16} className="text-white" /></div>
                 <ArrowUpRight size={14} className="text-blue-300 group-hover:text-blue-500 transition-colors" />
@@ -325,7 +340,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
           )}
           {canMembers && (
             <button type="button" onClick={() => navigateTo('Members', 'Expiring Soon')}
-              className="sd-card sd-card-4 relative overflow-hidden rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-4 text-left hover:shadow-lg hover:border-amber-200 transition-all active:scale-[0.98] group">
+              className="sd-card sd-card-4 relative overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100/50 p-4 text-left hover:shadow-lg hover:border-amber-300 transition-all active:scale-[0.98] group">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center shadow-sm"><AlertTriangle size={16} className="text-white" /></div>
                 <ArrowUpRight size={14} className="text-amber-300 group-hover:text-amber-500 transition-colors" />
@@ -336,7 +351,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
           )}
           {canPayments ? (
             <button type="button" onClick={() => navigateTo('Payments')}
-              className="sd-card sd-card-4 relative overflow-hidden rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-white p-4 text-left hover:shadow-lg hover:border-rose-200 transition-all active:scale-[0.98] group">
+              className="sd-card sd-card-4 relative overflow-hidden rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-rose-100/50 p-4 text-left hover:shadow-lg hover:border-rose-300 transition-all active:scale-[0.98] group">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-9 h-9 rounded-xl bg-rose-500 flex items-center justify-center shadow-sm"><CreditCard size={16} className="text-white" /></div>
                 <ArrowUpRight size={14} className="text-rose-300 group-hover:text-rose-500 transition-colors" />
@@ -346,7 +361,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
             </button>
           ) : canMembers ? (
             <button type="button" onClick={() => navigateTo('Members')}
-              className="sd-card sd-card-4 relative overflow-hidden rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white p-4 text-left hover:shadow-lg hover:border-violet-200 transition-all active:scale-[0.98] group">
+              className="sd-card sd-card-4 relative overflow-hidden rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-violet-100/50 p-4 text-left hover:shadow-lg hover:border-violet-300 transition-all active:scale-[0.98] group">
               <div className="flex items-center justify-between mb-3">
                 <div className="w-9 h-9 rounded-xl bg-violet-500 flex items-center justify-center shadow-sm"><UserCheck size={16} className="text-white" /></div>
                 <ArrowUpRight size={14} className="text-violet-300 group-hover:text-violet-500 transition-colors" />
@@ -401,6 +416,16 @@ function StaffDashboard({ appRuntime, isActive = true }) {
                     }}>
                     {member.days_left}d left
                   </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); sendExpiryReminder(member.id); }}
+                    disabled={reminderLoadingId === member.id}
+                    className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-40"
+                    style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.2)' }}
+                    title="Send Reminder"
+                  >
+                    <Send size={13} className={`text-indigo-300 ${reminderLoadingId === member.id ? 'animate-pulse' : ''}`} />
+                  </button>
                 </div>
               ))}
             </div>
@@ -427,15 +452,15 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         )}
 
         {/* ════════════ FOOTER TIP ════════════ */}
-        <div className="sd-card sd-card-7 rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/60 to-violet-50/40 p-4">
+        <div className="sd-card sd-card-7 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 p-4 shadow-sm">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
               style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
               <Sparkles size={14} className="text-white" />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-500">Pro Tip</p>
-              <p className="text-[13px] font-medium text-slate-600 mt-1 leading-relaxed">{tip}</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-600">Pro Tip</p>
+              <p className="text-[13px] font-medium text-slate-700 mt-1 leading-relaxed">{tip}</p>
             </div>
           </div>
         </div>

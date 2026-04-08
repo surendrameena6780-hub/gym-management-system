@@ -4,7 +4,7 @@ import {
   Search, Filter, Download, Plus, DollarSign, 
   AlertCircle, FileText, CheckCircle2, 
   Clock, X, ChevronDown, User, ArrowDownToLine, History, Wallet, CreditCard, Trash2,
-  Phone, MessageCircle, RefreshCw
+  Phone, MessageCircle, RefreshCw, Settings
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
@@ -297,6 +297,10 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [expenseForm, setExpenseForm] = useState({ category: '', vendor: '', description: '', amount: '', bill_date: '', payment_mode: 'Cash' });
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [payrollForm, setPayrollForm] = useState({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
+  const [autoPayConfigs, setAutoPayConfigs] = useState([]);
+  const [showAutoPaySetup, setShowAutoPaySetup] = useState(false);
+  const [autoPayForm, setAutoPayForm] = useState({ user_id: '', base_pay: '', pay_day: '1', auto_enabled: true });
+  const [autoPaySaving, setAutoPaySaving] = useState(false);
   const [showPosModal, setShowPosModal] = useState(false);
   const [posForm, setPosForm] = useState({ name: '', category: 'supplement', price: '', stock_qty: '' });
 
@@ -353,6 +357,34 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     }
   }, [branchParams, token]);
 
+  const fetchAutoPayConfigs = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/finance/payroll/auto-config', { headers: { 'x-auth-token': token } });
+      setAutoPayConfigs(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setAutoPayConfigs([]);
+    }
+  }, [token]);
+
+  const handleSaveAutoPay = useCallback(async () => {
+    if (!autoPayForm.user_id || !autoPayForm.base_pay) {
+      toast?.('Select a staff member and enter base pay.', 'warning');
+      return;
+    }
+    setAutoPaySaving(true);
+    try {
+      await axios.put(`/api/finance/payroll/auto-config/${autoPayForm.user_id}`, autoPayForm, { headers: { 'x-auth-token': token } });
+      toast?.('Auto-pay configuration saved', 'success');
+      setShowAutoPaySetup(false);
+      setAutoPayForm({ user_id: '', base_pay: '', pay_day: '1', auto_enabled: true });
+      fetchAutoPayConfigs();
+    } catch {
+      toast?.('Failed to save auto-pay config', 'error');
+    } finally {
+      setAutoPaySaving(false);
+    }
+  }, [autoPayForm, fetchAutoPayConfigs, toast, token]);
+
   const fetchFinanceOverview = useCallback(async () => {
     try {
       const res = await axios.get('/api/finance/overview', {
@@ -375,6 +407,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       fetchExpenses();
     } else if (financeTab === 'payroll') {
       fetchPayroll();
+      fetchAutoPayConfigs();
       fetchStaffOptions();
     } else if (financeTab === 'pos') {
       fetchPosProducts();
@@ -382,7 +415,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } else if (financeTab === 'collections') {
       fetchFinanceOverview();
     }
-  }, [financeTab, fetchExpenses, fetchPayroll, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchStaffOptions]);
+  }, [financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchStaffOptions]);
 
   const handleSaveExpense = async () => {
     try {
@@ -1332,7 +1365,10 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
             <button onClick={() => setShowModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Record Payment</button>
           </>}
           {financeTab === 'expenses' && <button onClick={() => setShowExpenseModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Expense</button>}
-          {financeTab === 'payroll' && <button onClick={() => setShowPayrollModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Payroll</button>}
+          {financeTab === 'payroll' && <>
+            {isOwner && <button onClick={() => setShowAutoPaySetup(true)} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Settings size={17} /> Auto-Pay</button>}
+            <button onClick={() => setShowPayrollModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Payroll</button>
+          </>}
           {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
         </div>
       </div>
@@ -1748,6 +1784,22 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {/* ═══════ PAYROLL TAB ═══════ */}
       {financeTab === 'payroll' && (
         <div ref={payrollListRef} className="space-y-4 scroll-mt-28">
+          {/* Auto-Pay Active Configs */}
+          {isOwner && autoPayConfigs.filter(c => c.auto_enabled).length > 0 && (
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-2">Auto-Pay Active</p>
+              <div className="flex flex-wrap gap-2">
+                {autoPayConfigs.filter(c => c.auto_enabled).map(c => (
+                  <button key={c.user_id} onClick={() => { setAutoPayForm({ user_id: String(c.user_id), base_pay: String(c.base_pay), pay_day: String(c.pay_day), auto_enabled: true }); setShowAutoPaySetup(true); }}
+                    className="inline-flex items-center gap-2 rounded-xl bg-white border border-indigo-100 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-indigo-50">
+                    <span>{c.staff_name}</span>
+                    <span className="text-indigo-500">₹{Number(c.base_pay).toLocaleString()}</span>
+                    <span className="text-slate-400">Day {c.pay_day}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {payrollEntries.length === 0 ? (
             <div className="text-center py-12 text-slate-400">
               <p className="text-lg font-bold">No payroll entries yet</p>
@@ -2456,6 +2508,41 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                 <p className="text-lg font-black text-slate-900 mt-1">₹{(Number(payrollForm.base_pay || 0) + Number(payrollForm.commission || 0) - Number(payrollForm.deductions || 0)).toLocaleString()}</p>
               </div>
               <button onClick={handleSavePayroll} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800">Save Payroll</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Auto-Pay Setup Modal ── */}
+      {showAutoPaySetup && (
+        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div><h2 className="text-xl font-black text-slate-900">Auto-Pay Setup</h2><p className="text-xs font-bold text-slate-400 mt-0.5">Auto-generate payroll entries each month</p></div>
+              <button onClick={() => { setShowAutoPaySetup(false); setAutoPayForm({ user_id: '', base_pay: '', pay_day: '1', auto_enabled: true }); }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Staff Member</label>
+                <select value={autoPayForm.user_id} onChange={e => setAutoPayForm(p => ({ ...p, user_id: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
+                  <option value="">Select staff...</option>
+                  {staffOptions.map(s => (
+                    <option key={s.id} value={s.id}>{s.full_name}{s.staff_role ? ` (${s.staff_role})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-bold text-slate-600 block mb-1">Base Pay (₹)</label><input type="number" value={autoPayForm.base_pay} onChange={e => setAutoPayForm(p => ({ ...p, base_pay: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="e.g. 15000" /></div>
+                <div><label className="text-xs font-bold text-slate-600 block mb-1">Pay Day (1-28)</label><input type="number" min="1" max="28" value={autoPayForm.pay_day} onChange={e => setAutoPayForm(p => ({ ...p, pay_day: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
+              </div>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={autoPayForm.auto_enabled} onChange={e => setAutoPayForm(p => ({ ...p, auto_enabled: e.target.checked }))} className="w-5 h-5 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                <span className="text-sm font-bold text-slate-700">Enable auto-pay for this staff</span>
+              </label>
+              <div className="rounded-2xl bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs font-semibold text-indigo-600">
+                A payroll entry with status "Pending Approval" will be auto-created on day {autoPayForm.pay_day || '1'} of each month. You can then approve and mark it paid.
+              </div>
+              <button onClick={handleSaveAutoPay} disabled={autoPaySaving} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-50">{autoPaySaving ? 'Saving...' : 'Save Auto-Pay Config'}</button>
             </div>
           </div>
         </div>

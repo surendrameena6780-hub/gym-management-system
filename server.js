@@ -23,6 +23,7 @@ const checkExpirations = require('./jobs/expiryCheck');
 const { runAutomatedNotificationNudges } = require('./jobs/notificationAutomation');
 const { runRetentionMaintenance } = require('./jobs/retentionMaintenance');
 const { runDatabaseBackup } = require('./jobs/databaseBackup');
+const { runPayrollAutoPay } = require('./jobs/payrollAutoPay');
 const auth = require('./middleware/authMiddleware');
 
 // Import Routes
@@ -476,6 +477,11 @@ const startBackgroundJobs = () => {
     stopJobs.push(scheduleRecurringJob(() => runRetentionMaintenance().catch((err) => {
         console.error('RETENTION MAINTENANCE ERROR:', err.message);
     }), retentionMaintenanceIntervalMs));
+
+    // Payroll auto-pay: runs every 6 hours, checks if today is pay day for any staff
+    stopJobs.push(scheduleRecurringJob(() => runPayrollAutoPay().catch((err) => {
+        console.error('PAYROLL AUTO-PAY ERROR:', err.message);
+    }), 1000 * 60 * 60 * 6));
 
     if (String(process.env.DB_BACKUP_ENABLED || 'false').trim().toLowerCase() === 'true') {
         stopJobs.push(scheduleRecurringJob(() => runDatabaseBackup().catch((err) => {

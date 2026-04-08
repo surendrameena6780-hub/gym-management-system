@@ -801,7 +801,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
 
   return (
     <div className="app-min-shell-height font-['Inter'] overflow-y-auto"
-      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)' }}>
+      style={{ background: 'linear-gradient(160deg, #060b14 0%, #090c18 100%)', touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
 
       {/* Ambient blobs */}
       <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none"
@@ -979,68 +979,6 @@ function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
           )}
 
           <div className="space-y-3">
-            <div className="p-5 rounded-[28px]"
-              style={{ background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-                    style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.18)' }}>
-                    <LocateFixed size={18} className="text-emerald-300" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-white font-black text-base">Geo Radius Self Check-In</p>
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
-                        style={geoStatusMeta.tone}>
-                        {geoStatusMeta.label}
-                      </span>
-                    </div>
-                    <p className="text-slate-400 text-sm font-medium mt-1">Open the app near the gym entrance and use location-based check-in. If permission is already granted, the app can auto-attempt once when opened.</p>
-                  </div>
-                </div>
-                {checkedInToday ? (
-                  <span className="px-3 py-1.5 rounded-full text-[11px] font-black text-emerald-300 shrink-0"
-                    style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.18)' }}>
-                    <span className="inline-flex items-center gap-1"><CheckCircle size={12} /> Checked today</span>
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 text-[11px] font-semibold text-slate-400">
-                <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <span className="text-slate-500 block mb-1">Gym Radius</span>
-                  <span className="text-white font-black">{attendanceOptions.self_checkin_available ? `${attendanceOptions.gym_radius_meters || 200} meters` : 'Not configured yet'}</span>
-                </div>
-                <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <span className="text-slate-500 block mb-1">Location Access</span>
-                  <span className="text-white font-black">{geoPermissionState === 'granted' ? 'Allowed on this device' : geoPermissionState === 'denied' ? 'Blocked in browser' : geoPermissionState === 'unsupported' ? 'Not supported' : 'Needs confirmation'}</span>
-                </div>
-                <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <span className="text-slate-500 block mb-1">Gate Protection</span>
-                  <span className="text-white font-black">Expired or unpaid entries still alert staff instantly</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
-                <button
-                  type="button"
-                  onClick={requestLocationAccess}
-                  disabled={geoPermissionBusy || geoPermissionState === 'unsupported'}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                  style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                  <MapPin size={16} /> {geoPermissionBusy ? 'Enabling...' : geoPermissionState === 'granted' ? 'Location Enabled' : 'Enable Location'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => submitLocationSelfCheckin({ auto: false })}
-                  disabled={!attendanceOptions.self_checkin_available || geoCheckinBusy || selfCheckinBusy || geoPermissionBusy}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                  style={{ background: 'linear-gradient(135deg, #10b981, #14b8a6)' }}>
-                  <LocateFixed size={16} /> {geoCheckinBusy ? 'Checking location...' : 'Check In Now'}
-                </button>
-              </div>
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-5 rounded-[28px]"
                 style={{ background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -1118,32 +1056,16 @@ function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {[
-                {
-                  step: '01',
-                  title: 'Open the app near the entrance',
-                  text: 'If location access is already allowed, the app can attempt geo check-in automatically when it opens.',
-                },
-                {
-                  step: '02',
-                  title: 'Use the fastest available method',
-                  text: 'Tap Check In Now for geo mode, scan the gym QR, or show your member pass to the reception desk.',
-                },
-                {
-                  step: '03',
-                  title: 'Protection stays active',
-                  text: 'Expired, unpaid, or outside-radius attempts are blocked and flagged to gym staff immediately.',
-                },
-              ].map((item) => (
-                <div key={item.step} className="p-4 rounded-[24px]"
-                  style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <p className="text-indigo-300 text-[10px] font-black uppercase tracking-[0.22em]">Step {item.step}</p>
-                  <p className="text-white font-black text-sm mt-2">{item.title}</p>
-                  <p className="text-slate-500 text-xs font-medium mt-2 leading-relaxed">{item.text}</p>
-                </div>
-              ))}
-            </div>
+            {attendanceOptions.self_checkin_available && (
+              <button
+                type="button"
+                onClick={() => submitLocationSelfCheckin({ auto: false })}
+                disabled={geoCheckinBusy || selfCheckinBusy}
+                className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, #10b981, #14b8a6)' }}>
+                <LocateFixed size={16} /> {geoCheckinBusy ? 'Checking location...' : 'Quick Geo Check-In'}
+              </button>
+            )}
           </div>
         </div>
 

@@ -495,6 +495,62 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
 });
 
 // ═══════════════════════════════════════════════════════════
+//   PAYROLL AUTO-CONFIG
+// ═══════════════════════════════════════════════════════════
+router.get('/payroll/auto-config', requirePermission('payments:read'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const result = await pool.query(
+            `SELECT pac.*, u.full_name AS staff_name, u.staff_role
+             FROM payroll_auto_config pac
+             JOIN users u ON u.id = pac.user_id AND u.gym_id = $1
+             WHERE pac.gym_id = $1
+             ORDER BY u.full_name`,
+            [gid]
+        );
+        return res.json(result.rows);
+    } catch (err) {
+        console.error('PAYROLL AUTO-CONFIG LIST:', err.message);
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+router.put('/payroll/auto-config/:userId', requirePermission('payments:write'), async (req, res) => {
+    try {
+        const gid = req.user.gym_id;
+        const userId = parseInt(req.body.user_id || req.params.userId, 10);
+        if (!Number.isInteger(userId) || userId <= 0) {
+            return res.status(400).json({ error: 'Invalid staff member.' });
+        }
+
+        const staffCheck = await pool.query(
+            'SELECT id FROM users WHERE id = $1 AND gym_id = $2 AND role != $3',
+            [userId, gid, 'OWNER']
+        );
+        if (staffCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found.' });
+        }
+
+        const basePay = Math.max(0, parseFloat(req.body.base_pay) || 0);
+        const autoEnabled = Boolean(req.body.auto_enabled);
+        const payDay = Math.min(28, Math.max(1, parseInt(req.body.pay_day, 10) || 1));
+
+        const result = await pool.query(
+            `INSERT INTO payroll_auto_config (gym_id, user_id, base_pay, auto_enabled, pay_day, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (gym_id, user_id)
+             DO UPDATE SET base_pay = $3, auto_enabled = $4, pay_day = $5, updated_at = NOW()
+             RETURNING *`,
+            [gid, userId, basePay, autoEnabled, payDay]
+        );
+        return res.json(result.rows[0]);
+    } catch (err) {
+        console.error('PAYROLL AUTO-CONFIG UPSERT:', err.message);
+        return res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════
 //   POS: Products
 // ═══════════════════════════════════════════════════════════
 router.get('/pos/products', requirePermission('payments:read'), async (req, res) => {

@@ -201,6 +201,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   const [heatmap, setHeatmap] = useState([]);
   const [peakHours, setPeakHours] = useState([]);
   const [peakHoursDays, setPeakHoursDays] = useState('today');
+  const peakHoursDaysRef = useRef('today');
+  useEffect(() => { peakHoursDaysRef.current = peakHoursDays; }, [peakHoursDays]);
   const [inactiveDays, setInactiveDays] = useState(7);
   const [inactiveMembers, setInactiveMembers] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -680,11 +682,11 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   const refreshAttendanceViews = useCallback(() => Promise.all([
     loadOverviewBundle(),
-    loadPeakHours(peakHoursDays),
+    loadPeakHours(peakHoursDaysRef.current),
     loadRecords(),
     loadInactive(inactiveDays),
     loadLeaderboard(),
-  ]), [inactiveDays, loadInactive, loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, peakHoursDays]);
+  ]), [inactiveDays, loadInactive, loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords]);
 
   useEffect(() => {
     refreshAttendanceViewsRef.current = refreshAttendanceViews;
@@ -694,13 +696,13 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
     if (!token) return;
     setLoading(true);
     try {
-      await Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDays), loadRecords(), loadLeaderboard()]);
+      await Promise.all([loadOverviewBundle(), loadPeakHours(peakHoursDaysRef.current), loadRecords(), loadLeaderboard()]);
     } catch (_err) {
       toast?.('Failed to load attendance dashboard.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, peakHoursDays, toast, token]);
+  }, [loadLeaderboard, loadOverviewBundle, loadPeakHours, loadRecords, toast, token]);
 
   useEffect(() => {
     loadAll();

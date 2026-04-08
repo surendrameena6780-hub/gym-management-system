@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   Search, Edit2, Plus, X, Zap, RefreshCw, Trash2, Ban, Calendar,
@@ -318,7 +318,11 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [plans, setPlans] = useState([]);
   const [filter, setFilter] = useState(defaultFilter);
   const [searchTerm, setSearchTerm] = useState('');
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [memberSummary, setMemberSummary] = useState({ total: 0, active: 0, inactive: 0, expiring_soon: 0, expired: 0, unpaid: 0, frozen: 0 });
@@ -924,7 +928,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           paginate: true,
           page: membersPagination.page,
           limit: membersPagination.limit,
-          search: deferredSearchTerm || undefined,
+          search: debouncedSearch || undefined,
           status: FILTER_TO_API_STATUS[filter] || 'ALL',
           branch_id: branchScopeValue,
         },
@@ -961,7 +965,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         setIsRefreshing(false);
       }
     }
-  }, [branchScopeValue, deferredSearchTerm, filter, membersPagination.limit, membersPagination.page, toast, token]);
+  }, [branchScopeValue, debouncedSearch, filter, membersPagination.limit, membersPagination.page, toast, token]);
 
   const fetchMemberSummary = useCallback(async () => {
     const requestId = memberSummaryRequestIdRef.current + 1;
@@ -1016,7 +1020,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
   useEffect(() => {
     setMembersPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
-  }, [deferredSearchTerm, filter]);
+  }, [debouncedSearch, filter]);
 
   // Instantly refresh when dashboard check-in or payment fires the data-changed event
   useEffect(() => {
@@ -1633,7 +1637,16 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
   const toggleSelection = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
 
-  const filteredMembers = members;
+  const filteredMembers = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q || q === debouncedSearch.trim().toLowerCase()) return members;
+    return members.filter((m) => {
+      const name = (m.full_name || '').toLowerCase();
+      const phone = (m.phone || '').toLowerCase();
+      const email = (m.email || '').toLowerCase();
+      return name.includes(q) || phone.includes(q) || email.includes(q);
+    });
+  }, [members, searchTerm, debouncedSearch]);
 
   const counts = useMemo(() => ({
     All: memberSummary.total,
@@ -1746,7 +1759,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                         return (
                           <div
                             key={`member-mobile-${member.id}`}
-                            className={`gv-fade-up relative p-4 rounded-2xl border space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover ${selectedIds.includes(member.id) ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-100 bg-white'}`}
+                            className={`gv-fade-up relative p-4 rounded-2xl border space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover overflow-hidden ${selectedIds.includes(member.id) ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-100 bg-white'}`}
                             style={{ animationDelay: `${Math.min(idx * 0.04, 0.3)}s` }}
                             onClick={() => (isBulkMode ? toggleSelection(member.id) : handleViewDetails(member))}
                           >
