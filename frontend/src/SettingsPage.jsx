@@ -1426,13 +1426,25 @@ const loadRazorpayScript = () => {
               }
 
             const paymentObject = new window.Razorpay(options);
-            paymentObject.on('payment.failed', function (){
-              toast("Payment cancelled or failed.", "error");
+            paymentObject.on('payment.failed', function (response){
+              const checkoutError = response?.error || {};
+              const description = checkoutError.description || checkoutError.reason || 'Payment cancelled or failed.';
+              reportClientError('Settings billing checkout failed', new Error(description), {
+                razorpay: checkoutError,
+                order_id: order.id,
+                plan_tier: selectedPlan.id,
+                cycle: billingCycle,
+              });
+              toast(description, "error");
               setIsProcessingPayment(false);
           });
           paymentObject.open();
 
           } catch (_err) {
+          reportClientError('Settings billing create-order', _err, {
+            plan_tier: selectedPlan.id,
+            cycle: billingCycle,
+          });
           toast("Server error while initiating payment.", "error");
           setIsProcessingPayment(false);
       }

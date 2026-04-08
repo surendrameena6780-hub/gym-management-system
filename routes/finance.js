@@ -8,6 +8,7 @@ const {
     ensureDateOnly,
     ensureNumber,
     ensureTrimmedString,
+    ensureChoice,
     isValidationError,
 } = require('../utils/fieldValidation');
 const {
@@ -85,6 +86,22 @@ const normalizePayrollStatus = (value, fallback = 'PENDING_APPROVAL') => {
     const normalized = String(value || fallback).trim().toUpperCase();
     const allowed = new Set(['PENDING_APPROVAL', 'APPROVED', 'PAID', 'REJECTED']);
     return allowed.has(normalized) ? normalized : fallback;
+};
+
+const normalizePayrollPayoutMode = (value, { required = false, defaultValue = '' } = {}) => {
+    const normalized = ensureChoice(value, {
+        field: 'payout_mode',
+        choices: ['CASH', 'ONLINE'],
+        required,
+        defaultValue: String(defaultValue || '').trim().toUpperCase(),
+        uppercase: true,
+    });
+
+    if (!normalized) {
+        return '';
+    }
+
+    return normalized === 'ONLINE' ? 'Online' : 'Cash';
 };
 
 const isOwnerUser = (req) => String(req?.user?.role || '').trim().toUpperCase() === 'OWNER';
@@ -380,7 +397,7 @@ router.post('/payroll', requirePermission('payments:write'), async (req, res) =>
         const gid = gymId(req);
         const { user_id, pay_period, base_pay, commission, deductions, notes } = req.body || {};
         const uid = posInt(user_id);
-        if (!uid || !pay_period) return res.status(400).json({ error: 'user_id and pay_period are required.' });
+        if (!uid) return res.status(400).json({ error: 'user_id is required.' });
         const staffResult = await pool.query(
             `SELECT id, role, COALESCE(branch_id, $3) AS branch_id
              FROM users
@@ -395,11 +412,20 @@ router.post('/payroll', requirePermission('payments:write'), async (req, res) =>
         }
 
         const branchScope = await resolveBranchWriteScope(pool, req, staff.branch_id);
-        const net = Number(base_pay||0) + Number(commission||0) - Number(deductions||0);
+        const normalizedPayPeriod = ensureTrimmedString(pay_period, { field: 'pay_period', required: true, max: 30 });
+        const normalizedBasePay = ensureNumber(base_pay, { field: 'base_pay', required: true, min: 0 });
+        const normalizedCommission = ensureNumber(commission, { field: 'commission', min: 0, defaultValue: 0 });
+        const normalizedDeductions = ensureNumber(deductions, { field: 'deductions', min: 0, defaultValue: 0 });
+        const normalizedNotes = ensureTrimmedString(notes, { field: 'notes', max: 1000 });
+        const net = normalizedBasePay + normalizedCommission - normalizedDeductions;
+        if (net < 0) {
+            return res.status(400).json({ error: 'Net pay cannot be negative.' });
+        }
+
         const result = await pool.query(
             `INSERT INTO payroll_entries (gym_id, user_id, pay_period, base_pay, commission, deductions, net_pay, notes, status, branch_id, created_by)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-            [gid, uid, String(pay_period).trim(), Number(base_pay||0), Number(commission||0), Number(deductions||0), net, String(notes||'').trim(), 'PENDING_APPROVAL', branchScope.branchId, req.user.id]);
+            [gid, uid, normalizedPayPeriod, normalizedBasePay, normalizedCommission, normalizedDeductions, net, normalizedNotes, 'PENDING_APPROVAL', branchScope.branchId, req.user.id]);
         return res.status(201).json({
             ...result.rows[0],
             branch_id: branchScope.branchId,
@@ -408,6 +434,9 @@ router.post('/payroll', requirePermission('payments:write'), async (req, res) =>
     } catch (err) {
         console.error('PAYROLL CREATE:', err.message);
         if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         return res.status(500).json({ error: 'Failed' });
@@ -428,7 +457,8 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
         const existing = existingResult.rows[0];
         if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-        const branchScope = await resolveBranchReadScope(pool, req, existing.branch_id || DEFAULT_BRANCH_ID);
+        const { base_pay, commission, deductions, notes } = req.body || {};
+        const branchScope = await resolveBranchWriteScope(pool, req, existing.branch_id || DEFAULT_BRANCH_ID);
         const nextStatus = normalizePayrollStatus(req.body?.status, existing.status || 'PENDING_APPROVAL');
         if (!isOwnerUser(req) && nextStatus !== String(existing.status || '').trim().toUpperCase()) {
             return res.status(403).json({ error: 'Only owners can approve, reject, or settle payroll.' });
@@ -437,15 +467,48 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
             return res.status(400).json({ error: 'Approve payroll before marking it as paid.' });
         }
 
-        const normalizedBasePay = Number(base_pay ?? existing.base_pay ?? 0);
-        const normalizedCommission = Number(commission ?? existing.commission ?? 0);
-        const normalizedDeductions = Number(deductions ?? existing.deductions ?? 0);
-        const normalizedNotes = String(notes ?? existing.notes ?? '').trim();
-        const rejectionReason = String(req.body?.rejection_reason || '').trim();
-        const payoutMode = String(req.body?.payout_mode || '').trim();
-        const payoutReference = String(req.body?.payout_reference || '').trim();
-        const payoutNotes = String(req.body?.payout_notes || '').trim();
+        const normalizedBasePay = ensureNumber(base_pay, {
+            field: 'base_pay',
+            min: 0,
+            defaultValue: Number(existing.base_pay ?? 0),
+        });
+        const normalizedCommission = ensureNumber(commission, {
+            field: 'commission',
+            min: 0,
+            defaultValue: Number(existing.commission ?? 0),
+        });
+        const normalizedDeductions = ensureNumber(deductions, {
+            field: 'deductions',
+            min: 0,
+            defaultValue: Number(existing.deductions ?? 0),
+        });
+        const normalizedNotes = ensureTrimmedString(notes, {
+            field: 'notes',
+            max: 1000,
+            defaultValue: existing.notes || '',
+        });
         const net = normalizedBasePay + normalizedCommission - normalizedDeductions;
+        if (net < 0) {
+            return res.status(400).json({ error: 'Net pay cannot be negative.' });
+        }
+
+        const rejectionReason = nextStatus === 'REJECTED'
+            ? ensureTrimmedString(req.body?.rejection_reason, { field: 'rejection_reason', required: true, min: 2, max: 500 })
+            : '';
+        const payoutMode = nextStatus === 'PAID'
+            ? normalizePayrollPayoutMode(req.body?.payout_mode, { required: true, defaultValue: 'ONLINE' })
+            : '';
+        const payoutReference = nextStatus === 'PAID'
+            ? ensureTrimmedString(req.body?.payout_reference, {
+                field: 'payout_reference',
+                required: payoutMode === 'Online',
+                max: 120,
+            })
+            : '';
+        const payoutNotes = nextStatus === 'PAID'
+            ? ensureTrimmedString(req.body?.payout_notes, { field: 'payout_notes', max: 1000 })
+            : '';
+
         const result = await pool.query(
             `UPDATE payroll_entries
              SET base_pay = $1,
@@ -488,6 +551,9 @@ router.put('/payroll/:id', requirePermission('payments:write'), async (req, res)
     } catch (err) {
         console.error('PAYROLL UPDATE:', err.message);
         if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
         }
         return res.status(500).json({ error: 'Failed' });

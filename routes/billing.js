@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const { requireOwner } = require('../middleware/rbac');
+const { recordRuntimeEvent } = require('../utils/runtimeTelemetry');
 
 router.use(auth, requireOwner);
 
@@ -21,6 +22,44 @@ const getRazorpay = () => {
         });
     }
     return _razorpay;
+};
+
+const buildRazorpayErrorDetails = (err) => ({
+    status_code: Number(
+        err?.statusCode
+        || err?.error?.statusCode
+        || err?.response?.status
+        || err?.error?.status_code
+        || 0
+    ) || null,
+    code: String(err?.error?.code || err?.code || '').trim() || null,
+    field: String(err?.error?.field || '').trim() || null,
+    source: String(err?.error?.source || '').trim() || null,
+    reason: String(err?.error?.reason || '').trim() || null,
+    description: String(err?.error?.description || err?.message || '').trim() || null,
+});
+
+const logBillingRazorpayError = (req, stage, error, metadata = {}) => {
+    const details = buildRazorpayErrorDetails(error);
+    const summary = details.description || details.reason || error?.message || 'Unknown Razorpay error';
+
+    console.error(`RAZORPAY BILLING ${String(stage || 'unknown').toUpperCase()} ERROR:`, summary, details);
+    void recordRuntimeEvent({
+        eventType: 'PAYMENT_GATEWAY_ERROR',
+        severity: 'ERROR',
+        source: 'razorpay',
+        message: `Billing ${stage} failed: ${summary}`,
+        route: req?.originalUrl || '/api/billing',
+        method: req?.method || 'POST',
+        gymId: req?.user?.gym_id,
+        userId: req?.user?.id,
+        actorRole: req?.user?.role,
+        metadata: {
+            stage,
+            ...metadata,
+            ...details,
+        },
+    });
 };
 
 const SAAS_PRICING = {
@@ -71,6 +110,10 @@ router.post('/create-order', async (req, res) => {
         const order = await getRazorpay().orders.create(options);
         res.json(order);
     } catch (error) {
+        logBillingRazorpayError(req, 'create_order', error, {
+            plan_tier: req.body?.plan_tier,
+            cycle: req.body?.cycle,
+        });
         console.error("RAZORPAY ORDER ERROR:", error);
         res.status(500).json({ error: "Failed to initiate payment" });
     }
@@ -92,8 +135,20 @@ router.post('/verify', async (req, res) => {
     const expectedSign = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET).update(sign.toString()).digest("hex");
 
     if (razorpay_signature === expectedSign) {
+        let order;
+
         try {
-            const order = await getRazorpay().orders.fetch(razorpay_order_id);
+            order = await getRazorpay().orders.fetch(razorpay_order_id);
+        } catch (err) {
+            logBillingRazorpayError(req, 'fetch_order', err, {
+                razorpay_order_id,
+                plan_tier: resolved.planTier,
+                cycle: resolved.cycle,
+            });
+            return res.status(502).json({ error: 'Failed to verify payment order with Razorpay.' });
+        }
+
+        try {
             if (!order || Number(order.amount) !== resolved.amountInr * 100 || String(order.currency || '').toUpperCase() !== 'INR') {
                 return res.status(400).json({ error: 'Order amount/currency mismatch.' });
             }

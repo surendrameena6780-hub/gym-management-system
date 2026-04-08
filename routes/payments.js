@@ -6,6 +6,7 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
 const { decryptSecret } = require('../utils/secretCrypto');
+const { recordRuntimeEvent } = require('../utils/runtimeTelemetry');
 const {
     BranchAccessError,
     branchSchemaMiddleware,
@@ -31,6 +32,40 @@ const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY
 const PAYMENT_DEDUPE_WINDOW_SECONDS = Math.max(10, parseInt(process.env.PAYMENT_DEDUPE_WINDOW_SECONDS || '45', 10));
 const IS_PRODUCTION_RUNTIME = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
 let ensurePaymentCollectionsSchemaPromise;
+
+const buildRazorpayErrorDetails = (err) => ({
+    status_code: Number(
+        err?.statusCode
+        || err?.error?.statusCode
+        || err?.response?.status
+        || err?.error?.status_code
+        || 0
+    ) || null,
+    code: String(err?.error?.code || err?.code || '').trim() || null,
+    field: String(err?.error?.field || '').trim() || null,
+    source: String(err?.error?.source || '').trim() || null,
+    reason: String(err?.error?.reason || '').trim() || null,
+    description: String(err?.error?.description || err?.message || '').trim() || null,
+});
+
+const logCollectionRazorpayError = ({ stage, error, gymId = null, metadata = {} }) => {
+    const details = buildRazorpayErrorDetails(error);
+    const summary = details.description || details.reason || error?.message || 'Unknown Razorpay error';
+
+    console.error(`RAZORPAY COLLECTION ${String(stage || 'unknown').toUpperCase()} ERROR:`, summary, details);
+    void recordRuntimeEvent({
+        eventType: 'PAYMENT_GATEWAY_ERROR',
+        severity: 'ERROR',
+        source: 'razorpay',
+        message: `Collection ${stage} failed: ${summary}`,
+        gymId,
+        metadata: {
+            stage,
+            ...metadata,
+            ...details,
+        },
+    });
+};
 
 const ensurePaymentCollectionsSchema = async () => {
     if (!ensurePaymentCollectionsSchemaPromise) {
@@ -525,7 +560,26 @@ const createCollectionPaymentLink = async ({
     }
 
     const razorpayClient = createCollectionRazorpayClient(razorpayConfig);
-    const paymentLink = await razorpayClient.paymentLink.create(payload);
+    let paymentLink;
+
+    try {
+        paymentLink = await razorpayClient.paymentLink.create(payload);
+    } catch (err) {
+        logCollectionRazorpayError({
+            stage: 'create_link',
+            error: err,
+            gymId: Number.parseInt(notes?.gym_id, 10) || null,
+            metadata: {
+                connect_mode: razorpayConfig.connectMode,
+                connected_account_id: razorpayConfig.connectedAccount || '',
+                gateway_source: razorpayConfig.source,
+                environment: razorpayConfig.environment,
+                reference_id: referenceId,
+                amount_paise: amountPaise,
+            },
+        });
+        throw err;
+    }
 
     return {
         merchant_name: payeeName,

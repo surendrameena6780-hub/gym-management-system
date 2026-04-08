@@ -60,6 +60,17 @@ const getPayrollStatusMeta = (value) => {
   return PAYROLL_STATUS_META[normalized] || PAYROLL_STATUS_META.PENDING_APPROVAL;
 };
 
+const PAYROLL_PAYOUT_MODE_OPTIONS = [
+  { value: 'Cash', label: 'Cash payout' },
+  { value: 'Online', label: 'Online bank transfer / UPI' },
+];
+
+const createPayrollSettlementForm = (entry = null) => ({
+  payout_mode: entry?.payout_mode || 'Online',
+  payout_reference: entry?.payout_reference || '',
+  payout_notes: entry?.payout_notes || '',
+});
+
 const formatPayrollDateTime = (value) => {
   if (!value) return '';
   const parsed = new Date(value);
@@ -297,6 +308,9 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [expenseForm, setExpenseForm] = useState({ category: '', vendor: '', description: '', amount: '', bill_date: '', payment_mode: 'Cash' });
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [payrollForm, setPayrollForm] = useState({ user_id: '', pay_period: '', base_pay: '', commission: '0', deductions: '0', notes: '' });
+  const [payrollActionLoadingId, setPayrollActionLoadingId] = useState(null);
+  const [payrollSettlementEntry, setPayrollSettlementEntry] = useState(null);
+  const [payrollSettlementForm, setPayrollSettlementForm] = useState(() => createPayrollSettlementForm());
   const [autoPayConfigs, setAutoPayConfigs] = useState([]);
   const [showAutoPaySetup, setShowAutoPaySetup] = useState(false);
   const [autoPayForm, setAutoPayForm] = useState({ user_id: '', base_pay: '', pay_day: '1', auto_enabled: true });
@@ -513,7 +527,13 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     }
   };
 
+  const closePayrollSettlementModal = useCallback(() => {
+    setPayrollSettlementEntry(null);
+    setPayrollSettlementForm(createPayrollSettlementForm());
+  }, []);
+
   const updatePayrollStatus = useCallback(async (entry, updates, successMessage) => {
+    setPayrollActionLoadingId(entry.id);
     try {
       await axios.put(`/api/finance/payroll/${entry.id}`, {
         base_pay: entry.base_pay,
@@ -526,13 +546,17 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       toast?.(successMessage, 'success');
       fetchPayroll();
       fetchFinanceOverview();
+      return true;
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to update payroll status.', 'error');
+      return false;
+    } finally {
+      setPayrollActionLoadingId(null);
     }
   }, [branchScopeValue, fetchFinanceOverview, fetchPayroll, toast, token]);
 
   const approvePayroll = useCallback((entry) => {
-    updatePayrollStatus(entry, {
+    void updatePayrollStatus(entry, {
       status: 'APPROVED',
       rejection_reason: '',
     }, 'Payroll approved.');
@@ -546,27 +570,36 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       return;
     }
 
-    updatePayrollStatus(entry, {
+    void updatePayrollStatus(entry, {
       status: 'REJECTED',
       rejection_reason: rejectionReason.trim(),
     }, 'Payroll rejected.');
   }, [toast, updatePayrollStatus]);
 
   const markPayrollPaid = useCallback((entry) => {
-    const payoutMode = window.prompt('Payout mode', entry.payout_mode || 'Bank Transfer');
-    if (payoutMode === null) return;
-    const payoutReference = window.prompt('Payout reference / transfer ID (optional)', entry.payout_reference || '');
-    if (payoutReference === null) return;
-    const payoutNotes = window.prompt('Payout notes (optional)', entry.payout_notes || '');
-    if (payoutNotes === null) return;
+    setPayrollSettlementEntry(entry);
+    setPayrollSettlementForm(createPayrollSettlementForm(entry));
+  }, []);
 
-    updatePayrollStatus(entry, {
+  const handleConfirmPayrollSettlement = useCallback(async () => {
+    if (!payrollSettlementEntry) return;
+
+    if (payrollSettlementForm.payout_mode === 'Online' && !String(payrollSettlementForm.payout_reference || '').trim()) {
+      toast?.('Add the bank transfer or UPI reference before marking this payroll as paid.', 'warning');
+      return;
+    }
+
+    const didUpdate = await updatePayrollStatus(payrollSettlementEntry, {
       status: 'PAID',
-      payout_mode: payoutMode.trim() || 'Manual',
-      payout_reference: payoutReference.trim(),
-      payout_notes: payoutNotes.trim(),
+      payout_mode: payrollSettlementForm.payout_mode,
+      payout_reference: String(payrollSettlementForm.payout_reference || '').trim(),
+      payout_notes: String(payrollSettlementForm.payout_notes || '').trim(),
     }, 'Payroll marked as paid.');
-  }, [updatePayrollStatus]);
+
+    if (didUpdate) {
+      closePayrollSettlementModal();
+    }
+  }, [closePayrollSettlementModal, payrollSettlementEntry, payrollSettlementForm, toast, updatePayrollStatus]);
 
   const getImageUrl = (path) => normalizeProfileImageUrl(path);
 
@@ -1813,6 +1846,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                   const statusMeta = getPayrollStatusMeta(statusKey);
                   const paidSummary = entry.paid_at ? `Paid ${formatPayrollDateTime(entry.paid_at)}` : '';
                   const approvalSummary = entry.approved_at ? `Approved ${formatPayrollDateTime(entry.approved_at)}` : statusMeta.note;
+                  const isBusy = payrollActionLoadingId === entry.id;
 
                   return (
                     <div key={`payroll-mobile-${entry.id}`} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
@@ -1850,22 +1884,22 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                       <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-semibold text-slate-500">
                         {statusKey === 'PENDING_APPROVAL' && isOwner ? (
                           <>
-                            <button onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100">
-                              Reject
+                            <button disabled={isBusy} onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                              {isBusy ? 'Saving...' : 'Reject'}
                             </button>
-                            <button onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700">
-                              Approve
+                            <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                              {isBusy ? 'Saving...' : 'Approve'}
                             </button>
                           </>
                         ) : null}
                         {statusKey === 'APPROVED' && isOwner ? (
-                          <button onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800">
-                            Mark Paid
+                          <button disabled={isBusy} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                            {isBusy ? 'Saving...' : 'Mark Paid'}
                           </button>
                         ) : null}
                         {statusKey === 'REJECTED' && isOwner ? (
-                          <button onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700">
-                            Re-Approve
+                          <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                            {isBusy ? 'Saving...' : 'Re-Approve'}
                           </button>
                         ) : null}
                         {!isOwner && statusKey !== 'PAID' ? <span className="text-slate-400 font-bold">Owner action required</span> : null}
@@ -1896,6 +1930,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                   {payrollEntries.map((entry) => {
                     const statusKey = String(entry.status || 'PENDING_APPROVAL').toUpperCase();
                     const statusMeta = getPayrollStatusMeta(statusKey);
+                    const isBusy = payrollActionLoadingId === entry.id;
                     const progressText = statusKey === 'PAID'
                       ? `${entry.payout_mode || 'Manual'}${entry.payout_reference ? ` • ${entry.payout_reference}` : ''}`
                       : statusKey === 'REJECTED'
@@ -1920,22 +1955,22 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                           <div className="flex flex-wrap items-center justify-end gap-2">
                             {statusKey === 'PENDING_APPROVAL' && isOwner ? (
                               <>
-                                <button onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100">
-                                  Reject
+                                <button disabled={isBusy} onClick={() => rejectPayroll(entry)} className="px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-wider hover:bg-rose-100 disabled:opacity-60 disabled:cursor-not-allowed">
+                                  {isBusy ? 'Saving...' : 'Reject'}
                                 </button>
-                                <button onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700">
-                                  Approve
+                                <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                                  {isBusy ? 'Saving...' : 'Approve'}
                                 </button>
                               </>
                             ) : null}
                             {statusKey === 'APPROVED' && isOwner ? (
-                              <button onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800">
-                                Mark Paid
+                              <button disabled={isBusy} onClick={() => markPayrollPaid(entry)} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
+                                {isBusy ? 'Saving...' : 'Mark Paid'}
                               </button>
                             ) : null}
                             {statusKey === 'REJECTED' && isOwner ? (
-                              <button onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700">
-                                Re-Approve
+                              <button disabled={isBusy} onClick={() => approvePayroll(entry)} className="px-3 py-2 rounded-xl bg-sky-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                                {isBusy ? 'Saving...' : 'Re-Approve'}
                               </button>
                             ) : null}
                             {!isOwner && statusKey !== 'PAID' ? <span className="text-xs font-bold text-slate-400">Owner action required</span> : null}
@@ -2473,6 +2508,50 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                 <div><label className="text-xs font-bold text-slate-600 block mb-1">Bill Date</label><input type="date" value={expenseForm.bill_date} onChange={e => setExpenseForm(p => ({ ...p, bill_date: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
               </div>
               <button onClick={handleSaveExpense} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800">Save Expense</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Payroll Modal ── */}
+      {payrollSettlementEntry && (
+        <div className="app-modal-shell z-[90] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">Settle Payroll</h2>
+                <p className="text-xs font-bold text-slate-400 mt-0.5">Record how the owner paid this staff salary</p>
+              </div>
+              <button onClick={closePayrollSettlementModal} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+            </div>
+            <div className="app-modal-scroll p-4 sm:p-6 space-y-4">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payroll Entry</p>
+                <p className="text-lg font-black text-slate-900 mt-1">{payrollSettlementEntry.staff_name}</p>
+                <p className="text-sm font-semibold text-slate-500 mt-1">₹{Number(payrollSettlementEntry.net_pay || 0).toLocaleString()} for {payrollSettlementEntry.pay_period || 'this pay period'}</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Payout Mode</label>
+                  <select value={payrollSettlementForm.payout_mode} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_mode: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
+                    {PAYROLL_PAYOUT_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Reference / Transfer ID</label>
+                  <input value={payrollSettlementForm.payout_reference} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_reference: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder={payrollSettlementForm.payout_mode === 'Online' ? 'Required for online payout' : 'Optional for cash payout'} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Payout Notes</label>
+                <textarea value={payrollSettlementForm.payout_notes} onChange={e => setPayrollSettlementForm(prev => ({ ...prev, payout_notes: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm min-h-[88px] resize-none" placeholder="Optional note like bank transfer, UPI, envelope handoff, or partial context" />
+              </div>
+              <div className="rounded-2xl bg-sky-50 border border-sky-100 px-4 py-3 text-xs font-semibold text-sky-700">
+                This records a staff salary payout only. It does not use the member payment collection flow or the GymVault billing Razorpay flow.
+              </div>
+              <button onClick={handleConfirmPayrollSettlement} disabled={payrollActionLoadingId === payrollSettlementEntry.id} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">{payrollActionLoadingId === payrollSettlementEntry.id ? 'Saving...' : 'Confirm Settlement'}</button>
             </div>
           </div>
         </div>
