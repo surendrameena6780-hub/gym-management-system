@@ -365,14 +365,9 @@ const fetchCollectionPaymentLinkSafely = async (razorpayClient, paymentLinkId) =
 };
 
 const createCollectionRazorpayClient = (razorpayConfig) => {
-    const headers = razorpayConfig.connectMode === 'PARTNER' && razorpayConfig.connectedAccount
-        ? { 'X-Razorpay-Account': razorpayConfig.connectedAccount }
-        : undefined;
-
     return new Razorpay({
         key_id: razorpayConfig.keyId,
         key_secret: razorpayConfig.keySecret,
-        headers,
     });
 };
 
@@ -402,6 +397,27 @@ const createCollectionPaymentLink = async ({
         expire_by: Math.floor(Date.now() / 1000) + COLLECTION_LINK_TTL_SECONDS,
         notes,
     };
+
+    if (razorpayConfig.connectMode === 'PARTNER') {
+        const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
+        const feeAmount = Math.round(amountPaise * feePercent / 100);
+        const transferAmount = amountPaise - feeAmount;
+        if (transferAmount <= 0) {
+            throw new Error('Collection amount is too small for the configured platform fee.');
+        }
+
+        payload.options = {
+            order: {
+                transfers: [{
+                    account: razorpayConfig.connectedAccount,
+                    amount: transferAmount,
+                    currency: 'INR',
+                    on_hold: false,
+                    notes,
+                }],
+            },
+        };
+    }
 
     const razorpayClient = createCollectionRazorpayClient(razorpayConfig);
     const paymentLink = await razorpayClient.paymentLink.create(payload);
