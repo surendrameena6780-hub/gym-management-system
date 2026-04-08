@@ -259,12 +259,11 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
 
   return (
     <div className="min-h-full p-0 space-y-8 font-inter text-slate-900">
-      <div className="flex flex-col desktop:flex-row justify-between items-start desktop:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
-          <p className="text-slate-500 font-medium mt-1">Simple numbers from real payments, memberships, and attendance.</p>
-        </div>
-        <div className="flex w-full flex-col items-end gap-3 desktop:w-auto">
+      <div className="space-y-3">
+        <div className="relative sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
+          <div className="min-w-0 pr-[9rem] sm:pr-1">
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
+          </div>
           <OperationsBranchScopeBar
             branchDirectory={branchDirectory}
             branchId={operationsBranchId}
@@ -273,9 +272,11 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
             loading={appRuntime.branchScopeLoading}
             title="Insights scope"
             description="Filter insights and attendance trends by branch without leaving the page."
-            className="shrink-0"
+            className="absolute right-0 top-0 justify-self-end self-start shrink-0 sm:static"
           />
-          <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+          <p className="mt-2 text-slate-500 font-medium sm:col-span-2 sm:mt-0">Simple numbers from real payments, memberships, and attendance.</p>
+        </div>
+        <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm w-fit">
             {['1M', '3M', '6M', '1Y'].map((range) => (
               <button
                 key={range}
@@ -293,7 +294,6 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
             >
               <Download size={18} />
             </button>
-          </div>
         </div>
       </div>
 
