@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import PageLoader from './PageLoader';
-import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import PaginationControls from './components/PaginationControls';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -979,18 +978,6 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   return (
     <div className="space-y-5 p-2">
-      <div className="flex items-start justify-end">
-        <OperationsBranchScopeBar
-          branchDirectory={branchDirectory}
-          branchId={operationsBranchId}
-          onChange={appRuntime.setOperationsBranchId}
-          currentUser={currentUser}
-          loading={appRuntime.branchScopeLoading}
-          title="Attendance scope"
-          description="Filter search, check-ins, live feed, and retention views by branch without leaving the page."
-          className="shrink-0"
-        />
-      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Today's Check-ins</p>

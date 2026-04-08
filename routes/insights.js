@@ -5,6 +5,12 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requirePermission } = require('../middleware/rbac');
 const { getGymTimezone } = require('../utils/gymTime');
+const {
+    BranchAccessError,
+    branchSchemaMiddleware,
+    DEFAULT_BRANCH_ID,
+    resolveBranchReadScope,
+} = require('../utils/branchAccess');
 
 const RANGE_TO_MONTHS = {
     '1M': 1,
@@ -27,15 +33,54 @@ const diffInDays = (endDate, startDate) => {
     return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 };
 
-router.get('/overview', auth, saasMiddleware, requirePermission('insights:read'), async (req, res) => {
+const DEFAULT_BRANCH_SQL = `'${DEFAULT_BRANCH_ID}'`;
+
+const getBranchFilterSql = (params, branchId, columnExpression) => {
+    if (!branchId) {
+        return '';
+    }
+
+    params.push(branchId);
+    return ` AND ${columnExpression} = $${params.length}`;
+};
+
+const sendInsightsRouteError = (res, err, logLabel, fallback) => {
+    if (err instanceof BranchAccessError) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    console.error(logLabel, err.message);
+    return res.status(500).json({ error: fallback });
+};
+
+router.use(auth, saasMiddleware, branchSchemaMiddleware);
+
+router.get('/overview', requirePermission('insights:read'), async (req, res) => {
     const gymId = req.user.gym_id;
     const range = normalizeRange(req.query.range);
     const months = RANGE_TO_MONTHS[range];
     const peakHourDays = Math.min(months * 31, 365);
 
     try {
+        const { branchId } = await resolveBranchReadScope(pool, req);
         const gymTimezone = await getGymTimezone(pool, gymId);
-                const [memberRowsRes, revenueGraphRes, planRevenueRes, topMembersRes, peakHoursRes, last30RevenueRes] = await Promise.all([
+        const memberParams = [gymId];
+        const membershipBranchClause = getBranchFilterSql(memberParams, branchId, `COALESCE(ms.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const memberBranchClause = getBranchFilterSql(memberParams, branchId, `COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const revenueParams = [gymId, months, gymTimezone];
+        const revenueBranchClause = getBranchFilterSql(revenueParams, branchId, `COALESCE(pay.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const planRevenueParams = [gymId, months, gymTimezone];
+        const planRevenueBranchClause = getBranchFilterSql(planRevenueParams, branchId, `COALESCE(pay.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const topMembersParams = [gymId];
+        const topMembershipBranchClause = getBranchFilterSql(topMembersParams, branchId, `COALESCE(ms.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const topPaymentBranchClause = getBranchFilterSql(topMembersParams, branchId, `COALESCE(pay.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const topMemberBranchClause = getBranchFilterSql(topMembersParams, branchId, `COALESCE(m.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const peakHourParams = [gymId, peakHourDays, gymTimezone];
+        const peakHourBranchClause = getBranchFilterSql(peakHourParams, branchId, `COALESCE(a.branch_id, ${DEFAULT_BRANCH_SQL})`);
+        const last30RevenueParams = [gymId];
+        const last30RevenueBranchClause = getBranchFilterSql(last30RevenueParams, branchId, `COALESCE(pay.branch_id, ${DEFAULT_BRANCH_SQL})`);
+
+        const [memberRowsRes, revenueGraphRes, planRevenueRes, topMembersRes, peakHoursRes, last30RevenueRes] = await Promise.all([
             pool.query(
                 `WITH latest_memberships AS (
                     SELECT DISTINCT ON (ms.member_id)
@@ -48,6 +93,7 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                      LEFT JOIN plans p ON p.id = ms.plan_id
                      WHERE ms.gym_id = $1
                        AND ms.deleted_at IS NULL
+                                             ${membershipBranchClause}
                      ORDER BY ms.member_id, ms.end_date DESC NULLS LAST, ms.id DESC
                  )
                  SELECT
@@ -64,8 +110,9 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  LEFT JOIN latest_memberships lm ON lm.member_id = m.id
                  WHERE m.gym_id = $1
                    AND m.deleted_at IS NULL
+                                     ${memberBranchClause}
                  ORDER BY m.full_name ASC`,
-                [gymId]
+                                memberParams
             ),
             pool.query(
                 `WITH month_series AS (
@@ -77,15 +124,16 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  ),
                  revenue_by_month AS (
                     SELECT
-                                                date_trunc('month', timezone($3, payment_date)) AS month_start,
+                                                date_trunc('month', timezone($3, pay.payment_date)) AS month_start,
                         COALESCE(SUM(amount_paid), 0) AS revenue
-                    FROM payments
-                    WHERE gym_id = $1
-                      AND deleted_at IS NULL
-                                            AND payment_date >= (
+                                        FROM payments pay
+                                        WHERE pay.gym_id = $1
+                                            AND pay.deleted_at IS NULL
+                                            ${revenueBranchClause}
+                                            AND pay.payment_date >= (
                                                 date_trunc('month', timezone($3, NOW())) - (($2::int - 1) * INTERVAL '1 month')
                                             ) AT TIME ZONE $3
-                                        GROUP BY date_trunc('month', timezone($3, payment_date))
+                                        GROUP BY date_trunc('month', timezone($3, pay.payment_date))
                  )
                  SELECT
                     TO_CHAR(ms.month_start, 'Mon') AS name,
@@ -93,7 +141,7 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  FROM month_series ms
                  LEFT JOIN revenue_by_month rbm ON rbm.month_start = ms.month_start
                  ORDER BY ms.month_start ASC`,
-                                [gymId, months, gymTimezone]
+                                revenueParams
             ),
             pool.query(
                 `SELECT
@@ -104,68 +152,74 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  LEFT JOIN plans p ON p.id = pay.plan_id
                  WHERE pay.gym_id = $1
                    AND pay.deleted_at IS NULL
-                                     AND pay.payment_date >= (
-                                                date_trunc('month', timezone($3, NOW())) - (($2::int - 1) * INTERVAL '1 month')
-                                     ) AT TIME ZONE $3
+                   ${planRevenueBranchClause}
+                   AND pay.payment_date >= (
+                        date_trunc('month', timezone($3, NOW())) - (($2::int - 1) * INTERVAL '1 month')
+                   ) AT TIME ZONE $3
                  GROUP BY COALESCE(p.name, 'Unassigned Plan')
                  ORDER BY revenue DESC, name ASC
                  LIMIT 8`,
-                                [gymId, months, gymTimezone]
+                planRevenueParams
             ),
-                        pool.query(
-                                `WITH latest_memberships AS (
-                                        SELECT DISTINCT ON (ms.member_id)
-                                                ms.member_id,
-                                                ms.status
-                                        FROM memberships ms
-                                        WHERE ms.gym_id = $1
-                                            AND ms.deleted_at IS NULL
-                                        ORDER BY ms.member_id, ms.end_date DESC NULLS LAST, ms.id DESC
-                                 ),
-                                 payment_totals AS (
-                                        SELECT
-                                                user_id AS member_id,
-                                                COALESCE(SUM(amount_paid), 0) AS total_paid
-                                        FROM payments
-                                        WHERE gym_id = $1
-                                            AND deleted_at IS NULL
-                                        GROUP BY user_id
-                                 )
-                                 SELECT
-                                        m.id,
-                                        m.full_name,
-                                        m.profile_pic,
-                                        COALESCE(pt.total_paid, 0) AS total_paid
-                                 FROM members m
-                                 INNER JOIN latest_memberships lm ON lm.member_id = m.id
-                                 INNER JOIN payment_totals pt ON pt.member_id = m.id
-                                 WHERE m.gym_id = $1
-                                     AND m.deleted_at IS NULL
-                                     AND COALESCE(lm.status, 'UNPAID') = 'ACTIVE'
-                                     AND COALESCE(pt.total_paid, 0) > 0
-                                 ORDER BY pt.total_paid DESC, m.full_name ASC
-                                 LIMIT 5`,
-                                [gymId]
-                        ),
+            pool.query(
+                `WITH latest_memberships AS (
+                        SELECT DISTINCT ON (ms.member_id)
+                            ms.member_id,
+                            ms.status
+                        FROM memberships ms
+                        WHERE ms.gym_id = $1
+                            AND ms.deleted_at IS NULL
+                            ${topMembershipBranchClause}
+                        ORDER BY ms.member_id, ms.end_date DESC NULLS LAST, ms.id DESC
+                 ),
+                 payment_totals AS (
+                        SELECT
+                            pay.user_id AS member_id,
+                            COALESCE(SUM(pay.amount_paid), 0) AS total_paid
+                        FROM payments pay
+                        WHERE pay.gym_id = $1
+                            AND pay.deleted_at IS NULL
+                            ${topPaymentBranchClause}
+                        GROUP BY pay.user_id
+                 )
+                 SELECT
+                        m.id,
+                        m.full_name,
+                        m.profile_pic,
+                        COALESCE(pt.total_paid, 0) AS total_paid
+                 FROM members m
+                 INNER JOIN latest_memberships lm ON lm.member_id = m.id
+                 INNER JOIN payment_totals pt ON pt.member_id = m.id
+                 WHERE m.gym_id = $1
+                     AND m.deleted_at IS NULL
+                     ${topMemberBranchClause}
+                     AND COALESCE(lm.status, 'UNPAID') = 'ACTIVE'
+                     AND COALESCE(pt.total_paid, 0) > 0
+                 ORDER BY pt.total_paid DESC, m.full_name ASC
+                 LIMIT 5`,
+                topMembersParams
+            ),
             pool.query(
                 `SELECT
-                                        EXTRACT(HOUR FROM timezone($3, check_in_time))::INTEGER AS hour,
+                    EXTRACT(HOUR FROM timezone($3, a.check_in_time))::INTEGER AS hour,
                     COUNT(*)::INTEGER AS count
-                 FROM attendance
-                 WHERE gym_id = $1
-                   AND deleted_at IS NULL
-                   AND check_in_time >= NOW() - ($2::int || ' day')::interval
-                                 GROUP BY EXTRACT(HOUR FROM timezone($3, check_in_time))
+                 FROM attendance a
+                 WHERE a.gym_id = $1
+                   AND a.deleted_at IS NULL
+                   ${peakHourBranchClause}
+                   AND a.check_in_time >= NOW() - ($2::int || ' day')::interval
+                 GROUP BY EXTRACT(HOUR FROM timezone($3, a.check_in_time))
                  ORDER BY hour ASC`,
-                                [gymId, peakHourDays, gymTimezone]
+                peakHourParams
             ),
             pool.query(
                 `SELECT COALESCE(ROUND(SUM(amount_paid)), 0)::INTEGER AS revenue
-                 FROM payments
-                 WHERE gym_id = $1
-                   AND deleted_at IS NULL
-                   AND payment_date >= NOW() - INTERVAL '30 days'`,
-                [gymId]
+                 FROM payments pay
+                 WHERE pay.gym_id = $1
+                   AND pay.deleted_at IS NULL
+                   ${last30RevenueBranchClause}
+                   AND pay.payment_date >= NOW() - INTERVAL '30 days'`,
+                last30RevenueParams
             ),
         ]);
 
@@ -284,8 +338,7 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
             },
         });
     } catch (err) {
-        console.error('INSIGHTS OVERVIEW ERROR:', err.message);
-        return res.status(500).json({ error: 'Server Error' });
+        return sendInsightsRouteError(res, err, 'INSIGHTS OVERVIEW ERROR:', 'Failed to load insights overview.');
     }
 });
 

@@ -266,7 +266,7 @@ router.get('/types', requirePermission('attendance:read'), async (req, res) => {
         const { branchId } = await resolveBranchReadScope(pool, req);
         const includeInactive = String(req.query.include_inactive || '').toLowerCase() === 'true';
         const params = [gymId, includeInactive];
-        const branchClause = getBranchFilterSql(params, branchId);
+        const branchClause = getBranchFilterSql(params, branchId, `COALESCE(ct.branch_id, ${DEFAULT_BRANCH_SQL})`);
         const result = await pool.query(
             `SELECT
                 ct.*,

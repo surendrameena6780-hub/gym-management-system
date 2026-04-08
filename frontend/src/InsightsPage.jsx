@@ -11,9 +11,11 @@ import {
   MessageSquare, Phone, Award, RefreshCw,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
 import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import { getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 import PageLoader from './PageLoader';
 
 const EMPTY_ANALYTICS = {
@@ -112,7 +114,11 @@ const normalizeInsightsPayload = (payload) => ({
 });
 
 const InsightsPage = ({ appRuntime, isActive = true }) => {
-  const { token, toast, showConfirm } = appRuntime;
+  const { token, toast, showConfirm, currentUser = null } = appRuntime;
+  const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
+  const defaultBranchId = getDefaultBranchId(branchDirectory);
+  const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
   const [activeTab, setActiveTab] = useState('revenue');
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [loading, setLoading] = useState(true);
@@ -195,19 +201,25 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
   const fetchInsights = useCallback(async (range, allowCache = true) => {
     if (!token) return;
 
-    if (allowCache && cacheRef.current.has(range)) {
-      setAnalytics(cacheRef.current.get(range));
+    const cacheKey = `${range}:${branchScopeValue || 'all'}`;
+
+    if (allowCache && cacheRef.current.has(cacheKey)) {
+      setAnalytics(cacheRef.current.get(cacheKey));
       setLoading(false);
       return;
     }
 
     setLoading(true);
     try {
-      const res = await axios.get(`/api/insights/overview?range=${encodeURIComponent(range)}`, {
+      const params = { range };
+      if (branchScopeValue) params.branch_id = branchScopeValue;
+
+      const res = await axios.get('/api/insights/overview', {
         headers: { 'x-auth-token': token },
+        params,
       });
       const normalized = normalizeInsightsPayload(res.data || {});
-      cacheRef.current.set(range, normalized);
+      cacheRef.current.set(cacheKey, normalized);
       setAnalytics(normalized);
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to load insights.', 'error');
@@ -215,19 +227,21 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, toast]);
+  }, [branchScopeValue, token, toast]);
 
   useEffect(() => {
     if (!token || !isActive) return;
     fetchInsights(dateRange, true);
-  }, [token, dateRange, isActive, fetchInsights]);
+  }, [token, dateRange, branchScopeValue, isActive, fetchInsights]);
 
   useEffect(() => {
     if (!token) return;
-    const url = insightsPeakDays === 'today'
-      ? '/api/attendance/peak-hours?today=true'
-      : `/api/attendance/peak-hours?days=${insightsPeakDays}`;
-    axios.get(url, { headers: { 'x-auth-token': token } })
+    const params = insightsPeakDays === 'today'
+      ? { today: true }
+      : { days: insightsPeakDays };
+    if (branchScopeValue) params.branch_id = branchScopeValue;
+
+    axios.get('/api/attendance/peak-hours', { headers: { 'x-auth-token': token }, params })
       .then((res) => {
         const rows = Array.isArray(res.data) ? res.data : [];
         setInsightsPeakHours(rows.map((item) => ({
@@ -236,7 +250,7 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
         })));
       })
       .catch(() => {});
-  }, [token, insightsPeakDays, isActive]);
+  }, [token, branchScopeValue, insightsPeakDays, isActive]);
 
   const hasRevenueGraph = analytics.revenue.graphData.some((item) => Number(item.revenue || 0) > 0);
   const hasPeakHourData = insightsPeakHours.some((item) => Number(item.count || 0) > 0);
@@ -250,24 +264,36 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
           <p className="text-slate-500 font-medium mt-1">Simple numbers from real payments, memberships, and attendance.</p>
         </div>
-        <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-          {['1M', '3M', '6M', '1Y'].map((range) => (
+        <div className="flex w-full flex-col items-end gap-3 desktop:w-auto">
+          <OperationsBranchScopeBar
+            branchDirectory={branchDirectory}
+            branchId={operationsBranchId}
+            onChange={appRuntime.setOperationsBranchId}
+            currentUser={currentUser}
+            loading={appRuntime.branchScopeLoading}
+            title="Insights scope"
+            description="Filter insights and attendance trends by branch without leaving the page."
+            className="shrink-0"
+          />
+          <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+            {['1M', '3M', '6M', '1Y'].map((range) => (
+              <button
+                key={range}
+                onClick={() => setDateRange(range)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${dateRange === range ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+              >
+                {range}
+              </button>
+            ))}
+            <div className="w-[1px] h-6 bg-slate-200 mx-1" />
             <button
-              key={range}
-              onClick={() => setDateRange(range)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${dateRange === range ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+              onClick={handleDownloadReport}
+              className="px-3 py-2 text-slate-400 hover:text-slate-900 transition-colors"
+              title="Download PDF Report"
             >
-              {range}
+              <Download size={18} />
             </button>
-          ))}
-          <div className="w-[1px] h-6 bg-slate-200 mx-1" />
-          <button
-            onClick={handleDownloadReport}
-            className="px-3 py-2 text-slate-400 hover:text-slate-900 transition-colors"
-            title="Download PDF Report"
-          >
-            <Download size={18} />
-          </button>
+          </div>
         </div>
       </div>
 
