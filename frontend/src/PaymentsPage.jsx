@@ -1758,8 +1758,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)', opacity: 0, animation: 'payCardIn 0.6s cubic-bezier(0.16,1,0.3,1) 0ms forwards' }}>
 
       <div className="space-y-3">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
-          <div className="min-w-0 pr-1">
+        <div className="relative sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
+          <div className="min-w-0 pr-[9rem] sm:pr-1">
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Finance Hub</h1>
           </div>
           <OperationsBranchScopeBar
@@ -1770,7 +1770,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
             loading={appRuntime.branchScopeLoading}
             title="Finance scope"
             description="Switch the branch lens for collections, expenses, payroll, and POS flows."
-            className="justify-self-end self-start shrink-0"
+            className="absolute right-0 top-0 justify-self-end self-start shrink-0 sm:static"
           />
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">

@@ -1681,13 +1681,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="space-y-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
-            <div className="min-w-0 pr-1">
+          <div className="relative sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
+            <div className="min-w-0 pr-[9rem] sm:pr-1">
               <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
-              <p className="text-slate-500 text-sm mt-0.5 flex items-center gap-2">
-                <span>Manage and track your gym members</span>
-                {isRefreshing && members.length > 0 ? <span className="text-[11px] font-bold text-indigo-500">Refreshing...</span> : null}
-              </p>
             </div>
             <OperationsBranchScopeBar
               branchDirectory={branchDirectory}
@@ -1697,8 +1693,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               loading={appRuntime.branchScopeLoading}
               title="Member scope"
               description="Switch the working branch for member lists, summaries, and new member assignment."
-              className="justify-self-end self-start shrink-0"
+              className="absolute right-0 top-0 justify-self-end self-start shrink-0 sm:static"
             />
+            <p className="mt-2 text-slate-500 text-sm flex items-center gap-2 pr-1 sm:col-span-2 sm:mt-0">
+                <span>Manage and track your gym members</span>
+                {isRefreshing && members.length > 0 ? <span className="text-[11px] font-bold text-indigo-500">Refreshing...</span> : null}
+            </p>
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">
             <button type="button" aria-pressed={isBulkMode} onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 desktop:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>

@@ -852,6 +852,12 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     }
   }, [authHeaders, broadcastAudience, broadcastCustomIds, broadcastMessage, broadcastTemplateKey, fetchData, toast]);
 
+  const checkedInMemberIds = useMemo(() => new Set(
+    todayAttendance
+      .map((row) => Number(row.member_id))
+      .filter((id) => Number.isFinite(id)),
+  ), [todayAttendance]);
+
   const setCheckinBusyState = useCallback((memberId, isBusy) => {
     const normalizedId = Number(memberId);
     if (!Number.isInteger(normalizedId)) return;
@@ -1564,12 +1570,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const chartTotal = useMemo(() => (
     (chartDays === 7 ? chart7 : chart30).reduce((sum, day) => sum + (day.revenue || 0), 0)
   ), [chart30, chart7, chartDays]);
-
-  const checkedInMemberIds = useMemo(() => new Set(
-    todayAttendance
-      .map((row) => Number(row.member_id))
-      .filter((id) => Number.isFinite(id)),
-  ), [todayAttendance]);
 
   const checkinMembers = useMemo(() => {
     const query = String(checkinQuery || '').trim().toLowerCase();
