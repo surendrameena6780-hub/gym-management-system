@@ -501,6 +501,8 @@ const createCollectionPaymentLink = async ({
         notes,
     };
 
+    // Keep Route member collection on the platform link + transfer flow.
+    // Direct connected-account payment links regressed in production and stopped behaving like the working Apr 4 Route setup.
     if (razorpayConfig.connectMode === 'PARTNER') {
         const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
         const feeAmount = Math.round(amountPaise * feePercent / 100);
