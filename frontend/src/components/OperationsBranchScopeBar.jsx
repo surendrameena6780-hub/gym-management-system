@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building2 } from 'lucide-react';
+import { Building2, ChevronDown, LoaderCircle } from 'lucide-react';
 import { buildBranchOptions, getBranchLabel, normalizeBranchDirectory } from '../utils/branchScope';
 
 const OperationsBranchScopeBar = ({
@@ -11,6 +11,7 @@ const OperationsBranchScopeBar = ({
   title = 'Operational scope',
   description = 'Filter this page by branch. Owners can switch views without leaving the workflow.',
   allLabel = 'All branches',
+  className = '',
 }) => {
   const normalizedBranchDirectory = normalizeBranchDirectory(branchDirectory);
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
@@ -22,40 +23,37 @@ const OperationsBranchScopeBar = ({
   });
 
   return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white/80 px-4 py-3 backdrop-blur-sm">
-      <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between">
-        <div className="min-w-0">
-          <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
-            <Building2 size={13} />
-            <span>{title}</span>
-          </div>
-          <p className="mt-1 truncate text-sm font-black text-slate-900">
-            {loading ? 'Loading branch access...' : activeLabel}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-slate-500">
-            {canSelect ? description : `This account is locked to ${activeLabel}.`}
-          </p>
+    <div className={`min-w-0 max-w-full ${className}`.trim()}>
+      <span className="sr-only">{title}</span>
+      {canSelect ? (
+        <label className="relative block w-full max-w-full sm:w-auto sm:min-w-[220px]">
+          <Building2 size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <select
+            value={branchId || options[0]?.value || ''}
+            onChange={(event) => onChange(event.target.value)}
+            aria-label={title}
+            title={description}
+            className="w-full max-w-full appearance-none rounded-2xl border border-slate-200 bg-white/90 pl-10 pr-10 py-2.5 text-sm font-black text-slate-900 shadow-sm outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          {loading ? (
+            <LoaderCircle size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+          ) : (
+            <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          )}
+        </label>
+      ) : (
+        <div
+          className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm font-black text-slate-900 shadow-sm"
+          title={loading ? 'Loading branch access...' : `Locked to ${activeLabel}`}
+        >
+          {loading ? <LoaderCircle size={15} className="animate-spin text-slate-400 shrink-0" /> : <Building2 size={15} className="text-slate-400 shrink-0" />}
+          <span className="truncate">{loading ? 'Loading branch...' : activeLabel}</span>
         </div>
-
-        {canSelect ? (
-          <label className="block desktop:min-w-[240px]">
-            <span className="sr-only">Select branch scope</span>
-            <select
-              value={branchId || options[0]?.value || ''}
-              onChange={(event) => onChange(event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-900 outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200"
-            >
-              {options.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 desktop:min-w-[220px]">
-            {activeLabel}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };

@@ -1679,24 +1679,24 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         ))}
       </div>
 
-      <OperationsBranchScopeBar
-        branchDirectory={branchDirectory}
-        branchId={operationsBranchId}
-        onChange={appRuntime.setOperationsBranchId}
-        currentUser={currentUser}
-        loading={appRuntime.branchScopeLoading}
-        title="Member scope"
-        description="Switch the working branch for member lists, summaries, and new member assignment."
-      />
-
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
-        <div className="flex flex-col desktop:flex-row justify-between desktop:items-center gap-3">
-          <div>
+        <div className="flex flex-col desktop:flex-row justify-between desktop:items-start gap-3">
+          <div className="min-w-0 space-y-3">
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
             <p className="text-slate-500 text-sm mt-0.5 flex items-center gap-2">
               <span>Manage and track your gym members</span>
               {isRefreshing && members.length > 0 ? <span className="text-[11px] font-bold text-indigo-500">Refreshing...</span> : null}
             </p>
+            <OperationsBranchScopeBar
+              branchDirectory={branchDirectory}
+              branchId={operationsBranchId}
+              onChange={appRuntime.setOperationsBranchId}
+              currentUser={currentUser}
+              loading={appRuntime.branchScopeLoading}
+              title="Member scope"
+              description="Switch the working branch for member lists, summaries, and new member assignment."
+              className="w-full sm:w-auto"
+            />
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">
             <button type="button" aria-pressed={isBulkMode} onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 desktop:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>
@@ -1731,13 +1731,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             </div>
           ) : (
             <>
-              <div className="desktop:hidden flex min-h-0 flex-1 py-2">
-                <div className="relative flex min-h-0 flex-1 flex-col">
-                  <div className="members-mobile-list-scroll no-scrollbar flex-1 min-h-0">
-                    <div className="space-y-3 pb-6">
+              <div className="desktop:hidden flex w-full min-w-0 flex-1 py-2 overflow-x-hidden">
+                <div className="relative flex w-full min-w-0 flex-col rounded-[24px] border border-slate-100 bg-slate-50/60 p-2 overflow-hidden">
+                  <div className="members-mobile-list-scroll no-scrollbar flex-1 min-h-0 w-full min-w-0 overflow-x-hidden">
+                    <div className="space-y-3 pb-3">
                       {loading ? (
                       Array.from({ length: 4 }).map((_, i) => (
-                        <div key={`member-mobile-skeleton-${i}`} className="p-4 rounded-2xl border border-slate-100 bg-white space-y-3">
+                        <div key={`member-mobile-skeleton-${i}`} className="w-full min-w-0 p-4 rounded-2xl border border-slate-100 bg-white shadow-sm space-y-3">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full gv-skeleton shrink-0" />
                             <div className="flex-1 space-y-2">
@@ -1759,7 +1759,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                         return (
                           <div
                             key={`member-mobile-${member.id}`}
-                            className={`gv-fade-up relative p-4 rounded-2xl border space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover overflow-hidden ${selectedIds.includes(member.id) ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-100 bg-white'}`}
+                            className={`gv-fade-up relative w-full min-w-0 p-4 rounded-2xl border space-y-3 active:scale-[0.98] transition-transform cursor-pointer gv-card-hover overflow-hidden shadow-sm ${selectedIds.includes(member.id) ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-100 bg-white'}`}
                             style={{ animationDelay: `${Math.min(idx * 0.04, 0.3)}s` }}
                             onClick={() => (isBulkMode ? toggleSelection(member.id) : handleViewDetails(member))}
                           >
@@ -1770,7 +1770,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                                 </div>
                               </div>
                             )}
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
                               <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={40} />
                               <div className="min-w-0 flex-1">
                                 <p className="font-bold text-slate-900 truncate">{member.full_name}</p>
@@ -1795,7 +1795,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                       onPageChange={(nextPage) => setMembersPagination((prev) => ({ ...prev, page: nextPage }))}
                     />
                   )}
-                  <div className="gv-list-bottom-fade absolute bottom-0 inset-x-0 h-12 pointer-events-none rounded-b-2xl" style={{ background: 'linear-gradient(to top, rgba(248,250,252,0.96) 0%, transparent 100%)' }} />
+                  <div className="gv-list-bottom-fade absolute bottom-0 inset-x-0 hidden md:block desktop:hidden h-12 pointer-events-none rounded-b-2xl" style={{ background: 'linear-gradient(to top, rgba(248,250,252,0.96) 0%, transparent 100%)' }} />
                 </div>
               </div>
 

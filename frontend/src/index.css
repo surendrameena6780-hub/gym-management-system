@@ -320,11 +320,15 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .members-mobile-list-scroll {
-  max-height: var(--members-mobile-list-max-height);
+  max-height: none;
+  overflow-x: hidden;
 }
 
 .members-page-shell {
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 @media (min-width: 768px) and (max-width: 1099px) {
@@ -337,7 +341,9 @@ html.gv-compact-ui main.app-scroll-shell > div {
   }
 
   .members-mobile-list-scroll {
+    max-height: var(--members-mobile-list-max-height);
     min-height: var(--members-mobile-list-max-height);
+    overflow-y: auto;
   }
 }
 
