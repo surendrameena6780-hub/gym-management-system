@@ -365,25 +365,12 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     const handleExternalRefresh = () => {
       fetchData();
     };
-
-    const handleVisibilityRefresh = () => {
-      if (document.visibilityState === 'visible') {
-        fetchData();
-      }
-    };
-
-    window.addEventListener('focus', handleExternalRefresh);
-    window.addEventListener('pageshow', handleExternalRefresh);
     window.addEventListener('gymvault:data-changed', handleExternalRefresh);
     window.addEventListener('gymvault:app-resumed', handleExternalRefresh);
-    document.addEventListener('visibilitychange', handleVisibilityRefresh);
 
     return () => {
-      window.removeEventListener('focus', handleExternalRefresh);
-      window.removeEventListener('pageshow', handleExternalRefresh);
       window.removeEventListener('gymvault:data-changed', handleExternalRefresh);
       window.removeEventListener('gymvault:app-resumed', handleExternalRefresh);
-      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
     };
   }, [fetchData, isActive, token]);
 

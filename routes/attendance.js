@@ -1606,7 +1606,7 @@ router.get('/records', auth, saasMiddleware, requirePermission('attendance:read'
             ) ms_latest ON true
             WHERE a.gym_id = $1 AND a.deleted_at IS NULL AND m.deleted_at IS NULL AND ${dateClause}${branchClause}
             ORDER BY a.check_in_time DESC
-            ${paginate ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}` : 'LIMIT 500'}
+            ${paginate ? `LIMIT $${params.length + 1} OFFSET $${params.length + 2}` : 'LIMIT 50'}
         `;
 
         const result = await pool.query(query, paginate ? [...params, limit, offset] : params);

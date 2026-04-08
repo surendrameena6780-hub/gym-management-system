@@ -689,7 +689,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       setLoading(true);
       const headers = { 'x-auth-token': token };
       const [paymentsRes, statsRes, membersRes, plansRes] = await Promise.all([
-        axios.get('/api/payments', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to, ...branchParams } }),
+        axios.get('/api/payments', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to, compact: true, ...branchParams } }),
         axios.get('/api/payments/stats', { headers, params: { from: financeOverviewParams.from, to: financeOverviewParams.to, ...branchParams } }),
         axios.get('/api/members/options', { headers, params: { limit: 20, ...branchParams } }),
         axios.get('/api/plans', { headers })
@@ -962,23 +962,12 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         checkDueRazorpayStatusRef.current?.({ manual: false });
       }
     };
-
-    const handleVisibilityRefresh = () => {
-      if (document.visibilityState === 'visible') {
-        refreshPayments();
-      }
-    };
-
-    window.addEventListener('focus', refreshPayments);
-    window.addEventListener('pageshow', refreshPayments);
     window.addEventListener('gymvault:app-resumed', refreshPayments);
-    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+    window.addEventListener('gymvault:data-changed', refreshPayments);
 
     return () => {
-      window.removeEventListener('focus', refreshPayments);
-      window.removeEventListener('pageshow', refreshPayments);
       window.removeEventListener('gymvault:app-resumed', refreshPayments);
-      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+      window.removeEventListener('gymvault:data-changed', refreshPayments);
     };
   }, [token, isActive]);
 

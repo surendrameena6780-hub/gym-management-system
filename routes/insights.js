@@ -35,7 +35,7 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
 
     try {
         const gymTimezone = await getGymTimezone(pool, gymId);
-        const [memberRowsRes, revenueGraphRes, planRevenueRes, peakHoursRes, last30RevenueRes] = await Promise.all([
+                const [memberRowsRes, revenueGraphRes, planRevenueRes, topMembersRes, peakHoursRes, last30RevenueRes] = await Promise.all([
             pool.query(
                 `WITH latest_memberships AS (
                     SELECT DISTINCT ON (ms.member_id)
@@ -49,32 +49,19 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                      WHERE ms.gym_id = $1
                        AND ms.deleted_at IS NULL
                      ORDER BY ms.member_id, ms.end_date DESC NULLS LAST, ms.id DESC
-                 ),
-                 payment_totals AS (
-                    SELECT
-                        user_id AS member_id,
-                        COALESCE(SUM(amount_paid), 0) AS total_paid
-                    FROM payments
-                    WHERE gym_id = $1
-                      AND deleted_at IS NULL
-                    GROUP BY user_id
                  )
                  SELECT
                     m.id,
                     m.full_name,
                     m.phone,
-                    m.email,
                     m.last_visit,
                     m.joining_date,
-                    m.profile_pic,
                     COALESCE(lm.status, 'UNPAID') AS membership_status,
                     lm.plan_name,
                     lm.end_date,
-                    COALESCE(lm.plan_price, 0) AS plan_price,
-                    COALESCE(pt.total_paid, 0) AS total_paid
+                                        COALESCE(lm.plan_price, 0) AS plan_price
                  FROM members m
                  LEFT JOIN latest_memberships lm ON lm.member_id = m.id
-                 LEFT JOIN payment_totals pt ON pt.member_id = m.id
                  WHERE m.gym_id = $1
                    AND m.deleted_at IS NULL
                  ORDER BY m.full_name ASC`,
@@ -125,6 +112,41 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
                  LIMIT 8`,
                                 [gymId, months, gymTimezone]
             ),
+                        pool.query(
+                                `WITH latest_memberships AS (
+                                        SELECT DISTINCT ON (ms.member_id)
+                                                ms.member_id,
+                                                ms.status
+                                        FROM memberships ms
+                                        WHERE ms.gym_id = $1
+                                            AND ms.deleted_at IS NULL
+                                        ORDER BY ms.member_id, ms.end_date DESC NULLS LAST, ms.id DESC
+                                 ),
+                                 payment_totals AS (
+                                        SELECT
+                                                user_id AS member_id,
+                                                COALESCE(SUM(amount_paid), 0) AS total_paid
+                                        FROM payments
+                                        WHERE gym_id = $1
+                                            AND deleted_at IS NULL
+                                        GROUP BY user_id
+                                 )
+                                 SELECT
+                                        m.id,
+                                        m.full_name,
+                                        m.profile_pic,
+                                        COALESCE(pt.total_paid, 0) AS total_paid
+                                 FROM members m
+                                 INNER JOIN latest_memberships lm ON lm.member_id = m.id
+                                 INNER JOIN payment_totals pt ON pt.member_id = m.id
+                                 WHERE m.gym_id = $1
+                                     AND m.deleted_at IS NULL
+                                     AND COALESCE(lm.status, 'UNPAID') = 'ACTIVE'
+                                     AND COALESCE(pt.total_paid, 0) > 0
+                                 ORDER BY pt.total_paid DESC, m.full_name ASC
+                                 LIMIT 5`,
+                                [gymId]
+                        ),
             pool.query(
                 `SELECT
                                         EXTRACT(HOUR FROM timezone($3, check_in_time))::INTEGER AS hour,
@@ -153,7 +175,6 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
             return {
                 ...row,
                 plan_price: Number(row.plan_price || 0),
-                total_paid: Number(row.total_paid || 0),
                 days_left: daysLeft,
             };
         });
@@ -206,18 +227,32 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
             users: activeUsersByPlan.get(String(plan.name || 'Unassigned Plan')) || 0,
         }));
 
-        const topMembers = activeMembers
-            .filter((member) => member.total_paid > 0)
-            .sort((left, right) => {
-                if (right.total_paid === left.total_paid) return String(left.full_name).localeCompare(String(right.full_name));
-                return right.total_paid - left.total_paid;
-            })
-            .slice(0, 5);
+        const topMembers = topMembersRes.rows.map((member) => ({
+            id: member.id,
+            full_name: member.full_name,
+            profile_pic: member.profile_pic,
+            total_paid: Number(member.total_paid || 0),
+        }));
 
         const revenueAtRisk = expiringMembers.reduce((sum, member) => sum + Math.max(0, Number(member.plan_price || 0)), 0);
         const lostRevenue = expiredMembers.reduce((sum, member) => sum + Math.max(0, Number(member.plan_price || 0)), 0);
         const last30Revenue = Number(last30RevenueRes.rows[0]?.revenue || 0);
         const arpu = activeMembers.length > 0 ? Math.round(last30Revenue / activeMembers.length) : 0;
+
+        const expiringList = expiringMembers.slice(0, 10).map((member) => ({
+            id: member.id,
+            full_name: member.full_name,
+            phone: member.phone,
+            days_left: member.days_left,
+        }));
+
+        const inactiveList = inactiveMembers.slice(0, 5).map((member) => ({
+            id: member.id,
+            full_name: member.full_name,
+            phone: member.phone,
+            last_visit: member.last_visit,
+            days_inactive: member.days_inactive,
+        }));
 
         return res.json({
             range,
@@ -236,9 +271,9 @@ router.get('/overview', auth, saasMiddleware, requirePermission('insights:read')
             risk: {
                 expiringCount: expiringMembers.length,
                 revenueAtRisk,
-                expiringList: expiringMembers.slice(0, 10),
+                expiringList,
                 inactiveCount: inactiveMembers.length,
-                inactiveList: inactiveMembers.slice(0, 5),
+                inactiveList,
             },
             attendance: {
                 heatmap: peakHoursRes.rows.map((item) => ({

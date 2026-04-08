@@ -504,7 +504,10 @@ router.get('/pos/products', requirePermission('payments:read'), async (req, res)
         const params = [gid];
         const branchFilter = getBranchFilterSql(params, branchScope.branchId, 'branch_id');
         const result = await pool.query(
-            `SELECT * FROM pos_products WHERE gym_id=$1 AND deleted_at IS NULL${branchFilter} ORDER BY name ASC`, params);
+            `SELECT id, name, category, price, stock_qty, low_stock_threshold, branch_id
+             FROM pos_products
+             WHERE gym_id=$1 AND deleted_at IS NULL${branchFilter}
+             ORDER BY name ASC`, params);
         return res.json(mapBranchRows(result.rows, branchScope.branchDirectory));
     } catch (err) {
         console.error('POS PRODUCTS:', err.message);

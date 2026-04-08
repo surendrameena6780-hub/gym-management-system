@@ -661,13 +661,30 @@ router.get('/', async (req, res) => {
         const fromDate = normalizeDateInput(req.query.from);
         const toDate = normalizeDateInput(req.query.to);
         const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
+        const compact = String(req.query.compact || '').toLowerCase() === 'true';
         const page = Math.max(Number.parseInt(req.query.page || '1', 10) || 1, 1);
         const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '20', 10) || 20, 1), 200);
         const offset = (page - 1) * limit;
         const gym_id = req.user.gym_id;
 
-        let baseQuery = `
-            SELECT
+        const paymentSelectClause = compact ? `
+                p.id,
+                p.user_id,
+                p.invoice_id,
+                p.transaction_id,
+                p.amount_paid,
+                p.amount_due,
+                p.total_amount,
+                p.payment_date,
+                p.status,
+                p.payment_mode,
+                COALESCE(p.branch_id, m.branch_id, ${DEFAULT_BRANCH_SQL}) AS branch_id,
+                GREATEST(COALESCE(p.amount_paid, 0) - COALESCE(pc.collected_total, 0), 0) AS initial_amount_paid,
+                COALESCE(pc.online_collected_total, 0) AS due_online_collected,
+                COALESCE(pc.cash_collected_total, 0) AS due_cash_collected,
+                m.full_name AS member_name,
+                pl.name AS plan_name
+        ` : `
                 p.id,
                 p.user_id,
                 p.invoice_id,
@@ -700,6 +717,11 @@ router.get('/', async (req, res) => {
                 m.profile_pic,
                 pl.name AS plan_name,
                 pl.duration_days
+        `;
+
+        let baseQuery = `
+            SELECT
+                ${paymentSelectClause}
             FROM payments p
             JOIN members m ON p.user_id = m.id AND m.gym_id = p.gym_id
             LEFT JOIN plans pl ON p.plan_id = pl.id AND pl.gym_id = p.gym_id

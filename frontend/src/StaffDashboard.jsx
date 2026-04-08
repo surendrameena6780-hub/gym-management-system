@@ -53,9 +53,19 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       const headers = { 'x-auth-token': token };
       const requests = [];
       if (canMembers) {
-        requests.push(axios.get(`${API}/api/members`, { headers }).catch(() => ({ data: [] })));
+        requests.push(axios.get(`${API}/api/members/summary`, { headers }).catch(() => ({ data: {} })));
+        requests.push(axios.get(`${API}/api/members`, {
+          headers,
+          params: {
+            status: 'EXPIRING SOON',
+            paginate: true,
+            page: 1,
+            limit: 5,
+          },
+        }).catch(() => ({ data: { items: [] } })));
       } else {
-        requests.push(Promise.resolve({ data: [] }));
+        requests.push(Promise.resolve({ data: {} }));
+        requests.push(Promise.resolve({ data: { items: [] } }));
       }
       if (canAttendance) {
         requests.push(axios.get(`${API}/api/attendance/overview`, { headers }).catch(() => ({ data: {} })));
@@ -67,23 +77,23 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       } else {
         requests.push(Promise.resolve({ data: {} }));
       }
-      const [membersRes, attendanceRes, payStatsRes] = await Promise.all(requests);
-      const membersArr = Array.isArray(membersRes.data) ? membersRes.data
-        : Array.isArray(membersRes.data?.data) ? membersRes.data.data
-        : Array.isArray(membersRes.data?.members) ? membersRes.data.members : [];
-      const activeMembers = membersArr.filter(m => m.membership_status === 'ACTIVE');
-      const expiringMembers = activeMembers
-        .filter(m => m.days_left > 0 && m.days_left <= 7)
-        .sort((a, b) => a.days_left - b.days_left);
+      const [membersSummaryRes, expiringMembersRes, attendanceRes, payStatsRes] = await Promise.all(requests);
+      const membersSummary = membersSummaryRes.data && typeof membersSummaryRes.data === 'object' ? membersSummaryRes.data : {};
+      const expiringMembers = Array.isArray(expiringMembersRes.data?.items)
+        ? expiringMembersRes.data.items
+        : Array.isArray(expiringMembersRes.data)
+          ? expiringMembersRes.data
+          : [];
+      expiringMembers.sort((left, right) => Number(left?.days_left || 9999) - Number(right?.days_left || 9999));
       const attendData = attendanceRes.data?.data || attendanceRes.data || {};
       const todayCheckins = Number(attendData.totalToday || attendData.today_count || attendData.total || 0);
       const recentCheckins = Array.isArray(attendData.recent) ? attendData.recent.slice(0, 5) : [];
       const payStats = payStatsRes.data?.data || payStatsRes.data || {};
       setStats({
         todayCheckins,
-        activeMembers: activeMembers.length,
-        totalMembers: membersArr.length,
-        expiringThisWeek: expiringMembers.length,
+        activeMembers: Number(membersSummary.active || 0),
+        totalMembers: Number(membersSummary.total || 0),
+        expiringThisWeek: Number(membersSummary.expiring_soon || expiringMembers.length || 0),
         pendingDues: Number(payStats.pending_dues || 0),
         expiringMembers: expiringMembers.slice(0, 5),
         recentCheckins,
@@ -102,25 +112,12 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       if (document.visibilityState && document.visibilityState === 'hidden') return;
       fetchStats();
     };
-
-    const handleVisibilityRefresh = () => {
-      if (document.visibilityState === 'visible') {
-        refreshStats();
-      }
-    };
-
-    window.addEventListener('focus', refreshStats);
-    window.addEventListener('pageshow', refreshStats);
     window.addEventListener('gymvault:data-changed', refreshStats);
     window.addEventListener('gymvault:app-resumed', refreshStats);
-    document.addEventListener('visibilitychange', handleVisibilityRefresh);
 
     return () => {
-      window.removeEventListener('focus', refreshStats);
-      window.removeEventListener('pageshow', refreshStats);
       window.removeEventListener('gymvault:data-changed', refreshStats);
       window.removeEventListener('gymvault:app-resumed', refreshStats);
-      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
     };
   }, [fetchStats, isActive, token]);
 

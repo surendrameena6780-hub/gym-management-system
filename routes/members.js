@@ -427,7 +427,7 @@ router.get('/options', auth, saasMiddleware, requirePermission('members:read'), 
 
         params.push(limit);
         const result = await pool.query(
-            `SELECT id, full_name, phone, email, profile_pic
+            `SELECT id, full_name, phone, email
              FROM members
              ${whereClause}
              ORDER BY last_visit DESC NULLS LAST, id DESC
@@ -474,8 +474,18 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
                     FROM payments pay WHERE pay.user_id = m.id AND gym_id = $2 AND pay.deleted_at IS NULL
                 ) AS latest_payment_date,
                 COALESCE((
-                    SELECT json_agg(pay ORDER BY pay.payment_date DESC)
-                    FROM payments pay WHERE pay.user_id = m.id AND gym_id = $2 AND pay.deleted_at IS NULL
+                    SELECT json_agg(
+                        json_build_object(
+                            'payment_date', pay.payment_date,
+                            'payment_mode', pay.payment_mode,
+                            'status', pay.status,
+                            'amount_paid', pay.amount_paid,
+                            'amount_due', pay.amount_due
+                        )
+                        ORDER BY pay.payment_date DESC, pay.id DESC
+                    )
+                    FROM payments pay
+                    WHERE pay.user_id = m.id AND gym_id = $2 AND pay.deleted_at IS NULL
                 ), '[]') AS payment_history
             FROM members m
             LEFT JOIN LATERAL (
