@@ -557,15 +557,18 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
         ))}
       </div>
 
-      <OperationsBranchScopeBar
-        branchDirectory={branchDirectory}
-        branchId={operationsBranchId}
-        onChange={appRuntime.setOperationsBranchId}
-        currentUser={currentUser}
-        loading={appRuntime.branchScopeLoading}
-        title="Class scope"
-        description="Filter class formats, sessions, and roster actions by branch before scheduling or check-in."
-      />
+      <div className="flex justify-end">
+        <OperationsBranchScopeBar
+          branchDirectory={branchDirectory}
+          branchId={operationsBranchId}
+          onChange={appRuntime.setOperationsBranchId}
+          currentUser={currentUser}
+          loading={appRuntime.branchScopeLoading}
+          title="Class scope"
+          description="Filter class formats, sessions, and roster actions by branch before scheduling or check-in."
+          className="ml-auto w-full max-w-[11rem] sm:max-w-none sm:w-auto shrink-0"
+        />
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
         <div className="xl:col-span-4 bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>

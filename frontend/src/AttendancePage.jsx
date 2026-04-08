@@ -979,6 +979,18 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   return (
     <div className="space-y-5 p-2">
+      <div className="flex justify-end">
+        <OperationsBranchScopeBar
+          branchDirectory={branchDirectory}
+          branchId={operationsBranchId}
+          onChange={appRuntime.setOperationsBranchId}
+          currentUser={currentUser}
+          loading={appRuntime.branchScopeLoading}
+          title="Attendance scope"
+          description="Filter search, check-ins, live feed, and retention views by branch without leaving the page."
+          className="ml-auto w-full max-w-[11rem] sm:max-w-none sm:w-auto shrink-0"
+        />
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Today's Check-ins</p>
@@ -998,16 +1010,6 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
           <p className="text-xs font-bold text-slate-400 mt-1">{animatedPeakHourCount} check-ins</p>
         </div>
       </div>
-
-      <OperationsBranchScopeBar
-        branchDirectory={branchDirectory}
-        branchId={operationsBranchId}
-        onChange={appRuntime.setOperationsBranchId}
-        currentUser={currentUser}
-        loading={appRuntime.branchScopeLoading}
-        title="Attendance scope"
-        description="Filter search, check-ins, live feed, and retention views by branch without leaving the page."
-      />
 
       {/* ── Attendance Hub Tab Bar ── */}
       <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5 w-fit">

@@ -33,7 +33,7 @@ body,
   --mobile-content-gap: 0.9rem;
   --mobile-content-safe-padding: calc(var(--mobile-nav-offset) + var(--mobile-content-gap));
   --payments-mobile-list-max-height: 22rem;
-  --members-mobile-list-max-height: clamp(22rem, calc(var(--app-viewport-height) - 22rem), 48rem);
+  --members-mobile-list-max-height: clamp(23rem, calc(var(--app-viewport-height) - 26rem), 27rem);
 }
 
 .app-keyboard-open,
@@ -320,7 +320,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .members-mobile-list-scroll {
-  max-height: none;
+  max-height: var(--members-mobile-list-max-height);
   overflow-x: hidden;
 }
 

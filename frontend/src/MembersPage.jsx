@@ -1680,13 +1680,15 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       </div>
 
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
-        <div className="flex flex-col desktop:flex-row justify-between desktop:items-start gap-3">
-          <div className="min-w-0 space-y-3">
-            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
-            <p className="text-slate-500 text-sm mt-0.5 flex items-center gap-2">
-              <span>Manage and track your gym members</span>
-              {isRefreshing && members.length > 0 ? <span className="text-[11px] font-bold text-indigo-500">Refreshing...</span> : null}
-            </p>
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">Members {isBulkMode && (<span className="text-xs bg-slate-900 text-white px-2.5 py-1 rounded-full font-black">{selectedIds.length} selected</span>)}</h1>
+              <p className="text-slate-500 text-sm mt-0.5 flex items-center gap-2">
+                <span>Manage and track your gym members</span>
+                {isRefreshing && members.length > 0 ? <span className="text-[11px] font-bold text-indigo-500">Refreshing...</span> : null}
+              </p>
+            </div>
             <OperationsBranchScopeBar
               branchDirectory={branchDirectory}
               branchId={operationsBranchId}
@@ -1695,7 +1697,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               loading={appRuntime.branchScopeLoading}
               title="Member scope"
               description="Switch the working branch for member lists, summaries, and new member assignment."
-              className="w-full sm:w-auto"
+              className="ml-auto w-full max-w-[11rem] sm:max-w-none sm:w-auto shrink-0"
             />
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">

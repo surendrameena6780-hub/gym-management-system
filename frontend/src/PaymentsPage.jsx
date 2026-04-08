@@ -1757,39 +1757,42 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-5 sm:gap-6 mb-0"
         style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)', opacity: 0, animation: 'payCardIn 0.6s cubic-bezier(0.16,1,0.3,1) 0ms forwards' }}>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Finance Hub</h1>
-          {/* Finance hub tabs */}
-          <div className="flex gap-1 mt-3 bg-slate-100 rounded-xl p-0.5 w-fit overflow-x-auto whitespace-nowrap">
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Finance Hub</h1>
+          </div>
+          <OperationsBranchScopeBar
+            branchDirectory={branchDirectory}
+            branchId={operationsBranchId}
+            onChange={appRuntime.setOperationsBranchId}
+            currentUser={currentUser}
+            loading={appRuntime.branchScopeLoading}
+            title="Finance scope"
+            description="Switch the branch lens for collections, expenses, payroll, and POS flows."
+            className="ml-auto w-full max-w-[11rem] sm:max-w-none sm:w-auto shrink-0"
+          />
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">
+          <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5 w-fit overflow-x-auto whitespace-nowrap">
             {[{ key: 'collections', label: 'Collections' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }].map(t => (
               <button key={t.key} onClick={() => setFinanceTab(t.key)} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${financeTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
             ))}
           </div>
-        </div>
-        <div className="grid grid-cols-2 sm:flex gap-2.5 w-full sm:w-auto">
-          {financeTab === 'collections' && <>
-            <button onClick={handleExport} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Download size={17} /> Export</button>
-            <button onClick={() => setShowModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Record Payment</button>
-          </>}
-          {financeTab === 'expenses' && <button onClick={() => setShowExpenseModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Expense</button>}
-          {financeTab === 'payroll' && <>
-            {isOwner && <button onClick={() => setShowAutoPaySetup(true)} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Settings size={17} /> Auto-Pay</button>}
-            <button onClick={() => setShowPayrollModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Payroll</button>
-          </>}
-          {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
+          <div className="grid grid-cols-2 sm:flex gap-2.5 w-full sm:w-auto">
+            {financeTab === 'collections' && <>
+              <button onClick={handleExport} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Download size={17} /> Export</button>
+              <button onClick={() => setShowModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Record Payment</button>
+            </>}
+            {financeTab === 'expenses' && <button onClick={() => setShowExpenseModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Expense</button>}
+            {financeTab === 'payroll' && <>
+              {isOwner && <button onClick={() => setShowAutoPaySetup(true)} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Settings size={17} /> Auto-Pay</button>}
+              <button onClick={() => setShowPayrollModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Payroll</button>
+            </>}
+            {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
+          </div>
         </div>
       </div>
-
-      <OperationsBranchScopeBar
-        branchDirectory={branchDirectory}
-        branchId={operationsBranchId}
-        onChange={appRuntime.setOperationsBranchId}
-        currentUser={currentUser}
-        loading={appRuntime.branchScopeLoading}
-        title="Finance scope"
-        description="Switch the branch lens for collections, expenses, payroll, and POS flows."
-      />
 
       {/* ═══════ COLLECTIONS TAB ═══════ */}
       {financeTab === 'collections' && (<>
