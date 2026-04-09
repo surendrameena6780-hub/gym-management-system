@@ -99,12 +99,12 @@ router.post('/platform/whatsapp-delivery/webhook', async (req, res) => {
         const expectedToken = normalizeWebhookToken();
         const suppliedToken = String(req.query.token || req.headers['x-gymvault-token'] || '').trim();
 
-        if (!expectedToken) {
-            return res.status(isProduction ? 503 : 400).json({ error: 'WhatsApp delivery webhook token is not configured.' });
+        if (expectedToken && suppliedToken !== expectedToken) {
+            return res.status(401).json({ error: 'Invalid webhook token.' });
         }
 
-        if (suppliedToken !== expectedToken) {
-            return res.status(401).json({ error: 'Invalid webhook token.' });
+        if (!expectedToken && !isProduction) {
+            console.warn('WHATSAPP DELIVERY WEBHOOK WARNING: processing webhook without MSG91_WHATSAPP_WEBHOOK_TOKEN configured.');
         }
 
         const result = await applyWhatsAppDeliveryWebhook(req.body || {});

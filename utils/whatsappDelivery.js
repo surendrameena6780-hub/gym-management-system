@@ -51,6 +51,8 @@ const normalizeDeliveryStatus = (value) => {
 const normalizeWebhookDirection = (value) => {
     const raw = toTrimmedString(value).toLowerCase();
     if (!raw) return '';
+    if (raw === '1') return 'outbound';
+    if (raw === '2') return 'inbound';
     if (raw.includes('inbound')) return 'inbound';
     if (raw.includes('outbound')) return 'outbound';
     return raw;
@@ -227,10 +229,10 @@ const buildWebhookRecords = (payload) => {
     return getWebhookCandidates(payload)
         .filter((item) => !isInboundWebhookCandidate(item))
         .map((item) => {
-            const providerStatus = toTrimmedString(item.status || item.delivery_status || item.event_type || item.eventType);
+            const providerStatus = toTrimmedString(item.status || item.delivery_status || item.eventName || item.event_name || item.event_type || item.eventType);
             return {
                 requestId: toTrimmedString(item.request_id || item.requestId || item.requestid),
-                messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid),
+                messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid || item.uuid),
                 correlationId: toTrimmedString(item.CRQID || item.crqid || item.correlation_id || item.correlationId),
                 providerStatus,
                 normalizedStatus: normalizeDeliveryStatus(providerStatus),
@@ -259,7 +261,7 @@ const buildInboundWebhookRecords = (payload) => {
 
             return {
                 requestId: toTrimmedString(item.request_id || item.requestId || item.requestid),
-                messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid),
+                messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid || item.uuid),
                 correlationId: toTrimmedString(item.CRQID || item.crqid || item.correlation_id || item.correlationId),
                 integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number || item.to || pickFirstPrimitiveByKeys(item, ['integrated_number', 'integratedNumber', 'number', 'to', 'destination', 'owner_number', 'business_number'])),
                 senderNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.from || item.sender || item.phone || pickFirstPrimitiveByKeys(item, ['customer_number', 'customerNumber', 'from', 'sender', 'phone', 'wa_id'])),
