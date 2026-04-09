@@ -48,6 +48,14 @@ const normalizeDeliveryStatus = (value) => {
     return raw;
 };
 
+const normalizeWebhookDirection = (value) => {
+    const raw = toTrimmedString(value).toLowerCase();
+    if (!raw) return '';
+    if (raw.includes('inbound')) return 'inbound';
+    if (raw.includes('outbound')) return 'outbound';
+    return raw;
+};
+
 const normalizeWebhookToken = () => toTrimmedString(process.env.MSG91_WHATSAPP_WEBHOOK_TOKEN);
 
 const createCorrelationId = () => `gvwa_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
@@ -145,8 +153,79 @@ const getWebhookCandidates = (payload) => (
 )
     .filter((item) => item && typeof item === 'object');
 
+const extractInboundMessageText = (item) => truncateText(
+    toPrimitiveString(item?.text)
+    || toPrimitiveString(item?.body)
+    || toPrimitiveString(item?.message_text)
+    || toPrimitiveString(item?.messageText)
+    || toPrimitiveString(item?.content)
+    || toPrimitiveString(item?.reply)
+    || toPrimitiveString(item?.replyText)
+    || toTrimmedString(pickFirstPrimitiveByKeys(item, ['text', 'body', 'message_text', 'messageText', 'content', 'reply', 'replyText', 'message'])),
+    1000
+);
+
+const extractInboundSenderName = (item) => truncateText(
+    toPrimitiveString(item?.sender_name)
+    || toPrimitiveString(item?.senderName)
+    || toPrimitiveString(item?.customer_name)
+    || toPrimitiveString(item?.customerName)
+    || toPrimitiveString(item?.profile_name)
+    || toPrimitiveString(item?.profileName)
+    || toTrimmedString(pickFirstPrimitiveByKeys(item, ['sender_name', 'senderName', 'customer_name', 'customerName', 'profile_name', 'profileName', 'name'])),
+    120
+);
+
+const isInboundWebhookCandidate = (item) => {
+    const direction = normalizeWebhookDirection(item?.direction || item?.message_direction || item?.messageDirection || item?.event_type || item?.eventType);
+    if (direction === 'inbound') return true;
+    if (direction === 'outbound') return false;
+
+    const senderNumber = normalizeE164Phone(
+        item?.customer_number
+        || item?.customerNumber
+        || item?.from
+        || item?.sender
+        || item?.phone
+        || pickFirstPrimitiveByKeys(item, ['customer_number', 'customerNumber', 'from', 'sender', 'phone', 'wa_id'])
+    );
+    const integratedNumber = normalizeE164Phone(
+        item?.integrated_number
+        || item?.integratedNumber
+        || item?.number
+        || item?.to
+        || pickFirstPrimitiveByKeys(item, ['integrated_number', 'integratedNumber', 'number', 'to', 'destination', 'owner_number', 'business_number'])
+    );
+    const messageText = extractInboundMessageText(item);
+    const hasExplicitReplyPayload = Boolean(
+        toPrimitiveString(item?.reply)
+        || toPrimitiveString(item?.replyText)
+        || toPrimitiveString(item?.from)
+        || toPrimitiveString(item?.sender)
+        || toPrimitiveString(item?.sender_name)
+        || toPrimitiveString(item?.profile_name)
+    );
+    const hasDeliveryLifecycle = Boolean(
+        toTrimmedString(item?.status || item?.delivery_status || item?.event_type || item?.eventType)
+        || item?.submitted_at
+        || item?.submittedAt
+        || item?.sent_at
+        || item?.sentAt
+        || item?.delivered_at
+        || item?.deliveredAt
+        || item?.read_at
+        || item?.readAt
+        || item?.failed_at
+        || item?.failedAt
+        || toTrimmedString(item?.template_name || item?.templateName)
+    );
+
+    return Boolean(senderNumber && messageText && (hasExplicitReplyPayload || !hasDeliveryLifecycle || !integratedNumber));
+};
+
 const buildWebhookRecords = (payload) => {
     return getWebhookCandidates(payload)
+        .filter((item) => !isInboundWebhookCandidate(item))
         .map((item) => {
             const providerStatus = toTrimmedString(item.status || item.delivery_status || item.event_type || item.eventType);
             return {
@@ -155,11 +234,11 @@ const buildWebhookRecords = (payload) => {
                 correlationId: toTrimmedString(item.CRQID || item.crqid || item.correlation_id || item.correlationId),
                 providerStatus,
                 normalizedStatus: normalizeDeliveryStatus(providerStatus),
-                integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number),
-                recipientNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.to || item.recipient || item.phone),
+                integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number || pickFirstPrimitiveByKeys(item, ['integrated_number', 'integratedNumber', 'number'])),
+                recipientNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.to || item.recipient || item.phone || pickFirstPrimitiveByKeys(item, ['customer_number', 'customerNumber', 'to', 'recipient', 'phone'])),
                 templateName: toTrimmedString(item.template_name || item.templateName),
                 templateLanguage: toTrimmedString(item.template_language || item.templateLanguage),
-                direction: toTrimmedString(item.direction || item.message_direction || item.messageDirection).toLowerCase(),
+                direction: normalizeWebhookDirection(item.direction || item.message_direction || item.messageDirection),
                 statusDetail: buildStatusDetail(item),
                 submittedAt: parseProviderTimestamp(item.submitted_at || item.submittedAt),
                 sentAt: parseProviderTimestamp(item.sent_at || item.sentAt),
@@ -169,42 +248,24 @@ const buildWebhookRecords = (payload) => {
                 payload: item,
             };
         })
-        .filter((item) => item.direction !== 'inbound')
         .filter((item) => item.requestId || item.messageUuid || item.correlationId || item.recipientNumber || item.providerStatus);
 };
 
 const buildInboundWebhookRecords = (payload) => {
     return getWebhookCandidates(payload)
+        .filter((item) => isInboundWebhookCandidate(item))
         .map((item) => {
-            const messageText = truncateText(
-                toPrimitiveString(item.text)
-                || toPrimitiveString(item.body)
-                || toPrimitiveString(item.message_text)
-                || toPrimitiveString(item.messageText)
-                || toPrimitiveString(item.content)
-                || toTrimmedString(pickFirstPrimitiveByKeys(item, ['text', 'body', 'message_text', 'messageText', 'content', 'reply', 'replyText', 'message']))
-                || 'Customer replied on WhatsApp.',
-                1000
-            );
+            const messageText = extractInboundMessageText(item) || 'Customer replied on WhatsApp.';
 
             return {
                 requestId: toTrimmedString(item.request_id || item.requestId || item.requestid),
                 messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid),
                 correlationId: toTrimmedString(item.CRQID || item.crqid || item.correlation_id || item.correlationId),
-                integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number || item.to),
-                senderNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.from || item.sender || item.phone),
-                senderName: truncateText(
-                    toPrimitiveString(item.sender_name)
-                    || toPrimitiveString(item.senderName)
-                    || toPrimitiveString(item.customer_name)
-                    || toPrimitiveString(item.customerName)
-                    || toPrimitiveString(item.profile_name)
-                    || toPrimitiveString(item.profileName)
-                    || toTrimmedString(pickFirstPrimitiveByKeys(item, ['sender_name', 'senderName', 'customer_name', 'customerName', 'profile_name', 'profileName', 'name'])),
-                    120
-                ),
+                integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number || item.to || pickFirstPrimitiveByKeys(item, ['integrated_number', 'integratedNumber', 'number', 'to', 'destination', 'owner_number', 'business_number'])),
+                senderNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.from || item.sender || item.phone || pickFirstPrimitiveByKeys(item, ['customer_number', 'customerNumber', 'from', 'sender', 'phone', 'wa_id'])),
+                senderName: extractInboundSenderName(item),
                 messageText,
-                direction: toTrimmedString(item.direction || item.message_direction || item.messageDirection).toLowerCase(),
+                direction: normalizeWebhookDirection(item.direction || item.message_direction || item.messageDirection),
                 receivedAt: parseProviderTimestamp(
                     item.received_at
                     || item.receivedAt
@@ -218,7 +279,6 @@ const buildInboundWebhookRecords = (payload) => {
                 payload: item,
             };
         })
-        .filter((item) => item.direction === 'inbound')
         .filter((item) => item.integratedNumber || item.senderNumber || item.messageText);
 };
 
@@ -621,9 +681,52 @@ const appendLeadNotes = (currentValue, nextValue) => {
 const findRecentOutboundContextForInbound = async (record) => {
     const integratedLocal = normalizeLocalIndianPhone(record?.integratedNumber);
     const senderLocal = normalizeLocalIndianPhone(record?.senderNumber);
-    if (!integratedLocal || !senderLocal) return null;
+    if (!senderLocal) return null;
 
-    const result = await pool.query(
+    const mapOutboundContextRow = (row) => {
+        if (!row) return null;
+
+        return {
+            gymId: Number(row.gym_id || 0) || null,
+            memberId: Number(row.member_id || 0) || null,
+            broadcastLogId: Number(row.broadcast_log_id || 0) || null,
+            sourceKind: toTrimmedString(row.source_kind).toUpperCase(),
+            sourceLabel: toTrimmedString(row.source_label),
+            templateKey: toTrimmedString(row.template_key).toUpperCase(),
+            templateTitle: toTrimmedString(row.template_title),
+            fullName: truncateText(row.full_name, 120),
+            email: toTrimmedString(row.email),
+        };
+    };
+
+    if (integratedLocal) {
+        const result = await pool.query(
+            `SELECT
+                l.gym_id,
+                l.member_id,
+                l.broadcast_log_id,
+                l.source_kind,
+                l.source_label,
+                l.template_key,
+                l.template_title,
+                COALESCE(m.full_name, l.recipient_name, '') AS full_name,
+                COALESCE(m.email, '') AS email
+             FROM whatsapp_delivery_logs l
+             LEFT JOIN members m ON m.id = l.member_id
+             WHERE RIGHT(REGEXP_REPLACE(COALESCE(l.integrated_number, ''), '\\D', '', 'g'), 10) = $1
+               AND RIGHT(REGEXP_REPLACE(COALESCE(l.recipient_number, ''), '\\D', '', 'g'), 10) = $2
+             ORDER BY l.created_at DESC
+             LIMIT 1`,
+            [integratedLocal, senderLocal]
+        );
+
+        const strictMatch = mapOutboundContextRow(result.rows[0] || null);
+        if (strictMatch) {
+            return strictMatch;
+        }
+    }
+
+    const fallbackResult = await pool.query(
         `SELECT
             l.gym_id,
             l.member_id,
@@ -636,27 +739,14 @@ const findRecentOutboundContextForInbound = async (record) => {
             COALESCE(m.email, '') AS email
          FROM whatsapp_delivery_logs l
          LEFT JOIN members m ON m.id = l.member_id
-         WHERE RIGHT(REGEXP_REPLACE(COALESCE(l.integrated_number, ''), '\\D', '', 'g'), 10) = $1
-           AND RIGHT(REGEXP_REPLACE(COALESCE(l.recipient_number, ''), '\\D', '', 'g'), 10) = $2
+                 WHERE RIGHT(REGEXP_REPLACE(COALESCE(l.recipient_number, ''), '\D', '', 'g'), 10) = $1
+                     AND l.created_at >= NOW() - INTERVAL '14 days'
          ORDER BY l.created_at DESC
          LIMIT 1`,
-        [integratedLocal, senderLocal]
+                [senderLocal]
     );
 
-    const row = result.rows[0] || null;
-    if (!row) return null;
-
-    return {
-        gymId: Number(row.gym_id || 0) || null,
-        memberId: Number(row.member_id || 0) || null,
-        broadcastLogId: Number(row.broadcast_log_id || 0) || null,
-        sourceKind: toTrimmedString(row.source_kind).toUpperCase(),
-        sourceLabel: toTrimmedString(row.source_label),
-        templateKey: toTrimmedString(row.template_key).toUpperCase(),
-        templateTitle: toTrimmedString(row.template_title),
-        fullName: truncateText(row.full_name, 120),
-        email: toTrimmedString(row.email),
-    };
+        return mapOutboundContextRow(fallbackResult.rows[0] || null);
 };
 
 const findGymByIntegratedNumber = async (integratedNumber) => {

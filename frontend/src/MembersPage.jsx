@@ -2371,16 +2371,16 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       </div>
 
       {showReminderModal && reminderTargetMember && (
-        <div className="app-modal-shell z-[75] bg-slate-900/70 backdrop-blur-md">
-          <div className="app-modal-panel w-full max-w-lg overflow-hidden rounded-[30px] border border-white/10 shadow-2xl animate-in zoom-in-95" style={{ background: 'linear-gradient(180deg, #182234 0%, #111827 100%)' }}>
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
+        <div className="app-modal-shell z-[130] bg-slate-900/74 backdrop-blur-md">
+          <div className="app-modal-panel overflow-hidden rounded-[28px] border border-white/10 shadow-2xl animate-in zoom-in-95" style={{ width: 'min(100%, 27.5rem)', background: 'linear-gradient(180deg, #182234 0%, #111827 100%)' }}>
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-300">
-                  <MessageSquare size={20} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-300">
+                  <MessageSquare size={18} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-white">Send Reminder</h2>
-                  <p className="mt-1 text-sm font-semibold text-slate-400">Pick any approved WhatsApp template for this member.</p>
+                  <h2 className="text-lg font-black text-white">Send Reminder</h2>
+                  <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">Pick any approved WhatsApp template for this member.</p>
                 </div>
               </div>
               <button
@@ -2394,12 +2394,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               </button>
             </div>
 
-            <div className="app-modal-scroll space-y-5 px-6 py-5">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="app-modal-scroll space-y-4 px-5 py-4">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5">
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Recipient</p>
-                <p className="mt-2 text-lg font-black text-white">{reminderTargetMember.full_name}</p>
+                <p className="mt-2 text-base font-black text-white">{reminderTargetMember.full_name}</p>
                 <p className="mt-1 text-sm font-semibold text-slate-400">{reminderTargetMember.phone || 'No phone saved'}</p>
-                <div className="mt-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                <div className="mt-3 inline-flex rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
                   {getStatusInfo(reminderTargetMember).label}
                 </div>
               </div>
@@ -2421,12 +2421,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                     </option>
                   ))}
                 </select>
-                <p className="mt-2 text-xs font-semibold text-slate-400">
+                <p className="mt-2 text-[11px] font-semibold leading-5 text-slate-400">
                   Renewal Reminder is preselected only for expired and expiring-soon members. Active members default to a sales or re-engagement message instead.
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+              <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Preview</p>
                   {selectedReminderTemplate?.title ? (
@@ -2437,7 +2437,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 </div>
 
                 {reminderTemplatesLoading || reminderPreviewLoading ? (
-                  <div className="flex items-center gap-3 py-10 text-slate-300">
+                  <div className="flex items-center gap-3 py-6 text-slate-300">
                     <RefreshCw size={16} className="animate-spin" />
                     <span className="text-sm font-semibold">Preparing reminder preview...</span>
                   </div>
@@ -2446,21 +2446,21 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                     {reminderPreviewError}
                   </div>
                 ) : reminderPreviewItem ? (
-                  <div className="mt-4 space-y-3">
-                    <p className="text-sm font-semibold text-slate-400">
+                  <div className="mt-4 space-y-2.5">
+                    <p className="text-sm font-semibold leading-5 text-slate-400">
                       Template: <span className="font-black text-white">{reminderPreviewItem.template_title || selectedReminderTemplate?.title || 'Selected template'}</span>
                     </p>
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <p className="whitespace-pre-line text-sm font-semibold leading-7 text-slate-100">{reminderPreviewItem.message}</p>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5">
+                      <p className="whitespace-pre-line text-sm font-semibold leading-6 text-slate-100">{reminderPreviewItem.message}</p>
                     </div>
                   </div>
                 ) : (
-                  <div className="py-10 text-sm font-semibold text-slate-400">Select a template to preview the message.</div>
+                  <div className="py-6 text-sm font-semibold text-slate-400">Select a template to preview the message.</div>
                 )}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 border-t border-white/10 px-6 py-5">
+            <div className="grid grid-cols-2 gap-3 border-t border-white/10 px-5 py-4">
               <button
                 type="button"
                 onClick={closeReminderModal}
