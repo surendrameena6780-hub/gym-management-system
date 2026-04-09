@@ -38,26 +38,47 @@ const normalizeSettingsTab = (value) => {
 
 const SAAS_PLANS = {
   monthly: [
-    { id: 'test',  name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic', name: 'Basic',      price: 999,  billed: 999,   features: ['Up to 100 Members', 'Basic Analytics', '1 Staff Account', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'pro',   name: 'Pro Vault',  price: 1999, billed: 1999,  features: ['Unlimited Members', 'AI Financial Insights', 'Auto WhatsApp Alerts', '3 Staff Accounts'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'elite', name: 'Elite',      price: 3999, billed: 3999,  features: ['Multi-Branch Support', 'Custom Branded App', 'Dedicated Manager', 'Unlimited Staff'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
+    { id: 'basic',  name: 'Basic',      price: 1499, billed: 1499,  features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'growth', name: 'Growth',     price: 2799, billed: 2799,  features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3699, billed: 3699,  features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
   annual: [
-    { id: 'test',  name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic', name: 'Basic',      price: 839,  billed: 10068, features: ['Up to 100 Members', 'Basic Analytics', '1 Staff Account', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'pro',   name: 'Pro Vault',  price: 1666, billed: 19992, features: ['Unlimited Members', 'AI Financial Insights', 'Auto WhatsApp Alerts', '3 Staff Accounts'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'elite', name: 'Elite',      price: 3333, billed: 39996, features: ['Multi-Branch Support', 'Custom Branded App', 'Dedicated Manager', 'Unlimited Staff'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
+    { id: 'basic',  name: 'Basic',      price: 1259, billed: 15108, features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'growth', name: 'Growth',     price: 2351, billed: 28212, features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3107, billed: 37284, features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
 };
 
-// Per-plan limits used in ProgressBars and feature descriptions
+// Per-plan base limits
 const PLAN_LIMITS = {
-  test:  { members: 'Unlimited', staff: 'Unlimited', storage: 2  },
-  basic: { members: 100,         staff: 1,           storage: 5  },
-  pro:   { members: 'Unlimited', staff: 3,           storage: 10 },
-  elite: { members: 'Unlimited', staff: 'Unlimited', storage: 20 },
+  test:   { members: 'Unlimited', staff: 'Unlimited', storage: 2,  branches: 'Unlimited', whatsapp: 'Unlimited', hello: 'Unlimited' },
+  basic:  { members: 150,         staff: 2,           storage: 5,  branches: 1,           whatsapp: 500,          hello: 0 },
+  growth: { members: 400,         staff: 5,           storage: 10, branches: 2,           whatsapp: 1000,         hello: 1 },
+  pro:    { members: 1000,        staff: 10,          storage: 20, branches: 3,           whatsapp: 2000,         hello: 1 },
 };
+
+// Compute effective limits by adding addon purchases on top of base plan limits
+const getEffectiveLimits = (planId, gymData) => {
+  const base = PLAN_LIMITS[planId] || PLAN_LIMITS.basic;
+  return {
+    members:  base.members  === 'Unlimited' ? 'Unlimited' : base.members  + (Number(gymData?.addon_extra_members)  || 0),
+    staff:    base.staff    === 'Unlimited' ? 'Unlimited' : base.staff    + (Number(gymData?.addon_extra_staff)    || 0),
+    storage:  base.storage,
+    branches: base.branches === 'Unlimited' ? 'Unlimited' : base.branches + (Number(gymData?.addon_extra_branches) || 0),
+    whatsapp: base.whatsapp === 'Unlimited' ? 'Unlimited' : base.whatsapp + (Number(gymData?.addon_extra_whatsapp) || 0),
+    hello:    base.hello    === 'Unlimited' ? 'Unlimited' : base.hello    + (Number(gymData?.addon_extra_hello)    || 0),
+  };
+};
+
+const ADDON_PACKS = [
+  { key: 'extra_whatsapp_250', label: 'Extra 250 WhatsApp Messages', price: 249, icon: MessageSquare, desc: 'Adds 250 more outbound WhatsApp messages to your monthly quota.' },
+  { key: 'extra_staff_1',      label: 'Extra Staff User',            price: 149, icon: Users,         desc: 'Add 1 more staff login to your current plan.' },
+  { key: 'extra_members_100',  label: 'Extra 100 Active Members',    price: 299, icon: User,          desc: 'Raises your active member cap by 100.' },
+  { key: 'extra_branch_1',     label: 'Extra Branch',                price: 599, icon: Building2,     desc: 'Add 1 more branch to your gym setup.' },
+  { key: 'extra_hello_1',      label: 'Extra Hello Number',          price: 699, icon: Phone,         desc: 'Enable inbound Hello on 1 additional WhatsApp number.', requiresPlan: ['growth', 'pro'] },
+];
 
 const STAFF_ROLE_OPTIONS = [
   'MANAGER',
@@ -354,6 +375,7 @@ const loadRazorpayScript = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [processingAddonKey, setProcessingAddonKey] = useState(null);
   const invoiceStorageKey = `gv_invoice_${token?.slice(-12) || 'default'}`;
   const [localInvoice, setLocalInvoiceState] = useState(() => {
     try { const s = localStorage.getItem(invoiceStorageKey); return s ? JSON.parse(s) : null; } catch { return null; }
@@ -1389,6 +1411,74 @@ const loadRazorpayScript = () => {
       }
   };
 
+  const handleAddonPurchase = async (addonPack) => {
+      if (addonPack.requiresPlan && !addonPack.requiresPlan.includes(gymData.current_plan)) {
+          toast(`This add-on requires the ${addonPack.requiresPlan.join(' or ')} plan.`, 'error');
+          return;
+      }
+      setProcessingAddonKey(addonPack.key);
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+          toast('Razorpay script failed to load.', 'error');
+          setProcessingAddonKey(null);
+          return;
+      }
+      try {
+          const orderRes = await axios.post('/api/billing/create-addon-order', { addon_key: addonPack.key }, headers);
+          const order = orderRes.data;
+          const checkoutImageUrl = getRazorpayCheckoutImageUrl();
+          const options = {
+              key: razorpayKey,
+              amount: order.amount,
+              currency: order.currency,
+              name: `GymVault Add-on`,
+              description: addonPack.label,
+              image: checkoutImageUrl,
+              order_id: order.id,
+              handler: async function (response) {
+                  try {
+                      await axios.post('/api/billing/verify-addon', {
+                          razorpay_order_id: response.razorpay_order_id,
+                          razorpay_payment_id: response.razorpay_payment_id,
+                          razorpay_signature: response.razorpay_signature,
+                          addon_key: addonPack.key,
+                      }, headers);
+                      toast(`${addonPack.label} added successfully!`, 'success');
+                      setTimeout(() => { fetchSettings(); }, 1500);
+                  } catch (err) {
+                      reportClientError('Addon verify', err);
+                      toast('Add-on payment received. Syncing...', 'warning');
+                      setTimeout(() => { fetchSettings(); }, 2000);
+                  } finally {
+                      setProcessingAddonKey(null);
+                  }
+              },
+              prefill: {
+                  name: accountData.full_name,
+                  email: accountData.email,
+                  contact: accountData.phone || gymData.phone,
+              },
+              theme: { color: '#4f46e5' },
+              modal: { ondismiss: () => setProcessingAddonKey(null) },
+          };
+          if (!options.key) {
+              toast('Payment gateway not configured.', 'error');
+              setProcessingAddonKey(null);
+              return;
+          }
+          const paymentObject = new window.Razorpay(options);
+          paymentObject.on('payment.failed', function (response) {
+              toast(response?.error?.description || 'Add-on payment failed.', 'error');
+              setProcessingAddonKey(null);
+          });
+          paymentObject.open();
+      } catch (_err) {
+          reportClientError('Addon create-order', _err);
+          toast('Failed to initiate add-on payment.', 'error');
+          setProcessingAddonKey(null);
+      }
+  };
+
   const handleSubscribe = async (selectedPlan) => {
       setIsProcessingPayment(true);
       const scriptLoaded = await loadRazorpayScript();
@@ -2124,37 +2214,108 @@ const loadRazorpayScript = () => {
               </div>
 
               {/* Usage & Limits Dashboard */}
+              {(() => {
+                const eLimits = getEffectiveLimits(gymData.current_plan, gymData);
+                return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
-                          <h3 className="font-black text-slate-900 text-lg leading-tight">Live Database Usage</h3>
-                          <p className="text-xs font-bold text-slate-500">Tracked against your current plan limits.</p>
+                          <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
+                          <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp ? ' + add-ons' : ''}.</p>
                       </div>
                   </div>
                   
                   <div className="grid grid-cols-1 desktop:grid-cols-2 gap-x-12 gap-y-8 mt-6">
                       <ProgressBar 
-                          label="Total Registered Members" 
+                          label="Active Members" 
                           current={usageData.members} 
-                          max={PLAN_LIMITS[gymData.current_plan]?.members ?? 'Unlimited'} 
+                          max={eLimits.members} 
                           icon={Users} 
                       />
                       <ProgressBar 
-                          label="Cloud Storage (Images & Backups)" 
+                          label="Staff Accounts" 
+                          current={usageData.staff} 
+                          max={eLimits.staff} 
+                          icon={User} 
+                      />
+                      <ProgressBar 
+                          label="WhatsApp Messages / Month" 
+                          current={0} 
+                          max={eLimits.whatsapp} 
+                          icon={MessageSquare} 
+                      />
+                      <ProgressBar 
+                          label="Branches" 
+                          current={1} 
+                          max={eLimits.branches} 
+                          icon={Building2} 
+                      />
+                      <ProgressBar 
+                          label="Cloud Storage" 
                           current={usageData.storage} 
-                          max={PLAN_LIMITS[gymData.current_plan]?.storage ?? 10} 
+                          max={eLimits.storage} 
                           unit="GB" 
                           icon={HardDrive} 
                       />
                       <ProgressBar 
-                          label="Active Staff Accounts" 
-                          current={usageData.staff} 
-                          max={PLAN_LIMITS[gymData.current_plan]?.staff ?? 'Unlimited'} 
-                          icon={User} 
+                          label="Hello Inbound Numbers" 
+                          current={0} 
+                          max={eLimits.hello} 
+                          icon={Phone} 
                       />
                   </div>
               </div>
+                );
+              })()}
+
+              {/* Add-on Packs */}
+              {gymData.current_plan && gymData.current_plan !== 'test' && (
+              <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
+                  <div className="flex items-center gap-3 mb-2">
+                      <div className="p-2.5 bg-violet-50 text-violet-600 rounded-xl"><Plus size={20} /></div>
+                      <div>
+                          <h3 className="font-black text-slate-900 text-lg leading-tight">Add-on Packs</h3>
+                          <p className="text-xs font-bold text-slate-500">Need more capacity? Purchase add-ons instantly.</p>
+                      </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+                      {ADDON_PACKS.map((addon) => {
+                          const AddonIcon = addon.icon;
+                          const isRestricted = addon.requiresPlan && !addon.requiresPlan.includes(gymData.current_plan);
+                          const isProcessing = processingAddonKey === addon.key;
+                          return (
+                              <div key={addon.key} className={`p-5 rounded-2xl border transition-all ${isRestricted ? 'border-slate-100 bg-slate-50 opacity-60' : 'border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md'}`}>
+                                  <div className="flex items-center gap-3 mb-3">
+                                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isRestricted ? 'bg-slate-100 text-slate-400' : 'bg-indigo-50 text-indigo-500'}`}>
+                                          <AddonIcon size={18} />
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                          <h4 className="text-sm font-black text-slate-800 truncate">{addon.label}</h4>
+                                          <p className="text-xs font-bold text-slate-400">one-time</p>
+                                      </div>
+                                  </div>
+                                  <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed">{addon.desc}</p>
+                                  <div className="flex items-center justify-between">
+                                      <span className="text-lg font-black text-slate-900">₹{addon.price}</span>
+                                      {isRestricted ? (
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Requires {addon.requiresPlan.join('/')}</span>
+                                      ) : (
+                                          <button
+                                              onClick={() => handleAddonPurchase(addon)}
+                                              disabled={isProcessing || isProcessingPayment}
+                                              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-60 flex items-center gap-1.5"
+                                          >
+                                              {isProcessing ? <><RefreshCw size={12} className="animate-spin" /> Buying…</> : <><Plus size={12} /> Buy</>}
+                                          </button>
+                                      )}
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+              </div>
+              )}
 
               {/* Dynamic Invoice & Security Layout */}
               <div className="grid grid-cols-1 desktop:grid-cols-2 gap-6 mt-6">

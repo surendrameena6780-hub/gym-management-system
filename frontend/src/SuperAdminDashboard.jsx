@@ -728,7 +728,7 @@ function SuperAdminDashboard({ token, onLogout }) {
           <option value="">All Status</option><option value="ACTIVE">Active</option><option value="BLOCKED">Blocked</option><option value="SUSPENDED">Suspended</option>
         </select>
         <select className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" value={gymFilters.plan} onChange={(e) => setGymFilters((p) => ({ ...p, plan: e.target.value }))}>
-          <option value="">All Plans</option><option value="basic">Basic</option><option value="pro">Pro</option><option value="elite">Elite</option>
+          <option value="">All Plans</option><option value="basic">Basic</option><option value="growth">Growth</option><option value="pro">Pro</option>
         </select>
         <input type="date" className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" value={gymFilters.dateFrom} onChange={(e) => setGymFilters((p) => ({ ...p, dateFrom: e.target.value }))} />
         <input type="date" className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" value={gymFilters.dateTo} onChange={(e) => setGymFilters((p) => ({ ...p, dateTo: e.target.value }))} />
@@ -1609,8 +1609,8 @@ function SuperAdminDashboard({ token, onLogout }) {
                 <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" placeholder="Support Email" value={gymEditModal.support_email} onChange={(e) => setGymEditModal((prev) => ({ ...prev, support_email: e.target.value }))} />
                 <select className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" value={gymEditModal.plan} onChange={(e) => setGymEditModal((prev) => ({ ...prev, plan: e.target.value }))}>
                   <option value="basic">Basic</option>
+                  <option value="growth">Growth</option>
                   <option value="pro">Pro</option>
-                  <option value="elite">Elite</option>
                 </select>
                 <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm md:col-span-2" placeholder="Website" value={gymEditModal.website} onChange={(e) => setGymEditModal((prev) => ({ ...prev, website: e.target.value }))} />
               </div>

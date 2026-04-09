@@ -696,6 +696,13 @@ ALTER TABLE gyms ADD COLUMN IF NOT EXISTS saas_valid_until TIMESTAMP DEFAULT (CU
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS razorpay_customer_id VARCHAR(100);
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS saas_billing_cycle VARCHAR(20) DEFAULT 'monthly';
 
+-- SAAS ADD-ONS: Extra capacity purchased by gym owners
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS addon_extra_whatsapp  INTEGER DEFAULT 0;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS addon_extra_staff     INTEGER DEFAULT 0;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS addon_extra_members   INTEGER DEFAULT 0;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS addon_extra_branches  INTEGER DEFAULT 0;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS addon_extra_hello     INTEGER DEFAULT 0;
+
 -- =============================================================
 -- OAUTH & MEMBER PORTAL: Google, Apple, and OTP-based member login
 -- =============================================================

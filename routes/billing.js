@@ -63,8 +63,17 @@ const logBillingRazorpayError = (req, stage, error, metadata = {}) => {
 };
 
 const SAAS_PRICING = {
-    monthly: { test: 1, basic: 999, pro: 1999, elite: 3999 },
-    annual:  { test: 1, basic: 10068, pro: 19992, elite: 39996 },
+    monthly: { test: 1, basic: 1499, growth: 2799, pro: 3699 },
+    annual:  { test: 1, basic: 15108, growth: 28212, pro: 37284 },
+};
+
+// Add-on packs (monthly, one-time purchase per billing period)
+const ADDON_PRICING = {
+    extra_whatsapp_250:  { price: 249, label: 'Extra 250 WhatsApp Messages', column: 'addon_extra_whatsapp',  increment: 250 },
+    extra_staff_1:       { price: 149, label: 'Extra Staff User',            column: 'addon_extra_staff',     increment: 1   },
+    extra_members_100:   { price: 299, label: 'Extra 100 Active Members',    column: 'addon_extra_members',   increment: 100 },
+    extra_branch_1:      { price: 599, label: 'Extra Branch',                column: 'addon_extra_branches',  increment: 1   },
+    extra_hello_1:       { price: 699, label: 'Extra Hello-enabled Number',  column: 'addon_extra_hello',     increment: 1   },
 };
 
 const normalizeCycle = (value) => String(value || 'monthly').trim().toLowerCase();
@@ -207,6 +216,107 @@ router.post('/reset-test', async (req, res) => {
     } catch (err) {
         console.error('Reset test error:', err);
         res.status(500).json({ error: 'Failed to reset test timer.' });
+    }
+});
+
+// --- 4. GET CURRENT ADD-ON COUNTS ---
+router.get('/addons', async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT
+                COALESCE(addon_extra_whatsapp, 0)  AS addon_extra_whatsapp,
+                COALESCE(addon_extra_staff, 0)     AS addon_extra_staff,
+                COALESCE(addon_extra_members, 0)   AS addon_extra_members,
+                COALESCE(addon_extra_branches, 0)  AS addon_extra_branches,
+                COALESCE(addon_extra_hello, 0)     AS addon_extra_hello
+             FROM gyms WHERE id = $1`,
+            [req.user.gym_id]
+        );
+        res.json({ addons: rows[0] || {}, pricing: ADDON_PRICING });
+    } catch (err) {
+        console.error('Addon fetch error:', err);
+        res.status(500).json({ error: 'Failed to fetch add-ons.' });
+    }
+});
+
+// --- 5. CREATE ADD-ON ORDER ---
+router.post('/create-addon-order', async (req, res) => {
+    try {
+        const addonKey = String(req.body.addon_key || '').trim();
+        const addon = ADDON_PRICING[addonKey];
+        if (!addon) {
+            return res.status(400).json({ error: 'Invalid add-on type.' });
+        }
+
+        const options = {
+            amount: addon.price * 100,
+            currency: 'INR',
+            receipt: `addon_${req.user.gym_id}_${addonKey.slice(0, 12)}_${Date.now().toString().slice(-8)}`,
+            notes: {
+                gym_id: String(req.user.gym_id),
+                addon_key: addonKey,
+                type: 'addon',
+            },
+        };
+
+        const order = await getRazorpay().orders.create(options);
+        res.json(order);
+    } catch (error) {
+        logBillingRazorpayError(req, 'create_addon_order', error, { addon_key: req.body?.addon_key });
+        res.status(500).json({ error: 'Failed to initiate add-on payment.' });
+    }
+});
+
+// --- 6. VERIFY & APPLY ADD-ON ---
+router.post('/verify-addon', async (req, res) => {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, addon_key } = req.body;
+    const addonKey = String(addon_key || '').trim();
+    const addon = ADDON_PRICING[addonKey];
+    if (!addon) {
+        return res.status(400).json({ error: 'Invalid add-on type.' });
+    }
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({ error: 'Missing payment verification fields.' });
+    }
+
+    const sign = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSign = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(sign).digest('hex');
+
+    if (razorpay_signature !== expectedSign) {
+        return res.status(400).json({ error: 'Invalid signature!' });
+    }
+
+    let order;
+    try {
+        order = await getRazorpay().orders.fetch(razorpay_order_id);
+    } catch (err) {
+        logBillingRazorpayError(req, 'fetch_addon_order', err, { razorpay_order_id, addon_key: addonKey });
+        return res.status(502).json({ error: 'Failed to verify add-on order with Razorpay.' });
+    }
+
+    if (!order || Number(order.amount) !== addon.price * 100 || String(order.currency || '').toUpperCase() !== 'INR') {
+        return res.status(400).json({ error: 'Add-on order amount/currency mismatch.' });
+    }
+
+    try {
+        const col = addon.column;
+        const { rows } = await pool.query(
+            `UPDATE gyms
+             SET ${col} = COALESCE(${col}, 0) + $1
+             WHERE id = $2
+             RETURNING
+                COALESCE(addon_extra_whatsapp, 0)  AS addon_extra_whatsapp,
+                COALESCE(addon_extra_staff, 0)     AS addon_extra_staff,
+                COALESCE(addon_extra_members, 0)   AS addon_extra_members,
+                COALESCE(addon_extra_branches, 0)  AS addon_extra_branches,
+                COALESCE(addon_extra_hello, 0)     AS addon_extra_hello`,
+            [addon.increment, req.user.gym_id]
+        );
+        res.json({ message: `${addon.label} added successfully!`, addons: rows[0] });
+    } catch (err) {
+        console.error('Addon apply error:', err);
+        res.status(500).json({ error: 'Failed to apply add-on.' });
     }
 });
 
