@@ -218,6 +218,121 @@ const AttentionPanel = ({ controller }) => {
   );
 };
 
+const DesktopRevenuePulsePanel = ({ controller }) => {
+  const {
+    chartDays,
+    chartTotal,
+    dashboardData,
+    displayChartData,
+    navigateTo,
+    payStats,
+    todayCheckins,
+  } = controller;
+
+  const bestRevenueDay = displayChartData.reduce((best, point) => {
+    if (!best || Number(point?.rev || 0) > Number(best?.rev || 0)) {
+      return point;
+    }
+    return best;
+  }, null);
+
+  const averageDailyRevenue = displayChartData.length > 0
+    ? Math.round(chartTotal / displayChartData.length)
+    : 0;
+  const nextRecommendation = dashboardData.ai.recommendations[0] || null;
+
+  return (
+    <Card
+      className="hidden desktop:block p-5 overflow-hidden relative"
+      style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 420ms forwards' }}
+    >
+      <div className="absolute inset-0 pointer-events-none opacity-[0.7]">
+        <div className="absolute -top-16 -right-16 h-40 w-40 rounded-full bg-indigo-500/10 blur-3xl" />
+        <div className="absolute -bottom-20 left-8 h-44 w-44 rounded-full bg-cyan-500/10 blur-3xl" />
+      </div>
+
+      <div className="relative flex items-start justify-between gap-4">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-indigo-600">
+            <Activity size={12} /> Desk Pulse
+          </div>
+          <h3 className="mt-3 text-lg font-black tracking-tight text-slate-900">Operations Snapshot</h3>
+          <p className="mt-1 text-sm font-semibold text-slate-500">
+            Keep the chart focused, and use this panel for the daily operational read.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-right">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Range</p>
+          <p className="mt-1 text-base font-black text-slate-900">{chartDays} Days</p>
+          <p className="text-[11px] font-semibold text-slate-500">₹{chartTotal.toLocaleString()} tracked</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-4 gap-3">
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Avg / Day</p>
+          <p className="mt-1 text-xl font-black text-slate-900">₹{averageDailyRevenue.toLocaleString()}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Best Day</p>
+          <p className="mt-1 text-xl font-black text-slate-900">₹{Number(bestRevenueDay?.rev || 0).toLocaleString()}</p>
+          <p className="mt-1 text-[11px] font-semibold text-slate-500">{bestRevenueDay?.name || 'No data'}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Check-ins</p>
+          <p className="mt-1 text-xl font-black text-slate-900">{Number(todayCheckins || 0).toLocaleString()}</p>
+          <p className="mt-1 text-[11px] font-semibold text-slate-500">Today at the desk</p>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Pending Dues</p>
+          <p className="mt-1 text-xl font-black text-slate-900">₹{Number(payStats.pending_dues || 0).toLocaleString()}</p>
+          <p className="mt-1 text-[11px] font-semibold text-slate-500">Collections waiting</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-[1.2fr_0.8fr] gap-4">
+        <div className="rounded-[22px] border border-indigo-100 bg-[linear-gradient(135deg,rgba(99,102,241,0.08),rgba(6,182,212,0.05))] px-4 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Next Best Move</p>
+              <p className="mt-2 text-base font-black text-slate-900">
+                {nextRecommendation?.title || 'Momentum is stable today'}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-white/80 px-3 py-2 text-right shadow-sm">
+              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Potential</p>
+              <p className="mt-1 text-sm font-black text-slate-900">₹{Number(nextRecommendation?.impact || dashboardData.automations.estimatedRecoveryValue || 0).toLocaleString()}</p>
+            </div>
+          </div>
+          <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
+            {nextRecommendation?.reason || 'No urgent recommendation right now. Keep an eye on renewals and daily collections.'}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2.5">
+          <button
+            type="button"
+            onClick={() => navigateTo('Payments', 'All', { section: 'collections-overview' })}
+            className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-left text-white transition-colors hover:bg-slate-800"
+          >
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">Collections</p>
+            <p className="mt-1 text-sm font-black">Open revenue desk</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigateTo('Members', 'Expiring Soon')}
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-colors hover:bg-slate-50"
+          >
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Renewals</p>
+            <p className="mt-1 text-sm font-black text-slate-900">{dashboardData.expiring7} expiring in 7 days</p>
+          </button>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 const FloatingActionBar = ({ controller }) => {
   const {
     launchQuickAction,
@@ -462,85 +577,89 @@ const DashboardPageView = ({ controller, isActive = true }) => {
           {topCards.map((card) => <KPICard key={card.title} {...card} />)}
         </div>
 
-        <div className="grid grid-cols-12 gap-5">
-          <Card
-            className="col-span-12 lg:col-span-8 p-6 flex flex-col"
-            style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 340ms forwards' }}
-          >
-            <div className="flex items-start justify-between mb-5">
-              <div>
-                <h3 className="font-black text-slate-900 text-lg tracking-tight">Revenue Trend</h3>
-                <p className="text-xs text-slate-400 font-semibold mt-0.5">
-                  <span className="font-black text-slate-700">₹{chartTotal.toLocaleString()}</span> · last {chartDays} days
-                </p>
-              </div>
-              <div className="flex gap-1 bg-slate-100/80 p-1 rounded-xl">
-                {[7, 30].map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    onClick={() => setChartDays(days)}
-                    aria-pressed={chartDays === days}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${chartDays === days ? 'bg-white text-slate-900 shadow-sm shadow-black/5' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    {days}D
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex-1 min-h-[220px]">
-              {displayChartData.length > 0 ? (
-                <SafeResponsiveContainer
-                  isActive={isActive}
-                  fallback={<div className="h-full rounded-2xl border border-slate-100 bg-slate-50" />}
-                >
-                    <AreaChart data={displayChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#6366f1" stopOpacity={0.22} />
-                          <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 0" vertical={false} stroke="rgba(99,102,241,0.06)" />
-                      <XAxis
-                        dataKey="name"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
-                        dy={8}
-                      />
-                      <YAxis
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
-                        tickFormatter={(value) => `₹${value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}`}
-                        width={44}
-                      />
-                      <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                      <Area
-                        type="monotone"
-                        dataKey="rev"
-                        stroke="#6366f1"
-                        strokeWidth={2.5}
-                        fillOpacity={1}
-                        fill="url(#revGrad)"
-                        dot={false}
-                        activeDot={{ r: 5, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }}
-                      />
-                    </AreaChart>
-                </SafeResponsiveContainer>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center">
-                    <TrendingUp size={24} className="text-slate-300" />
-                  </div>
-                  <p className="text-sm font-bold text-slate-300">No revenue data for this period</p>
+        <div className="grid grid-cols-12 gap-5 desktop:items-start">
+          <div className="col-span-12 desktop:col-span-8 space-y-5">
+            <Card
+              className="p-6 flex flex-col"
+              style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 340ms forwards' }}
+            >
+              <div className="flex items-start justify-between mb-5">
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg tracking-tight">Revenue Trend</h3>
+                  <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                    <span className="font-black text-slate-700">₹{chartTotal.toLocaleString()}</span> · last {chartDays} days
+                  </p>
                 </div>
-              )}
-            </div>
-          </Card>
+                <div className="flex gap-1 bg-slate-100/80 p-1 rounded-xl">
+                  {[7, 30].map((days) => (
+                    <button
+                      key={days}
+                      type="button"
+                      onClick={() => setChartDays(days)}
+                      aria-pressed={chartDays === days}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 ${chartDays === days ? 'bg-white text-slate-900 shadow-sm shadow-black/5' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      {days}D
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 min-h-[220px] desktop:h-[320px]">
+                {displayChartData.length > 0 ? (
+                  <SafeResponsiveContainer
+                    isActive={isActive}
+                    fallback={<div className="h-full rounded-2xl border border-slate-100 bg-slate-50" />}
+                  >
+                      <AreaChart data={displayChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.22} />
+                            <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 0" vertical={false} stroke="rgba(99,102,241,0.06)" />
+                        <XAxis
+                          dataKey="name"
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
+                          dy={8}
+                        />
+                        <YAxis
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
+                          tickFormatter={(value) => `₹${value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}`}
+                          width={44}
+                        />
+                        <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                        <Area
+                          type="monotone"
+                          dataKey="rev"
+                          stroke="#6366f1"
+                          strokeWidth={2.5}
+                          fillOpacity={1}
+                          fill="url(#revGrad)"
+                          dot={false}
+                          activeDot={{ r: 5, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }}
+                        />
+                      </AreaChart>
+                  </SafeResponsiveContainer>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center">
+                      <TrendingUp size={24} className="text-slate-300" />
+                    </div>
+                    <p className="text-sm font-bold text-slate-300">No revenue data for this period</p>
+                  </div>
+                )}
+              </div>
+            </Card>
 
-          <div className="col-span-12 lg:col-span-4 flex flex-col gap-5">
+            <DesktopRevenuePulsePanel controller={controller} />
+          </div>
+
+          <div className="col-span-12 desktop:col-span-4 flex flex-col gap-5">
             <SmartTipsPanel controller={controller} />
             <AttentionPanel controller={controller} />
           </div>
