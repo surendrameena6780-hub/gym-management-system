@@ -715,8 +715,16 @@ const loadRazorpayScript = () => {
   const currentPlanMeta = normalizedBillingCatalog.plans[gymData.current_plan] || normalizedBillingCatalog.plans.pro;
   const currentPlanName = currentPlanMeta?.name || 'Current plan';
   const canManageCustomTemplates = hasBillingCapability(normalizedBillingCatalog, gymData.current_plan, 'custom_templates');
+  const planCardOrder = useMemo(() => {
+    const visiblePlanOrder = Array.isArray(normalizedBillingCatalog.plan_order) ? normalizedBillingCatalog.plan_order : [];
+    const currentPlanId = String(gymData.current_plan || '').trim().toLowerCase();
+    if (!currentPlanId || visiblePlanOrder.includes(currentPlanId) || !normalizedBillingCatalog.plans[currentPlanId]) {
+      return visiblePlanOrder;
+    }
+    return [currentPlanId, ...visiblePlanOrder];
+  }, [gymData.current_plan, normalizedBillingCatalog]);
   const planCards = useMemo(
-    () => normalizedBillingCatalog.plan_order.map((planId) => {
+    () => planCardOrder.map((planId) => {
       const plan = normalizedBillingCatalog.plans[planId];
       const theme = BILLING_PLAN_THEME[planId] || BILLING_PLAN_THEME.basic;
       return {
@@ -728,7 +736,7 @@ const loadRazorpayScript = () => {
         desc: plan.features?.[0] || '',
       };
     }),
-    [billingCycle, normalizedBillingCatalog]
+    [billingCycle, normalizedBillingCatalog, planCardOrder]
   );
   const addonPacks = useMemo(
     () => normalizedBillingCatalog.addon_order.map((addonKey) => {
@@ -2318,7 +2326,7 @@ const loadRazorpayScript = () => {
 
                 {/* the scroll container becomes a grid on lg+ */}
                 <div
-                  className="flex gap-4 overflow-x-auto snap-x snap-mandatory pt-6 pb-4 scroll-smooth lg:grid lg:grid-cols-4 lg:overflow-visible lg:snap-none lg:pt-6"
+                  className="flex gap-4 overflow-x-auto snap-x snap-mandatory pt-6 pb-4 scroll-smooth lg:grid lg:[grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] lg:overflow-visible lg:snap-none lg:pt-6"
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
                 >
                   {planCards.map((plan) => {

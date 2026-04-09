@@ -11,6 +11,7 @@ const {
     getBillingConfig,
     getBillingPlanPrice,
     getGymBillingSnapshot,
+    isBillingPlanVisible,
     isAddonAllowedForPlan,
     normalizePlanId,
     serializeBillingConfig,
@@ -246,6 +247,9 @@ router.post('/create-order', async (req, res) => {
         const resolved = resolveSaasPrice(billingConfig, req.body.plan_tier, req.body.cycle);
         if (!resolved) {
             return res.status(400).json({ error: 'Invalid plan_tier or cycle.' });
+        }
+        if (!isBillingPlanVisible(billingConfig, resolved.planTier)) {
+            return res.status(400).json({ error: 'This plan is no longer available for new purchases.' });
         }
 
         const gym = await getGymBillingSnapshot(pool, req.user.gym_id) || {};

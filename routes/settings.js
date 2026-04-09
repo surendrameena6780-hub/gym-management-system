@@ -1070,7 +1070,7 @@ router.get('/', auth, async (req, res) => {
                 interface_compact_mode: gym.interface_compact_mode,
                 interface_dark_mode: gym.interface_dark_mode,
             },
-            billing_catalog: serializeBillingConfig(billingConfig),
+            billing_catalog: serializeBillingConfig(billingConfig, { includeAllPlans: true }),
             effective_limits: effectiveLimits,
             support_profile: {
                 whatsapp: gym.whatsapp,

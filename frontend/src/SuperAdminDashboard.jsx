@@ -268,6 +268,7 @@ function SuperAdminDashboard({ token, onLogout }) {
     error: '',
   });
   const billingConfig = normalizeFrontendBillingCatalog(system.billing_config);
+  const hiddenTestPlan = billingConfig.plan_order.includes('test') ? null : billingConfig.plans.test;
 
   const groupedUsers = useMemo(() => {
     const groupsMap = new Map();
@@ -690,7 +691,7 @@ function SuperAdminDashboard({ token, onLogout }) {
       alert('System settings saved');
     } catch (err) {
       handleApiError(err);
-      alert('Failed to save system settings');
+      alert(err?.response?.data?.error || 'Failed to save system settings');
     }
   };
 
@@ -798,6 +799,38 @@ function SuperAdminDashboard({ token, onLogout }) {
               },
             },
           },
+        },
+      };
+    });
+  };
+
+  const removeBillingPlan = (planId) => {
+    if (planId !== 'test') {
+      alert('Only the Test Drive plan can be removed from the live catalog. Basic, Growth, and Pro stay fixed.');
+      return;
+    }
+    if (!window.confirm('Remove Test Drive from the live billing catalog? Existing gyms on Test Drive can still upgrade, but new gyms will no longer see this plan.')) return;
+
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          plan_order: billingConfig.plan_order.filter((entry) => entry !== planId),
+        },
+      };
+    });
+  };
+
+  const restoreBillingPlan = (planId) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          plan_order: BILLING_PLAN_ORDER.filter((entry) => entry === planId || billingConfig.plan_order.includes(entry)),
         },
       };
     });
@@ -1497,8 +1530,23 @@ function SuperAdminDashboard({ token, onLogout }) {
               <div className="space-y-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-3">Plans</p>
+                  {hiddenTestPlan && (
+                    <div className="mb-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-amber-100">Test Drive removed from the live catalog</p>
+                        <p className="text-xs text-amber-200/80 mt-1">New gyms will only see Basic, Growth, and Pro. Restore Test Drive if you need the ₹1 QA plan again.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => restoreBillingPlan('test')}
+                        className="px-3 py-2 rounded-xl border border-amber-400/30 bg-black/20 text-amber-100 text-xs font-black uppercase tracking-wider hover:bg-black/30 transition-colors"
+                      >
+                        Restore Test Drive
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                    {BILLING_PLAN_ORDER.map((planId) => {
+                    {billingConfig.plan_order.map((planId) => {
                       const plan = billingConfig.plans[planId];
                       if (!plan) return null;
                       return (
@@ -1508,14 +1556,25 @@ function SuperAdminDashboard({ token, onLogout }) {
                               <p className="text-sm font-black text-white">{plan.name}</p>
                               <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mt-1">{planId}</p>
                             </div>
-                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(plan.popular)}
-                                onChange={(e) => updateBillingPlanField(planId, 'popular', e.target.checked)}
-                              />
-                              Popular
-                            </label>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(plan.popular)}
+                                  onChange={(e) => updateBillingPlanField(planId, 'popular', e.target.checked)}
+                                />
+                                Popular
+                              </label>
+                              {planId === 'test' && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeBillingPlan(planId)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-rose-200 hover:bg-rose-500/20 transition-colors"
+                                >
+                                  <Trash2 size={12} /> Delete
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1648,7 +1707,7 @@ function SuperAdminDashboard({ token, onLogout }) {
                           <div>
                             <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-2">Allowed Plans</p>
                             <div className="flex flex-wrap gap-2">
-                              {BILLING_PLAN_ORDER.filter((planId) => planId !== 'test').map((planId) => {
+                              {billingConfig.plan_order.filter((planId) => planId !== 'test').map((planId) => {
                                 const active = (addon.requires_plans || []).includes(planId);
                                 return (
                                   <button

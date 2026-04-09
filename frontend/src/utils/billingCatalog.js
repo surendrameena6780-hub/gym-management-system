@@ -1,4 +1,5 @@
 export const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
+export const BILLING_CORE_PLAN_IDS = ['basic', 'growth', 'pro'];
 export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
 export const BILLING_CAPABILITY_KEYS = ['custom_templates'];
 
@@ -18,7 +19,14 @@ export const defaultBillingCatalog = {
       monthly_price: 1,
       annual_price: 1,
       popular: false,
-      features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'],
+      features: [
+        'Unlimited members, staff users, branches, and outbound WhatsApp for testing',
+        'Hello inbound available on unlimited numbers during the test window',
+        '2 GB cloud storage for QA data and trial media',
+        'All billing, automation, and integration flows unlocked for QA',
+        '₹1 live payment test checkout',
+        'Expires automatically in 1 day',
+      ],
       capabilities: { custom_templates: true },
       limits: { members: null, staff: null, storage: 2, branches: null, whatsapp: null, hello: null },
     },
@@ -28,7 +36,18 @@ export const defaultBillingCatalog = {
       monthly_price: 1,
       annual_price: 10,
       popular: false,
-      features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+      features: [
+        'Up to 150 active members',
+        '1 branch included',
+        '1 owner + 2 staff users',
+        '500 WhatsApp messages per month',
+        'Hello inbound not included on this plan',
+        '5 GB cloud storage',
+        'Members, attendance, plans, payments, dues, and leads',
+        'Dashboard with basic insights and renewal reminders',
+        '14-day free trial',
+        'Email support',
+      ],
       capabilities: { custom_templates: false },
       limits: { members: 150, staff: 2, storage: 5, branches: 1, whatsapp: 500, hello: 0 },
     },
@@ -38,7 +57,20 @@ export const defaultBillingCatalog = {
       monthly_price: 2,
       annual_price: 20,
       popular: true,
-      features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+      features: [
+        'Up to 400 active members',
+        'Up to 2 branches',
+        '1 owner + 5 staff users',
+        '1,000 WhatsApp messages per month',
+        'Hello inbound on 1 number',
+        '10 GB cloud storage',
+        'WhatsApp reply-to-lead capture',
+        'Custom WhatsApp templates',
+        'Advanced insights, reports, and branch-wise reporting',
+        'Class and staff operations',
+        '14-day free trial',
+        'Priority support',
+      ],
       capabilities: { custom_templates: true },
       limits: { members: 400, staff: 5, storage: 10, branches: 2, whatsapp: 1000, hello: 1 },
     },
@@ -48,7 +80,20 @@ export const defaultBillingCatalog = {
       monthly_price: 3,
       annual_price: 30,
       popular: false,
-      features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+      features: [
+        'Up to 1,000 active members',
+        'Up to 3 branches',
+        '1 owner + 10 staff users',
+        '2,000 WhatsApp messages per month',
+        'Hello inbound on 1 number',
+        '20 GB cloud storage',
+        'Full reply-to-lead workflow',
+        'Custom WhatsApp templates',
+        'Advanced insights and performance analytics',
+        'Staff, payroll, and RFID-ready operations',
+        '14-day free trial',
+        'Fastest support response',
+      ],
       capabilities: { custom_templates: true },
       limits: { members: 1000, staff: 10, storage: 20, branches: 3, whatsapp: 2000, hello: 1 },
     },
@@ -125,11 +170,56 @@ const normalizeFeatureList = (value, fallback = []) => {
   return normalized.length > 0 ? normalized : [...fallback];
 };
 
+const arraysMatch = (left = [], right = []) => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const LEGACY_BILLING_PLAN_FEATURES = {
+  test: [
+    ['Full Feature Access', 'For Testing Only', 'Rs 1 Payment Test', 'Expires in 1 Day'],
+    ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'],
+  ],
+  basic: [
+    ['Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+  ],
+  growth: [
+    ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+  ],
+  pro: [
+    ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+  ],
+};
+
+const normalizePlanFeatures = (planId, value, fallback = []) => {
+  const normalized = normalizeFeatureList(value, fallback);
+  const legacySets = LEGACY_BILLING_PLAN_FEATURES[planId] || [];
+  if (legacySets.some((legacy) => arraysMatch(normalized, legacy))) {
+    return [...fallback];
+  }
+  return normalized;
+};
+
 const normalizeRequiresPlans = (value, fallback = []) => {
   const source = Array.isArray(value) ? value : [];
   const allowed = new Set(BILLING_PLAN_ORDER);
   const normalized = source.map((item) => String(item || '').trim().toLowerCase()).filter((item) => allowed.has(item));
   return Array.from(new Set(normalized.length > 0 ? normalized : fallback));
+};
+
+const normalizePlanOrder = (value, fallback = BILLING_PLAN_ORDER, { includeTest = true } = {}) => {
+  const source = Array.isArray(value) && value.length > 0 ? value : fallback;
+  const selected = new Set(
+    source
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((item) => BILLING_PLAN_ORDER.includes(item))
+  );
+
+  BILLING_CORE_PLAN_IDS.forEach((planId) => selected.add(planId));
+  if (!includeTest) {
+    selected.delete('test');
+  }
+
+  return BILLING_PLAN_ORDER.filter((planId) => selected.has(planId));
 };
 
 const normalizePlanLimits = (value, fallback = {}) => Object.fromEntries(
@@ -165,7 +255,7 @@ const normalizePlan = (planId, value) => {
     monthly_price: readNumber(raw.monthly_price, fallback.monthly_price, { min: 0, max: 100000 }),
     annual_price: readNumber(raw.annual_price, fallback.annual_price, { min: 0, max: 100000 }),
     popular: raw.popular === undefined ? fallback.popular : Boolean(raw.popular),
-    features: normalizeFeatureList(raw.features, fallback.features),
+    features: normalizePlanFeatures(planId, raw.features, fallback.features),
     capabilities: normalizePlanCapabilities(raw.capabilities, fallback.capabilities),
     limits: normalizePlanLimits(raw.limits, fallback.limits),
   };
@@ -187,11 +277,17 @@ const normalizeAddon = (addonKey, value) => {
 
 export const normalizeBillingCatalog = (value, { includeTest = true } = {}) => {
   const raw = value && typeof value === 'object' ? value : {};
-  const visiblePlanOrder = BILLING_PLAN_ORDER.filter((planId) => includeTest || planId !== 'test');
+  const visiblePlanOrder = normalizePlanOrder(raw.plan_order, defaultBillingCatalog.plan_order, { includeTest });
+  const rawPlanKeys = new Set(
+    Object.keys(raw.plans || {})
+      .map((planId) => String(planId || '').trim().toLowerCase())
+      .filter((planId) => BILLING_PLAN_ORDER.includes(planId))
+  );
+  const normalizedPlanIds = BILLING_PLAN_ORDER.filter((planId) => visiblePlanOrder.includes(planId) || rawPlanKeys.has(planId));
   return {
     plan_order: visiblePlanOrder,
     addon_order: [...BILLING_ADDON_ORDER],
-    plans: Object.fromEntries(visiblePlanOrder.map((planId) => [planId, normalizePlan(planId, raw.plans?.[planId])])),
+    plans: Object.fromEntries(normalizedPlanIds.map((planId) => [planId, normalizePlan(planId, raw.plans?.[planId])])),
     addons: Object.fromEntries(BILLING_ADDON_ORDER.map((addonKey) => [addonKey, normalizeAddon(addonKey, raw.addons?.[addonKey])])),
   };
 };

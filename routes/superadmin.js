@@ -951,7 +951,7 @@ router.get('/system', superAuth, async (_req, res) => {
         return res.json({
             ...base,
             automation_settings: normalizeAutomationSettings(base.automation_settings),
-            billing_config: serializeBillingConfig(base.billing_config),
+            billing_config: serializeBillingConfig(base.billing_config, { includeAllPlans: true }),
             support_profile: normalizeSupportProfile(base.support_profile),
         });
     } catch (err) {
