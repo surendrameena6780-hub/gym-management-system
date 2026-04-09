@@ -3128,8 +3128,9 @@ const loadRazorpayScript = () => {
                                       <p>1. Create one webhook for On Inbound Request Received using the exact callback URL above.</p>
                                       <p>2. Create one webhook for On Inbound Report Received using the same callback URL.</p>
                                       <p>3. Keep one webhook for On Delivered Events using the same callback URL.</p>
-                                      <p>4. If MSG91 still shows no inbound logs, open Number → Integration and enable Allow inbound in Hello, then try the reply again.</p>
-                                      <p>5. If MSG91 shows failed webhook logs, open the snapshot and verify the saved URL matches this full callback URL exactly.</p>
+                                      <p>4. In MSG91, make sure Pause Webhook is turned OFF for all three webhooks. A paused webhook will not send events to GymVault.</p>
+                                      <p>5. If MSG91 still shows no inbound logs, open Number → Integration and enable Allow inbound in Hello, then try the reply again.</p>
+                                      <p>6. If MSG91 shows failed webhook logs, open the snapshot and verify the saved URL matches this full callback URL exactly.</p>
                                     </div>
                                   </div>
                                 </div>
