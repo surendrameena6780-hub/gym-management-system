@@ -135,6 +135,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     progress: 0,
     is_complete: false,
     steps: { profile: false, plans: false, members: false },
+    recommended: { whatsapp: false, payments: false },
   });
   const [isSkipped, setIsSkipped] = useState(localStorage.getItem('gymvault_skip_setup') === 'true');
   const [showTourBanner, setShowTourBanner] = useState(localStorage.getItem('gymvault_tour_completed') !== 'true');
@@ -277,7 +278,20 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       const normalizedTodayData = Array.isArray(todayData) ? todayData : [];
       setTodayAttendance(normalizedTodayData);
       setTodayCheckins(normalizedTodayData.length);
-      setSetup(asObject(pickData(setupRes, { progress: 0, is_complete: false, steps: {} }), { progress: 0, is_complete: false, steps: {} }));
+      setSetup(asObject(
+        pickData(setupRes, {
+          progress: 0,
+          is_complete: false,
+          steps: { profile: false, plans: false, members: false },
+          recommended: { whatsapp: false, payments: false },
+        }),
+        {
+          progress: 0,
+          is_complete: false,
+          steps: { profile: false, plans: false, members: false },
+          recommended: { whatsapp: false, payments: false },
+        },
+      ));
 
       const settingsData = asObject(pickData(settingsRes, {}), {});
       const billingData = asObject(settingsData.gym, {});
@@ -1270,12 +1284,50 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     const incompleteSetupSteps = Object.entries(setup.steps || {})
       .filter(([, isDone]) => !isDone)
       .map(([key]) => key);
+    const recommendedSetup = asObject(setup.recommended, { whatsapp: false, payments: false });
     const setupStepLabels = {
       profile: 'business profile',
       plans: 'plan catalog',
       members: 'member base',
     };
     const nextSetupStep = incompleteSetupSteps[0] || null;
+    const setupActionRows = [
+      !setup.steps?.profile && {
+        id: 'SETUP_PROFILE',
+        title: 'Complete your business profile',
+        description: 'Add gym phone, address, and owner-facing details before you start collecting members and payments.',
+        cta: 'Open Settings',
+        action: () => navigateTo('Settings', 'account'),
+      },
+      !setup.steps?.plans && {
+        id: 'SETUP_PLAN',
+        title: 'Add your first plan',
+        description: 'Create the membership plans you want to sell before enrolling members.',
+        cta: 'Create Plan',
+        action: () => navigateTo('Plans'),
+      },
+      !setup.steps?.members && {
+        id: 'SETUP_MEMBER',
+        title: 'Add your first member',
+        description: 'Create the first member profile to start attendance, renewals, and due tracking.',
+        cta: 'Add Member',
+        action: () => setShowAddModal(true),
+      },
+      !recommendedSetup.whatsapp && {
+        id: 'SETUP_WHATSAPP',
+        title: 'Connect WhatsApp reminders',
+        description: 'Link your gym WhatsApp number to automate reminders, campaigns, and reply capture.',
+        cta: 'Open Integrations',
+        action: () => navigateTo('Settings', 'integrations'),
+      },
+      !recommendedSetup.payments && {
+        id: 'SETUP_PAYMENTS',
+        title: 'Set up payment collection',
+        description: 'Add your UPI ID or payment gateway so activations and dues can be collected smoothly.',
+        cta: 'Set Up Payments',
+        action: () => navigateTo('Settings', 'integrations'),
+      },
+    ].filter(Boolean);
     const targetTodayTraffic = active.length > 0 ? Math.max(3, Math.round(active.length * 0.14)) : 3;
     const trafficGap = Math.max(0, targetTodayTraffic - todayCheckins);
 
@@ -1636,6 +1688,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         urgentCount,
       },
       actionRows: mergedActionRows,
+      setupActionRows,
       automations: {
         sentToday,
         runsToday,

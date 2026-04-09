@@ -7,6 +7,25 @@ const { requireOwner } = require('../middleware/rbac');
 
 router.use(auth, saasMiddleware, requireOwner);
 
+let ensureDashboardSetupSchemaPromise;
+
+const ensureDashboardSetupSchema = async () => {
+    if (!ensureDashboardSetupSchemaPromise) {
+        ensureDashboardSetupSchemaPromise = pool.query(`
+            ALTER TABLE gyms
+            ADD COLUMN IF NOT EXISTS messaging_whatsapp_status VARCHAR(30) DEFAULT 'NOT_CONFIGURED',
+            ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT TRUE,
+            ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120),
+            ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED';
+        `).catch((error) => {
+            ensureDashboardSetupSchemaPromise = null;
+            throw error;
+        });
+    }
+
+    await ensureDashboardSetupSchemaPromise;
+};
+
 // GET /api/dashboard/stats
 router.get('/stats', async (req, res) => {
     const gym_id = req.user.gym_id; 
@@ -110,6 +129,7 @@ router.get('/setup-status', async (req, res) => {
     const gym_id = req.user.gym_id;
 
     try {
+        await ensureDashboardSetupSchema();
         const result = await pool.query(
             `SELECT
                 (
@@ -127,7 +147,12 @@ router.get('/setup-status', async (req, res) => {
                     FROM members m
                     WHERE m.gym_id = g.id AND m.deleted_at IS NULL
                     LIMIT 1
-                ) AS step3_members
+                ) AS step3_members,
+                (COALESCE(UPPER(g.messaging_whatsapp_status), 'NOT_CONFIGURED') = 'CONNECTED') AS whatsapp_ready,
+                (
+                    COALESCE(LENGTH(BTRIM(g.member_upi_id)), 0) > 0
+                    OR COALESCE(UPPER(g.member_payments_onboarding_status), 'NOT_CONNECTED') IN ('CONNECTED', 'ACTIVE')
+                ) AS payments_ready
              FROM gyms g
              WHERE g.id = $1
              LIMIT 1`,
@@ -141,8 +166,10 @@ router.get('/setup-status', async (req, res) => {
         const step1_profile = Boolean(result.rows[0].step1_profile);
         const step2_plans = Boolean(result.rows[0].step2_plans);
         const step3_members = Boolean(result.rows[0].step3_members);
+        const whatsappReady = Boolean(result.rows[0].whatsapp_ready);
+        const paymentsReady = Boolean(result.rows[0].payments_ready);
 
-        // Calculate completion percentage
+        // Core setup progress intentionally stays tied to the first-run essentials.
         let completedCount = 0;
         if (step1_profile) completedCount++;
         if (step2_plans) completedCount++;
@@ -157,6 +184,10 @@ router.get('/setup-status', async (req, res) => {
                 profile: step1_profile,
                 plans: step2_plans,
                 members: step3_members
+            },
+            recommended: {
+                whatsapp: whatsappReady,
+                payments: paymentsReady,
             }
         });
 
