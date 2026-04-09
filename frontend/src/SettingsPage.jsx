@@ -714,13 +714,8 @@ const loadRazorpayScript = () => {
   const currentPlanName = currentPlanMeta?.name || 'Current plan';
   const canManageCustomTemplates = hasBillingCapability(normalizedBillingCatalog, gymData.current_plan, 'custom_templates');
   const planCardOrder = useMemo(() => {
-    const visiblePlanOrder = Array.isArray(normalizedBillingCatalog.plan_order) ? normalizedBillingCatalog.plan_order : [];
-    const currentPlanId = String(gymData.current_plan || '').trim().toLowerCase();
-    if (!currentPlanId || visiblePlanOrder.includes(currentPlanId) || !normalizedBillingCatalog.plans[currentPlanId]) {
-      return visiblePlanOrder;
-    }
-    return [currentPlanId, ...visiblePlanOrder];
-  }, [gymData.current_plan, normalizedBillingCatalog]);
+    return Array.isArray(normalizedBillingCatalog.plan_order) ? normalizedBillingCatalog.plan_order : [];
+  }, [normalizedBillingCatalog]);
   const planCards = useMemo(
     () => planCardOrder.map((planId) => {
       const plan = normalizedBillingCatalog.plans[planId];

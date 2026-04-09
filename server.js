@@ -99,6 +99,22 @@ const corsOrigins = collectCorsOrigins(
     process.env.VERCEL_PROJECT_PRODUCTION_URL,
 );
 const isProduction = process.env.NODE_ENV === 'production';
+const PROFILE_IMAGE_PLACEHOLDER_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Profile image unavailable">
+    <rect width="96" height="96" rx="48" fill="#e2e8f0"/>
+    <circle cx="48" cy="36" r="18" fill="#94a3b8"/>
+    <path d="M20 82c4.8-15.2 16.1-23 28-23s23.2 7.8 28 23" fill="#94a3b8"/>
+</svg>`;
+const PROFILE_IMAGE_PLACEHOLDER_BUFFER = Buffer.from(PROFILE_IMAGE_PLACEHOLDER_SVG, 'utf8');
+
+const sendProfileImagePlaceholder = (res) => {
+        res.status(200);
+        res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+        res.setHeader('Cache-Control', isProduction ? 'public, max-age=86400, stale-while-revalidate=604800' : 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Content-Disposition', 'inline');
+        return res.end(PROFILE_IMAGE_PLACEHOLDER_BUFFER);
+};
 const REQUIRED_NODE_VERSION = '20.18.0';
 const currentNodeVersion = String(process.version || '').replace(/^v/, '');
 
@@ -305,7 +321,7 @@ app.use(
     },
     express.static(PROFILE_UPLOAD_DIR, {
         index: false,
-        fallthrough: false,
+        fallthrough: true,
         dotfiles: 'deny',
         maxAge: isProduction ? '7d' : 0,
         immutable: isProduction,
@@ -313,7 +329,8 @@ app.use(
             res.setHeader('X-Content-Type-Options', 'nosniff');
             res.setHeader('Content-Disposition', 'inline');
         },
-    })
+    }),
+    (_req, res) => sendProfileImagePlaceholder(res)
 );
 
 app.use('/api/users', require('./routes/users'));

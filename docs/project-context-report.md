@@ -105,10 +105,13 @@ All pages in `App.jsx` are mounted once and toggled visible via `getPageVisibili
 - `authMiddleware.js` re-queries the DB on every request to reject revoked/inactive accounts even on valid JWTs.
 
 ### SaaS Billing
-- Plans: Test Drive (₹1), Basic (₹999/mo), Pro Vault (₹1999/mo), Elite (₹3999/mo).
+- Live owner-facing catalog is driven by `platform_settings.billing_config.plan_order`.
+- Current live plans are Basic, Growth, and Pro. Test Drive is an optional hidden QA plan that superadmin can remove from the live catalog.
+- If Test Drive is removed from the live catalog, existing gyms can still retain `current_plan='test'` until they upgrade or expire, but owner-facing billing cards must not re-add Test Drive into the visible plan list.
 - Gym `saas_status` can be `FREE_TRIAL`, `ACTIVE`, `GRACE_PERIOD`, or `EXPIRED`.
 - Expired gyms are blocked by `saasMiddleware` but can always reach the Settings billing tab.
 - SaaS payments go through Razorpay checkout using **platform** keys (`RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` in `.env`).
+- POS is a plan-gated capability and is currently available only on Growth and Pro.
 
 ### Member Payment Collection
 Two separate Razorpay contexts exist:
@@ -129,6 +132,12 @@ Any multi-step write must use a dedicated `client = await pool.connect()` with e
 - Gyms can have up to 25 branches stored as JSON in `gyms.branch_directory`.
 - Branch scope is resolved per request via `resolveBranchReadScope` / `resolveBranchWriteScope` helpers.
 - Owner sees all; staff sees their assigned branch only.
+
+### Global vs Gym-Scoped Changes
+- If a user asks for a change to apply "globally," verify all three layers: platform settings, schema defaults, and existing-gym backfills.
+- This codebase has duplicated schema/default helpers in more than one route file. A setting changed only in `routes/settings.js` may still behave differently elsewhere if `routes/memberships.js` or another route carries its own helper.
+- Owner-facing billing views must respect the live billing catalog order from platform settings. If hidden current-plan metadata is needed, include it without making the hidden plan selectable again.
+- Optional media should fail soft. Missing profile uploads must return a placeholder response instead of a `404`, otherwise every page that renders the avatar will spam the browser console even if the UI hides the broken image.
 
 ---
 
@@ -173,15 +182,21 @@ Any multi-step write must use a dedicated `client = await pool.connect()` with e
 ### Owner Settings Hub
 Fully tabbed settings page for owners:
 - **Account & Business** — profile, gym info, logo
-- **Staff & Roles** — add/edit/deactivate staff, reset passwords, branch assign
+- **Staff & Roles** — add/edit/delete staff, reset passwords, branch assign, anti-autofill handling on add form
 - **Billing & Subscriptions** — plan upgrades via Razorpay, invoice generation
 - **Integrations** — Razorpay (manual/partner), WhatsApp MSG91, UPI, campaign templates
 - **Data & Backup** — CSV export, member CSV import
-- **Security** — password change, 2FA placeholder
 - **System Preferences** — currency, timezone
-- **Interface Preferences** — dark mode, compact mode, reduced motion
-- **Platform** — branches, API keys, webhooks, WhatsApp delivery logs
+- **Interface Preferences** — dark mode only
+- **Automation** — currently a coming-soon section
+- **Report Settings** — currently a coming-soon section
 - **Danger Zone** — account deletion
+
+Additional current behavior:
+- Bulk messaging defaults ON globally unless explicitly disabled.
+- Member online collection defaults ON globally unless explicitly disabled.
+- Default member collection connect mode is `PARTNER` (Route-style flow), not `MANUAL`.
+- Peak analysis defaults to `7D` in dashboard analytics flows.
 
 ### Superadmin Panel
 - Separate login (`/superadmin`)
@@ -266,6 +281,53 @@ Full-stack feature added:
 - Do not reuse member payment helpers, connected accounts, or billing credentials for salary payouts.
 - For manual bank transfer fallback, keep requiring a transfer reference before marking payroll as paid.
 
+### Branch Scope + Billing Catalog + Phase 4 Sweep (commits `63acf22`, `0ded2e7`, `e98b424`, `b2644bb`, `df374a8`)
+This chat covered a large multi-step cleanup and feature pass beyond the older fixes above.
+
+**Key outcomes:**
+- Branch-aware operations were pushed through the owner app so data and actions follow the active branch instead of leaking across the gym.
+- Superadmin billing catalog editing was extended so Test Drive can be removed from the live catalog.
+- The dashboard Need Attention panel was kept populated instead of collapsing into obvious empty space.
+- A full Phase 4 cleanup pass was completed across settings, analytics defaults, staff management, and POS gating.
+
+**Important implementation details from this batch:**
+- `b2644bb` introduced the per-branch system with owner branch switchers, branch-aware dashboard/leads behavior, and per-branch billing copy.
+- `df374a8` completed the main Phase 4 request set:
+  - added fallback action rows to keep the dashboard action panel filled,
+  - removed the Security page,
+  - reduced Interface Preferences to dark mode only,
+  - changed Staff & Roles from activate/deactivate to delete,
+  - added anti-autofill protection to the staff add form,
+  - forced peak analysis defaults to `7D`,
+  - enabled bulk messaging by default,
+  - enabled member online collection by default,
+  - changed default member collection connect mode to `PARTNER`,
+  - enforced POS access on Growth and Pro only in both frontend and backend.
+- The global-default fix was not just UI-level. It required schema-default and backfill changes in both `routes/settings.js` and `routes/memberships.js`, plus member-facing fallback alignment in `routes/member.js`.
+
+### Hidden Test Plan Rendering on Existing Test Gyms
+**Problem:** superadmin could remove Test Drive from the live billing catalog, but an owner account still on Test Drive continued to see it in Settings.
+
+**Root cause:** the owner settings billing screen was prepending the gym's current hidden plan back into the visible billing carousel, which effectively bypassed the live catalog removal.
+
+**Fix:**
+- `serializeBillingConfig()` now supports including current-plan metadata without re-adding hidden plans to `plan_order`.
+- `routes/settings.js` now sends the live visible order plus hidden current-plan metadata only when needed.
+- `frontend/src/SettingsPage.jsx` no longer reinserts a hidden current plan into the visible plan cards.
+
+**Rule going forward:** removing a plan in superadmin should hide it globally from owner-facing upgrade choices. Existing gyms may retain that plan internally as current billing state, but the hidden plan must not become selectable again because of frontend convenience logic.
+
+### Missing Profile Image Console Errors
+**Problem:** several pages were logging repeated `GET /uploads/profiles/... 404` errors in DevTools.
+
+**Root cause:** old or deleted profile image filenames remained in the database. Frontend `onError` handlers hid the broken image visually, but the browser had already logged the failed network request.
+
+**Fix:**
+- `server.js` now serves a placeholder SVG for missing profile uploads under `/uploads/profiles/*` when the requested extension is a valid profile-image type.
+- This keeps the response as a valid image `200` instead of a `404`, so optional missing avatars stop polluting the console across Payments, Dashboard, Members, Insights, Classes, and member-facing views.
+
+**Rule going forward:** if optional media is referenced from many pages, fix missing-file behavior at the server boundary instead of relying only on per-component `img onError` handlers.
+
 ---
 
 ## 7. Working Rules & Conventions
@@ -276,11 +338,17 @@ Full-stack feature added:
 3. **For Razorpay/payment work**: prefer Razorpay-native messaging delivery; do not add Twilio unless explicitly requested.
 4. **Implementation discipline**: don't add features beyond what was asked, don't add docstrings to unchanged code, don't add error handling for scenarios that can't happen.
 5. **For Route member collections**: always keep the platform Payment Link + Route transfer flow. Never switch partner-mode member collections back to direct connected-account Payment Links unless explicitly re-validated in production.
+6. **If the user says a change should apply globally**, audit platform settings, schema defaults, and existing-row backfills. Do not stop at one route or one gym.
+7. **If a plan is hidden in superadmin**, owner-facing pages must obey `billing_config.plan_order`. Hidden current-plan metadata is allowed, hidden plan cards are not.
+8. **Optional media must not create browser console errors.** Missing avatar/profile assets should resolve to a fallback response, not a hard `404`.
+9. **When removing a setting from UI**, also neutralize its persisted/runtime effect so old saved values cannot keep changing behavior behind the scenes.
 
 ### Validation Before Every Commit
 ```bash
 npm --prefix frontend run build          # must pass with no errors
-node -e "require('./routes/[changed].js')"  # catch module-load errors
+node --check server.js                   # syntax-check app entry when touched
+node --check routes/[changed].js         # syntax-check changed backend files
+node --check utils/[changed].js          # syntax-check changed shared backend utilities
 ```
 
 ### Security Rules We Follow
@@ -326,18 +394,18 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 
 | Commit | Description |
 |---|---|
+| `df374a8` | Complete phase 4 settings and POS updates |
+| `b2644bb` | Add per-branch system with owner branch switcher and data isolation |
+| `e98b424` | Support deleting Test Drive from the live billing catalog |
+| `0ded2e7` | Keep dashboard attention panel populated |
+| `63acf22` | Fix contrast, plan gating, branch limits, dashboard crash, and superadmin layout |
+| `b9cd3ac` | Implement editable billing catalog and enforce limits |
+| `34dc70b` | Fix signup plan persistence and staff usage counts |
+| `6510732` | Show real first-time owner setup actions on dashboard |
 | `8ad7808` | Document permanent Route transfer partner flow |
 | `44f35f2` | Restore Route transfer flow for partner payment links |
 | `29eb3a5` | Fix Razorpay link verification and stale-link handling |
-| `50efbaa` | Fix 10 UX issues + payroll auto-pay feature |
-| `39b9fb7` | Implement branch scoped operations across key workflows |
-| `c35d88a` | Complete branch payroll flows and member mobile fixes |
-| `fb404ac` | Close deep-scan security and live test gaps |
-| `27a5a1c` | Improve settings smoke coverage and accessibility |
-| `fa3e812` | Harden frontend runtime guardrails |
-| `2492595` | Add superadmin telemetry and paginate heavy views |
-| `81f9d89` | Fix cross-device stale chunk crashes |
-| `fddef0d` | Persist mobile auth sessions across restarts |
+| `50efbaa` | Fix 10 UX issues and add payroll auto-pay |
 
 ---
 
@@ -348,7 +416,9 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 | True auto check-in (RFID/BLE) | Scaffolded — hardware wiring pending |
 | WhatsApp templates | Must be MSG91-approved before live sending works |
 | Razorpay partner mode | Needs live server keys; test keys create invisible links |
-| Dark mode | Defaults ON; uses Tailwind class-based dark; full dark coverage is partial |
+| Hidden Test Drive plan | Existing gyms may still retain `current_plan='test'`, but owner-facing upgrade cards must follow live `plan_order` and hide Test Drive if superadmin removed it |
+| Profile uploads | Old DB filenames may point to deleted files; `/uploads/profiles/*` now falls back to a placeholder image and should never be reverted to raw `404` behavior |
+| Dark mode | Defaults ON; Interface Preferences now only exposes dark mode |
 | Automation tab in Settings | Marked "coming soon" in UI |
 | Report Settings tab in Settings | Marked "coming soon" in UI |
 | Multi-branch isolation | Branch scope helpers in place; UI for branch switching exists for owners |
@@ -364,10 +434,120 @@ When starting a new session, tell the AI:
 - Commit automatically after completing any fix or feature.
 - Do not change design/layout unless explicitly asked.
 - Run `npm --prefix frontend run build` before every commit.
-- If touching backend routes, run a require-check on changed files.
+- If touching backend routes or shared backend utilities, run `node --check` on the changed files.
+- If a user says something should apply globally, inspect both platform settings and every duplicated schema/default helper before assuming the fix is complete.
 
 For urgent issues, always check:
 1. `system_runtime_events` table for server-side errors.
 2. Browser DevTools console for client-side errors (also sent to `/api/support/client-errors`).
 3. Razorpay dashboard mode mismatch (test vs live keys).
 4. `config/db.js` always-run migrations for any new schema needed on live.
+5. `platform_settings.billing_config.plan_order` if a plan appears or disappears incorrectly in owner-facing billing.
+6. `/uploads/profiles/*` network responses if profile-image console errors reappear; the expected behavior is a real image or the placeholder SVG, never a hard `404`.
+
+---
+
+## 11. Full Handoff From This Chat
+
+This section is the detailed continuation record for the next AI session. It summarizes what was investigated, what was changed, why the decisions were made, and the collaboration rules that were reinforced during this chat.
+
+### A. Starting Point for This Chat
+- The repo already had the broader gym-management stack described above.
+- Earlier work in this same chat had already started improving dashboard behavior, billing catalog control, and branch support.
+- Before the latest follow-up, the most recent completed commits in this chat were:
+  - `63acf22` for a mixed stability/UX batch,
+  - `0ded2e7` for dashboard attention-panel backfill,
+  - `e98b424` for Test Drive deletion support in the billing catalog,
+  - `b2644bb` for the per-branch system,
+  - `df374a8` for the main Phase 4 settings/POS/defaults sweep.
+
+### B. Major Themes of This Chat
+- Make branch behavior real across the app instead of superficial.
+- Make superadmin billing-catalog changes actually propagate to owner-facing pages.
+- Make requested defaults truly app-wide instead of only affecting one gym or only new rows.
+- Remove noisy browser-console errors caused by stale optional media.
+- Keep commits flowing automatically after a completed batch.
+
+### C. Branch / Multi-Location Work Completed Earlier in This Chat
+- A per-branch system was implemented so owners can switch operational scope instead of seeing one blended gym-wide view everywhere.
+- Branch-aware behavior was carried into dashboard, leads, and billing-related owner flows.
+- Branch-specific billing copy and owner switchers were added so the active scope is obvious.
+- The core rule established here is: owner can see all branches, staff stays locked to assigned branch, and read/write scope must go through the branch helpers rather than page-local filtering.
+
+### D. Billing Catalog / Test Drive Work Completed Earlier in This Chat
+- Superadmin billing catalog editing was improved.
+- Test Drive became removable from the live catalog.
+- The rule established from that work: Basic, Growth, and Pro are the stable live plans; Test Drive is optional QA catalog state controlled from superadmin.
+
+### E. Phase 4 Batch Completed in This Chat (`df374a8`)
+The following user-requested items were completed as one coordinated batch:
+
+1. Dashboard action spacing
+- The dashboard Need Attention / action section had visible empty space compared with the Desk Pulse panel.
+- Fallback operational recommendation rows were added so the section stays visually filled instead of collapsing after only a few rows.
+
+2. Staff add-form autofill cleanup
+- Browser autofill was putting email/password values into the Staff & Roles add form by default.
+- Anti-autofill trap inputs and explicit autocomplete handling were added so the form opens blank.
+
+3. Delete staff instead of activate/deactivate
+- Frontend action changed from activate/deactivate to delete.
+- Backend owner-only delete endpoint was added in `routes/users.js`.
+- Delete rejects invalid IDs, blocks deleting the owner account, and returns a conflict if protected foreign-key references still exist.
+
+4. Global defaults instead of one-gym behavior
+- Bulk messaging default was made globally ON.
+- Member online collection default was made globally ON.
+- Member collection connect mode default was switched to `PARTNER` globally.
+- These were implemented as schema-default and existing-row backfill changes, not just UI defaults.
+- Duplicate helpers in both `routes/settings.js` and `routes/memberships.js` were updated so the behavior is actually consistent app-wide.
+
+5. Settings cleanup
+- Security tab/page was removed from owner Settings.
+- Reduce Motion and Compact Layout were removed from Interface Preferences.
+- Runtime normalization now forces those removed interface settings off, so old saved values cannot keep affecting the app.
+- Dark mode remains the only interface toggle.
+
+6. Peak-analysis default
+- Peak analysis default range was changed from `today` to `7D` in both Insights and Attendance.
+
+7. POS plan gating
+- POS access is now limited to Growth and Pro only.
+- Backend gating was added in `routes/finance.js`.
+- Frontend gating was added in `frontend/src/PaymentsPage.jsx`.
+- Auth payloads were updated to expose `saas_plan` on the current user so frontend gating has the right plan state immediately.
+
+### F. Current Follow-Up Completed in This Turn
+This follow-up turn addressed two remaining problems after `df374a8`:
+
+1. Hidden Test Drive still appearing on a gym currently on Test Drive
+- Root cause: the owner settings billing page was prepending the current hidden plan back into the visible card list.
+- Fix: owner-facing billing now respects the live `plan_order` globally, while the settings API can still include current-plan metadata when the current plan is hidden.
+- Result: a gym still on Test Drive can keep its billing state internally, but Test Drive no longer appears as a visible upgrade/renewal card after superadmin removes it from the live catalog.
+
+2. Browser console errors from missing profile-image files
+- Root cause: old DB rows referenced profile filenames that no longer exist under `/uploads/profiles`.
+- Frontend `img onError` handlers hid the broken image visually but could not stop network `404` errors from appearing in DevTools.
+- Fix: the server now returns a placeholder SVG for missing valid profile-image requests under `/uploads/profiles/*`.
+- Result: profile-image failures degrade cleanly without polluting the console across the app.
+
+### G. Validation Done During This Chat
+- Frontend production build was run repeatedly with `npm --prefix frontend run build` and passed after the major batches.
+- Backend syntax checks were run with `node --check` on touched files such as `server.js`, `routes/settings.js`, `routes/memberships.js`, `routes/member.js`, `routes/users.js`, `routes/finance.js`, `routes/auth.js`, and `utils/platformSettings.js`.
+- A serializer sanity check confirmed the intended behavior for hidden Test Drive:
+  - visible `plan_order` excludes `test`,
+  - serialized `plans` can still include `test` metadata when the current gym is on that plan.
+
+### H. Collaboration Style Reinforced in This Chat
+- The user expects completed fixes, not partial analysis.
+- Commits and pushes should happen automatically after a finished batch.
+- Layout changes should be avoided unless specifically requested.
+- When the user says something must apply globally, the fix must be audited for platform scope, schema defaults, existing-gym backfills, and duplicate helper logic.
+- Console noise matters. Optional broken media should be fixed at the source, not treated as acceptable because the UI visually falls back.
+
+### I. Recurring Errors / Pitfalls Future Chats Must Remember
+- **Hidden-plan reappearance bug:** do not reinsert hidden current plans into owner-facing billing card order.
+- **Duplicated default helpers:** check both `routes/settings.js` and `routes/memberships.js` for member-payment-related defaults.
+- **Profile-image 404 spam:** missing uploads must never return hard `404`s to the frontend when the asset is optional.
+- **Razorpay test-vs-live mismatch:** invisible payment links in dashboard issues often come from test-mode server keys.
+- **Owner-facing billing visibility bugs:** inspect `platform_settings.billing_config`, then `/api/settings`, then `SettingsPage.jsx` visible plan ordering logic.

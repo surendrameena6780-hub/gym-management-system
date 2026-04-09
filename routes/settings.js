@@ -1084,7 +1084,7 @@ router.get('/', auth, async (req, res) => {
                 interface_compact_mode: false,
                 interface_dark_mode: gym.interface_dark_mode,
             },
-            billing_catalog: serializeBillingConfig(billingConfig, { includeAllPlans: true }),
+            billing_catalog: serializeBillingConfig(billingConfig, { includeCurrentPlan: gym.current_plan }),
             effective_limits: effectiveLimits,
             support_profile: {
                 whatsapp: gym.whatsapp,

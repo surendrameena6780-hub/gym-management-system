@@ -379,12 +379,16 @@ const getVisibleBillingPlanOrder = (billingConfig, { includeTest = true } = {}) 
     return normalizedConfig.plan_order.filter((planId) => includeTest || planId !== 'test');
 };
 
-const serializeBillingConfig = (value, { includeTest = true, includeAllPlans = false } = {}) => {
+const serializeBillingConfig = (value, { includeTest = true, includeAllPlans = false, includeCurrentPlan = null } = {}) => {
     const billingConfig = normalizeBillingConfig(value);
     const visiblePlanOrder = getVisibleBillingPlanOrder(billingConfig, { includeTest });
+    const currentPlanId = normalizePlanId(includeCurrentPlan, 'basic');
     const serializedPlanIds = includeAllPlans
         ? BILLING_PLAN_ORDER
-        : visiblePlanOrder;
+        : Array.from(new Set([
+            ...visiblePlanOrder,
+            currentPlanId,
+        ].filter((planId) => BILLING_PLAN_ORDER.includes(planId))));
     return {
         plan_order: visiblePlanOrder,
         addon_order: [...billingConfig.addon_order],
