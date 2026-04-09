@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { 
   Search, Filter, Download, Plus, DollarSign, 
@@ -308,7 +308,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const animatedPendingDues  = useCountUp(parseFloat(filteredStats.pending_dues  || 0));
 
   const [searchTerm, setSearchTerm] = useState('');
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const normalizedSearchTerm = searchTerm.trim();
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [activeFilter, setActiveFilter] = useState(defaultFilter || 'All');
 
@@ -320,6 +320,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [memberHistory, setMemberHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [renewalContext, setRenewalContext] = useState(null);
+  const [renewalContextLoading, setRenewalContextLoading] = useState(false);
   const [dueModalPayment, setDueModalPayment] = useState(null);
   const [dueFormData, setDueFormData] = useState({ amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
   const [dueSubmitting, setDueSubmitting] = useState(false);
@@ -338,6 +340,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   });
 
   const dueRazorpayPollBusyRef = useRef(false);
+  const ledgerRequestIdRef = useRef(0);
   const fetchDataRef = useRef(null);
   const checkDueRazorpayStatusRef = useRef(null);
   const dueResumeStateRef = useRef({
@@ -391,7 +394,6 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [posEditingProduct, setPosEditingProduct] = useState(null);
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [posMenuOpenId, setPosMenuOpenId] = useState(null);
-  const [posDeleteConfirmId, setPosDeleteConfirmId] = useState(null);
   const [showRecentBills, setShowRecentBills] = useState(false);
 
   const financeOverviewParams = useMemo(() => {
@@ -762,15 +764,40 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     finally { setPosProductSaving(false); }
   };
 
-  const handleDeletePosProduct = async (productId) => {
-    try {
-      await axios.delete(`/api/finance/pos/products/${productId}`, { headers: { 'x-auth-token': token } });
-      toast?.('Product deleted', 'success');
-      setPosDeleteConfirmId(null);
-      setPosMenuOpenId(null);
-      fetchPosProducts();
-    } catch { toast?.('Failed to delete product', 'error'); }
-  };
+  const handleDeletePosProduct = useCallback(async (product) => {
+    if (!product?.id) return;
+
+    const runDelete = async () => {
+      try {
+        await axios.delete(`/api/finance/pos/products/${product.id}`, {
+          headers: { 'x-auth-token': token },
+          params: branchParams,
+        });
+        toast?.('Product deleted', 'success');
+        setPosMenuOpenId(null);
+        fetchPosProducts();
+      } catch (err) {
+        toast?.(err?.response?.data?.error || 'Failed to delete product', 'error');
+      }
+    };
+
+    const confirmMessage = `Delete ${product.name || 'this product'} from the POS catalog? Existing sales history will stay, but this product will no longer appear for checkout.`;
+
+    if (showConfirm) {
+      showConfirm({
+        title: 'Delete Product',
+        message: confirmMessage,
+        confirmLabel: 'Delete Product',
+        variant: 'danger',
+        onConfirm: runDelete,
+      });
+      return;
+    }
+
+    if (window.confirm(confirmMessage)) {
+      await runDelete();
+    }
+  }, [branchParams, fetchPosProducts, showConfirm, toast, token]);
 
   const openEditProduct = (product) => {
     setPosEditingProduct(product);
@@ -1140,6 +1167,9 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   }, [branchParams, token]);
 
   const loadLedger = useCallback(async () => {
+    const requestId = ledgerRequestIdRef.current + 1;
+    ledgerRequestIdRef.current = requestId;
+
     try {
       const res = await axios.get('/api/payments', {
         headers: { 'x-auth-token': token },
@@ -1147,7 +1177,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           paginate: true,
           page: ledgerPagination.page,
           limit: ledgerPagination.limit,
-          search: deferredSearchTerm || undefined,
+          search: normalizedSearchTerm || undefined,
           filter: activeFilter,
           from: financeOverviewParams.from,
           to: financeOverviewParams.to,
@@ -1159,16 +1189,25 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         ...payment,
         profile_pic: normalizeProfileImageUrl(payment?.profile_pic),
       }));
+
+      if (requestId !== ledgerRequestIdRef.current) {
+        return;
+      }
+
       setLedgerPayments(ledgerData);
       setLedgerPagination((prev) => ({
         ...prev,
         ...(res.data?.pagination || {}),
       }));
     } catch (err) {
+      if (requestId !== ledgerRequestIdRef.current) {
+        return;
+      }
+
       reportClientError('Payments load ledger', err);
       setLedgerPayments([]);
     }
-  }, [activeFilter, branchParams, deferredSearchTerm, financeOverviewParams.from, financeOverviewParams.to, ledgerPagination.limit, ledgerPagination.page, token]);
+  }, [activeFilter, branchParams, financeOverviewParams.from, financeOverviewParams.to, ledgerPagination.limit, ledgerPagination.page, normalizedSearchTerm, token]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -1213,11 +1252,11 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   useEffect(() => {
     if (!token || !isActive) return;
     loadLedger();
-  }, [activeFilter, deferredSearchTerm, isActive, ledgerPagination.limit, ledgerPagination.page, loadLedger, token]);
+  }, [activeFilter, isActive, ledgerPagination.limit, ledgerPagination.page, loadLedger, token]);
 
   useEffect(() => {
     setLedgerPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
-  }, [activeFilter, deferredSearchTerm, financeOverviewParams.from, financeOverviewParams.to]);
+  }, [activeFilter, financeOverviewParams.from, financeOverviewParams.to, normalizedSearchTerm]);
 
   useEffect(() => {
     setActiveFilter(defaultFilter || 'All');
@@ -1261,6 +1300,47 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     loadMemberOptions(memberSearch);
   }, [loadMemberOptions, memberSearch, showModal, token]);
 
+  useEffect(() => {
+    if (!showModal || !token || !formData.user_id || !formData.plan_id) {
+      setRenewalContext(null);
+      setRenewalContextLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadRenewalContext = async () => {
+      setRenewalContextLoading(true);
+      try {
+        const res = await axios.get(`/api/payments/renewal-context/${formData.user_id}`, {
+          headers: { 'x-auth-token': token },
+          params: {
+            plan_id: formData.plan_id,
+            ...branchParams,
+          },
+        });
+
+        if (!cancelled) {
+          setRenewalContext(extractObject(res.data, null));
+        }
+      } catch (_err) {
+        if (!cancelled) {
+          setRenewalContext(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setRenewalContextLoading(false);
+        }
+      }
+    };
+
+    loadRenewalContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchParams, formData.plan_id, formData.user_id, showModal, token]);
+
   const handleRecordPayment = async (e) => {
     if (e) e.preventDefault();
     if (recordSubmitting) return;
@@ -1271,16 +1351,22 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         branch_id: branchScopeValue,
         payment_mode: (formData.transaction_id && formData.transaction_id.trim() !== "") ? "Online" : formData.payment_mode
       };
-      await axios.post('/api/payments/record', finalPayload, { headers: { 'x-auth-token': token } });
+      const res = await axios.post('/api/payments/record', finalPayload, { headers: { 'x-auth-token': token } });
+      const dueResolution = extractObject(res.data?.plan_change_due_resolution, null);
       setShowModal(false);
       setMemberSearch('');
       setShowMemberDropdown(false);
+      setRenewalContext(null);
       setFormData({ user_id: '', plan_id: '', amount_paid: '', total_amount: '', payment_mode: 'Online', transaction_id: '', notes: '' });
       await refreshAllData();
       window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'payments' } }));
-      toast?.("Payment recorded successfully!", "success");
-    } catch (_err) {
-      toast?.("Error recording payment. Please try again.", "error");
+      if (dueResolution?.removed_count > 0) {
+        toast?.(`Payment recorded. Removed ${dueResolution.removed_count} recent previous-plan due${dueResolution.removed_count > 1 ? 's' : ''}.`, 'success');
+      } else {
+        toast?.('Payment recorded successfully!', 'success');
+      }
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Error recording payment. Please try again.', 'error');
     } finally {
       setRecordSubmitting(false);
     }
@@ -1313,7 +1399,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const handlePlanSelect = (e) => {
     const planId = e.target.value;
     const selectedPlan = plans.find(p => p.id === parseInt(planId));
-    setFormData({ ...formData, plan_id: planId, total_amount: selectedPlan ? selectedPlan.price : '' });
+    setFormData((prev) => ({ ...prev, plan_id: planId, total_amount: selectedPlan ? selectedPlan.price : '' }));
   };
 
   const openReceipt = useCallback(async (payment) => {
@@ -2554,7 +2640,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
       {/* ═══════ POS TAB ═══════ */}
       {financeTab === 'pos' && (
-        <div ref={posCatalogRef} className="space-y-4 scroll-mt-28 min-h-[400px]" onClick={() => { setPosMenuOpenId(null); setPosDeleteConfirmId(null); }}>
+        <div ref={posCatalogRef} className="space-y-4 scroll-mt-28 min-h-[400px]" onClick={() => { setPosMenuOpenId(null); }}>
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
             {/* ── LEFT: Catalog ── */}
             <div className="space-y-4">
@@ -2624,19 +2710,13 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                               <MoreVertical size={14} />
                             </button>
                             {posMenuOpenId === p.id && (
-                              <div className="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-xl border border-slate-100 z-20 overflow-hidden">
-                                <button type="button" onClick={() => openEditProduct(p)} className="w-full text-left px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                              <div className="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-xl border border-slate-100 z-20 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); openEditProduct(p); }} className="w-full text-left px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2">
                                   <Edit3 size={12} /> Edit
                                 </button>
-                                {posDeleteConfirmId === p.id ? (
-                                  <button type="button" onClick={() => handleDeletePosProduct(p.id)} className="w-full text-left px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-2">
-                                    <Trash2 size={12} /> Confirm Delete
-                                  </button>
-                                ) : (
-                                  <button type="button" onClick={() => setPosDeleteConfirmId(p.id)} className="w-full text-left px-3 py-2.5 text-xs font-bold text-red-500 hover:bg-red-50 flex items-center gap-2">
-                                    <Trash2 size={12} /> Delete
-                                  </button>
-                                )}
+                                <button type="button" onClick={(e) => { e.stopPropagation(); void handleDeletePosProduct(p); }} className="w-full text-left px-3 py-2.5 text-xs font-bold text-red-500 hover:bg-red-50 flex items-center gap-2">
+                                  <Trash2 size={12} /> Delete
+                                </button>
                               </div>
                             )}
                           </div>
@@ -2901,7 +2981,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div><h2 className="text-xl font-black text-slate-900">Record Transaction</h2><p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Log a manual payment</p></div>
-              <button onClick={() => { setShowModal(false); setMemberSearch(''); setShowMemberDropdown(false); }} className="bg-white p-2 rounded-full text-slate-400 hover:text-slate-900 shadow-sm transition-all"><X size={20} /></button>
+              <button onClick={() => { setShowModal(false); setMemberSearch(''); setShowMemberDropdown(false); setRenewalContext(null); }} className="bg-white p-2 rounded-full text-slate-400 hover:text-slate-900 shadow-sm transition-all"><X size={20} /></button>
             </div>
             <form onSubmit={handleRecordPayment} className="app-modal-scroll p-6 space-y-5">
               {/* Member searchable combobox */}
@@ -2920,7 +3000,10 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                         const nextValue = e.target.value;
                         setMemberSearch(nextValue);
                         setShowMemberDropdown(true);
-                        if (!nextValue) setFormData(f => ({...f, user_id: ''}));
+                        if (!nextValue) {
+                          setFormData((prev) => ({ ...prev, user_id: '', plan_id: '', total_amount: '' }));
+                          setRenewalContext(null);
+                        }
                         loadMemberOptions(nextValue);
                       }}
                     />
@@ -2946,6 +3029,44 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                 <input type="text" required className="sr-only" readOnly value={formData.user_id} />
               </div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Select Plan</label><div className="relative"><select required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none appearance-none" value={formData.plan_id} onChange={handlePlanSelect}><option value="">-- Choose Plan --</option>{plans.map(p => (<option key={p.id} value={p.id}>{p.name} - ₹{p.price}</option>))}</select><ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} /></div></div>
+              {renewalContextLoading ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-[11px] font-bold text-slate-500">Checking previous-plan dues...</p>
+                </div>
+              ) : null}
+              {renewalContext?.removed_count > 0 ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center text-amber-600 shrink-0 border border-amber-100">
+                      <AlertCircle size={16} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-amber-800">Recent previous-plan due will be removed</p>
+                      <p className="text-[12px] font-semibold text-amber-700 mt-1 leading-relaxed">
+                        This member has {renewalContext.removed_count} pending previous-plan due{renewalContext.removed_count > 1 ? 's' : ''} from the last {renewalContext.grace_days || 15} days. When you activate this new plan, GymVault will remove those older dues automatically.
+                      </p>
+                      <p className="text-[11px] font-bold text-amber-700/80 mt-2">
+                        {renewalContext.removable_pending_dues?.map((entry) => `${entry.plan_name || 'Previous plan'} · ₹${Number(entry.amount_due || 0).toLocaleString()}`).join(' • ')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {renewalContext?.retained_count > 0 ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center text-rose-600 shrink-0 border border-rose-100">
+                      <Clock size={16} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-rose-800">Older previous-plan due will stay</p>
+                      <p className="text-[12px] font-semibold text-rose-700 mt-1 leading-relaxed">
+                        {renewalContext.retained_count} previous-plan due{renewalContext.retained_count > 1 ? 's are' : ' is'} older than {renewalContext.grace_days || 15} days, so they will remain visible in the ledger.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Total Amount (₹)</label><input type="number" readOnly className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none cursor-not-allowed" value={formData.total_amount} /></div>
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Amount Paid (₹)</label><input type="number" required className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500/20" placeholder="0" value={formData.amount_paid} onChange={e => setFormData({...formData, amount_paid: e.target.value})} /></div>

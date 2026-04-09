@@ -28,6 +28,7 @@ router.use(auth, saasMiddleware, requireOwner);
 router.use(branchSchemaMiddleware);
 
 const DUE_ZERO_THRESHOLD = 0.009;
+const PLAN_CHANGE_DUE_GRACE_DAYS = 15;
 const COLLECTION_LINK_TTL_SECONDS = Math.max(1800, parseInt(process.env.RAZORPAY_COLLECTION_LINK_TTL_SECONDS || '86400', 10));
 const PAYMENT_DEDUPE_WINDOW_SECONDS = Math.max(10, parseInt(process.env.PAYMENT_DEDUPE_WINDOW_SECONDS || '45', 10));
 const IS_PRODUCTION_RUNTIME = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
@@ -233,6 +234,112 @@ const appendNote = (existingNotes, newNote) => {
     const incoming = String(newNote || '').trim();
     if (!incoming) return current;
     return current ? `${current}\n${incoming}` : incoming;
+};
+
+const PLAN_CHANGE_AUTO_RESOLVE_NOTE = `Auto-cleared remaining due because the member switched plans within ${PLAN_CHANGE_DUE_GRACE_DAYS} days.`;
+
+const buildPlanChangeDueSummary = (context = {}) => {
+    const removable = Array.isArray(context.removable_pending_dues) ? context.removable_pending_dues : [];
+    const retained = Array.isArray(context.retained_pending_dues) ? context.retained_pending_dues : [];
+
+    return {
+        grace_days: PLAN_CHANGE_DUE_GRACE_DAYS,
+        removed_count: removable.length,
+        removed_total_due: roundMoney(removable.reduce((sum, entry) => sum + Number(entry.amount_due || 0), 0)),
+        retained_count: retained.length,
+        retained_total_due: roundMoney(retained.reduce((sum, entry) => sum + Number(entry.amount_due || 0), 0)),
+        removable_pending_dues: removable,
+        retained_pending_dues: retained,
+    };
+};
+
+const getPlanChangeDueContext = async (db, { gymId, userId, nextPlanId }) => {
+    if (!gymId || !userId || !nextPlanId) {
+        return buildPlanChangeDueSummary();
+    }
+
+    const pendingResult = await db.query(
+        `SELECT
+            p.id,
+            p.plan_id,
+            p.invoice_id,
+            p.amount_paid,
+            p.amount_due,
+            p.total_amount,
+            p.notes,
+            p.payment_date,
+            COALESCE(pl.name, 'Membership') AS plan_name
+         FROM payments p
+         LEFT JOIN plans pl ON pl.id = p.plan_id AND pl.gym_id = p.gym_id
+         WHERE p.gym_id = $1
+           AND p.user_id = $2
+           AND p.deleted_at IS NULL
+           AND LOWER(COALESCE(p.status, '')) = 'pending'
+           AND COALESCE(p.amount_due, 0) > $4
+           AND COALESCE(p.plan_id, 0) <> $3
+         ORDER BY p.payment_date DESC, p.id DESC`,
+        [gymId, userId, nextPlanId, DUE_ZERO_THRESHOLD]
+    );
+
+    const graceCutoffMs = Date.now() - (PLAN_CHANGE_DUE_GRACE_DAYS * 24 * 60 * 60 * 1000);
+    const removable = [];
+    const retained = [];
+
+    pendingResult.rows.forEach((entry) => {
+        const paymentDate = new Date(entry.payment_date);
+        const normalizedEntry = {
+            id: entry.id,
+            plan_id: entry.plan_id,
+            plan_name: entry.plan_name,
+            invoice_id: entry.invoice_id,
+            amount_paid: roundMoney(entry.amount_paid || 0),
+            amount_due: roundMoney(entry.amount_due || 0),
+            total_amount: roundMoney(entry.total_amount || 0),
+            notes: entry.notes || '',
+            payment_date: entry.payment_date,
+        };
+
+        if (!Number.isNaN(paymentDate.getTime()) && paymentDate.getTime() >= graceCutoffMs) {
+            removable.push(normalizedEntry);
+            return;
+        }
+
+        retained.push(normalizedEntry);
+    });
+
+    return buildPlanChangeDueSummary({
+        removable_pending_dues: removable,
+        retained_pending_dues: retained,
+    });
+};
+
+const resolveRecentPlanChangeDues = async (db, { gymId, userId, nextPlanId }) => {
+    const dueContext = await getPlanChangeDueContext(db, { gymId, userId, nextPlanId });
+
+    for (const entry of dueContext.removable_pending_dues) {
+        if (roundMoney(entry.amount_paid || 0) <= DUE_ZERO_THRESHOLD) {
+            await db.query(
+                `UPDATE payments
+                 SET deleted_at = NOW(),
+                     notes = $1
+                 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
+                [appendNote(entry.notes, PLAN_CHANGE_AUTO_RESOLVE_NOTE), entry.id, gymId]
+            );
+            continue;
+        }
+
+        await db.query(
+            `UPDATE payments
+             SET amount_due = 0,
+                 total_amount = amount_paid,
+                 status = 'Completed',
+                 notes = $1
+             WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
+            [appendNote(entry.notes, PLAN_CHANGE_AUTO_RESOLVE_NOTE), entry.id, gymId]
+        );
+    }
+
+    return dueContext;
 };
 
 const buildAutoCollectionReference = (paymentId) => `DUE-${paymentId}-${Date.now().toString().slice(-6)}`;
@@ -1000,6 +1107,31 @@ router.get('/', async (req, res) => {
     }
 });
 
+router.get('/renewal-context/:member_id', async (req, res) => {
+    try {
+        const memberId = ensureInteger(req.params?.member_id, { field: 'member_id', required: true, min: 1 });
+        const planId = ensureInteger(req.query?.plan_id, { field: 'plan_id', required: true, min: 1 });
+        const gym_id = req.user.gym_id;
+
+        const memberBranchId = await getMemberBranchId(pool, gym_id, memberId);
+        if (!memberBranchId) {
+            return res.status(404).json({ error: 'Member not found.' });
+        }
+
+        ensureBranchAccess(await resolveBranchReadScope(pool, req), memberBranchId);
+
+        const context = await getPlanChangeDueContext(pool, {
+            gymId: gym_id,
+            userId: memberId,
+            nextPlanId: planId,
+        });
+
+        return res.json(context);
+    } catch (err) {
+        return sendPaymentRouteError(res, err, 'RENEWAL CONTEXT ERROR:');
+    }
+});
+
 router.post('/record', async (req, res) => {
     let client;
 
@@ -1085,6 +1217,12 @@ router.post('/record', async (req, res) => {
             ]
         );
 
+        const planChangeDueResolution = await resolveRecentPlanChangeDues(client, {
+            gymId: gym_id,
+            userId,
+            nextPlanId: planId,
+        });
+
         await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [userId, gym_id]);
 
         const days = planResult.rows[0].duration_days || 30;
@@ -1110,7 +1248,11 @@ router.post('/record', async (req, res) => {
         );
 
         await client.query('COMMIT');
-        res.json({ msg: 'Payment Recorded!', payment: newPayment.rows[0] });
+        res.json({
+            msg: 'Payment Recorded!',
+            payment: newPayment.rows[0],
+            plan_change_due_resolution: planChangeDueResolution,
+        });
     } catch (err) {
         if (client) {
             await client.query('ROLLBACK').catch(() => {});
