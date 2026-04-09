@@ -1651,6 +1651,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       });
     })();
 
+    const maxActionRows = 4;
     const priorityRank = { P0: 0, P1: 1, P2: 2 };
     const actionCandidates = [subscriptionWarning, ...aiCandidates]
       .filter(Boolean)
@@ -1659,10 +1660,44 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         if (rankDiff !== 0) return rankDiff;
         return Number(b.score || 0) - Number(a.score || 0);
       });
+    const setupFillCandidates = actionCandidates.length > 0
+      ? setupActionRows.map((row, index) => buildRecommendation({
+        id: row.id,
+        title: row.title,
+        reason: row.description,
+        count: 1,
+        impact: Math.round(Math.max(avgPlanPrice, avgPlanPrice * (1.1 - Math.min(index, 2) * 0.08))),
+        confidence: Math.max(68, 84 - index * 4),
+        urgency: setup.progress < 50 ? 'Today' : 'This week',
+        priority: 'P2',
+        cta: row.cta,
+        sub: row.id === 'SETUP_WHATSAPP'
+          ? 'Unlock reminder automation'
+          : row.id === 'SETUP_PAYMENTS'
+            ? 'Start collecting digitally'
+            : row.id === 'SETUP_MEMBER'
+              ? 'Start member operations'
+              : row.id === 'SETUP_PLAN'
+                ? 'Finish your offer catalog'
+                : 'Finish business setup',
+        action: row.action,
+      }))
+      : [];
     const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
-    const mergedActionRows = actionRequiredRows.length > 0
-      ? actionRequiredRows.slice(0, 4)
-      : actionCandidates.slice(0, 4);
+    const mergedActionRows = [];
+    const seenActionIds = new Set();
+    const pushUniqueRows = (rows) => {
+      rows.forEach((row) => {
+        if (!row || mergedActionRows.length >= maxActionRows || seenActionIds.has(row.id)) {
+          return;
+        }
+        mergedActionRows.push(row);
+        seenActionIds.add(row.id);
+      });
+    };
+    pushUniqueRows(actionRequiredRows);
+    pushUniqueRows(setupFillCandidates);
+    pushUniqueRows(actionCandidates.filter((item) => item.priority !== 'P0' && item.priority !== 'P1'));
     const urgentCount = actionRequiredRows.length;
 
     return {
