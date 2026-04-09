@@ -272,9 +272,29 @@ const normalizeMemberRecord = (member) => ({
   profile_pic: normalizeProfileImageUrl(member?.profile_pic),
 });
 
+const unwrapMembersApiData = (payload) => {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return unwrapMembersApiData(payload.data);
+  }
+  return payload && typeof payload === 'object' ? payload : {};
+};
+
 const getLatestPaymentDate = (member) => member?.latest_payment_date || (Array.isArray(member?.payment_history) ? member.payment_history[0]?.payment_date : null) || null;
 
 const getEffectiveVisitSource = (member) => member?.last_visit || getLatestPaymentDate(member) || null;
+
+const getWholeDayDiffFromDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const today = new Date();
+  return Math.floor(
+    (Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+      - Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()))
+      / (1000 * 60 * 60 * 24)
+  );
+};
 
 const SuccessModal = ({ memberName, onClose, onDownload }) => {
   const [countdown, setCountdown] = useState(4);
@@ -349,13 +369,22 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showFreezeModal, setShowFreezeModal] = useState(false);
+  const [showReminderModal, setShowReminderModal] = useState(false);
 
   const [selectedMember, setSelectedMember] = useState(null);
+  const [reminderTargetMember, setReminderTargetMember] = useState(null);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [addSelectedPlanId, setAddSelectedPlanId] = useState('');
   const [addFormData, setAddFormData] = useState(() => ({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }));
   const [editFormData, setEditFormData] = useState(() => ({ id: '', full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }));
   const [freezeFormData, setFreezeFormData] = useState({ freeze_end_date: '', freeze_reason: '' });
+  const [reminderTemplates, setReminderTemplates] = useState([]);
+  const [reminderTemplatesLoading, setReminderTemplatesLoading] = useState(false);
+  const [selectedReminderTemplateKey, setSelectedReminderTemplateKey] = useState('');
+  const [reminderPreviewPayload, setReminderPreviewPayload] = useState(null);
+  const [reminderPreviewLoading, setReminderPreviewLoading] = useState(false);
+  const [reminderPreviewError, setReminderPreviewError] = useState('');
+  const [reminderSending, setReminderSending] = useState(false);
 
   // Lifecycle drawer state
   const [drawerTab, setDrawerTab] = useState('profile');
@@ -1294,26 +1323,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     }
   };
 
-  const sendWhatsAppReminder = async (member, type) => {
-    if (!member?.id) {
-      toast?.('Member details are incomplete for this reminder.', 'warning');
-      return;
-    }
-
-    const templateKey = type === 'reminder'
-      ? 'EXPIRING_SOON'
-      : type === 'followup'
-        ? 'INACTIVE'
-        : type === 'expired'
-          ? 'EXPIRED'
-          : undefined;
-
-    await confirmAndSendReminders({
-      memberIds: [member.id],
-      templateKey,
-      loadingSetter: setReminderLoadingKey,
-      loadingValue: `member-reminder-${member.id}`,
-    });
+  const sendWhatsAppReminder = async (member) => {
+    await openReminderComposer(member);
   };
 
   const handleCall = (phoneNumber) => window.open(`tel:${phoneNumber}`, '_self');
@@ -1491,6 +1502,162 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return { label: 'ACTIVE', color: 'bg-emerald-400', text: 'text-emerald-500' };
   };
 
+  const resolveReminderDefaultTemplateKey = (member, templates) => {
+    const normalizedTemplates = Array.isArray(templates) ? templates : [];
+    const availableKeys = new Set(
+      normalizedTemplates
+        .map((template) => String(template?.template_key || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    if (availableKeys.size === 0) return '';
+
+    const statusLabel = getStatusInfo(member).label;
+    const amountDue = Number(member?.amount_due || 0);
+    const daysSinceVisit = getWholeDayDiffFromDate(getEffectiveVisitSource(member));
+
+    const candidateKeys = statusLabel === 'EXPIRED' || statusLabel === 'EXPIRING SOON'
+      ? ['RENEWAL_REMINDER', statusLabel === 'EXPIRED' ? 'EXPIRED' : 'EXPIRING_SOON', 'PAYMENT_DUE', 'SALES_OFFER']
+      : statusLabel === 'UNPAID' || amountDue > 0
+        ? ['PAYMENT_DUE', 'UNPAID', 'SALES_OFFER', 'RENEWAL_REMINDER']
+        : statusLabel === 'INACTIVE' || (Number.isFinite(daysSinceVisit) && daysSinceVisit >= 7)
+          ? ['INACTIVE', 'SALES_OFFER', 'HOLIDAY', 'PAYMENT_DUE']
+          : ['SALES_OFFER', 'HOLIDAY', 'INACTIVE', 'PAYMENT_DUE'];
+
+    return candidateKeys.find((templateKey) => availableKeys.has(templateKey)) || normalizedTemplates[0]?.template_key || '';
+  };
+
+  const closeReminderModal = useCallback(() => {
+    setShowReminderModal(false);
+    setReminderTargetMember(null);
+    setSelectedReminderTemplateKey('');
+    setReminderPreviewPayload(null);
+    setReminderPreviewError('');
+    setReminderPreviewLoading(false);
+  }, []);
+
+  const loadReminderTemplates = useCallback(async () => {
+    if (reminderTemplates.length > 0) {
+      return reminderTemplates;
+    }
+
+    const response = await axios.get('/api/notifications/reminders/templates', {
+      headers: { 'x-auth-token': token },
+    });
+    const payload = unwrapMembersApiData(response.data);
+    const templates = Array.isArray(payload.templates)
+      ? payload.templates
+        .map((template) => ({
+          ...template,
+          template_key: String(template?.template_key || '').trim().toUpperCase(),
+          title: String(template?.title || template?.template_key || '').trim(),
+        }))
+        .filter((template) => template.template_key)
+      : [];
+
+    setReminderTemplates(templates);
+    return templates;
+  }, [reminderTemplates, token]);
+
+  const openReminderComposer = async (member) => {
+    if (!member?.id) {
+      toast?.('Member details are incomplete for this reminder.', 'warning');
+      return;
+    }
+
+    const loadingKey = `member-reminder-${member.id}`;
+
+    try {
+      setReminderLoadingKey(loadingKey);
+      setReminderTemplatesLoading(true);
+
+      const templates = await loadReminderTemplates();
+      if (templates.length === 0) {
+        toast?.('No approved WhatsApp reminder templates are available right now.', 'warning');
+        return;
+      }
+
+      setReminderTargetMember(member);
+      setReminderPreviewPayload(null);
+      setReminderPreviewError('');
+      setSelectedReminderTemplateKey(resolveReminderDefaultTemplateKey(member, templates));
+      setShowReminderModal(true);
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to load WhatsApp reminder templates.'), 'error');
+    } finally {
+      setReminderTemplatesLoading(false);
+      setReminderLoadingKey('');
+    }
+  };
+
+  useEffect(() => {
+    if (!showReminderModal || !reminderTargetMember?.id || !selectedReminderTemplateKey) {
+      setReminderPreviewPayload(null);
+      setReminderPreviewError('');
+      return undefined;
+    }
+
+    let isCancelled = false;
+    setReminderPreviewLoading(true);
+    setReminderPreviewPayload(null);
+    setReminderPreviewError('');
+
+    previewWhatsAppReminders({
+      token,
+      memberIds: [reminderTargetMember.id],
+      templateKey: selectedReminderTemplateKey,
+    })
+      .then((payload) => {
+        if (isCancelled) return;
+        setReminderPreviewPayload(payload);
+        if (!buildReminderPreviewDialog(payload)) {
+          setReminderPreviewError(getReminderPreviewBlockReason(payload) || 'No reminder can be sent for this member.');
+        }
+      })
+      .catch((error) => {
+        if (isCancelled) return;
+        setReminderPreviewPayload(null);
+        setReminderPreviewError(getApiErrorMessage(error, 'Failed to prepare WhatsApp reminder preview.'));
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setReminderPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedReminderTemplateKey, showReminderModal, reminderTargetMember, token]);
+
+  const sendSelectedReminder = async () => {
+    if (!reminderTargetMember?.id || !selectedReminderTemplateKey) {
+      toast?.('Choose a reminder template first.', 'warning');
+      return;
+    }
+
+    if (!buildReminderPreviewDialog(reminderPreviewPayload)) {
+      toast?.(reminderPreviewError || 'No reminder can be sent for this member.', 'warning');
+      return;
+    }
+
+    try {
+      setReminderSending(true);
+      const payload = await sendWhatsAppReminders({
+        token,
+        memberIds: [reminderTargetMember.id],
+        templateKey: selectedReminderTemplateKey,
+      });
+      const summary = summarizeReminderResult(payload, 'Reminder');
+      toast?.(summary.message, summary.tone);
+      closeReminderModal();
+    } catch (err) {
+      toast?.(getApiErrorMessage(err, 'Failed to queue WhatsApp reminder.'), 'error');
+    } finally {
+      setReminderSending(false);
+    }
+  };
+
   const canCheckMemberIn = (member) => {
     const label = getStatusInfo(member).label;
     return ['ACTIVE', 'INACTIVE', 'EXPIRING SOON'].includes(label);
@@ -1657,6 +1824,20 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     Inactive: memberSummary.inactive,
     Unpaid: memberSummary.unpaid,
   }), [memberSummary]);
+
+  const selectedReminderTemplate = reminderTemplates.find((template) => template.template_key === selectedReminderTemplateKey) || null;
+  const reminderPreviewItem = Array.isArray(reminderPreviewPayload?.preview_items)
+    ? reminderPreviewPayload.preview_items.find((item) => Number(item?.member_id) === Number(reminderTargetMember?.id))
+      || reminderPreviewPayload.preview_items[0]
+      || null
+    : null;
+  const canSendReminderFromModal = Boolean(
+    reminderTargetMember?.id
+    && selectedReminderTemplateKey
+    && reminderPreviewItem?.eligible
+    && !reminderPreviewLoading
+    && !reminderSending
+  );
 
   if (loading && members.length === 0) return <PageLoader className="min-h-[56vh]" />;
 
@@ -1854,7 +2035,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                           <div className="ml-auto flex max-w-[220px] flex-wrap justify-end items-center gap-1.5">
                             {canWritePayments && statusInfo.label === 'UNPAID' && <button type="button" aria-label={`Initiate plan for ${member.full_name}`} onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[82px] items-center justify-center gap-1 bg-purple-50 text-purple-600 px-2.5 py-1.5 rounded-lg border border-purple-100 text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} fill="currentColor" />} Initiate</button>}
                             {canWritePayments && (statusInfo.label === 'EXPIRED' || statusInfo.label === 'EXPIRING SOON') && <button type="button" aria-label={`Renew membership for ${member.full_name}`} onClick={() => openActivateModalWithFeedback(member, `member-${member.id}`)} className="inline-flex min-w-[76px] items-center justify-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1.5 rounded-lg border border-rose-100 text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all shadow-sm">{memberActionLoading === `member-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <RefreshCw size={10} />} Renew</button>}
-                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON' || statusInfo.label === 'EXPIRED') && <button type="button" aria-label={`Send reminder to ${member.full_name}`} onClick={() => sendWhatsAppReminder(member, statusInfo.label === 'INACTIVE' ? 'followup' : statusInfo.label === 'EXPIRED' ? 'expired' : 'reminder')} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex min-w-[84px] items-center justify-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
+                            {(statusInfo.label === 'INACTIVE' || statusInfo.label === 'EXPIRING SOON' || statusInfo.label === 'EXPIRED') && <button type="button" aria-label={`Send reminder to ${member.full_name}`} onClick={() => sendWhatsAppReminder(member)} disabled={reminderLoadingKey === `member-reminder-${member.id}`} className="inline-flex min-w-[84px] items-center justify-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-100 text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${member.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />} Remind</button>}
                             {canWriteAttendance && canCheckMemberIn(member) && <button type="button" aria-label={`Manual check-in for ${member.full_name}`} onClick={(e) => handleManualCheckIn(e, member.id)} title="Manual Check-In" className="p-1.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={13} /></button>}
                             {canWriteMembers && <button type="button" aria-label={`Edit ${member.full_name}`} onClick={(e) => { e.stopPropagation(); handleEditClick(member); }} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"><Edit2 size={13} /></button>}
                           </div>
@@ -1946,7 +2127,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button type="button" aria-label={`Call ${selectedMember.full_name}`} onClick={() => handleCall(selectedMember.phone)} className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm"><Phone size={10} fill="currentColor" /></button>
-                  <button type="button" aria-label={`Send WhatsApp reminder to ${selectedMember.full_name}`} onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />}</button>
+                  <button type="button" aria-label={`Send WhatsApp reminder to ${selectedMember.full_name}`} onClick={() => sendWhatsAppReminder(selectedMember)} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed">{reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={10} className="animate-spin" /> : <MessageSquare size={10} fill="currentColor" />}</button>
                 </div>
               </div>
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex items-center gap-2">
@@ -2173,7 +2354,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 {memberActionLoading === 'details-activate' ? <RefreshCw size={13} className="animate-spin" /> : <Zap size={13} fill="currentColor" />}{getStatusInfo(selectedMember).label === 'EXPIRED' || getStatusInfo(selectedMember).label === 'EXPIRING SOON' ? 'Renew' : 'Activate'}
               </button>
             )}
-            <button onClick={() => sendWhatsAppReminder(selectedMember, 'auto')} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="min-w-0 flex-1 px-2 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed">
+            <button onClick={() => sendWhatsAppReminder(selectedMember)} disabled={reminderLoadingKey === `member-reminder-${selectedMember.id}`} className="min-w-0 flex-1 px-2 py-2.5 bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed">
               {reminderLoadingKey === `member-reminder-${selectedMember.id}` ? <RefreshCw size={13} className="animate-spin" /> : <MessageSquare size={13} fill="currentColor" />} Remind
             </button>
             {canWriteMembers && <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedMember); }} className="min-w-0 flex-1 px-2 py-2.5 bg-slate-800 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 whitespace-nowrap hover:bg-slate-700 transition-all active:scale-95">
@@ -2188,6 +2369,119 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           </div>
         </>)}
       </div>
+
+      {showReminderModal && reminderTargetMember && (
+        <div className="app-modal-shell z-[75] bg-slate-900/70 backdrop-blur-md">
+          <div className="app-modal-panel w-full max-w-lg overflow-hidden rounded-[30px] border border-white/10 shadow-2xl animate-in zoom-in-95" style={{ background: 'linear-gradient(180deg, #182234 0%, #111827 100%)' }}>
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-300">
+                  <MessageSquare size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-white">Send Reminder</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-400">Pick any approved WhatsApp template for this member.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close reminder modal"
+                onClick={closeReminderModal}
+                disabled={reminderSending}
+                className="rounded-full p-2 text-slate-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="app-modal-scroll space-y-5 px-6 py-5">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Recipient</p>
+                <p className="mt-2 text-lg font-black text-white">{reminderTargetMember.full_name}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-400">{reminderTargetMember.phone || 'No phone saved'}</p>
+                <div className="mt-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                  {getStatusInfo(reminderTargetMember).label}
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="member-reminder-template" className="block text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
+                  Reminder Template
+                </label>
+                <select
+                  id="member-reminder-template"
+                  value={selectedReminderTemplateKey}
+                  onChange={(event) => setSelectedReminderTemplateKey(event.target.value)}
+                  disabled={reminderTemplatesLoading || reminderSending}
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm font-bold text-white outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/30 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {reminderTemplates.map((template) => (
+                    <option key={template.template_key} value={template.template_key} className="bg-slate-900 text-white">
+                      {template.title}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs font-semibold text-slate-400">
+                  Renewal Reminder is preselected only for expired and expiring-soon members. Active members default to a sales or re-engagement message instead.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Preview</p>
+                  {selectedReminderTemplate?.title ? (
+                    <span className="rounded-full border border-indigo-400/20 bg-indigo-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200">
+                      {selectedReminderTemplate.title}
+                    </span>
+                  ) : null}
+                </div>
+
+                {reminderTemplatesLoading || reminderPreviewLoading ? (
+                  <div className="flex items-center gap-3 py-10 text-slate-300">
+                    <RefreshCw size={16} className="animate-spin" />
+                    <span className="text-sm font-semibold">Preparing reminder preview...</span>
+                  </div>
+                ) : reminderPreviewError ? (
+                  <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm font-semibold text-amber-100">
+                    {reminderPreviewError}
+                  </div>
+                ) : reminderPreviewItem ? (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-sm font-semibold text-slate-400">
+                      Template: <span className="font-black text-white">{reminderPreviewItem.template_title || selectedReminderTemplate?.title || 'Selected template'}</span>
+                    </p>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="whitespace-pre-line text-sm font-semibold leading-7 text-slate-100">{reminderPreviewItem.message}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-10 text-sm font-semibold text-slate-400">Select a template to preview the message.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 border-t border-white/10 px-6 py-5">
+              <button
+                type="button"
+                onClick={closeReminderModal}
+                disabled={reminderSending}
+                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-black uppercase tracking-[0.18em] text-slate-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={sendSelectedReminder}
+                disabled={!canSendReminderFromModal}
+                className="rounded-2xl px-4 py-3 text-sm font-black uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', boxShadow: '0 10px 30px rgba(245,158,11,0.28)' }}
+              >
+                {reminderSending ? 'Sending...' : 'Send Reminder'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showEditModal && (
         <div className="app-modal-shell z-[60] bg-slate-900/60 backdrop-blur-sm">

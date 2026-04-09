@@ -281,22 +281,47 @@ const pickReminderTemplateCandidates = (member = {}, requestedTemplateKey = '') 
     const daysInactive = Number(member.days_inactive || 0);
 
     if (amountDue > 0 || membershipStatus === 'UNPAID') {
-        return ['PAYMENT_DUE', 'UNPAID', 'RENEWAL_REMINDER'];
+        return ['PAYMENT_DUE', 'UNPAID', 'SALES_OFFER', 'RENEWAL_REMINDER'];
     }
 
     if (membershipStatus === 'EXPIRED' || (Number.isFinite(daysToExpiry) && daysToExpiry < 0)) {
-        return ['EXPIRED', 'RENEWAL_REMINDER'];
+        return ['RENEWAL_REMINDER', 'EXPIRED'];
     }
 
     if (membershipStatus === 'ACTIVE' && Number.isFinite(daysToExpiry) && daysToExpiry <= 7) {
-        return ['EXPIRING_SOON', 'RENEWAL_REMINDER'];
+        return ['RENEWAL_REMINDER', 'EXPIRING_SOON'];
     }
 
     if (daysInactive >= 7) {
-        return ['INACTIVE', 'SALES_OFFER', 'RENEWAL_REMINDER'];
+        return ['INACTIVE', 'SALES_OFFER', 'HOLIDAY', 'RENEWAL_REMINDER'];
     }
 
-    return ['RENEWAL_REMINDER', 'EXPIRING_SOON', 'PAYMENT_DUE', 'INACTIVE', 'EXPIRED'];
+    return ['SALES_OFFER', 'HOLIDAY', 'INACTIVE', 'PAYMENT_DUE', 'RENEWAL_REMINDER', 'EXPIRING_SOON', 'EXPIRED'];
+};
+
+const getApprovedReminderTemplates = async (gymId) => {
+    const templateRes = await pool.query(
+        `SELECT
+            template_key,
+            title,
+            whatsapp_text,
+            whatsapp_template_name,
+            whatsapp_template_language,
+            whatsapp_template_status,
+            is_active
+         FROM gym_message_templates
+         WHERE gym_id = $1 AND is_active = TRUE
+         ORDER BY updated_at DESC, title ASC`,
+        [gymId]
+    );
+
+    return templateRes.rows
+        .map((template) => ({
+            ...template,
+            template_key: String(template.template_key || '').trim().toUpperCase(),
+        }))
+        .filter((template) => template.template_key && template.whatsapp_template_name)
+        .filter((template) => normalizeTemplateStatus(template.whatsapp_template_status) === 'APPROVED');
 };
 
 const pickApprovedTemplate = (templateMap, candidateKeys = []) => {
@@ -464,6 +489,30 @@ router.put('/read-all', auth, saasMiddleware, async (req, res) => {
 });
 
 // --- 4. PREVIEW DIRECT MEMBER REMINDERS ---
+router.get('/reminders/templates', auth, saasMiddleware, async (req, res) => {
+    try {
+        await ensureMessagingSchema();
+
+        if (!canSendManualReminder(req.user)) {
+            return fail(res, 403, 'FORBIDDEN_REMINDER_SEND', 'You do not have permission to view WhatsApp reminder templates.');
+        }
+
+        const gymId = req.user.gym_id;
+        const templates = await getApprovedReminderTemplates(gymId);
+
+        return ok(res, {
+            templates: templates.map((template) => ({
+                template_key: template.template_key,
+                title: template.title,
+                whatsapp_text: template.whatsapp_text,
+            })),
+        });
+    } catch (err) {
+        console.error('REMINDER TEMPLATES ERROR:', err.message);
+        return fail(res, 500, 'REMINDER_TEMPLATES_FETCH_FAILED', 'Failed to load WhatsApp reminder templates.');
+    }
+});
+
 router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
     try {
         await ensureMessagingSchema();
@@ -507,27 +556,8 @@ router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
             return fail(res, 400, 'REMINDER_LIMIT_EXCEEDED', `Select up to ${bulkLimit} members at a time for WhatsApp reminders.`);
         }
 
-        const templateRes = await pool.query(
-            `SELECT
-                template_key,
-                title,
-                whatsapp_text,
-                whatsapp_template_name,
-                whatsapp_template_language,
-                whatsapp_template_status,
-                is_active
-             FROM gym_message_templates
-             WHERE gym_id = $1 AND is_active = TRUE`,
-            [gymId]
-        );
-
-        const approvedTemplates = new Map();
-        for (const template of templateRes.rows) {
-            const templateKey = String(template.template_key || '').trim().toUpperCase();
-            if (!templateKey || !template.whatsapp_template_name) continue;
-            if (normalizeTemplateStatus(template.whatsapp_template_status) !== 'APPROVED') continue;
-            approvedTemplates.set(templateKey, template);
-        }
+        const approvedTemplateRows = await getApprovedReminderTemplates(gymId);
+        const approvedTemplates = new Map(approvedTemplateRows.map((template) => [template.template_key, template]));
 
         if (approvedTemplates.size === 0) {
             return fail(res, 400, 'NO_APPROVED_TEMPLATES', 'No approved WhatsApp templates are available. Approve a template in Settings first.');
@@ -607,27 +637,8 @@ router.post('/reminders/send', auth, saasMiddleware, reminderRequestLimiter, asy
             return fail(res, 400, 'REMINDER_LIMIT_EXCEEDED', `Select up to ${bulkLimit} members at a time for WhatsApp reminders.`);
         }
 
-        const templateRes = await pool.query(
-            `SELECT
-                template_key,
-                title,
-                whatsapp_text,
-                whatsapp_template_name,
-                whatsapp_template_language,
-                whatsapp_template_status,
-                is_active
-             FROM gym_message_templates
-             WHERE gym_id = $1 AND is_active = TRUE`,
-            [gymId]
-        );
-
-        const approvedTemplates = new Map();
-        for (const template of templateRes.rows) {
-            const templateKey = String(template.template_key || '').trim().toUpperCase();
-            if (!templateKey || !template.whatsapp_template_name) continue;
-            if (normalizeTemplateStatus(template.whatsapp_template_status) !== 'APPROVED') continue;
-            approvedTemplates.set(templateKey, template);
-        }
+        const approvedTemplateRows = await getApprovedReminderTemplates(gymId);
+        const approvedTemplates = new Map(approvedTemplateRows.map((template) => [template.template_key, template]));
 
         if (approvedTemplates.size === 0) {
             return fail(res, 400, 'NO_APPROVED_TEMPLATES', 'No approved WhatsApp templates are available. Approve a template in Settings first.');
