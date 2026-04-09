@@ -3125,9 +3125,11 @@ const loadRazorpayScript = () => {
                                   <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-3">
                                     <p className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-700 mb-2">Required in MSG91</p>
                                     <div className="space-y-1.5 text-[11px] font-semibold leading-5 text-indigo-700">
-                                      <p>1. Create one webhook for Inbound Message events using the exact callback URL above.</p>
-                                      <p>2. Create one webhook for On Delivered Events using the same callback URL.</p>
-                                      <p>3. If MSG91 shows failed webhook logs, open the snapshot and verify the saved URL matches this full callback URL exactly.</p>
+                                      <p>1. Create one webhook for On Inbound Request Received using the exact callback URL above.</p>
+                                      <p>2. Create one webhook for On Inbound Report Received using the same callback URL.</p>
+                                      <p>3. Keep one webhook for On Delivered Events using the same callback URL.</p>
+                                      <p>4. If MSG91 still shows no inbound logs, open Number → Integration and enable Allow inbound in Hello, then try the reply again.</p>
+                                      <p>5. If MSG91 shows failed webhook logs, open the snapshot and verify the saved URL matches this full callback URL exactly.</p>
                                     </div>
                                   </div>
                                 </div>

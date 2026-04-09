@@ -262,6 +262,7 @@ const buildInboundWebhookRecords = (payload) => {
             return {
                 requestId: toTrimmedString(item.request_id || item.requestId || item.requestid),
                 messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid || item.uuid),
+                replyMessageId: toTrimmedString(item.reply_msg_id || item.replyMsgId || pickFirstPrimitiveByKeys(item, ['reply_msg_id', 'replyMsgId'])),
                 correlationId: toTrimmedString(item.CRQID || item.crqid || item.correlation_id || item.correlationId),
                 integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number || item.to || pickFirstPrimitiveByKeys(item, ['integrated_number', 'integratedNumber', 'number', 'to', 'destination', 'owner_number', 'business_number'])),
                 senderNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.from || item.sender || item.phone || pickFirstPrimitiveByKeys(item, ['customer_number', 'customerNumber', 'from', 'sender', 'phone', 'wa_id'])),
@@ -683,7 +684,7 @@ const appendLeadNotes = (currentValue, nextValue) => {
 const findRecentOutboundContextForInbound = async (record) => {
     const integratedLocal = normalizeLocalIndianPhone(record?.integratedNumber);
     const senderLocal = normalizeLocalIndianPhone(record?.senderNumber);
-    if (!senderLocal) return null;
+    const replyMessageId = toTrimmedString(record?.replyMessageId);
 
     const mapOutboundContextRow = (row) => {
         if (!row) return null;
@@ -700,6 +701,34 @@ const findRecentOutboundContextForInbound = async (record) => {
             email: toTrimmedString(row.email),
         };
     };
+
+    if (replyMessageId) {
+        const result = await pool.query(
+            `SELECT
+                l.gym_id,
+                l.member_id,
+                l.broadcast_log_id,
+                l.source_kind,
+                l.source_label,
+                l.template_key,
+                l.template_title,
+                COALESCE(m.full_name, l.recipient_name, '') AS full_name,
+                COALESCE(m.email, '') AS email
+             FROM whatsapp_delivery_logs l
+             LEFT JOIN members m ON m.id = l.member_id
+             WHERE l.msg91_message_uuid = $1
+             ORDER BY l.created_at DESC
+             LIMIT 1`,
+            [replyMessageId]
+        );
+
+        const replyMatch = mapOutboundContextRow(result.rows[0] || null);
+        if (replyMatch) {
+            return replyMatch;
+        }
+    }
+
+    if (!senderLocal) return null;
 
     if (integratedLocal) {
         const result = await pool.query(
