@@ -123,7 +123,7 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState('6M');
-  const [insightsPeakDays, setInsightsPeakDays] = useState('today');
+  const [insightsPeakDays, setInsightsPeakDays] = useState('7');
   const [insightsPeakHours, setInsightsPeakHours] = useState([]);
   const [reminderLoadingKey, setReminderLoadingKey] = useState('');
   const cacheRef = useRef(new Map());

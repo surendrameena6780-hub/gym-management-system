@@ -63,21 +63,30 @@ const logCollectionRazorpayError = ({ stage, error, gymId = null, metadata = {} 
 
 const ensureMemberPaymentsSchema = async () => {
     if (!ensureMemberPaymentsSchemaPromise) {
-        ensureMemberPaymentsSchemaPromise = pool.query(`
-            ALTER TABLE gyms
-            ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT FALSE,
-            ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120),
-            ADD COLUMN IF NOT EXISTS member_razorpay_key_secret_enc TEXT,
-            ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120),
-            ADD COLUMN IF NOT EXISTS member_payments_updated_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS member_payments_connect_mode VARCHAR(20) DEFAULT 'MANUAL',
-            ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED',
-            ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120),
-            ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb,
-            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_hash TEXT,
-            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_expires_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
-        `);
+        ensureMemberPaymentsSchemaPromise = (async () => {
+            await pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT TRUE,
+                ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS member_razorpay_key_secret_enc TEXT,
+                ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS member_payments_updated_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS member_payments_connect_mode VARCHAR(20) DEFAULT 'PARTNER',
+                ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED',
+                ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_hash TEXT,
+                ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_expires_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
+            `);
+
+            await pool.query(`
+                ALTER TABLE gyms ALTER COLUMN member_payments_enabled SET DEFAULT TRUE;
+                ALTER TABLE gyms ALTER COLUMN member_payments_connect_mode SET DEFAULT 'PARTNER';
+                UPDATE gyms SET member_payments_enabled = TRUE WHERE COALESCE(member_payments_enabled, FALSE) = FALSE;
+                UPDATE gyms SET member_payments_connect_mode = 'PARTNER' WHERE COALESCE(member_payments_connect_mode, '') = '';
+            `);
+        })();
     }
     await ensureMemberPaymentsSchemaPromise;
 };
@@ -325,7 +334,7 @@ const serializeCollectionPaymentLink = (paymentLink, {
 });
 
 const resolveCollectionRazorpayConfig = (gymConfig = {}) => {
-    const requestedMode = String(gymConfig.member_payments_connect_mode || 'MANUAL').trim().toUpperCase() || 'MANUAL';
+    const requestedMode = String(gymConfig.member_payments_connect_mode || 'PARTNER').trim().toUpperCase() || 'PARTNER';
     const manualConfig = buildManualCollectionRazorpayConfig(gymConfig);
     const partnerConfig = buildPartnerCollectionRazorpayConfig(gymConfig);
 

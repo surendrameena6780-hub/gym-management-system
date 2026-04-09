@@ -441,7 +441,7 @@ const normalizeIntegrationTemplatesInput = (value) => {
     });
 };
 
-const normalizeMemberPaymentSettingsInput = (value, currentConnectMode = 'MANUAL') => {
+const normalizeMemberPaymentSettingsInput = (value, currentConnectMode = 'PARTNER') => {
     const settings = ensureObject(value, { field: 'member_payments' });
     return {
         enabled: Boolean(settings.enabled),
@@ -847,10 +847,15 @@ const ensureMessagingSchema = async () => {
                 ADD COLUMN IF NOT EXISTS messaging_whatsapp_last_error TEXT,
                 ADD COLUMN IF NOT EXISTS messaging_whatsapp_templates_status VARCHAR(30) DEFAULT 'NOT_SYNCED',
                 ADD COLUMN IF NOT EXISTS messaging_whatsapp_templates_last_synced_at TIMESTAMPTZ,
-                ADD COLUMN IF NOT EXISTS bulk_enabled BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS bulk_enabled BOOLEAN DEFAULT TRUE,
                 ADD COLUMN IF NOT EXISTS bulk_monthly_limit INTEGER DEFAULT 500,
                 ADD COLUMN IF NOT EXISTS bulk_per_campaign_limit INTEGER DEFAULT 50,
                 ADD COLUMN IF NOT EXISTS bulk_channels JSONB DEFAULT '{"whatsapp": true, "sms": false}'::jsonb;
+            `);
+
+            await pool.query(`
+                ALTER TABLE gyms ALTER COLUMN bulk_enabled SET DEFAULT TRUE;
+                UPDATE gyms SET bulk_enabled = TRUE WHERE COALESCE(bulk_enabled, FALSE) = FALSE;
             `);
 
             await pool.query(`
@@ -892,21 +897,30 @@ const ensureMessagingSchema = async () => {
 
 const ensureMemberPaymentsSchema = async () => {
     if (!ensureMemberPaymentsSchemaPromise) {
-        ensureMemberPaymentsSchemaPromise = pool.query(`
-            ALTER TABLE gyms
-            ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT TRUE,
-            ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120),
-            ADD COLUMN IF NOT EXISTS member_razorpay_key_secret_enc TEXT,
-            ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120),
-            ADD COLUMN IF NOT EXISTS member_payments_updated_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS member_payments_connect_mode VARCHAR(20) DEFAULT 'MANUAL',
-            ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED',
-            ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120),
-            ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb,
-            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_hash TEXT,
-            ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_expires_at TIMESTAMP,
-            ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
-        `);
+        ensureMemberPaymentsSchemaPromise = (async () => {
+            await pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS member_payments_enabled BOOLEAN DEFAULT TRUE,
+                ADD COLUMN IF NOT EXISTS member_razorpay_key_id VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS member_razorpay_key_secret_enc TEXT,
+                ADD COLUMN IF NOT EXISTS member_upi_id VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS member_payments_updated_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS member_payments_connect_mode VARCHAR(20) DEFAULT 'PARTNER',
+                ADD COLUMN IF NOT EXISTS member_payments_onboarding_status VARCHAR(30) DEFAULT 'NOT_CONNECTED',
+                ADD COLUMN IF NOT EXISTS member_razorpay_connected_account_id VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS member_payments_connect_meta JSONB DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_hash TEXT,
+                ADD COLUMN IF NOT EXISTS member_payments_connect_nonce_expires_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS member_payments_connected_at TIMESTAMP;
+            `);
+
+            await pool.query(`
+                ALTER TABLE gyms ALTER COLUMN member_payments_enabled SET DEFAULT TRUE;
+                ALTER TABLE gyms ALTER COLUMN member_payments_connect_mode SET DEFAULT 'PARTNER';
+                UPDATE gyms SET member_payments_enabled = TRUE WHERE COALESCE(member_payments_enabled, FALSE) = FALSE;
+                UPDATE gyms SET member_payments_connect_mode = 'PARTNER' WHERE COALESCE(member_payments_connect_mode, '') = '';
+            `);
+        })();
     }
     await ensureMemberPaymentsSchemaPromise;
 };
@@ -1066,8 +1080,8 @@ router.get('/', auth, async (req, res) => {
                 addon_extra_members: Number.parseInt(gym.addon_extra_members || 0, 10),
                 addon_extra_branches: Number.parseInt(gym.addon_extra_branches || 0, 10),
                 addon_extra_hello: Number.parseInt(gym.addon_extra_hello || 0, 10),
-                interface_reduce_motion: gym.interface_reduce_motion,
-                interface_compact_mode: gym.interface_compact_mode,
+                interface_reduce_motion: false,
+                interface_compact_mode: false,
                 interface_dark_mode: gym.interface_dark_mode,
             },
             billing_catalog: serializeBillingConfig(billingConfig, { includeAllPlans: true }),
@@ -1096,8 +1110,8 @@ router.get('/preferences', auth, async (req, res) => {
 
         const result = await pool.query(
             `SELECT currency, timezone,
-                    COALESCE(interface_reduce_motion, FALSE) AS interface_reduce_motion,
-                    COALESCE(interface_compact_mode, FALSE) AS interface_compact_mode,
+                    FALSE AS interface_reduce_motion,
+                    FALSE AS interface_compact_mode,
                     COALESCE(interface_dark_mode, TRUE) AS interface_dark_mode
              FROM gyms
              WHERE id = $1
@@ -1159,7 +1173,7 @@ router.get('/integrations', auth, async (req, res) => {
             platform_otp_mode: platformOtpMode,
             platform_otp_ready: true,
             sms_ready: platformOtpMode === 'msg91',
-            bulk_enabled: Boolean(row.bulk_enabled),
+            bulk_enabled: row.bulk_enabled !== false,
             bulk_monthly_limit: monthlyLimit,
             bulk_per_campaign_limit: toPositiveInt(row.bulk_per_campaign_limit, 50),
             bulk_channels: row.bulk_channels || { whatsapp: true, sms: false },
@@ -1168,8 +1182,8 @@ router.get('/integrations', auth, async (req, res) => {
             approved_template_count: templates.filter((template) => normalizeTemplateStatus(template.whatsapp_template_status) === 'APPROVED').length,
             templates,
             member_payments: {
-                enabled: Boolean(row.member_payments_enabled),
-                connect_mode: String(row.member_payments_connect_mode || 'MANUAL').toUpperCase(),
+                enabled: row.member_payments_enabled !== false,
+                connect_mode: String(row.member_payments_connect_mode || 'PARTNER').toUpperCase(),
                 onboarding_status: String(row.member_payments_onboarding_status || 'NOT_CONNECTED').toUpperCase(),
                 connected_account_id: row.member_razorpay_connected_account_id || '',
                 connected_at: row.member_payments_connected_at || null,
@@ -2287,8 +2301,8 @@ router.put('/preferences', auth, async (req, res) => {
         await ensurePreferenceSchema();
         const currency = ensureTrimmedString(req.body?.currency, { field: 'currency', required: true, min: 1, max: 10, uppercase: true });
         const timezone = ensureTrimmedString(req.body?.timezone, { field: 'timezone', required: true, min: 3, max: 100 });
-        const interface_reduce_motion = req.body?.interface_reduce_motion === true;
-        const interface_compact_mode = req.body?.interface_compact_mode === true;
+        const interface_reduce_motion = false;
+        const interface_compact_mode = false;
         const interface_dark_mode = req.body?.interface_dark_mode === true;
         await pool.query(
             `UPDATE gyms

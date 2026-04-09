@@ -263,7 +263,7 @@ const getPaymentCapabilitySummary = async (gymId) => {
             COALESCE(member_upi_id, '') AS member_upi_id,
             COALESCE(member_razorpay_key_id, '') AS member_razorpay_key_id,
             COALESCE(member_razorpay_key_secret_enc, '') AS member_razorpay_key_secret_enc,
-            COALESCE(member_payments_connect_mode, 'MANUAL') AS member_payments_connect_mode,
+            COALESCE(member_payments_connect_mode, 'PARTNER') AS member_payments_connect_mode,
             COALESCE(member_razorpay_connected_account_id, '') AS member_razorpay_connected_account_id
          FROM gyms
          WHERE id = $1
@@ -272,7 +272,7 @@ const getPaymentCapabilitySummary = async (gymId) => {
     );
 
     const row = result.rows[0] || {};
-    const connectMode = String(row.member_payments_connect_mode || 'MANUAL').toUpperCase();
+    const connectMode = String(row.member_payments_connect_mode || 'PARTNER').toUpperCase();
     const hasRazorpay = connectMode === 'PARTNER'
         ? Boolean(String(row.member_razorpay_connected_account_id || '').trim())
         : Boolean(String(row.member_razorpay_key_id || '').trim() && String(row.member_razorpay_key_secret_enc || '').trim());

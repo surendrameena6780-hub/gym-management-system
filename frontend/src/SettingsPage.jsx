@@ -4,7 +4,7 @@ import {
   User, Building2, Users, Bell, CreditCard, Blocks, 
   ShieldCheck, Database, Sliders, Palette, Zap, 
   FileText, AlertOctagon, Save, Lock, Trash2,
-  CheckCircle, Plus, Download, Smartphone, Monitor, Globe,
+  CheckCircle, Plus, Download, Smartphone,
   Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
   RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
   MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon
@@ -28,7 +28,6 @@ const TABS = [
   { id: 'staff', label: 'Staff & Roles', icon: Users, group: 'Personal & Business' },
   { id: 'billing', label: 'Billing & Subscriptions', icon: CreditCard, group: 'Personal & Business' },
   { id: 'integrations', label: 'Integrations', icon: Blocks, group: 'System' },
-  { id: 'security', label: 'Security Settings', icon: ShieldCheck, group: 'System' },
   { id: 'data', label: 'Data & Backup', icon: Database, group: 'System' },
   { id: 'preferences', label: 'System Preferences', icon: Sliders, group: 'Customization' },
   { id: 'interface', label: 'Interface Preferences', icon: Palette, group: 'Customization' },
@@ -637,7 +636,7 @@ const loadRazorpayScript = () => {
     platform_otp_mode: 'preview',
     approved_template_count: 0,
     sms_ready: false,
-    bulk_enabled: false,
+    bulk_enabled: true,
     bulk_monthly_limit: 500,
     bulk_per_campaign_limit: 50,
     bulk_channels: { whatsapp: true, sms: false },
@@ -646,7 +645,7 @@ const loadRazorpayScript = () => {
     templates: DEFAULT_MESSAGE_TEMPLATES,
     member_payments: {
       enabled: true,
-      connect_mode: 'MANUAL',
+      connect_mode: 'PARTNER',
       onboarding_status: 'NOT_CONNECTED',
       connected_account_id: '',
       connected_at: null,
@@ -680,7 +679,6 @@ const loadRazorpayScript = () => {
     compact_mode: false,
     dark_mode: true,
   });
-  const [twoFactor, setTwoFactor] = useState(false);
   const [staffMembers, setStaffMembers] = useState([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [addingStaff, setAddingStaff] = useState(false);
@@ -810,8 +808,8 @@ const loadRazorpayScript = () => {
           }));
 
           const nextInterfacePreferences = {
-            reduce_motion: Boolean(res.data.gym.interface_reduce_motion),
-            compact_mode: Boolean(res.data.gym.interface_compact_mode),
+            reduce_motion: false,
+            compact_mode: false,
             dark_mode: Boolean(res.data.gym.interface_dark_mode ?? true),
           };
           setInterfacePreferences(nextInterfacePreferences);
@@ -906,7 +904,7 @@ const loadRazorpayScript = () => {
         platform_otp_mode: String(payload.platform_otp_mode || 'preview').toLowerCase(),
         approved_template_count: Number(payload.approved_template_count || 0),
         sms_ready: Boolean(payload.sms_ready),
-        bulk_enabled: Boolean(payload.bulk_enabled),
+        bulk_enabled: payload.bulk_enabled !== false,
         bulk_monthly_limit: Number(payload.bulk_monthly_limit || 500),
         bulk_per_campaign_limit: Number(payload.bulk_per_campaign_limit || 50),
         bulk_channels: payload.bulk_channels || { whatsapp: true, sms: false },
@@ -914,8 +912,8 @@ const loadRazorpayScript = () => {
         monthly_remaining: Number(payload.monthly_remaining || 0),
         templates: normalizedTemplates,
         member_payments: {
-          enabled: Boolean(payload.member_payments?.enabled),
-          connect_mode: String(payload.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
+          enabled: payload.member_payments?.enabled !== false,
+          connect_mode: String(payload.member_payments?.connect_mode || 'PARTNER').toUpperCase(),
           onboarding_status: String(payload.member_payments?.onboarding_status || 'NOT_CONNECTED').toUpperCase(),
           connected_account_id: String(payload.member_payments?.connected_account_id || ''),
           connected_at: payload.member_payments?.connected_at || null,
@@ -1460,13 +1458,6 @@ const loadRazorpayScript = () => {
     }
   };
 
-  const toggleStaffStatus = async (staff) => {
-    await updateStaffRecord(staff, {
-      is_active: !staff.is_active,
-      permissions: staff.permissions,
-    }, `Staff ${!staff.is_active ? 'activated' : 'deactivated'} successfully.`);
-  };
-
   const updateStaffRole = async (staff, nextRole) => {
     await updateStaffRecord(staff, {
       staff_role: nextRole,
@@ -1497,6 +1488,33 @@ const loadRazorpayScript = () => {
       toast(err?.response?.data?.error || 'Failed to reset password.', 'error');
     } finally {
       setResettingPasswordId(null);
+    }
+  };
+
+  const deleteStaffMember = async (staff) => {
+    if (!staff?.id) return;
+    if (!window.confirm(`Delete ${staff.full_name || 'this staff member'} permanently?`)) {
+      return;
+    }
+
+    setSavingStaffId(staff.id);
+    try {
+      await axios.delete(`/api/users/staff/${staff.id}`, headers);
+      toast('Staff member deleted successfully.', 'success');
+      setStaffPasswordReset((prev) => {
+        const next = { ...prev };
+        delete next[staff.id];
+        return next;
+      });
+      await fetchStaff();
+      setUsageData((prev) => ({
+        ...prev,
+        staff: Math.max(0, Number(prev.staff || 0) - 1),
+      }));
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to delete staff member.', 'error');
+    } finally {
+      setSavingStaffId(null);
     }
   };
 
@@ -1864,17 +1882,23 @@ const loadRazorpayScript = () => {
   };
 
   const persistPreferences = async (successMessage) => {
+    const nextInterfacePreferences = {
+      reduce_motion: false,
+      compact_mode: false,
+      dark_mode: Boolean(interfacePreferences.dark_mode),
+    };
     setIsSaving(true);
     try {
       await axios.put('/api/settings/preferences', {
         currency: gymData.currency,
         timezone: gymData.timezone,
-        interface_reduce_motion: interfacePreferences.reduce_motion,
-        interface_compact_mode: interfacePreferences.compact_mode,
-        interface_dark_mode: interfacePreferences.dark_mode,
+        interface_reduce_motion: false,
+        interface_compact_mode: false,
+        interface_dark_mode: nextInterfacePreferences.dark_mode,
       }, headers);
-      applyInterfacePreferences(interfacePreferences);
-      saveInterfacePreferencesLocal(interfacePreferences);
+      setInterfacePreferences(nextInterfacePreferences);
+      applyInterfacePreferences(nextInterfacePreferences);
+      saveInterfacePreferencesLocal(nextInterfacePreferences);
       toast(successMessage, 'success');
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to update preferences', 'error');
@@ -2082,14 +2106,22 @@ const loadRazorpayScript = () => {
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white max-w-5xl mb-5">
                 <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest mb-4">Add Staff Member</h3>
-                <form onSubmit={handleAddStaff} className="grid grid-cols-1 desktop:grid-cols-6 gap-3">
+                <form onSubmit={handleAddStaff} autoComplete="off" className="grid grid-cols-1 desktop:grid-cols-6 gap-3">
+                  <input type="text" name="staff_login_probe" autoComplete="username" className="hidden" tabIndex={-1} aria-hidden="true" />
+                  <input type="password" name="staff_password_probe" autoComplete="current-password" className="hidden" tabIndex={-1} aria-hidden="true" />
                   <input
+                    name="staff_full_name_create"
+                    autoComplete="off"
                     value={staffForm.full_name}
                     onChange={(e) => setStaffForm((prev) => ({ ...prev, full_name: e.target.value }))}
                     placeholder="Full Name"
                     className="md:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold"
                   />
                   <input
+                    name="staff_email_create"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    spellCheck={false}
                     value={staffForm.email}
                     onChange={(e) => setStaffForm((prev) => ({ ...prev, email: e.target.value }))}
                     placeholder="Email"
@@ -2097,6 +2129,9 @@ const loadRazorpayScript = () => {
                     className="md:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold"
                   />
                   <input
+                    name="staff_password_create"
+                    autoComplete="new-password"
+                    data-lpignore="true"
                     value={staffForm.password}
                     onChange={(e) => setStaffForm((prev) => ({ ...prev, password: e.target.value }))}
                     placeholder="Temporary Password"
@@ -2208,11 +2243,11 @@ const loadRazorpayScript = () => {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <button
-                              onClick={() => toggleStaffStatus(staff)}
+                              onClick={() => deleteStaffMember(staff)}
                               disabled={savingStaffId === staff.id}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${staff.is_active ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'} disabled:opacity-60`}
+                              className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-600 hover:bg-rose-100 disabled:opacity-60"
                             >
-                              {staff.is_active ? 'Deactivate' : 'Activate'}
+                              {savingStaffId === staff.id ? 'Deleting' : 'Delete'}
                             </button>
                           </td>
                         </tr>
@@ -3758,28 +3793,6 @@ const loadRazorpayScript = () => {
             </div>
           )}
 
-          {activeTab === 'security' && (
-            <div className="animate-in fade-in duration-300">
-              <h2 className="text-2xl font-black text-slate-900 mb-1">Security Settings</h2>
-              <p className="text-sm font-medium text-slate-500 mb-8">Advanced protection for your gym's data.</p>
-              
-              <div className="border border-slate-200 rounded-2xl p-6 bg-white mb-6">
-                <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-bold text-slate-900 flex items-center gap-2"><Smartphone size={18}/> Two-Factor Authentication</h3>
-                  <button onClick={() => setTwoFactor(!twoFactor)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${twoFactor ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${twoFactor ? 'translate-x-6' : 'translate-x-1'}`} /></button>
-                </div>
-                <p className="text-sm text-slate-500">Require an OTP sent to your phone number every time you log in from a new device.</p>
-              </div>
-
-              <div className="border border-slate-200 rounded-2xl p-6 bg-white">
-                <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><Monitor size={18}/> Active Sessions</h3>
-                <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                  <div><p className="font-bold text-sm text-slate-800">Windows &bull; Chrome Browser</p><p className="text-xs text-emerald-500 font-bold">Current Session</p></div><Globe size={20} className="text-slate-300" />
-                </div>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'preferences' && (
             <div className="animate-in fade-in duration-300">
               <h2 className="text-2xl font-black text-slate-900 mb-1">System Preferences</h2>
@@ -3833,20 +3846,6 @@ const loadRazorpayScript = () => {
                     >
                       <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${interfacePreferences.dark_mode ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
-                  </div>
-                </div>
-
-                <div className="border border-slate-200 rounded-2xl p-6 bg-white">
-                  <div className="flex justify-between items-center gap-4">
-                    <div><h3 className="font-bold text-slate-900 text-sm mb-1">Reduce Motion</h3><p className="text-xs text-slate-500">Turns off most animations and transitions across the dashboard.</p></div>
-                    <button onClick={() => setInterfacePreferences((prev) => ({ ...prev, reduce_motion: !prev.reduce_motion }))} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${interfacePreferences.reduce_motion ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${interfacePreferences.reduce_motion ? 'translate-x-6' : 'translate-x-1'}`} /></button>
-                  </div>
-                </div>
-
-                <div className="border border-slate-200 rounded-2xl p-6 bg-white">
-                  <div className="flex justify-between items-center gap-4">
-                    <div><h3 className="font-bold text-slate-900 text-sm mb-1">Compact Layout</h3><p className="text-xs text-slate-500">Reduces page spacing and header height for a denser dashboard layout.</p></div>
-                    <button onClick={() => setInterfacePreferences((prev) => ({ ...prev, compact_mode: !prev.compact_mode }))} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${interfacePreferences.compact_mode ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${interfacePreferences.compact_mode ? 'translate-x-6' : 'translate-x-1'}`} /></button>
                   </div>
                 </div>
 

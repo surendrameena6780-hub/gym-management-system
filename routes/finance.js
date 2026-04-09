@@ -24,6 +24,7 @@ const {
 } = require('../utils/branchAccess');
 
 const gymId = (req) => { const v = Number.parseInt(req?.user?.gym_id ?? req?.user?.gymId, 10); return Number.isInteger(v) ? v : null; };
+const POS_ENABLED_PLANS = new Set(['growth', 'pro']);
 const posInt = (v, f = null) => { const p = Number.parseInt(v, 10); return Number.isInteger(p) && p > 0 ? p : f; };
 const parseDateBoundary = (value, endExclusive = false) => {
     const normalized = String(value || '').trim();
@@ -71,6 +72,29 @@ const getFinancePeriodConfig = (value, fromValue, toValue) => {
     }
 
     return { key: 'all', label: 'All time', startAt: null, endAt: null };
+};
+
+const ensurePosPlanAccess = async (req, res, next) => {
+    try {
+        const gid = gymId(req);
+        const result = await pool.query(
+            `SELECT COALESCE(current_plan, 'basic') AS current_plan
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [gid]
+        );
+
+        const currentPlan = String(result.rows[0]?.current_plan || 'basic').trim().toLowerCase();
+        if (!POS_ENABLED_PLANS.has(currentPlan)) {
+            return res.status(403).json({ error: 'POS is available on Growth and Pro plans only.' });
+        }
+
+        return next();
+    } catch (err) {
+        console.error('POS PLAN ACCESS ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to verify POS access.' });
+    }
 };
 
 const normalizeExpenseInput = (value = {}) => ({
@@ -1167,7 +1191,7 @@ router.put('/payroll/auto-config/:userId', requirePermission('payments:write'), 
 // ═══════════════════════════════════════════════════════════
 //   POS: Products
 // ═══════════════════════════════════════════════════════════
-router.get('/pos/products', requirePermission('payments:read'), async (req, res) => {
+router.get('/pos/products', requirePermission('payments:read'), ensurePosPlanAccess, async (req, res) => {
     try {
         const gid = gymId(req);
         const branchScope = await resolveBranchReadScope(pool, req);
@@ -1188,7 +1212,7 @@ router.get('/pos/products', requirePermission('payments:read'), async (req, res)
     }
 });
 
-router.post('/pos/products', requirePermission('payments:write'), async (req, res) => {
+router.post('/pos/products', requirePermission('payments:write'), ensurePosPlanAccess, async (req, res) => {
     try {
         const gid = gymId(req);
         const { name, category, price, cost_price, stock_qty, low_stock_threshold, sku } = req.body || {};
@@ -1213,7 +1237,7 @@ router.post('/pos/products', requirePermission('payments:write'), async (req, re
     }
 });
 
-router.put('/pos/products/:id', requirePermission('payments:write'), async (req, res) => {
+router.put('/pos/products/:id', requirePermission('payments:write'), ensurePosPlanAccess, async (req, res) => {
     try {
         const gid = gymId(req); const id = posInt(req.params.id);
         if (!id) return res.status(400).json({ error: 'Invalid id.' });
@@ -1242,7 +1266,7 @@ router.put('/pos/products/:id', requirePermission('payments:write'), async (req,
     }
 });
 
-router.delete('/pos/products/:id', requirePermission('payments:write'), async (req, res) => {
+router.delete('/pos/products/:id', requirePermission('payments:write'), ensurePosPlanAccess, async (req, res) => {
     try {
         const gid = gymId(req); const id = posInt(req.params.id);
         if (!id) return res.status(400).json({ error: 'Invalid id.' });
@@ -1264,7 +1288,7 @@ router.delete('/pos/products/:id', requirePermission('payments:write'), async (r
 // ═══════════════════════════════════════════════════════════
 //   POS: Sales
 // ═══════════════════════════════════════════════════════════
-router.get('/pos/sales', requirePermission('payments:read'), async (req, res) => {
+router.get('/pos/sales', requirePermission('payments:read'), ensurePosPlanAccess, async (req, res) => {
     try {
         const gid = gymId(req);
         const branchScope = await resolveBranchReadScope(pool, req);
@@ -1287,7 +1311,7 @@ router.get('/pos/sales', requirePermission('payments:read'), async (req, res) =>
     }
 });
 
-router.post('/pos/sales', requirePermission('payments:write'), async (req, res) => {
+router.post('/pos/sales', requirePermission('payments:write'), ensurePosPlanAccess, async (req, res) => {
     const client = await pool.connect();
     try {
         const gid = gymId(req);

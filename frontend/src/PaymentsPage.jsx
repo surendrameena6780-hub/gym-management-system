@@ -215,6 +215,8 @@ const INSIGHT_TONE_STYLES = {
 const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null, focusAction = null, onFocusHandled, focusSection = null, onSectionHandled, isActive = true }) => {
   const { token, toast, showConfirm, currentUser = null } = appRuntime;
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
+  const currentPlanId = String(currentUser?.saas_plan || currentUser?.current_plan || '').trim().toLowerCase();
+  const canAccessPos = currentPlanId === 'growth' || currentPlanId === 'pro';
   const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
   const defaultBranchId = getDefaultBranchId(branchDirectory);
   const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
@@ -536,13 +538,19 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       fetchStaffOptions();
       fetchPayrollPayoutSettings();
       fetchPayrollStaffDestinations();
-    } else if (financeTab === 'pos') {
+    } else if (financeTab === 'pos' && canAccessPos) {
       fetchPosProducts();
       fetchPosSales();
     } else if (financeTab === 'collections') {
       fetchFinanceOverview();
     }
-  }, [financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchPayrollPayoutSettings, fetchPayrollStaffDestinations, fetchStaffOptions]);
+  }, [canAccessPos, financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchPayrollPayoutSettings, fetchPayrollStaffDestinations, fetchStaffOptions]);
+
+  useEffect(() => {
+    if (!canAccessPos && financeTab === 'pos') {
+      setFinanceTab('collections');
+    }
+  }, [canAccessPos, financeTab]);
 
   const payrollDestinationByUserId = useMemo(() => {
     const nextMap = new Map();
@@ -1136,6 +1144,12 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     const target = sectionMap[sectionKey];
     if (!target) return;
 
+    if (target.tab === 'pos' && !canAccessPos) {
+      toast?.('POS is available on Growth and Pro plans only.', 'warning');
+      onSectionHandled?.();
+      return;
+    }
+
     setFinanceTab(target.tab);
 
     if (financeFocusTimerRef.current) {
@@ -1146,7 +1160,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       target.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       onSectionHandled?.();
     }, 180);
-  }, [onSectionHandled]);
+  }, [canAccessPos, onSectionHandled, toast]);
 
   const filteredPayments = ledgerPayments;
 
@@ -1906,7 +1920,9 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">
           <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5 w-fit overflow-x-auto whitespace-nowrap">
-            {[{ key: 'collections', label: 'Collections' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }].map(t => (
+            {[{ key: 'collections', label: 'Collections' }, { key: 'expenses', label: 'Expenses' }, { key: 'payroll', label: 'Payroll' }, { key: 'pos', label: 'POS' }]
+              .filter((tab) => tab.key !== 'pos' || canAccessPos)
+              .map(t => (
               <button key={t.key} onClick={() => setFinanceTab(t.key)} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${financeTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{t.label}</button>
             ))}
           </div>
@@ -1920,7 +1936,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
               {isOwner && <button onClick={() => setShowAutoPaySetup(true)} className="justify-center bg-white border border-slate-200 text-slate-600 px-3 sm:px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 shadow-sm"><Settings size={17} /> Auto-Pay</button>}
               <button onClick={() => setShowPayrollModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Payroll</button>
             </>}
-            {financeTab === 'pos' && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
+            {financeTab === 'pos' && canAccessPos && <button onClick={() => setShowPosModal(true)} className="justify-center bg-slate-900 text-white px-3 sm:px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-800 shadow-lg"><Plus size={18} /> Add Product</button>}
           </div>
         </div>
       </div>
@@ -2639,7 +2655,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       )}
 
       {/* ═══════ POS TAB ═══════ */}
-      {financeTab === 'pos' && (
+      {financeTab === 'pos' && canAccessPos && (
         <div ref={posCatalogRef} className="space-y-4 scroll-mt-28 min-h-[400px]" onClick={() => { setPosMenuOpenId(null); }}>
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
             {/* ── LEFT: Catalog ── */}

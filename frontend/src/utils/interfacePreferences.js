@@ -7,8 +7,8 @@ const DEFAULT_INTERFACE_PREFERENCES = {
 };
 
 export const normalizeInterfacePreferences = (value) => ({
-  reduce_motion: Boolean(value?.reduce_motion ?? value?.interface_reduce_motion ?? DEFAULT_INTERFACE_PREFERENCES.reduce_motion),
-  compact_mode: Boolean(value?.compact_mode ?? value?.interface_compact_mode ?? DEFAULT_INTERFACE_PREFERENCES.compact_mode),
+  reduce_motion: false,
+  compact_mode: false,
   dark_mode: Boolean(value?.dark_mode ?? value?.interface_dark_mode ?? DEFAULT_INTERFACE_PREFERENCES.dark_mode),
 });
 

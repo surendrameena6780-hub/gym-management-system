@@ -1684,6 +1684,53 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         action: row.action,
       }))
       : [];
+    const fillerActionRows = [
+      buildRecommendation({
+        id: 'DAILY_COLLECTIONS_REVIEW',
+        title: 'Review today\'s collections desk',
+        reason: Number(payStats.pending_dues || 0) > 0
+          ? `Pending dues worth ₹${Number(payStats.pending_dues || 0).toLocaleString()} still need a same-day follow-up.`
+          : 'Keep the collections desk reviewed so no late payments or failed follow-ups get missed.',
+        count: Math.max(1, pendingDuePayments.length),
+        impact: Math.max(avgPlanPrice, Math.round(Number(payStats.pending_dues || 0)) || avgPlanPrice),
+        confidence: 72,
+        urgency: 'Today',
+        priority: 'P2',
+        cta: 'Open Payments',
+        sub: 'Daily revenue review',
+        action: () => navigateTo('Payments'),
+      }),
+      buildRecommendation({
+        id: 'ATTENDANCE_DESK_REVIEW',
+        title: 'Review today\'s attendance desk',
+        reason: Number(todayCheckins || 0) === 0
+          ? 'No check-ins have been recorded yet today. Start the desk early so member traffic is captured correctly.'
+          : `${Number(todayCheckins || 0).toLocaleString()} check-ins are already recorded today. Keep the desk flowing and spot silent members early.`,
+        count: Math.max(1, Number(todayCheckins || 0)),
+        impact: Math.max(avgPlanPrice, Math.round(avgPlanPrice * 1.2)),
+        confidence: 69,
+        urgency: 'Today',
+        priority: 'P2',
+        cta: 'Open Attendance',
+        sub: 'Front desk watch',
+        action: () => navigateTo('Attendance'),
+      }),
+      buildRecommendation({
+        id: 'RENEWAL_PIPELINE_REVIEW',
+        title: 'Review the renewal pipeline',
+        reason: expiringIn7Days.length > 0
+          ? `${expiringIn7Days.length} membership${expiringIn7Days.length === 1 ? '' : 's'} are due this week. Keep the renewal queue warm even outside urgent windows.`
+          : 'No renewals are due yet, but a quick pipeline review keeps next week\'s follow-ups clean.',
+        count: Math.max(1, expiringIn7Days.length),
+        impact: Math.max(avgPlanPrice, Math.round(avgPlanPrice * 1.4)),
+        confidence: 66,
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Open Members',
+        sub: 'Renewal pipeline review',
+        action: () => navigateTo('Members'),
+      }),
+    ];
     const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
     const mergedActionRows = [];
     const seenActionIds = new Set();
@@ -1699,6 +1746,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     pushUniqueRows(actionRequiredRows);
     pushUniqueRows(setupFillCandidates);
     pushUniqueRows(actionCandidates.filter((item) => item.priority !== 'P0' && item.priority !== 'P1'));
+    pushUniqueRows(fillerActionRows);
     const urgentCount = actionRequiredRows.length;
 
     return {

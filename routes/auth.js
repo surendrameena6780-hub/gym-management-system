@@ -361,6 +361,7 @@ const buildAuthSuccessPayload = (user, message = 'Login successful!') => {
             staff_role: user.staff_role,
             branch_id: user.branch_id || DEFAULT_BRANCH_ID,
             is_active: user.is_active,
+            saas_plan: user.current_plan,
             permissions,
         },
         saas: {

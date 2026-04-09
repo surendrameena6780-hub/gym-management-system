@@ -210,6 +210,46 @@ router.put('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) =>
 });
 
 // POST /api/users/staff/:id/reset-password — Owner resets staff password
+router.delete('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) => {
+    const staffId = parseInt(req.params.id, 10);
+
+    if (!Number.isInteger(staffId)) {
+        return res.status(400).json({ error: 'Invalid staff id.' });
+    }
+
+    try {
+        const existing = await pool.query(
+            `SELECT id, role
+             FROM users
+             WHERE id = $1 AND gym_id = $2`,
+            [staffId, req.user.gym_id]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff user not found.' });
+        }
+
+        if (existing.rows[0].role === 'OWNER') {
+            return res.status(400).json({ error: 'Owner account cannot be deleted here.' });
+        }
+
+        await pool.query(
+            `DELETE FROM users
+             WHERE id = $1 AND gym_id = $2`,
+            [staffId, req.user.gym_id]
+        );
+
+        return res.json({ message: 'Staff member deleted successfully.' });
+    } catch (err) {
+        console.error('STAFF DELETE ERROR:', err.message);
+        if (err.code === '23503') {
+            return res.status(409).json({ error: 'This staff member is still linked to protected records and cannot be deleted yet.' });
+        }
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+// POST /api/users/staff/:id/reset-password — Owner resets staff password
 router.post('/staff/:id/reset-password', auth, requireOwner, saasMiddleware, async (req, res) => {
     const staffId = parseInt(req.params.id, 10);
     const { new_password } = req.body;

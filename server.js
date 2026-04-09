@@ -378,6 +378,7 @@ app.get('/api/auth/me', auth, async (req, res) => {
                 staff_role: row.staff_role,
                 branch_id: row.branch_id,
                 is_active: row.is_active,
+                saas_plan: row.current_plan,
                 permissions: row.permissions,
             },
             saas: {

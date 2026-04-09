@@ -199,8 +199,8 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
   const [heatmap, setHeatmap] = useState([]);
   const [peakHours, setPeakHours] = useState([]);
-  const [peakHoursDays, setPeakHoursDays] = useState('today');
-  const peakHoursDaysRef = useRef('today');
+  const [peakHoursDays, setPeakHoursDays] = useState('7');
+  const peakHoursDaysRef = useRef('7');
   useEffect(() => { peakHoursDaysRef.current = peakHoursDays; }, [peakHoursDays]);
   const [inactiveDays, setInactiveDays] = useState(7);
   const [inactiveMembers, setInactiveMembers] = useState([]);
