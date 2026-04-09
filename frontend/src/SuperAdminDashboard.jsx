@@ -188,6 +188,8 @@ function SuperAdminDashboard({ token, onLogout }) {
   });
   const [logs, setLogs] = useState([]);
   const [telemetry, setTelemetry] = useState(null);
+  const [webhookData, setWebhookData] = useState(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
   const [runtimeEvents, setRuntimeEvents] = useState([]);
   const [runtimeFilters, setRuntimeFilters] = useState({ q: '', event_type: '', severity: '' });
   const [runtimePagination, setRuntimePagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1, hasNext: false, hasPrev: false });
@@ -377,7 +379,7 @@ function SuperAdminDashboard({ token, onLogout }) {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([loadOverview(), loadGyms(), loadUsers(), loadTickets(), loadReports(), loadSystem(), loadLogs(), loadTelemetry(), loadRuntimeEvents()]);
+    await Promise.all([loadOverview(), loadGyms(), loadUsers(), loadTickets(), loadReports(), loadSystem(), loadLogs(), loadTelemetry(), loadRuntimeEvents(), loadWebhookUrl()]);
     setLoading(false);
   }, [loadGyms, loadLogs, loadOverview, loadReports, loadRuntimeEvents, loadSystem, loadTelemetry, loadTickets, loadUsers]);
 
@@ -647,6 +649,13 @@ function SuperAdminDashboard({ token, onLogout }) {
       handleApiError(err);
       alert('Failed to save system settings');
     }
+  };
+
+  const loadWebhookUrl = async () => {
+    try {
+      const res = await axios.get('/api/superadmin/system/whatsapp-webhook', headers);
+      setWebhookData(res.data);
+    } catch { /* ignore */ }
   };
 
   const updateAutomationTemplate = (templateKey, field, value) => {
@@ -1302,6 +1311,36 @@ function SuperAdminDashboard({ token, onLogout }) {
               </div>
 
               <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Settings</button>
+            </div>
+
+            {/* WhatsApp Webhook Configuration */}
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+              <p className="text-xs uppercase tracking-widest font-black text-slate-400">WhatsApp Webhook (MSG91)</p>
+              <p className="text-sm text-slate-500">Paste this URL once into MSG91 WhatsApp → Webhook for outbound delivery reports.</p>
+              {webhookData ? (
+                <>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${webhookData.webhook_token_configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                      {webhookData.webhook_token_configured ? 'Token Protected' : 'Open URL'}
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-black/30 border border-white/10 px-3 py-3">
+                    <p className="text-sm font-bold text-slate-200 break-all">{webhookData.callback_url}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => { navigator.clipboard.writeText(webhookData.callback_url); setWebhookCopied(true); setTimeout(() => setWebhookCopied(false), 2000); }} className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2">
+                      {webhookCopied ? '✓ Copied' : 'Copy URL'}
+                    </button>
+                    {webhookData.docs_url && (
+                      <a href={webhookData.docs_url} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-slate-300 text-xs font-black uppercase tracking-wider hover:bg-white/20 transition-all">
+                        MSG91 Guide
+                      </a>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <button type="button" onClick={loadWebhookUrl} className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 font-bold text-sm">Load Webhook URL</button>
+              )}
             </div>
 
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">

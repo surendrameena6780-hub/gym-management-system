@@ -2488,7 +2488,7 @@ const loadRazorpayScript = () => {
                         </div>
                       </div>
 
-                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3">
+                      <div className="hidden sm:block bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <h4 className="font-black text-slate-900 text-sm mb-1">Connection Details</h4>
@@ -2970,33 +2970,7 @@ const loadRazorpayScript = () => {
 
                             <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-4">
                               <div className="space-y-4">
-                                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                  <div className="flex items-center justify-between gap-3 mb-3">
-                                    <div>
-                                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">MSG91 Callback URL</p>
-                                      <p className="text-xs text-slate-500 mt-1">Paste this into MSG91 WhatsApp outbound webhook settings.</p>
-                                    </div>
-                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${platformData.whatsapp_delivery?.webhook_token_configured ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                      {platformData.whatsapp_delivery?.webhook_token_configured ? 'Token Protected' : 'Open URL'}
-                                    </span>
-                                  </div>
-                                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                                    <p className="text-sm font-bold text-slate-800 break-all">{platformData.whatsapp_delivery?.callback_url || 'Callback URL will appear here after platform settings load.'}</p>
-                                  </div>
-                                  <div className="flex flex-wrap gap-2 mt-3">
-                                    <button type="button" onClick={copyDeliveryCallbackToClipboard} disabled={!platformData.whatsapp_delivery?.callback_url} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center gap-2">
-                                      {copiedDeliveryCallback ? <Check size={13} /> : <Link size={13} />} {copiedDeliveryCallback ? 'Copied' : 'Copy URL'}
-                                    </button>
-                                    {platformData.whatsapp_delivery?.docs_url && (
-                                      <a href={platformData.whatsapp_delivery.docs_url} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition-all">
-                                        MSG91 Guide
-                                      </a>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] font-semibold text-slate-600 leading-relaxed mt-3">
-                                    In MSG91 open <span className="font-black text-slate-700">WhatsApp → Webhook</span> or <span className="font-black text-slate-700">Webhook (New)</span>, then paste this URL for outbound delivery reports. MSG91 may retry duplicate callbacks, so GymVault keeps these updates idempotent.
-                                  </p>
-                                </div>
+
 
                                 <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-5 gap-3">
                                   <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">

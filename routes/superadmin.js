@@ -917,6 +917,27 @@ router.get('/reports/light', superAuth, async (_req, res) => {
     }
 });
 
+// ── WhatsApp Webhook URL (for MSG91 configuration) ──
+router.get('/system/whatsapp-webhook', superAuth, async (req, res) => {
+    try {
+        const webhookToken = String(process.env.WHATSAPP_DELIVERY_WEBHOOK_TOKEN || process.env.MSG91_WHATSAPP_WEBHOOK_TOKEN || '').trim();
+        const appUrl = String(process.env.APP_URL || '').trim().replace(/\/+$/, '');
+        const forwardedProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
+        const forwardedHost = String(req.headers['x-forwarded-host'] || req.get('host') || '').split(',')[0].trim();
+        const baseUrl = appUrl || (forwardedHost ? `${forwardedProto}://${forwardedHost}` : 'http://localhost:5000');
+        const url = new URL('/api/settings/platform/whatsapp-delivery/webhook', `${baseUrl}/`);
+        if (webhookToken) url.searchParams.set('token', webhookToken);
+        return res.json({
+            callback_url: url.toString(),
+            webhook_token_configured: Boolean(webhookToken),
+            docs_url: 'https://docs.msg91.com/whatsapp-webhook',
+        });
+    } catch (err) {
+        console.error('SUPERADMIN WHATSAPP WEBHOOK URL ERROR:', err.message);
+        return res.status(500).json({ error: 'Server Error' });
+    }
+});
+
 router.get('/system', superAuth, async (_req, res) => {
     try {
         await ensurePlatformSettingsBase();
