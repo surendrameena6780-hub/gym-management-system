@@ -269,8 +269,8 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
 
     showConfirm?.({
       title: 'Convert Lead',
-      message: `Convert ${lead.full_name} into a member record now?`,
-      confirmLabel: 'Convert Now',
+      message: `Convert ${lead.full_name} into a member now? This will mark the lead as won and open the member record.`,
+      confirmLabel: 'Convert To Member',
       variant: 'warning',
       onConfirm: async () => {
         try {
@@ -484,82 +484,99 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
               })}
             </div>
 
-            <div className="hidden desktop:block overflow-auto">
-              <table className="w-full text-left border-collapse table-fixed min-w-[1100px]">
-                <thead>
-                  <tr className="text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-100">
-                    <th className="py-4 w-[21%] pr-2">Lead</th>
-                    <th className="py-4 w-[12%] px-2">Source</th>
-                    <th className="py-4 w-[14%] px-2">Follow-Up</th>
-                    <th className="py-4 w-[14%] px-2">Trial</th>
-                    <th className="py-4 w-[12%] px-2">Priority</th>
-                    <th className="py-4 w-[11%] px-2">Status</th>
-                    <th className="py-4 w-[16%] text-right px-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {leads.map((lead) => {
-                    const due = isDueLead(lead);
-                    const statusLabel = String(lead.status || 'NEW').toUpperCase();
-                    const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
-                    return (
-                      <tr key={lead.id} className={`transition-colors ${due ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-slate-50/70'}`}>
-                        <td className="py-4 pr-2 align-top">
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-900 truncate">{lead.full_name}</span>
-                              {lead.converted_member_id && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-50 text-violet-700 border border-violet-100">Member Linked</span>}
-                              {due && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200">Due Today</span>}
-                            </div>
-                            <p className="text-xs text-slate-500 truncate">{lead.phone}{lead.email ? ` • ${lead.email}` : ''}</p>
-                            {(lead.notes || lead.lost_reason) && (
-                              <p className={`text-xs line-clamp-2 ${lead.lost_reason ? 'text-rose-500' : 'text-slate-500'}`}>
-                                {lead.lost_reason ? `Lost: ${lead.lost_reason}` : lead.notes}
-                              </p>
-                            )}
+            <div className="hidden desktop:flex desktop:flex-col gap-3">
+              {leads.map((lead) => {
+                const due = isDueLead(lead);
+                const statusLabel = String(lead.status || 'NEW').toUpperCase();
+                const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
+                const noteText = lead.lost_reason ? `Lost reason: ${lead.lost_reason}` : lead.notes;
+
+                return (
+                  <article
+                    key={lead.id}
+                    className={`rounded-3xl border px-5 py-5 transition-colors ${due ? 'border-amber-200 bg-amber-50/50' : 'border-slate-100 bg-slate-50/60 hover:bg-slate-50'}`}
+                  >
+                    <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,1.2fr)_minmax(0,1.15fr)_minmax(0,1.05fr)_minmax(0,0.9fr)_minmax(0,1fr)_auto] gap-4 items-start">
+                      <div className="min-w-0 space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-black text-slate-900 break-words">{lead.full_name}</h3>
+                          {lead.converted_member_id && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-50 text-violet-700 border border-violet-100">Member Linked</span>}
+                          {due && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200">Due Today</span>}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-slate-600 break-all">{lead.phone}</p>
+                          {lead.email && <p className="text-sm font-medium text-slate-500 break-all">{lead.email}</p>}
+                        </div>
+                        {noteText && (
+                          <div className={`rounded-2xl border px-3 py-2.5 ${lead.lost_reason ? 'border-rose-100 bg-rose-50/70' : 'border-slate-100 bg-white/70'}`}>
+                            <p className={`text-xs leading-relaxed break-words ${lead.lost_reason ? 'font-semibold text-rose-600' : 'font-medium text-slate-600'}`}>
+                              {noteText}
+                            </p>
                           </div>
-                        </td>
-                        <td className="py-4 px-2 text-sm font-semibold text-slate-600 align-top">{lead.source || 'Walk-in'}</td>
-                        <td className="py-4 px-2 text-sm font-semibold align-top"><span className={due ? 'text-amber-700' : 'text-slate-600'}>{formatDateTimeLabel(lead.next_follow_up_at)}</span></td>
-                        <td className="py-4 px-2 text-sm font-semibold text-slate-600 align-top">{formatDateTimeLabel(lead.trial_date)}</td>
-                        <td className="py-4 px-2 align-top"><span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${PRIORITY_STYLES[priorityLabel] || PRIORITY_STYLES.MEDIUM}`}>{priorityLabel}</span></td>
-                        <td className="py-4 px-2 align-top"><span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span></td>
-                        <td className="py-4 px-2 align-top">
-                          <div className="flex justify-end items-center gap-1.5 flex-wrap">
-                            <button type="button" aria-label={`Call ${lead.full_name}`} onClick={() => handleCall(lead.phone)} className="p-2 text-blue-500 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-500 hover:text-white transition-all">
-                              <Phone size={13} />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Source</p>
+                        <p className="text-sm font-bold text-slate-700 break-words">{lead.source || 'Walk-in'}</p>
+                      </div>
+
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Follow-Up</p>
+                        <p className={`text-sm font-bold break-words ${due ? 'text-amber-700' : 'text-slate-700'}`}>{formatDateTimeLabel(lead.next_follow_up_at)}</p>
+                      </div>
+
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Trial</p>
+                        <p className="text-sm font-bold text-slate-700 break-words">{formatDateTimeLabel(lead.trial_date)}</p>
+                      </div>
+
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Priority</p>
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${PRIORITY_STYLES[priorityLabel] || PRIORITY_STYLES.MEDIUM}`}>{priorityLabel}</span>
+                      </div>
+
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Status</p>
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span>
+                      </div>
+
+                      <div className="min-w-[210px] space-y-2">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 text-right">Actions</p>
+                        <div className="flex justify-end items-center gap-2 flex-wrap">
+                          <button type="button" aria-label={`Call ${lead.full_name}`} onClick={() => handleCall(lead.phone)} className="p-2.5 text-blue-500 bg-blue-50 border border-blue-100 rounded-xl hover:bg-blue-500 hover:text-white transition-all">
+                            <Phone size={14} />
+                          </button>
+                          <button type="button" aria-label={`WhatsApp ${lead.full_name}`} onClick={() => handleWhatsApp(lead)} className="p-2.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-xl hover:bg-emerald-500 hover:text-white transition-all">
+                            <MessageSquare size={14} />
+                          </button>
+                          {lead.converted_member_id ? (
+                            <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="inline-flex items-center gap-1.5 bg-violet-50 text-violet-600 px-3 py-2 rounded-xl border border-violet-100 text-[10px] font-black uppercase hover:bg-violet-600 hover:text-white transition-all shadow-sm">
+                              <ArrowRight size={12} /> Open Member
                             </button>
-                            <button type="button" aria-label={`WhatsApp ${lead.full_name}`} onClick={() => handleWhatsApp(lead)} className="p-2 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-lg hover:bg-emerald-500 hover:text-white transition-all">
-                              <MessageSquare size={13} />
+                          ) : (
+                            canManage && (
+                              <button onClick={() => handleConvertLead(lead)} className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl border border-indigo-100 text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
+                                <ArrowRight size={12} /> Convert
+                              </button>
+                            )
+                          )}
+                          {canManage && (
+                            <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="p-2.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
+                              <Pencil size={14} />
                             </button>
-                            {lead.converted_member_id ? (
-                              <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="inline-flex items-center gap-1 bg-violet-50 text-violet-600 px-2.5 py-1.5 rounded-lg border border-violet-100 text-[10px] font-black uppercase hover:bg-violet-600 hover:text-white transition-all shadow-sm">
-                                <ArrowRight size={11} /> Open Member
-                              </button>
-                            ) : (
-                              canManage && (
-                                <button onClick={() => handleConvertLead(lead)} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1.5 rounded-lg border border-indigo-100 text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
-                                  <ArrowRight size={11} /> Convert
-                                </button>
-                              )
-                            )}
-                            {canManage && (
-                              <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all">
-                                <Pencil size={13} />
-                              </button>
-                            )}
-                            {canManage && (
-                              <button type="button" aria-label={`Delete ${lead.full_name}`} onClick={() => handleDeleteLead(lead)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
-                                <Trash2 size={13} />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          )}
+                          {canManage && (
+                            <button type="button" aria-label={`Delete ${lead.full_name}`} onClick={() => handleDeleteLead(lead)} className="p-2.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
 
             {pagination.totalPages > 1 && (
