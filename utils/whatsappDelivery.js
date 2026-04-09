@@ -22,6 +22,21 @@ let ensureWhatsAppDeliverySchemaPromise;
 
 const toTrimmedString = (value) => String(value || '').trim();
 
+const toPrimitiveString = (value) => (
+    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        ? String(value).trim()
+        : ''
+);
+
+const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
+
+const truncateText = (value, max = 240) => {
+    const normalized = toTrimmedString(value).replace(/\s+/g, ' ');
+    if (!normalized) return '';
+    if (normalized.length <= max) return normalized;
+    return `${normalized.slice(0, Math.max(0, max - 1)).trim()}…`;
+};
+
 const normalizeDeliveryStatus = (value) => {
     const raw = toTrimmedString(value).toUpperCase();
     if (!raw) return 'UNKNOWN';
@@ -117,8 +132,8 @@ const extractSendAcceptanceMeta = (payload) => {
     };
 };
 
-const buildWebhookRecords = (payload) => {
-    const candidates = Array.isArray(payload)
+const getWebhookCandidates = (payload) => (
+    Array.isArray(payload)
         ? payload
         : Array.isArray(payload?.data)
             ? payload.data
@@ -126,10 +141,12 @@ const buildWebhookRecords = (payload) => {
                 ? payload.messages
                 : Array.isArray(payload?.results)
                     ? payload.results
-                    : [payload];
+                    : [payload]
+)
+    .filter((item) => item && typeof item === 'object');
 
-    return candidates
-        .filter((item) => item && typeof item === 'object')
+const buildWebhookRecords = (payload) => {
+    return getWebhookCandidates(payload)
         .map((item) => {
             const providerStatus = toTrimmedString(item.status || item.delivery_status || item.event_type || item.eventType);
             return {
@@ -155,6 +172,67 @@ const buildWebhookRecords = (payload) => {
         .filter((item) => item.direction !== 'inbound')
         .filter((item) => item.requestId || item.messageUuid || item.correlationId || item.recipientNumber || item.providerStatus);
 };
+
+const buildInboundWebhookRecords = (payload) => {
+    return getWebhookCandidates(payload)
+        .map((item) => {
+            const messageText = truncateText(
+                toPrimitiveString(item.text)
+                || toPrimitiveString(item.body)
+                || toPrimitiveString(item.message_text)
+                || toPrimitiveString(item.messageText)
+                || toPrimitiveString(item.content)
+                || toTrimmedString(pickFirstPrimitiveByKeys(item, ['text', 'body', 'message_text', 'messageText', 'content', 'reply', 'replyText', 'message']))
+                || 'Customer replied on WhatsApp.',
+                1000
+            );
+
+            return {
+                requestId: toTrimmedString(item.request_id || item.requestId || item.requestid),
+                messageUuid: toTrimmedString(item.message_uuid || item.messageUuid || item.messageuuid),
+                correlationId: toTrimmedString(item.CRQID || item.crqid || item.correlation_id || item.correlationId),
+                integratedNumber: normalizeE164Phone(item.integrated_number || item.integratedNumber || item.number || item.to),
+                senderNumber: normalizeE164Phone(item.customer_number || item.customerNumber || item.from || item.sender || item.phone),
+                senderName: truncateText(
+                    toPrimitiveString(item.sender_name)
+                    || toPrimitiveString(item.senderName)
+                    || toPrimitiveString(item.customer_name)
+                    || toPrimitiveString(item.customerName)
+                    || toPrimitiveString(item.profile_name)
+                    || toPrimitiveString(item.profileName)
+                    || toTrimmedString(pickFirstPrimitiveByKeys(item, ['sender_name', 'senderName', 'customer_name', 'customerName', 'profile_name', 'profileName', 'name'])),
+                    120
+                ),
+                messageText,
+                direction: toTrimmedString(item.direction || item.message_direction || item.messageDirection).toLowerCase(),
+                receivedAt: parseProviderTimestamp(
+                    item.received_at
+                    || item.receivedAt
+                    || item.created_at
+                    || item.createdAt
+                    || item.timestamp
+                    || item.time
+                    || item.sent_at
+                    || item.sentAt
+                ),
+                payload: item,
+            };
+        })
+        .filter((item) => item.direction === 'inbound')
+        .filter((item) => item.integratedNumber || item.senderNumber || item.messageText);
+};
+
+const buildInboundProviderMessageKey = (record) => crypto.createHash('sha1')
+    .update([
+        record.requestId,
+        record.messageUuid,
+        record.correlationId,
+        record.integratedNumber,
+        record.senderNumber,
+        record.messageText,
+        record.receivedAt ? new Date(record.receivedAt).toISOString() : '',
+    ].map((value) => toTrimmedString(value)).join('|'))
+    .digest('hex');
 
 const ensureWhatsAppDeliverySchema = async () => {
     if (!ensureWhatsAppDeliverySchemaPromise) {
@@ -212,6 +290,32 @@ const ensureWhatsAppDeliverySchema = async () => {
                 CREATE INDEX IF NOT EXISTS idx_whatsapp_delivery_logs_broadcast_log_id
                     ON whatsapp_delivery_logs(broadcast_log_id)
                     WHERE broadcast_log_id IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS whatsapp_inbound_logs (
+                    id SERIAL PRIMARY KEY,
+                    gym_id INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                    member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+                    lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+                    integrated_number VARCHAR(30) DEFAULT '',
+                    sender_number VARCHAR(30) NOT NULL,
+                    sender_name VARCHAR(120) DEFAULT '',
+                    message_text TEXT DEFAULT '',
+                    provider_message_key VARCHAR(120) UNIQUE,
+                    msg91_request_id VARCHAR(120),
+                    msg91_message_uuid VARCHAR(120),
+                    msg91_crqid VARCHAR(120),
+                    received_at TIMESTAMPTZ,
+                    reply_context JSONB DEFAULT '{}'::jsonb,
+                    last_provider_payload JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_whatsapp_inbound_logs_gym_created_at
+                    ON whatsapp_inbound_logs(gym_id, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_whatsapp_inbound_logs_sender_number
+                    ON whatsapp_inbound_logs(sender_number);
             `);
         })();
     }
@@ -481,13 +585,304 @@ const applyWebhookRecordToLog = async (logRow, record) => {
     );
 };
 
+const buildInboundReplyNote = (record, context = {}) => {
+    const parsedDate = record?.receivedAt ? new Date(record.receivedAt) : new Date();
+    const timeLabel = Number.isNaN(parsedDate.getTime())
+        ? new Date().toISOString()
+        : parsedDate.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    const sourceParts = [];
+
+    if (context?.templateTitle) {
+        sourceParts.push(`after ${context.templateTitle}`);
+    } else if (context?.sourceLabel) {
+        sourceParts.push(`after ${context.sourceLabel}`);
+    }
+
+    const prefix = sourceParts.length > 0 ? `${sourceParts.join(' ')}. ` : '';
+    return truncateText(`[WhatsApp reply · ${timeLabel}] ${prefix}${record?.messageText || 'Customer replied on WhatsApp.'}`, 1900);
+};
+
+const appendLeadNotes = (currentValue, nextValue) => {
+    const current = toTrimmedString(currentValue);
+    const next = toTrimmedString(nextValue);
+    if (!current) return truncateText(next, 2000);
+    if (!next) return truncateText(current, 2000);
+
+    const combined = `${current}\n\n${next}`;
+    if (combined.length <= 2000) return combined;
+    return combined.slice(combined.length - 2000);
+};
+
+const findRecentOutboundContextForInbound = async (record) => {
+    const integratedLocal = normalizeLocalIndianPhone(record?.integratedNumber);
+    const senderLocal = normalizeLocalIndianPhone(record?.senderNumber);
+    if (!integratedLocal || !senderLocal) return null;
+
+    const result = await pool.query(
+        `SELECT
+            l.gym_id,
+            l.member_id,
+            l.broadcast_log_id,
+            l.source_kind,
+            l.source_label,
+            l.template_key,
+            l.template_title,
+            COALESCE(m.full_name, l.recipient_name, '') AS full_name,
+            COALESCE(m.email, '') AS email
+         FROM whatsapp_delivery_logs l
+         LEFT JOIN members m ON m.id = l.member_id
+         WHERE RIGHT(REGEXP_REPLACE(COALESCE(l.integrated_number, ''), '\\D', '', 'g'), 10) = $1
+           AND RIGHT(REGEXP_REPLACE(COALESCE(l.recipient_number, ''), '\\D', '', 'g'), 10) = $2
+         ORDER BY l.created_at DESC
+         LIMIT 1`,
+        [integratedLocal, senderLocal]
+    );
+
+    const row = result.rows[0] || null;
+    if (!row) return null;
+
+    return {
+        gymId: Number(row.gym_id || 0) || null,
+        memberId: Number(row.member_id || 0) || null,
+        broadcastLogId: Number(row.broadcast_log_id || 0) || null,
+        sourceKind: toTrimmedString(row.source_kind).toUpperCase(),
+        sourceLabel: toTrimmedString(row.source_label),
+        templateKey: toTrimmedString(row.template_key).toUpperCase(),
+        templateTitle: toTrimmedString(row.template_title),
+        fullName: truncateText(row.full_name, 120),
+        email: toTrimmedString(row.email),
+    };
+};
+
+const findGymByIntegratedNumber = async (integratedNumber) => {
+    const integratedLocal = normalizeLocalIndianPhone(integratedNumber);
+    if (!integratedLocal) return null;
+
+    const result = await pool.query(
+        `SELECT id, name
+         FROM gyms
+         WHERE RIGHT(REGEXP_REPLACE(COALESCE(messaging_whatsapp_number, ''), '\\D', '', 'g'), 10) = $1
+         LIMIT 1`,
+        [integratedLocal]
+    );
+
+    return result.rows[0] || null;
+};
+
+const findMemberByPhone = async (gymId, phone) => {
+    const localPhone = normalizeLocalIndianPhone(phone);
+    if (!gymId || !localPhone) return null;
+
+    const result = await pool.query(
+        `SELECT id, full_name, email
+         FROM members
+         WHERE gym_id = $1
+           AND deleted_at IS NULL
+           AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2
+         ORDER BY id DESC
+         LIMIT 1`,
+        [gymId, localPhone]
+    );
+
+    return result.rows[0] || null;
+};
+
+const resolveInboundReplyContext = async (record) => {
+    const outboundContext = await findRecentOutboundContextForInbound(record);
+    if (outboundContext?.gymId) {
+        return outboundContext;
+    }
+
+    const gym = await findGymByIntegratedNumber(record?.integratedNumber);
+    if (!gym?.id) return null;
+
+    const member = await findMemberByPhone(gym.id, record?.senderNumber);
+
+    return {
+        gymId: Number(gym.id || 0) || null,
+        memberId: Number(member?.id || 0) || null,
+        broadcastLogId: null,
+        sourceKind: 'INBOUND_REPLY',
+        sourceLabel: 'WHATSAPP_REPLY',
+        templateKey: '',
+        templateTitle: '',
+        fullName: truncateText(member?.full_name || record?.senderName || `WhatsApp Reply ${normalizeLocalIndianPhone(record?.senderNumber) || ''}`, 120),
+        email: toTrimmedString(member?.email),
+    };
+};
+
+const upsertLeadForInboundReply = async ({ record, context }) => {
+    const gymId = Number(context?.gymId || 0) || null;
+    const phone = normalizeLocalIndianPhone(record?.senderNumber);
+    if (!gymId || !phone) return null;
+
+    const note = buildInboundReplyNote(record, context);
+    const existingLeadResult = await pool.query(
+        `SELECT id, source, status, priority, notes
+         FROM leads
+         WHERE gym_id = $1
+           AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2
+           AND status NOT IN ('WON', 'LOST')
+         ORDER BY updated_at DESC NULLS LAST, created_at DESC
+         LIMIT 1`,
+        [gymId, phone]
+    );
+
+    const existingLead = existingLeadResult.rows[0] || null;
+    if (existingLead?.id) {
+        const currentStatus = toTrimmedString(existingLead.status).toUpperCase();
+        const nextStatus = currentStatus === 'TRIAL_BOOKED' ? 'TRIAL_BOOKED' : 'FOLLOW_UP';
+        const updatedLead = await pool.query(
+            `UPDATE leads
+             SET status = $1,
+                 priority = 'HIGH',
+                 source = CASE WHEN COALESCE(NULLIF(TRIM(source), ''), '') = '' THEN 'WhatsApp Reply' ELSE source END,
+                 notes = $2,
+                 next_follow_up_at = NOW(),
+                 updated_at = NOW()
+             WHERE id = $3
+             RETURNING id`,
+            [
+                nextStatus,
+                appendLeadNotes(existingLead.notes, note),
+                existingLead.id,
+            ]
+        );
+
+        return updatedLead.rows[0] || { id: existingLead.id };
+    }
+
+    const createdLead = await pool.query(
+        `INSERT INTO leads (
+            gym_id,
+            full_name,
+            phone,
+            email,
+            source,
+            status,
+            priority,
+            notes,
+            next_follow_up_at
+         )
+         VALUES ($1, $2, $3, $4, 'WhatsApp Reply', 'FOLLOW_UP', 'HIGH', $5, NOW())
+         RETURNING id`,
+        [
+            gymId,
+            truncateText(context?.fullName || record?.senderName || `WhatsApp Reply ${phone}`, 120),
+            phone,
+            toTrimmedString(context?.email),
+            note,
+        ]
+    );
+
+    return createdLead.rows[0] || null;
+};
+
+const createInboundReplyNotification = async ({ gymId, fullName, messageText }) => {
+    if (!gymId) return;
+    const title = 'New WhatsApp reply';
+    const person = truncateText(fullName || 'A contact', 80);
+    const preview = truncateText(messageText || 'Replied on WhatsApp.', 140);
+
+    await pool.query(
+        `INSERT INTO notifications (gym_id, title, message)
+         VALUES ($1, $2, $3)`,
+        [gymId, title, `${person} replied on WhatsApp: ${preview} Open Leads to follow up.`]
+    );
+};
+
+const registerInboundReply = async (record) => {
+    const context = await resolveInboundReplyContext(record);
+    if (!context?.gymId) {
+        return { created: false, reason: 'unknown_gym' };
+    }
+
+    const providerMessageKey = buildInboundProviderMessageKey(record);
+    const insertedLog = await pool.query(
+        `INSERT INTO whatsapp_inbound_logs (
+            gym_id,
+            member_id,
+            integrated_number,
+            sender_number,
+            sender_name,
+            message_text,
+            provider_message_key,
+            msg91_request_id,
+            msg91_message_uuid,
+            msg91_crqid,
+            received_at,
+            reply_context,
+            last_provider_payload,
+            updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, NOW())
+         ON CONFLICT (provider_message_key) DO NOTHING
+         RETURNING id`,
+        [
+            context.gymId,
+            context.memberId || null,
+            normalizeE164Phone(record.integratedNumber),
+            normalizeE164Phone(record.senderNumber),
+            truncateText(context.fullName || record.senderName, 120),
+            truncateText(record.messageText, 1000),
+            providerMessageKey,
+            record.requestId || null,
+            record.messageUuid || null,
+            record.correlationId || null,
+            record.receivedAt || new Date(),
+            JSON.stringify({
+                source_kind: context.sourceKind || 'INBOUND_REPLY',
+                source_label: context.sourceLabel || 'WHATSAPP_REPLY',
+                template_key: context.templateKey || '',
+                template_title: context.templateTitle || '',
+                broadcast_log_id: context.broadcastLogId || null,
+            }),
+            JSON.stringify(record.payload || {}),
+        ]
+    );
+
+    const inboundLogId = insertedLog.rows[0]?.id;
+    if (!inboundLogId) {
+        return { created: false, reason: 'duplicate' };
+    }
+
+    const lead = await upsertLeadForInboundReply({ record, context });
+
+    await pool.query(
+        `UPDATE whatsapp_inbound_logs
+         SET lead_id = $2,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [inboundLogId, lead?.id || null]
+    );
+
+    await createInboundReplyNotification({
+        gymId: context.gymId,
+        fullName: context.fullName || record.senderName,
+        messageText: record.messageText,
+    });
+
+    return {
+        created: true,
+        leadId: lead?.id || null,
+    };
+};
+
 const applyWhatsAppDeliveryWebhook = async (payload) => {
     await ensureWhatsAppDeliverySchema();
 
     const records = buildWebhookRecords(payload);
+    const inboundRecords = buildInboundWebhookRecords(payload);
     let matched = 0;
     let updated = 0;
     let ignored = 0;
+    let inboundCreated = 0;
+    let inboundIgnored = 0;
 
     for (const record of records) {
         const logRow = await findLogForWebhookRecord(record);
@@ -501,11 +896,23 @@ const applyWhatsAppDeliveryWebhook = async (payload) => {
         updated += 1;
     }
 
+    for (const record of inboundRecords) {
+        const result = await registerInboundReply(record);
+        if (result.created) {
+            inboundCreated += 1;
+        } else {
+            inboundIgnored += 1;
+        }
+    }
+
     return {
-        received: records.length,
+        received: records.length + inboundRecords.length,
         matched,
         updated,
         ignored,
+        inbound_received: inboundRecords.length,
+        inbound_created: inboundCreated,
+        inbound_ignored: inboundIgnored,
     };
 };
 

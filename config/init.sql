@@ -447,6 +447,9 @@ CREATE TABLE IF NOT EXISTS broadcast_logs (
     message        TEXT NOT NULL,
     sent_to_count  INTEGER DEFAULT 0,
     status         VARCHAR(20) DEFAULT 'SENT',
+    dashboard_action_key  VARCHAR(80) DEFAULT '',
+    dashboard_audience_hash VARCHAR(120) DEFAULT '',
+    dashboard_expected_count INTEGER DEFAULT 0,
     created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

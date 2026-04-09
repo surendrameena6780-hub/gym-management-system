@@ -146,6 +146,13 @@ const ensureMessagingSchema = async () => {
                 ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_SYNCED';
                 ALTER TABLE gym_message_templates ADD COLUMN IF NOT EXISTS whatsapp_template_error TEXT;
             `);
+
+            await pool.query(`
+                ALTER TABLE broadcast_logs
+                ADD COLUMN IF NOT EXISTS dashboard_action_key VARCHAR(80),
+                ADD COLUMN IF NOT EXISTS dashboard_audience_hash VARCHAR(120),
+                ADD COLUMN IF NOT EXISTS dashboard_expected_count INTEGER DEFAULT 0;
+            `);
         })();
     }
     await ensureMessagingSchemaPromise;
@@ -860,6 +867,12 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         const customMemberIds = Array.isArray(req.body.member_ids) ? req.body.member_ids : [];
         const templateKey = String(req.body.template_key || '').trim().toUpperCase();
         const channel = 'WHATSAPP';
+        const dashboardActionKey = String(req.body.dashboard_action_key || '').trim().toUpperCase().slice(0, 80);
+        const dashboardAudienceHash = String(req.body.dashboard_audience_hash || '').trim().slice(0, 120);
+        const dashboardExpectedCountInput = Number.parseInt(req.body.dashboard_expected_count, 10);
+        const dashboardExpectedCount = Number.isInteger(dashboardExpectedCountInput) && dashboardExpectedCountInput > 0
+            ? dashboardExpectedCountInput
+            : 0;
 
         if (!templateKey) {
             return fail(res, 400, 'WHATSAPP_TEMPLATE_REQUIRED', 'Select an approved WhatsApp template before launching the campaign.');
@@ -966,10 +979,30 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         }
 
         const insertLog = await pool.query(
-            `INSERT INTO broadcast_logs (gym_id, segment, channel, message, sent_to_count, status, created_by)
-             VALUES ($1, $2, $3, $4, 0, 'QUEUED', $5)
+            `INSERT INTO broadcast_logs (
+                gym_id,
+                segment,
+                channel,
+                message,
+                sent_to_count,
+                status,
+                created_by,
+                dashboard_action_key,
+                dashboard_audience_hash,
+                dashboard_expected_count
+             )
+             VALUES ($1, $2, $3, $4, 0, 'QUEUED', $5, $6, $7, $8)
              RETURNING id, created_at`,
-            [gymId, customMemberIds.length > 0 ? 'CUSTOM' : segment, channel, message, userId]
+            [
+                gymId,
+                customMemberIds.length > 0 ? 'CUSTOM' : segment,
+                channel,
+                message,
+                userId,
+                dashboardActionKey || null,
+                dashboardAudienceHash || null,
+                dashboardExpectedCount,
+            ]
         );
 
         const broadcastLogId = insertLog.rows[0].id;
@@ -1071,10 +1104,21 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
 // --- 8. CAMPAIGN HISTORY LOG ---
 router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res) => {
     try {
+        await ensureMessagingSchema();
         const gymId = req.user.gym_id;
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20', 10)));
         const logs = await pool.query(
-            `SELECT id, segment, channel, message, sent_to_count, status, created_at
+            `SELECT
+                id,
+                segment,
+                channel,
+                message,
+                sent_to_count,
+                status,
+                created_at,
+                dashboard_action_key,
+                dashboard_audience_hash,
+                dashboard_expected_count
              FROM broadcast_logs
              WHERE gym_id = $1
              ORDER BY created_at DESC

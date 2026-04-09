@@ -12,6 +12,7 @@ import {
 
 const DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
 const MAX_WARMUP_RETRIES = 8;
+const DASHBOARD_ACTION_SUPPRESSION_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 const TERMINAL_RAZORPAY_LINK_STATUSES = new Set(['PAID', 'EXPIRED', 'CANCELLED', 'FAILED', 'NOT_FOUND']);
 
 const unwrapApiData = (payload) => {
@@ -90,6 +91,31 @@ const normalizeBroadcastTemplates = (sourceTemplates) => asArray(sourceTemplates
   .filter((template) => template.is_active !== false)
   .filter((template) => String(template.whatsapp_template_status || '').toUpperCase() === 'APPROVED');
 
+const normalizeDashboardActionKey = (value) => String(value || '').trim().toUpperCase();
+
+const hashDashboardMemberIds = (value) => {
+  let hash = 2166136261;
+  const source = String(value || '');
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+};
+
+const buildDashboardAudienceHash = (memberIds = []) => {
+  const normalizedIds = asArray(memberIds)
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) => Number.isInteger(value) && value > 0)
+    .sort((left, right) => left - right);
+
+  if (normalizedIds.length === 0) return '';
+
+  return `${normalizedIds.length}:${hashDashboardMemberIds(normalizedIds.join('|'))}`;
+};
+
 export default function useDashboardPageController({ appRuntime, setCurrentPage, startTour, isActive = true }) {
   const { token, toast, navigateTo: navTo } = appRuntime;
   const navigateTo = useMemo(() => navTo || ((...args) => setCurrentPage?.(...args)), [navTo, setCurrentPage]);
@@ -153,6 +179,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const [broadcastSearch, setBroadcastSearch] = useState('');
   const [broadcastCustomIds, setBroadcastCustomIds] = useState([]);
   const [broadcastTemplates, setBroadcastTemplates] = useState([]);
+  const [broadcastActionMeta, setBroadcastActionMeta] = useState(null);
   const [gymName, setGymName] = useState('');
   const [gymBilling, setGymBilling] = useState({
     saas_status: 'FREE_TRIAL',
@@ -165,6 +192,12 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
 
   const isAnyDashboardModalOpen = showAddModal || showPaymentModal || showBroadcastModal || showCheckinModal;
   const authHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+
+  useEffect(() => {
+    if (!showBroadcastModal) {
+      setBroadcastActionMeta(null);
+    }
+  }, [showBroadcastModal]);
 
   const closePaymentModal = useCallback(() => {
     setShowPaymentModal(false);
@@ -696,17 +729,63 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     setBroadcastMessage(resolved);
   }, [broadcastTemplateKey, broadcastTemplates, gymName]);
 
-  const openBroadcastDraft = useCallback((audience, _message) => {
+  const buildBroadcastActionMeta = useCallback(({ actionKey, members: sourceMembers }) => {
+    const normalizedActionKey = normalizeDashboardActionKey(actionKey);
+    if (!normalizedActionKey) return null;
+
+    const normalizedMembers = normalizeActionMembers(sourceMembers);
+    const memberIds = normalizedMembers
+      .map((member) => Number.parseInt(member?.id, 10))
+      .filter((memberId) => Number.isInteger(memberId) && memberId > 0);
+
+    if (memberIds.length === 0) return null;
+
+    return {
+      actionKey: normalizedActionKey,
+      expectedCount: memberIds.length,
+      audienceHash: buildDashboardAudienceHash(memberIds),
+    };
+  }, []);
+
+  const isBroadcastActionCompleted = useCallback((actionMeta) => {
+    if (!actionMeta?.actionKey || !actionMeta?.audienceHash || Number(actionMeta?.expectedCount || 0) <= 0) {
+      return false;
+    }
+
+    const cutoffTimestamp = Date.now() - DASHBOARD_ACTION_SUPPRESSION_WINDOW_MS;
+
+    return campaignLogs.some((log) => {
+      const createdAt = new Date(log?.created_at || '').getTime();
+      if (!Number.isFinite(createdAt) || createdAt < cutoffTimestamp) {
+        return false;
+      }
+
+      if (normalizeDashboardActionKey(log?.dashboard_action_key) !== actionMeta.actionKey) {
+        return false;
+      }
+
+      if (String(log?.dashboard_audience_hash || '') !== actionMeta.audienceHash) {
+        return false;
+      }
+
+      const expectedCount = Number(log?.dashboard_expected_count || 0);
+      const sentCount = Number(log?.sent_to_count || 0);
+      return expectedCount > 0 && sentCount >= expectedCount && String(log?.status || '').toUpperCase() !== 'FAILED';
+    });
+  }, [campaignLogs]);
+
+  const openBroadcastDraft = useCallback((audience, _message, actionMeta = null) => {
     setBroadcastAudience(audience);
     setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
     setBroadcastSearch('');
     setBroadcastCustomIds([]);
     setBroadcastMessage('');
+    setBroadcastActionMeta(actionMeta || null);
     setShowBroadcastModal(true);
     ensureBroadcastComposer({ preferCache: true }).catch(() => {});
   }, [ensureBroadcastComposer]);
 
-  const openBroadcastDraftForMembers = useCallback(({ memberIds = [], audience = 'All' }) => {
+  const openBroadcastDraftForMembers = useCallback(({ memberIds = [], audience = 'All', actionMeta = null }) => {
     const normalizedIds = Array.from(new Set(
       asArray(memberIds)
         .map((id) => Number.parseInt(id, 10))
@@ -718,6 +797,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     setBroadcastSearch('');
     setBroadcastCustomIds(normalizedIds);
     setBroadcastMessage('');
+    setBroadcastActionMeta(actionMeta || null);
     setShowBroadcastModal(true);
     ensureBroadcastComposer({ preferCache: true }).catch(() => {});
   }, [ensureBroadcastComposer]);
@@ -730,15 +810,23 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     bulkCta = 'Open Bulk Reminder',
     bulkMessage = '',
     bulkAudience = 'All',
+    campaignActionKey = '',
     fallbackAction,
   }) => {
     const normalizedMembers = normalizeActionMembers(sourceMembers);
     const count = normalizedMembers.length;
+    const completionMeta = buildBroadcastActionMeta({
+      actionKey: campaignActionKey,
+      members: normalizedMembers,
+    });
+    const isCompleted = isBroadcastActionCompleted(completionMeta);
 
     if (count === 0) {
       return {
         members: normalizedMembers,
         count,
+        completionMeta,
+        isCompleted,
         cta: bulkCta,
         action: fallbackAction || (() => {}),
       };
@@ -749,6 +837,8 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       return {
         members: normalizedMembers,
         count,
+        completionMeta,
+        isCompleted: false,
         cta: singleCta,
         action: () => navigateTo('Members', singleFilter, {
           memberId: target.id,
@@ -760,14 +850,17 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     return {
       members: normalizedMembers,
       count,
+      completionMeta,
+      isCompleted,
       cta: bulkCta,
       action: () => openBroadcastDraftForMembers({
         memberIds: normalizedMembers.map((member) => member.id),
         message: bulkMessage,
         audience: bulkAudience,
+        actionMeta: completionMeta,
       }),
     };
-  }, [navigateTo, openBroadcastDraftForMembers]);
+  }, [buildBroadcastActionMeta, isBroadcastActionCompleted, navigateTo, openBroadcastDraftForMembers]);
 
   const buildSmartPaymentCta = useCallback(({
     payments: sourcePayments,
@@ -829,6 +922,9 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         template_key: broadcastTemplateKey || undefined,
         message: broadcastMessage,
         member_ids: broadcastCustomIds,
+        dashboard_action_key: broadcastActionMeta?.actionKey || undefined,
+        dashboard_audience_hash: broadcastActionMeta?.audienceHash || undefined,
+        dashboard_expected_count: broadcastActionMeta?.expectedCount || undefined,
       }, authHeaders);
 
       const payload = unwrapApiData(res.data) || {};
@@ -844,6 +940,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       setBroadcastMessage('');
       setBroadcastSearch('');
       setBroadcastCustomIds([]);
+      setBroadcastActionMeta(null);
       fetchData();
     } catch (err) {
       toast(err?.response?.data?.error || 'Broadcast send failed.', 'error');
@@ -1079,6 +1176,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       bulkMessage: reminderMessages.highChurn,
       bulkAudience: 'HighChurn',
       bulkCta: 'Open Bulk Broadcast',
+      campaignActionKey: 'HIGH_CHURN_BROADCAST',
     });
     const expiringImmediateCta = buildSmartMemberCta({
       members: expiringIn3Days,
@@ -1086,6 +1184,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       bulkMessage: reminderMessages.expiringImmediate,
       bulkAudience: 'Expiring',
       bulkCta: 'Open Renewal Broadcast',
+      campaignActionKey: 'EXPIRING_IMMEDIATE_BROADCAST',
     });
     const expiringSoonCta = buildSmartMemberCta({
       members: expiringFollowupMembers,
@@ -1093,6 +1192,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       bulkMessage: reminderMessages.expiringSoon,
       bulkAudience: 'Expiring',
       bulkCta: 'Open Bulk Reminder',
+      campaignActionKey: 'EXPIRING_SOON_BROADCAST',
     });
     const expiredCta = buildSmartMemberCta({
       members: expired,
@@ -1100,6 +1200,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       bulkMessage: reminderMessages.expired,
       bulkAudience: 'Expired',
       bulkCta: 'Open Winback Broadcast',
+      campaignActionKey: 'EXPIRED_WINBACK_BROADCAST',
     });
     const ghostCta = buildSmartMemberCta({
       members: ghosts,
@@ -1107,6 +1208,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       bulkMessage: reminderMessages.inactive,
       bulkAudience: 'Ghosts',
       bulkCta: 'Open Bulk Follow-up',
+      campaignActionKey: 'GHOST_REACTIVATION_BROADCAST',
     });
     const unpaidCta = buildSmartMemberCta({
       members: unpaid,
@@ -1114,6 +1216,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       bulkMessage: reminderMessages.unpaid,
       bulkAudience: 'All',
       bulkCta: 'Open Bulk Reminder',
+      campaignActionKey: 'UNPAID_ACTIVATION_BROADCAST',
     });
     const pendingDueCta = buildSmartPaymentCta({
       payments: pendingDuePayments,
@@ -1194,7 +1297,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     };
 
     const aiCandidates = [
-      buildRecommendation({
+      !highChurnCta.isCompleted && buildRecommendation({
         id: 'HIGH_CHURN',
         title: 'Launch retention for high-churn members',
         reason: `${highChurnCta.count} member${highChurnCta.count === 1 ? ' is' : 's are'} in HIGH churn tier`,
@@ -1208,7 +1311,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Prevent churn before expiry',
         action: highChurnCta.action,
       }),
-      buildRecommendation({
+      !expiringImmediateCta.isCompleted && buildRecommendation({
         id: 'EXPIRING_72H',
         title: 'Renew plans expiring in 72 hours',
         reason: `${expiringImmediateCta.count} membership${expiringImmediateCta.count === 1 ? '' : 's'} will expire within 3 days`,
@@ -1222,7 +1325,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Renew these today',
         action: expiringImmediateCta.action,
       }),
-      buildRecommendation({
+      !expiringSoonCta.isCompleted && buildRecommendation({
         id: 'EXPIRING_7D',
         title: 'Follow up on memberships expiring this week',
         reason: `${expiringSoonCta.count} membership${expiringSoonCta.count === 1 ? '' : 's'} expire within 7 days`,
@@ -1236,7 +1339,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Follow up this week',
         action: expiringSoonCta.action,
       }),
-      buildRecommendation({
+      !expiredCta.isCompleted && buildRecommendation({
         id: 'EXPIRED_WINBACK',
         title: 'Win back expired members',
         reason: `${expiredCta.count} member${expiredCta.count === 1 ? ' is' : 's are'} already expired`,
@@ -1250,7 +1353,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Bring them back',
         action: expiredCta.action,
       }),
-      buildRecommendation({
+      !ghostCta.isCompleted && buildRecommendation({
         id: 'GHOST_REACTIVATION',
         title: 'Bring back members who stopped coming',
         reason: `${ghostCta.count} active member${ghostCta.count === 1 ? '' : 's'} absent 14+ days`,
@@ -1264,7 +1367,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Bring quiet members back',
         action: ghostCta.action,
       }),
-      buildRecommendation({
+      !unpaidCta.isCompleted && buildRecommendation({
         id: 'UNPAID_ACTIVATION',
         title: 'Start unpaid members',
         reason: `${unpaidCta.count} unpaid member${unpaidCta.count === 1 ? ' is' : 's are'} waiting for activation`,
@@ -1335,7 +1438,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
           setShowCheckinModal(true);
         },
       }),
-      members.length >= 12 && weeklyRuns === 0 && buildRecommendation({
+      members.length >= 12 && weeklyRuns === 0 && !isBroadcastActionCompleted(buildBroadcastActionMeta({ actionKey: 'AUTOMATION_RESTART_BROADCAST', members: active })) && buildRecommendation({
         id: 'AUTOMATION_RESTART',
         title: 'Restart member messages',
         reason: 'No campaign was sent in the last 7 days',
@@ -1346,7 +1449,11 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         priority: 'P2',
         cta: 'Launch Broadcast',
         sub: 'Send member reminders again',
-        action: () => openBroadcastDraft('Active', 'Hi from GymVault! New week, new goals. Reply if you want help with your next workout plan or renewal options.'),
+        action: () => openBroadcastDraft(
+          'Active',
+          'Hi from GymVault! New week, new goals. Reply if you want help with your next workout plan or renewal options.',
+          buildBroadcastActionMeta({ actionKey: 'AUTOMATION_RESTART_BROADCAST', members: active }),
+        ),
       }),
       topPlanEntry && topPlanPct >= 65 && plans.length >= 2 && buildRecommendation({
         id: 'PLAN_CONCENTRATION',
@@ -1374,7 +1481,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Give members one more choice',
         action: () => navigateTo('Plans'),
       }),
-      active.length >= 12 && expiringIn7Days.length === 0 && highChurnMembers.length < 3 && pendingDues < avgPlanPrice && buildRecommendation({
+      active.length >= 12 && expiringIn7Days.length === 0 && highChurnMembers.length < 3 && pendingDues < avgPlanPrice && !isBroadcastActionCompleted(buildBroadcastActionMeta({ actionKey: 'GROWTH_PUSH_BROADCAST', members })) && buildRecommendation({
         id: 'GROWTH_PUSH',
         title: 'This week is good for new joins',
         reason: `Risk signals are stable across ${active.length} active members`,
@@ -1385,7 +1492,11 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         priority: 'P2',
         cta: 'Launch Growth',
         sub: 'Bring in new members',
-        action: () => openBroadcastDraft('All', 'Hi from GymVault! Bring your momentum back this week. Reply if you want help choosing the right plan or bringing a friend along.'),
+        action: () => openBroadcastDraft(
+          'All',
+          'Hi from GymVault! Bring your momentum back this week. Reply if you want help choosing the right plan or bringing a friend along.',
+          buildBroadcastActionMeta({ actionKey: 'GROWTH_PUSH_BROADCAST', members }),
+        ),
       }),
     ].filter(Boolean)
       .sort((a, b) => b.score - a.score);
