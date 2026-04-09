@@ -39,16 +39,128 @@ const normalizeSettingsTab = (value) => {
 const SAAS_PLANS = {
   monthly: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic',  name: 'Basic',      price: 1499, billed: 1499,  features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2799, billed: 2799,  features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3699, billed: 3699,  features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'basic',  name: 'Basic',      price: 1, billed: 1,  features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
   annual: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic',  name: 'Basic',      price: 1259, billed: 15108, features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2351, billed: 28212, features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3107, billed: 37284, features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'basic',  name: 'Basic',      price: 1, billed: 10, features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
+};
+
+const BILLING_PRICING = {
+  monthly: { test: 1, basic: 1, growth: 2, pro: 3 },
+  annual: { test: 1, basic: 10, growth: 20, pro: 30 },
+};
+
+const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
+const BILLING_DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_CHECKOUT_PAISE = 100;
+const ACTIVE_BILLING_CREDIT_STATUSES = new Set(['ACTIVE']);
+
+const getPlanChargeInr = (planId, cycle) => Number(BILLING_PRICING[String(cycle || 'monthly')]?.[String(planId || 'basic')] || 0);
+const clampBillingValue = (value, min, max) => Math.min(max, Math.max(min, value));
+const normalizePayablePaise = (value) => {
+  const normalized = Math.max(0, Math.round(Number(value) || 0));
+  if (normalized > 0 && normalized < MIN_CHECKOUT_PAISE) return MIN_CHECKOUT_PAISE;
+  return normalized;
+};
+const formatPaiseAmount = (value) => {
+  const amount = (Number(value) || 0) / 100;
+  return new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
+
+const getBillingQuotePreview = ({
+  currentPlan,
+  currentCycle,
+  currentStatus,
+  currentValidUntil,
+  targetPlan,
+  targetCycle,
+}) => {
+  const fullPricePaise = Math.round(getPlanChargeInr(targetPlan, targetCycle) * 100);
+  const currentPricePaise = Math.round(getPlanChargeInr(currentPlan, currentCycle) * 100);
+  const renewalDays = targetPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[targetCycle] || 30;
+  const preview = {
+    kind: 'fresh_purchase',
+    fullPricePaise,
+    payablePaise: fullPricePaise,
+    creditPaise: 0,
+    preserveCurrentExpiry: false,
+    renewalDays,
+    remainingRatio: 0,
+    error: null,
+  };
+
+  const expiryMs = Date.parse(currentValidUntil || '');
+  const hasActiveCredit = Boolean(
+    currentPricePaise > 0
+    && ACTIVE_BILLING_CREDIT_STATUSES.has(String(currentStatus || '').trim().toUpperCase())
+    && Number.isFinite(expiryMs)
+    && expiryMs > Date.now()
+  );
+
+  if (!hasActiveCredit) {
+    if (currentPlan === targetPlan && currentCycle === targetCycle) {
+      return { ...preview, kind: 'renewal' };
+    }
+    return preview;
+  }
+
+  const currentCycleDays = currentPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[currentCycle] || 30;
+  const remainingRatio = clampBillingValue((expiryMs - Date.now()) / (currentCycleDays * BILLING_DAY_MS), 0, 1);
+  const currentRemainingCreditPaise = Math.floor(currentPricePaise * remainingRatio);
+
+  if (currentPlan === targetPlan && currentCycle === targetCycle) {
+    return { ...preview, kind: 'renewal', remainingRatio };
+  }
+
+  if (currentCycle === targetCycle) {
+    if (fullPricePaise <= currentPricePaise) {
+      return {
+        ...preview,
+        kind: 'downgrade_requires_renewal',
+        payablePaise: 0,
+        creditPaise: currentRemainingCreditPaise,
+        remainingRatio,
+        error: 'Lower-value plan changes should happen at renewal.',
+      };
+    }
+
+    return {
+      ...preview,
+      kind: 'prorated_upgrade',
+      payablePaise: normalizePayablePaise(Math.ceil(fullPricePaise * remainingRatio) - currentRemainingCreditPaise),
+      creditPaise: currentRemainingCreditPaise,
+      preserveCurrentExpiry: true,
+      remainingRatio,
+    };
+  }
+
+  if (fullPricePaise <= currentRemainingCreditPaise) {
+    return {
+      ...preview,
+      kind: 'downgrade_requires_renewal',
+      payablePaise: 0,
+      creditPaise: currentRemainingCreditPaise,
+      remainingRatio,
+      error: 'This lower-value switch should be scheduled at renewal.',
+    };
+  }
+
+  return {
+    ...preview,
+    kind: 'cycle_switch_with_credit',
+    payablePaise: normalizePayablePaise(fullPricePaise - currentRemainingCreditPaise),
+    creditPaise: currentRemainingCreditPaise,
+    remainingRatio,
+  };
 };
 
 // Per-plan base limits
@@ -1480,6 +1592,20 @@ const loadRazorpayScript = () => {
   };
 
   const handleSubscribe = async (selectedPlan) => {
+      const preview = getBillingQuotePreview({
+        currentPlan: gymData.current_plan,
+        currentCycle: gymData.saas_billing_cycle,
+        currentStatus: realStatus,
+        currentValidUntil: gymData.saas_valid_until,
+        targetPlan: selectedPlan.id,
+        targetCycle: billingCycle,
+      });
+
+      if (preview.error) {
+        toast(preview.error, 'warning');
+        return;
+      }
+
       setIsProcessingPayment(true);
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
@@ -1495,6 +1621,9 @@ const loadRazorpayScript = () => {
             }, headers);
           
           const order = orderRes.data;
+          const orderPreview = order?.billing_preview || preview;
+          const previewCreditPaise = Number(orderPreview?.credit_paise ?? orderPreview?.creditPaise ?? 0);
+          const previewPreserveExpiry = Boolean(orderPreview?.preserve_current_expiry ?? orderPreview?.preserveCurrentExpiry);
           const checkoutImageUrl = getRazorpayCheckoutImageUrl();
 
           const options = {
@@ -1502,7 +1631,9 @@ const loadRazorpayScript = () => {
               amount: order.amount,
               currency: order.currency,
               name: `GymVault ${selectedPlan.name}`,
-              description: `${billingCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
+              description: previewCreditPaise > 0
+                ? `${selectedPlan.name} subscription • ₹${formatPaiseAmount(previewCreditPaise)} credit applied`
+                : `${billingCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
               image: checkoutImageUrl,
               order_id: order.id,
               handler: async function (response) {
@@ -1514,17 +1645,24 @@ const loadRazorpayScript = () => {
                           saas_status: 'ACTIVE',
                           current_plan: selectedPlan.id,
                           saas_billing_cycle: billingCycle,
-                          saas_valid_until: new Date(Date.now() + optDays * 24 * 60 * 60 * 1000).toISOString()
+                          saas_valid_until: previewPreserveExpiry && prev.saas_valid_until
+                            ? prev.saas_valid_until
+                            : new Date(Date.now() + optDays * 24 * 60 * 60 * 1000).toISOString()
                       }));
 
                       setLocalInvoice({
                           id: response.razorpay_payment_id,
                           date: new Date().toISOString(),
-                          amount: selectedPlan.billed,
+                          amount: Number(order?.amount || 0) / 100 || selectedPlan.billed,
                           plan: `GymVault ${selectedPlan.name} (${billingCycle})`
                       });
 
-                      toast(`Successfully upgraded to ${selectedPlan.name}!`, "success");
+                      toast(
+                        orderPreview?.kind === 'prorated_upgrade'
+                          ? `Upgraded to ${selectedPlan.name}. Prorated credit applied.`
+                          : `Successfully updated to ${selectedPlan.name}!`,
+                        "success"
+                      );
 
                       // 2. Save officially to DB
                       await axios.post('/api/billing/verify', {
@@ -2108,6 +2246,15 @@ const loadRazorpayScript = () => {
                     const isActive = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
                     const isSamePlanDifferentCycle = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle !== billingCycle;
                     const needsRenewal = (realStatus === 'EXPIRED' || realStatus === 'GRACE_PERIOD') && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
+                    const planPreview = getBillingQuotePreview({
+                      currentPlan: gymData.current_plan,
+                      currentCycle: gymData.saas_billing_cycle,
+                      currentStatus: realStatus,
+                      currentValidUntil: gymData.saas_valid_until,
+                      targetPlan: plan.id,
+                      targetCycle: billingCycle,
+                    });
+                    const isBlockedMidCycleSwitch = !isActive && realStatus === 'ACTIVE' && Boolean(planPreview?.error);
 
                     // button label
                     let btnLabel = `Upgrade to ${plan.name}`;
@@ -2116,6 +2263,9 @@ const loadRazorpayScript = () => {
                     else if (needsRenewal) btnLabel = 'Renew Subscription';
                     else if (isSamePlanDifferentCycle) btnLabel = `Switch to ${billingCycle === 'annual' ? 'Annual' : 'Monthly'}`;
                     else if (plan.test) btnLabel = 'Pay \u20B91 \u2014 Test';
+                    else if (planPreview?.kind === 'prorated_upgrade') btnLabel = `Upgrade for ₹${formatPaiseAmount(planPreview.payablePaise)}`;
+                    else if (planPreview?.creditPaise > 0 && !planPreview?.error) btnLabel = `Switch for ₹${formatPaiseAmount(planPreview.payablePaise)}`;
+                    else if (isBlockedMidCycleSwitch) btnLabel = 'Schedule at Renewal';
 
                     return (
                       <div
@@ -2161,10 +2311,21 @@ const loadRazorpayScript = () => {
 
                         {/* name + price */}
                         <h3 className="text-lg font-black mb-0.5 text-slate-900">{plan.name}</h3>
-                        <div className="flex items-baseline gap-1 mb-5 text-slate-900">
+                        <div className="flex items-baseline gap-1 mb-2 text-slate-900">
                           <span className="text-3xl font-black">&#8377;{plan.price}</span>
                           <span className="text-sm font-medium text-slate-500">/mo</span>
                         </div>
+                        {!isActive && !plan.test && planPreview?.creditPaise > 0 && !planPreview?.error && (
+                          <p className="mb-5 text-xs font-bold text-emerald-600">
+                            ₹{formatPaiseAmount(planPreview.creditPaise)} credit applied. Pay ₹{formatPaiseAmount(planPreview.payablePaise)} today.
+                          </p>
+                        )}
+                        {!isActive && !plan.test && isBlockedMidCycleSwitch && (
+                          <p className="mb-5 text-xs font-bold text-amber-600">
+                            Lower-value plan switches should be scheduled at renewal.
+                          </p>
+                        )}
+                        {!isActive && !plan.test && !(planPreview?.creditPaise > 0) && !isBlockedMidCycleSwitch && <div className="mb-5" />}
 
                         {/* features */}
                         <ul className="space-y-2.5 mb-6 flex-1">
@@ -2179,7 +2340,7 @@ const loadRazorpayScript = () => {
                         {/* CTA button */}
                         <button
                           onClick={() => handleSubscribe(plan)}
-                          disabled={isProcessingPayment || isActive}
+                          disabled={isProcessingPayment || isActive || isBlockedMidCycleSwitch}
                           className={`w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 active:scale-95 ${
                             isActive
                               ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 cursor-not-allowed'

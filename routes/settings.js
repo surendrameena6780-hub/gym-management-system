@@ -138,6 +138,7 @@ let ensureMessagingSchemaPromise;
 let ensureMemberPaymentsSchemaPromise;
 let ensurePreferenceSchemaPromise;
 let ensurePlatformSchemaPromise;
+let ensureBillingAddonSchemaPromise;
 
 const MESSAGE_TEMPLATE_DEFAULTS = [
     {
@@ -922,6 +923,24 @@ const ensurePreferenceSchema = async () => {
     await ensurePreferenceSchemaPromise;
 };
 
+const ensureBillingAddonSchema = async () => {
+    if (!ensureBillingAddonSchemaPromise) {
+        ensureBillingAddonSchemaPromise = pool.query(`
+            ALTER TABLE gyms
+            ADD COLUMN IF NOT EXISTS addon_extra_whatsapp INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_staff INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_members INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_branches INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_hello INTEGER DEFAULT 0;
+        `).catch((error) => {
+            ensureBillingAddonSchemaPromise = null;
+            throw error;
+        });
+    }
+
+    await ensureBillingAddonSchemaPromise;
+};
+
 const ensurePlatformSchema = async () => {
     if (!ensurePlatformSchemaPromise) {
         ensurePlatformSchemaPromise = (async () => {
@@ -975,7 +994,7 @@ const discardUploadedProfile = async (req) => {
 
 router.get('/', auth, async (req, res) => {
     try {
-        await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema()]);
+        await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema(), ensureBillingAddonSchema()]);
 
         const [userRes, gymRes] = await Promise.all([
             pool.query(

@@ -8,9 +8,9 @@ import {
 
 // â”€â”€â”€ Plans (14-day trial automatic on all  -  no "Test Drive" option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PLANS = [
-  { key: 'basic',  label: 'Basic',  price: '\u20B91,499', color: '#6366f1', desc: 'Up to 150 members'   },
-  { key: 'growth', label: 'Growth', price: '\u20B92,799', color: '#a855f7', desc: 'Up to 400 members'   },
-  { key: 'pro',    label: 'Pro',    price: '\u20B93,699', color: '#10b981', desc: 'Up to 1,000 members' },
+  { key: 'basic',  label: 'Basic',  price: '\u20B91', color: '#6366f1', desc: 'Up to 150 members'   },
+  { key: 'growth', label: 'Growth', price: '\u20B92', color: '#a855f7', desc: 'Up to 400 members'   },
+  { key: 'pro',    label: 'Pro',    price: '\u20B93', color: '#10b981', desc: 'Up to 1,000 members' },
 ];
 
 const PENDING_GOOGLE_SIGNUP_KEY = 'gv_pending_google_signup';

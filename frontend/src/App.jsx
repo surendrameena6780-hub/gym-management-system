@@ -817,7 +817,8 @@ function App() {
     if (!token || isHQ || isSuspended) return;
     try {
       const res = await axios.get('/api/notifications', {
-        headers: { 'x-auth-token': token }
+        headers: { 'x-auth-token': token },
+        suppressGlobalErrorToast: true,
       });
       setNotifications(res.data.notifications);
       setUnreadCount(res.data.unread_count);

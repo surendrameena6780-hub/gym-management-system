@@ -62,10 +62,35 @@ const logBillingRazorpayError = (req, stage, error, metadata = {}) => {
     });
 };
 
-const SAAS_PRICING = {
-    monthly: { test: 1, basic: 1499, growth: 2799, pro: 3699 },
-    annual:  { test: 1, basic: 15108, growth: 28212, pro: 37284 },
+let ensureBillingAddonSchemaPromise;
+
+const ensureBillingAddonSchema = async () => {
+    if (!ensureBillingAddonSchemaPromise) {
+        ensureBillingAddonSchemaPromise = pool.query(`
+            ALTER TABLE gyms
+            ADD COLUMN IF NOT EXISTS addon_extra_whatsapp INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_staff INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_members INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_branches INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_hello INTEGER DEFAULT 0;
+        `).catch((error) => {
+            ensureBillingAddonSchemaPromise = null;
+            throw error;
+        });
+    }
+
+    await ensureBillingAddonSchemaPromise;
 };
+
+const SAAS_PRICING = {
+    monthly: { test: 1, basic: 1, growth: 2, pro: 3 },
+    annual:  { test: 1, basic: 10, growth: 20, pro: 30 },
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CYCLE_DAYS = { monthly: 30, annual: 365 };
+const ACTIVE_CREDIT_STATUSES = new Set(['ACTIVE']);
+const MIN_RAZORPAY_AMOUNT_PAISE = 100;
 
 // Add-on packs (monthly, one-time purchase per billing period)
 const ADDON_PRICING = {
@@ -79,6 +104,24 @@ const ADDON_PRICING = {
 const normalizeCycle = (value) => String(value || 'monthly').trim().toLowerCase();
 const normalizePlanTier = (value) => String(value || 'pro').trim().toLowerCase();
 
+const toPaise = (amountInr) => Math.max(0, Math.round((Number(amountInr) || 0) * 100));
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const parseTimestampMs = (value) => {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? timestamp : null;
+};
+const getCycleDays = (cycle, planTier) => {
+    if (normalizePlanTier(planTier) === 'test') return 1;
+    return CYCLE_DAYS[normalizeCycle(cycle)] || 30;
+};
+const normalizePayablePaise = (value) => {
+    const normalized = Math.max(0, Math.round(Number(value) || 0));
+    if (normalized > 0 && normalized < MIN_RAZORPAY_AMOUNT_PAISE) {
+        return MIN_RAZORPAY_AMOUNT_PAISE;
+    }
+    return normalized;
+};
+
 const resolveSaasPrice = (planTier, cycle) => {
     const normalizedCycle = normalizeCycle(cycle);
     const normalizedPlan = normalizePlanTier(planTier);
@@ -88,6 +131,124 @@ const resolveSaasPrice = (planTier, cycle) => {
     }
     return { planTier: normalizedPlan, cycle: normalizedCycle, amountInr: cycleMap[normalizedPlan] };
 };
+
+const buildBillingQuote = ({
+    currentPlan,
+    currentCycle,
+    currentStatus,
+    currentValidUntil,
+    targetPlan,
+    targetCycle,
+    now = Date.now(),
+}) => {
+    const resolvedTarget = resolveSaasPrice(targetPlan, targetCycle);
+    if (!resolvedTarget) return null;
+
+    const fullPricePaise = toPaise(resolvedTarget.amountInr);
+    const renewalDays = getCycleDays(resolvedTarget.cycle, resolvedTarget.planTier);
+    const baseQuote = {
+        planTier: resolvedTarget.planTier,
+        cycle: resolvedTarget.cycle,
+        kind: 'fresh_purchase',
+        fullPricePaise,
+        payablePaise: fullPricePaise,
+        creditPaise: 0,
+        preserveCurrentExpiry: false,
+        renewalDays,
+        remainingRatio: 0,
+        error: null,
+    };
+
+    const resolvedCurrent = resolveSaasPrice(currentPlan, currentCycle);
+    const validUntilMs = parseTimestampMs(currentValidUntil);
+    const currentStatusNormalized = String(currentStatus || '').trim().toUpperCase();
+    const hasActiveCredit = Boolean(
+        resolvedCurrent
+        && ACTIVE_CREDIT_STATUSES.has(currentStatusNormalized)
+        && validUntilMs
+        && validUntilMs > now
+    );
+
+    if (!hasActiveCredit) {
+        if (
+            resolvedCurrent
+            && resolvedCurrent.planTier === resolvedTarget.planTier
+            && resolvedCurrent.cycle === resolvedTarget.cycle
+        ) {
+            return { ...baseQuote, kind: 'renewal' };
+        }
+        return baseQuote;
+    }
+
+    const currentPricePaise = toPaise(resolvedCurrent.amountInr);
+    const currentCycleDays = getCycleDays(resolvedCurrent.cycle, resolvedCurrent.planTier);
+    const remainingRatio = clamp((validUntilMs - now) / (currentCycleDays * DAY_MS), 0, 1);
+    const currentRemainingCreditPaise = Math.floor(currentPricePaise * remainingRatio);
+
+    if (
+        resolvedCurrent.planTier === resolvedTarget.planTier
+        && resolvedCurrent.cycle === resolvedTarget.cycle
+    ) {
+        return { ...baseQuote, kind: 'renewal', remainingRatio };
+    }
+
+    if (resolvedCurrent.cycle === resolvedTarget.cycle) {
+        if (fullPricePaise <= currentPricePaise) {
+            return {
+                ...baseQuote,
+                kind: 'downgrade_requires_renewal',
+                payablePaise: 0,
+                creditPaise: currentRemainingCreditPaise,
+                remainingRatio,
+                error: 'Switching to a lower-value plan should happen at renewal. Immediate proration is applied only for upgrades.',
+            };
+        }
+
+        const targetRemainingPaise = Math.ceil(fullPricePaise * remainingRatio);
+        return {
+            ...baseQuote,
+            kind: 'prorated_upgrade',
+            payablePaise: normalizePayablePaise(targetRemainingPaise - currentRemainingCreditPaise),
+            creditPaise: currentRemainingCreditPaise,
+            preserveCurrentExpiry: true,
+            remainingRatio,
+        };
+    }
+
+    if (fullPricePaise <= currentRemainingCreditPaise) {
+        return {
+            ...baseQuote,
+            kind: 'downgrade_requires_renewal',
+            payablePaise: 0,
+            creditPaise: currentRemainingCreditPaise,
+            remainingRatio,
+            error: 'Your current plan still has more remaining value than this switch. Schedule lower-value changes at renewal instead.',
+        };
+    }
+
+    return {
+        ...baseQuote,
+        kind: 'cycle_switch_with_credit',
+        payablePaise: normalizePayablePaise(fullPricePaise - currentRemainingCreditPaise),
+        creditPaise: currentRemainingCreditPaise,
+        remainingRatio,
+    };
+};
+
+const buildBillingPreviewPayload = (quote, currentValidUntil = null) => ({
+    kind: quote.kind,
+    full_price_paise: quote.fullPricePaise,
+    full_price_inr: quote.fullPricePaise / 100,
+    payable_paise: quote.payablePaise,
+    payable_inr: quote.payablePaise / 100,
+    credit_paise: quote.creditPaise,
+    credit_inr: quote.creditPaise / 100,
+    preserve_current_expiry: quote.preserveCurrentExpiry,
+    current_valid_until: currentValidUntil || null,
+    renewal_days: quote.renewalDays,
+    remaining_ratio: quote.remainingRatio,
+    error: quote.error,
+  });
 
 // --- 0. PUBLIC CONFIG — returns the Razorpay key_id to authenticated frontend ---
 router.get('/config', (req, res) => {
@@ -104,8 +265,40 @@ router.post('/create-order', async (req, res) => {
             return res.status(400).json({ error: 'Invalid plan_tier or cycle.' });
         }
 
+        const { rows } = await pool.query(
+            `SELECT current_plan, saas_billing_cycle, saas_status, saas_valid_until
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [req.user.gym_id]
+        );
+        const gym = rows[0] || {};
+        const quote = buildBillingQuote({
+            currentPlan: gym.current_plan,
+            currentCycle: gym.saas_billing_cycle,
+            currentStatus: gym.saas_status,
+            currentValidUntil: gym.saas_valid_until,
+            targetPlan: resolved.planTier,
+            targetCycle: resolved.cycle,
+        });
+
+        if (!quote) {
+            return res.status(400).json({ error: 'Unable to build billing quote.' });
+        }
+
+        if (quote.error) {
+            return res.status(400).json({
+                error: quote.error,
+                billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+            });
+        }
+
+        if (quote.payablePaise <= 0) {
+            return res.status(400).json({ error: 'No payable amount was generated for this change.' });
+        }
+
         const options = {
-            amount: resolved.amountInr * 100,
+            amount: quote.payablePaise,
             currency: "INR",
             // Razorpay receipt max 40 chars — keep short
             receipt: `saas_${req.user.gym_id}_${resolved.planTier}_${Date.now().toString().slice(-8)}`,
@@ -113,11 +306,19 @@ router.post('/create-order', async (req, res) => {
                 gym_id: String(req.user.gym_id),
                 plan_tier: resolved.planTier,
                 cycle: resolved.cycle,
+                quote_kind: quote.kind,
+                payable_paise: String(quote.payablePaise),
+                credit_paise: String(quote.creditPaise),
+                preserve_expiry: quote.preserveCurrentExpiry ? '1' : '0',
+                renewal_days: String(quote.renewalDays),
             },
         };
 
         const order = await getRazorpay().orders.create(options);
-        res.json(order);
+        res.json({
+            ...order,
+            billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+        });
     } catch (error) {
         logBillingRazorpayError(req, 'create_order', error, {
             plan_tier: req.body?.plan_tier,
@@ -131,10 +332,6 @@ router.post('/create-order', async (req, res) => {
 // --- 2. VERIFY & SAVE PLAN ---
 router.post('/verify', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan_tier, cycle } = req.body;
-    const resolved = resolveSaasPrice(plan_tier, cycle);
-    if (!resolved) {
-        return res.status(400).json({ error: 'Invalid plan_tier or cycle.' });
-    }
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
         return res.status(400).json({ error: 'Missing payment verification fields.' });
@@ -145,40 +342,67 @@ router.post('/verify', async (req, res) => {
 
     if (razorpay_signature === expectedSign) {
         let order;
+        let targetPlan;
+        let targetCycle;
+        let payablePaise;
+        let preserveCurrentExpiry;
+        let renewalDays;
 
         try {
             order = await getRazorpay().orders.fetch(razorpay_order_id);
+            targetPlan = normalizePlanTier(order?.notes?.plan_tier || plan_tier);
+            targetCycle = normalizeCycle(order?.notes?.cycle || cycle);
+            payablePaise = Number.parseInt(order?.notes?.payable_paise, 10) || Number(order?.amount || 0);
+            preserveCurrentExpiry = String(order?.notes?.preserve_expiry || '') === '1';
+            renewalDays = Number.parseInt(order?.notes?.renewal_days, 10)
+                || getCycleDays(targetCycle, targetPlan);
         } catch (err) {
             logBillingRazorpayError(req, 'fetch_order', err, {
                 razorpay_order_id,
-                plan_tier: resolved.planTier,
-                cycle: resolved.cycle,
+                plan_tier: plan_tier,
+                cycle: cycle,
             });
             return res.status(502).json({ error: 'Failed to verify payment order with Razorpay.' });
         }
 
+        const resolved = resolveSaasPrice(targetPlan, targetCycle);
+        if (!resolved) {
+            return res.status(400).json({ error: 'Invalid order metadata for subscription update.' });
+        }
+
         try {
-            if (!order || Number(order.amount) !== resolved.amountInr * 100 || String(order.currency || '').toUpperCase() !== 'INR') {
+            if (!order || Number(order.amount) !== payablePaise || String(order.currency || '').toUpperCase() !== 'INR') {
                 return res.status(400).json({ error: 'Order amount/currency mismatch.' });
             }
 
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
-            const targetPlan = resolved.planTier;
-            const targetCycle = resolved.cycle;
-            // Test plan expires in 1 day; real plans: annual=365, monthly=30
-            const daysToAdd = targetPlan === 'test' ? 1 : targetCycle === 'annual' ? 365 : 30;
-
-                await client.query(
-                `UPDATE gyms 
-                 SET saas_status = 'ACTIVE', 
-                     current_plan = $1,
-                     saas_billing_cycle = $2,
-                     saas_valid_until = CURRENT_TIMESTAMP + ($3 || ' days')::interval 
-                 WHERE id = $4`,
-                [targetPlan, targetCycle, daysToAdd, req.user.gym_id]
-            );
+                if (preserveCurrentExpiry) {
+                    await client.query(
+                        `UPDATE gyms
+                         SET saas_status = 'ACTIVE',
+                             current_plan = $1,
+                             saas_billing_cycle = $2,
+                             saas_valid_until = CASE
+                                 WHEN saas_valid_until IS NULL OR saas_valid_until <= CURRENT_TIMESTAMP
+                                     THEN CURRENT_TIMESTAMP + ($3 || ' days')::interval
+                                 ELSE saas_valid_until
+                             END
+                         WHERE id = $4`,
+                        [targetPlan, targetCycle, renewalDays, req.user.gym_id]
+                    );
+                } else {
+                    await client.query(
+                        `UPDATE gyms
+                         SET saas_status = 'ACTIVE',
+                             current_plan = $1,
+                             saas_billing_cycle = $2,
+                             saas_valid_until = CURRENT_TIMESTAMP + ($3 || ' days')::interval
+                         WHERE id = $4`,
+                        [targetPlan, targetCycle, renewalDays, req.user.gym_id]
+                    );
+                }
 
                 await client.query('COMMIT');
             } catch (err) {
@@ -222,6 +446,7 @@ router.post('/reset-test', async (req, res) => {
 // --- 4. GET CURRENT ADD-ON COUNTS ---
 router.get('/addons', async (req, res) => {
     try {
+        await ensureBillingAddonSchema();
         const { rows } = await pool.query(
             `SELECT
                 COALESCE(addon_extra_whatsapp, 0)  AS addon_extra_whatsapp,
@@ -300,6 +525,7 @@ router.post('/verify-addon', async (req, res) => {
     }
 
     try {
+        await ensureBillingAddonSchema();
         const col = addon.column;
         const { rows } = await pool.query(
             `UPDATE gyms

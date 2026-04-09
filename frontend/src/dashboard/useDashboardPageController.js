@@ -153,6 +153,8 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const [quickActionLoading, setQuickActionLoading] = useState('');
   const quickActionTimerRef = useRef(null);
   const dashboardRefreshTimerRef = useRef(null);
+  const dashboardFetchInFlightRef = useRef(false);
+  const dashboardQueuedRefreshRef = useRef(false);
   const checkinBusyIdsRef = useRef(new Set());
   const broadcastComposerRequestRef = useRef(null);
   const broadcastComposerLoadedRef = useRef(false);
@@ -223,8 +225,19 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   }, [toast]);
 
   const fetchData = useCallback(async () => {
+    if (dashboardFetchInFlightRef.current) {
+      dashboardQueuedRefreshRef.current = true;
+      return;
+    }
+
+    dashboardFetchInFlightRef.current = true;
+
     try {
-      const requestConfig = { ...authHeaders, timeout: DASHBOARD_REQUEST_TIMEOUT_MS };
+      const requestConfig = {
+        ...authHeaders,
+        timeout: DASHBOARD_REQUEST_TIMEOUT_MS,
+        suppressGlobalErrorToast: true,
+      };
       const [
         membersRes, plansRes, statsRes,
         chart30Res, chart7Res, attendanceRes,
@@ -292,10 +305,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         .length;
       const successfulCalls = 11 - failedCalls;
 
-      if (failedCalls > 0 && successfulCalls > 0) {
-        toast?.(`${failedCalls} dashboard section(s) failed to load.`, 'warning');
-      }
-
       if (failedCalls === 11 && warmupRetryCountRef.current === 0) {
         toast?.('Server is waking up. Dashboard will retry automatically.', 'warning');
       }
@@ -321,7 +330,14 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     } catch (err) {
       reportClientError('Dashboard fetch', err);
     } finally {
+      dashboardFetchInFlightRef.current = false;
       setLoading(false);
+      if (dashboardQueuedRefreshRef.current) {
+        dashboardQueuedRefreshRef.current = false;
+        window.setTimeout(() => {
+          fetchData();
+        }, 120);
+      }
     }
   }, [authHeaders, toast]);
 
