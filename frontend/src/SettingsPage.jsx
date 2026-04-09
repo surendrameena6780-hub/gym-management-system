@@ -122,6 +122,24 @@ const DEFAULT_MESSAGE_TEMPLATES = [
   { template_key: 'PAYMENT_DUE', title: 'Payment Due Alert', whatsapp_text: '', sms_text: '', is_active: true },
 ];
 
+const DEFAULT_MESSAGE_TEMPLATE_KEY_SET = new Set(DEFAULT_MESSAGE_TEMPLATES.map((template) => template.template_key));
+
+const mergeMessageTemplates = (templates = []) => {
+  const incoming = Array.isArray(templates) ? templates : [];
+  const templateMap = new Map(incoming.map((template) => [String(template?.template_key || '').trim().toUpperCase(), template]));
+  const defaultTemplates = DEFAULT_MESSAGE_TEMPLATES.map((fallback) => ({
+    ...fallback,
+    ...(templateMap.get(fallback.template_key) || {}),
+  }));
+  const customTemplates = incoming
+    .filter((template) => !DEFAULT_MESSAGE_TEMPLATE_KEY_SET.has(String(template?.template_key || '').trim().toUpperCase()))
+    .sort((left, right) => String(left?.title || left?.template_key || '').localeCompare(String(right?.title || right?.template_key || '')));
+
+  return [...defaultTemplates, ...customTemplates];
+};
+
+const isCustomMessageTemplate = (template) => !DEFAULT_MESSAGE_TEMPLATE_KEY_SET.has(String(template?.template_key || '').trim().toUpperCase());
+
 const normalizeTemplateSyncStatus = (value) => {
   const status = String(value || '').trim().toUpperCase();
   if (!status) return 'NOT_SYNCED';
@@ -484,6 +502,12 @@ const loadRazorpayScript = () => {
     to: '',
     template_key: '',
   });
+  const [customTemplateComposerOpen, setCustomTemplateComposerOpen] = useState(false);
+  const [customTemplateDraft, setCustomTemplateDraft] = useState({
+    title: '',
+    raw_text: '',
+  });
+  const [customTemplateCreating, setCustomTemplateCreating] = useState(false);
   const [whatsappOnboarding, setWhatsAppOnboarding] = useState(DEFAULT_WHATSAPP_ONBOARDING);
   const [whatsappOnboardingOpen, setWhatsAppOnboardingOpen] = useState(false);
   const [whatsappOnboardingView, setWhatsAppOnboardingView] = useState('msg91');
@@ -640,11 +664,7 @@ const loadRazorpayScript = () => {
     try {
       const res = await axios.get('/api/settings/integrations', headers);
       const payload = res.data || {};
-      const templateMap = new Map((payload.templates || []).map((item) => [item.template_key, item]));
-      const normalizedTemplates = DEFAULT_MESSAGE_TEMPLATES.map((fallback) => ({
-        ...fallback,
-        ...(templateMap.get(fallback.template_key) || {}),
-      }));
+      const normalizedTemplates = mergeMessageTemplates(payload.templates || []);
 
       setIntegrationData((prev) => ({
         ...prev,
@@ -981,6 +1001,31 @@ const loadRazorpayScript = () => {
       toast(err?.response?.data?.error || 'Failed to save integration settings.', 'error');
     } finally {
       setIntegrationSaving(false);
+    }
+  };
+
+  const handleCreateCustomTemplate = async (e) => {
+    e.preventDefault();
+    if (!customTemplateDraft.raw_text.trim()) {
+      toast('Enter raw message copy first.', 'warning');
+      return;
+    }
+
+    setCustomTemplateCreating(true);
+    try {
+      const res = await axios.post('/api/settings/integrations/templates/custom', customTemplateDraft, headers);
+      const createdTemplateKey = String(res.data?.template?.template_key || '').trim();
+      setCustomTemplateDraft({ title: '', raw_text: '' });
+      setCustomTemplateComposerOpen(false);
+      await loadIntegrations();
+      if (createdTemplateKey) {
+        setExpandedTemplate(createdTemplateKey);
+      }
+      toast(res.data?.message || 'Custom template created.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to create custom template.', 'error');
+    } finally {
+      setCustomTemplateCreating(false);
     }
   };
 
@@ -2650,6 +2695,68 @@ const loadRazorpayScript = () => {
                           <h4 className="font-black text-slate-900 text-sm mb-0.5">Message Templates</h4>
                           <p className="text-xs text-slate-500 font-medium">{'Placeholders: {{name}}, {{plan}}, {{days_left}}, {{gym_name}}'}</p>
                         </div>
+                        <div className="px-5 pb-4">
+                          <div className="rounded-2xl border border-dashed border-purple-200 bg-gradient-to-br from-purple-50 via-white to-emerald-50 p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-sm font-black text-slate-900">Create a Custom Template</p>
+                                <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">Type raw copy once. GymVault will add placeholders like {'{{name}}'} and {'{{gym_name}}'}, save the operational version, and submit it to MSG91 for approval.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCustomTemplateComposerOpen((prev) => !prev)}
+                                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-black hover:bg-purple-700 active:scale-[0.98] transition-all"
+                              >
+                                <Plus size={14} /> {customTemplateComposerOpen ? 'Close Composer' : 'Create Template'}
+                              </button>
+                            </div>
+                            {customTemplateComposerOpen && (
+                              <form onSubmit={handleCreateCustomTemplate} className="mt-4 space-y-3">
+                                <div>
+                                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Internal Label (Optional)</label>
+                                  <input
+                                    value={customTemplateDraft.title}
+                                    onChange={(e) => setCustomTemplateDraft((prev) => ({ ...prev, title: e.target.value }))}
+                                    placeholder="Winback Offer, Festive Reminder, Personal Check-in"
+                                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Raw Message</label>
+                                  <textarea
+                                    rows={4}
+                                    value={customTemplateDraft.raw_text}
+                                    onChange={(e) => setCustomTemplateDraft((prev) => ({ ...prev, raw_text: e.target.value }))}
+                                    placeholder="hello from gym vault, we miss you. come back this week and reply if you want help"
+                                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none"
+                                  />
+                                </div>
+                                <div className="rounded-xl bg-white/80 border border-purple-100 px-3 py-3">
+                                  <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">Approval is still controlled by MSG91 and WhatsApp review, but creation and submission are automatic from here.</p>
+                                </div>
+                                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCustomTemplateComposerOpen(false);
+                                      setCustomTemplateDraft({ title: '', raw_text: '' });
+                                    }}
+                                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-black hover:bg-white transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    disabled={customTemplateCreating}
+                                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-black hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-60"
+                                  >
+                                    <Plus size={14} /> {customTemplateCreating ? 'Creating...' : 'Create & Sync'}
+                                  </button>
+                                </div>
+                              </form>
+                            )}
+                          </div>
+                        </div>
                         <div className="divide-y divide-slate-100">
                           {(integrationData.templates || []).map((template, index) => (
                             <div key={template.template_key}>
@@ -2660,9 +2767,16 @@ const loadRazorpayScript = () => {
                                   <div className={`w-2 h-2 rounded-full shrink-0 ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                                   <div>
                                     <span className="text-sm font-bold text-slate-800 block">{template.title}</span>
-                                    <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${getTemplateSyncMeta(normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'APPROVED' ? 'READY' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'PENDING' ? 'PENDING_APPROVAL' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'REJECTED' || normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'FAILED' ? 'ERROR' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'DISABLED' ? 'NOT_SYNCED' : 'NOT_SYNCED').pill}`}>
-                                      {normalizeTemplateSyncStatus(template.whatsapp_template_status).replace(/_/g, ' ')}
-                                    </span>
+                                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                      {isCustomMessageTemplate(template) && (
+                                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-900 text-white">
+                                          Custom
+                                        </span>
+                                      )}
+                                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${getTemplateSyncMeta(normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'APPROVED' ? 'READY' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'PENDING' ? 'PENDING_APPROVAL' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'REJECTED' || normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'FAILED' ? 'ERROR' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'DISABLED' ? 'NOT_SYNCED' : 'NOT_SYNCED').pill}`}>
+                                        {normalizeTemplateSyncStatus(template.whatsapp_template_status).replace(/_/g, ' ')}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                                 <ChevronDown size={15} className={`text-slate-400 transition-transform duration-200 shrink-0 ${expandedTemplate === template.template_key ? 'rotate-180' : ''}`} />
@@ -2702,7 +2816,11 @@ const loadRazorpayScript = () => {
                                       </div>
                                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                                         <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Notes</p>
-                                        <p className="mt-1 text-[11px] font-semibold text-slate-600 leading-relaxed">Use placeholders like {'{{name}}'}, {'{{plan}}'}, {'{{days_left}}'}, and {'{{gym_name}}'}. Changing the copy creates a new provider template version for approval.</p>
+                                        <p className="mt-1 text-[11px] font-semibold text-slate-600 leading-relaxed">
+                                          {isCustomMessageTemplate(template)
+                                            ? 'Custom templates can be edited here too. GymVault keeps the copy placeholder-aware and resubmits any changed version to MSG91 for review.'
+                                            : 'Use placeholders like {{name}}, {{plan}}, {{days_left}}, and {{gym_name}}. Changing the copy creates a new provider template version for approval.'}
+                                        </p>
                                       </div>
                                     </div>
                                   </div>

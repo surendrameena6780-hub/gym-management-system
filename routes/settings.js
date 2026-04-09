@@ -19,6 +19,7 @@ const {
     looksLikeMsg91TemplateDuplicate,
     normalizeE164Phone,
     normalizeLocalIndianPhone,
+    operationalizeTemplateCopy,
     pickTemplateCategory,
     sendWhatsAppTemplate,
 } = require('../utils/msg91');
@@ -190,6 +191,73 @@ const MESSAGE_TEMPLATE_DEFAULTS = [
 ];
 
 const MESSAGE_TEMPLATE_KEYS = MESSAGE_TEMPLATE_DEFAULTS.map((template) => template.template_key);
+const MAX_MESSAGE_TEMPLATES = 50;
+const MESSAGE_TEMPLATE_KEY_SET = new Set(MESSAGE_TEMPLATE_KEYS);
+const CUSTOM_TEMPLATE_KEY_PREFIX = 'CUSTOM_';
+
+const isBuiltInTemplateKey = (value) => MESSAGE_TEMPLATE_KEY_SET.has(String(value || '').trim().toUpperCase());
+
+const normalizeTemplateKey = (value, field = 'template_key') => {
+    const key = ensureTrimmedString(value, {
+        field,
+        required: true,
+        max: 60,
+        uppercase: true,
+    });
+
+    if (!/^[A-Z0-9_]+$/.test(key)) {
+        throw new ValidationError(`${field} must contain only letters, numbers, and underscores.`);
+    }
+
+    return key;
+};
+
+const deriveTemplateTitleFromText = (value) => {
+    const words = String(value || '')
+        .replace(/{{\s*[a-zA-Z0-9_]+\s*}}/g, ' ')
+        .replace(/[^a-zA-Z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 5);
+
+    if (words.length === 0) {
+        return 'Custom Template';
+    }
+
+    return words
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+};
+
+const buildCustomTemplateKey = (title, rawText) => {
+    const stem = String(title || rawText || 'custom template')
+        .replace(/{{\s*[a-zA-Z0-9_]+\s*}}/g, ' ')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_')
+        .toUpperCase()
+        .slice(0, 28) || 'MESSAGE';
+    const signature = crypto.createHash('sha1').update(String(rawText || title || Date.now())).digest('hex').slice(0, 6).toUpperCase();
+    return `${CUSTOM_TEMPLATE_KEY_PREFIX}${stem}_${signature}`.slice(0, 60);
+};
+
+const sortTemplatesForSettings = (templates = []) => [...templates].sort((left, right) => {
+    const leftKey = String(left?.template_key || '').trim().toUpperCase();
+    const rightKey = String(right?.template_key || '').trim().toUpperCase();
+    const leftBuiltIn = isBuiltInTemplateKey(leftKey);
+    const rightBuiltIn = isBuiltInTemplateKey(rightKey);
+
+    if (leftBuiltIn && rightBuiltIn) {
+        return MESSAGE_TEMPLATE_KEYS.indexOf(leftKey) - MESSAGE_TEMPLATE_KEYS.indexOf(rightKey);
+    }
+
+    if (leftBuiltIn !== rightBuiltIn) {
+        return leftBuiltIn ? -1 : 1;
+    }
+
+    return String(left?.title || leftKey).localeCompare(String(right?.title || rightKey));
+});
 
 const toPositiveInt = (value, fallback) => {
     const n = parseInt(value, 10);
@@ -316,19 +384,14 @@ const normalizeIntegrationTemplatesInput = (value) => {
         throw new ValidationError('templates must be an array.');
     }
 
-    if (value.length > MESSAGE_TEMPLATE_KEYS.length) {
-        throw new ValidationError(`templates must contain ${MESSAGE_TEMPLATE_KEYS.length} items or fewer.`);
+    if (value.length > MAX_MESSAGE_TEMPLATES) {
+        throw new ValidationError(`templates must contain ${MAX_MESSAGE_TEMPLATES} items or fewer.`);
     }
 
     const seenKeys = new Set();
     return value.map((entry, index) => {
         const template = ensureObject(entry, { field: `templates[${index}]` });
-        const key = ensureChoice(template.template_key, {
-            field: `templates[${index}].template_key`,
-            choices: MESSAGE_TEMPLATE_KEYS,
-            required: true,
-            uppercase: true,
-        });
+        const key = normalizeTemplateKey(template.template_key, `templates[${index}].template_key`);
 
         if (seenKeys.has(key)) {
             throw new ValidationError(`templates contains a duplicate template_key: ${key}.`);
@@ -336,28 +399,34 @@ const normalizeIntegrationTemplatesInput = (value) => {
         seenKeys.add(key);
 
         const fallback = MESSAGE_TEMPLATE_DEFAULTS.find((item) => item.template_key === key);
-        const whatsappText = ensureTrimmedString(template.whatsapp_text || fallback?.whatsapp_text || '', {
+        const isCustomTemplate = !isBuiltInTemplateKey(key);
+        const rawWhatsAppText = ensureTrimmedString(template.whatsapp_text || fallback?.whatsapp_text || '', {
             field: `templates[${index}].whatsapp_text`,
             required: true,
             min: 10,
             max: 4000,
         });
+        const whatsappText = isCustomTemplate ? operationalizeTemplateCopy(rawWhatsAppText) : rawWhatsAppText;
+        const rawSmsText = ensureTrimmedString(template.sms_text || fallback?.sms_text || whatsappText, {
+            field: `templates[${index}].sms_text`,
+            required: true,
+            min: 10,
+            max: 4000,
+        });
+        const smsText = isCustomTemplate ? operationalizeTemplateCopy(rawSmsText) : rawSmsText;
+        const titleFallback = fallback?.title || deriveTemplateTitleFromText(rawWhatsAppText) || key;
 
         return {
             template_key: key,
-            title: ensureTrimmedString(template.title || fallback?.title || key, {
+            title: ensureTrimmedString(template.title || titleFallback, {
                 field: `templates[${index}].title`,
                 required: true,
                 min: 2,
                 max: 120,
             }),
             whatsapp_text: whatsappText,
-            sms_text: ensureTrimmedString(template.sms_text || fallback?.sms_text || whatsappText, {
-                field: `templates[${index}].sms_text`,
-                required: true,
-                min: 10,
-                max: 4000,
-            }),
+            sms_text: smsText,
+            whatsapp_template_category: pickTemplateCategory(key, whatsappText),
             is_active: template.is_active !== false,
         };
     });
@@ -450,7 +519,7 @@ const summarizeTemplateSyncStatus = (templates) => {
 const seedMessageTemplates = async (gymId, db = pool) => {
     for (const template of MESSAGE_TEMPLATE_DEFAULTS) {
         const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
-        const templateCategory = pickTemplateCategory(template.template_key);
+        const templateCategory = pickTemplateCategory(template.template_key, template.whatsapp_text);
 
         await db.query(
             `INSERT INTO gym_message_templates (
@@ -528,7 +597,10 @@ const loadMessagingState = async (gymId) => {
 
     return {
         gym: gymRes.rows[0] || {},
-        templates: templatesRes.rows || [],
+        templates: sortTemplatesForSettings((templatesRes.rows || []).map((template) => ({
+            ...template,
+            is_custom: !isBuiltInTemplateKey(template.template_key),
+        }))),
     };
 };
 
@@ -606,7 +678,7 @@ const syncGymWhatsAppState = async (gymId) => {
 
         for (const template of initialState.templates) {
             const desiredName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
-            const desiredCategory = pickTemplateCategory(template.template_key);
+            const desiredCategory = pickTemplateCategory(template.template_key, template.whatsapp_text);
             const isActive = template.is_active !== false;
 
             if (!isActive) {
@@ -669,7 +741,7 @@ const syncGymWhatsAppState = async (gymId) => {
 
         for (const template of latestTemplatesState.templates) {
             const desiredName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
-            const desiredCategory = pickTemplateCategory(template.template_key);
+            const desiredCategory = pickTemplateCategory(template.template_key, template.whatsapp_text);
             const providerTemplate = refreshedProviderMap.get(desiredName.toLowerCase());
             const currentStatus = normalizeTemplateStatus(template.whatsapp_template_status || 'NOT_SYNCED');
             const nextStatus = template.is_active === false
@@ -1085,6 +1157,121 @@ router.get('/integrations', auth, async (req, res) => {
     }
 });
 
+router.post('/integrations/templates/custom', auth, async (req, res) => {
+    try {
+        await ensureMessagingSchema();
+
+        const gymId = req.user.gym_id;
+        await seedMessageTemplates(gymId);
+
+        const rawText = ensureTrimmedString(req.body?.raw_text, {
+            field: 'raw_text',
+            required: true,
+            min: 5,
+            max: 4000,
+        });
+        const requestedTitle = ensureTrimmedString(req.body?.title, {
+            field: 'title',
+            max: 120,
+        });
+        const whatsappText = operationalizeTemplateCopy(rawText);
+        const title = ensureTrimmedString(requestedTitle || deriveTemplateTitleFromText(rawText), {
+            field: 'title',
+            required: true,
+            min: 2,
+            max: 120,
+        });
+        const templateKey = buildCustomTemplateKey(title, whatsappText);
+        const templateCategory = pickTemplateCategory(templateKey, whatsappText);
+
+        const templateCountRes = await pool.query(
+            `SELECT COUNT(*)::INT AS template_count
+             FROM gym_message_templates
+             WHERE gym_id = $1`,
+            [gymId]
+        );
+
+        if (Number(templateCountRes.rows[0]?.template_count || 0) >= MAX_MESSAGE_TEMPLATES) {
+            return res.status(400).json({
+                error: `You can store up to ${MAX_MESSAGE_TEMPLATES} templates per gym.`,
+            });
+        }
+
+        const duplicateRes = await pool.query(
+            `SELECT template_key, title
+             FROM gym_message_templates
+             WHERE gym_id = $1
+               AND LOWER(whatsapp_text) = LOWER($2)
+             LIMIT 1`,
+            [gymId, whatsappText]
+        );
+
+        if (duplicateRes.rows.length > 0) {
+            return res.status(409).json({
+                error: `A similar template already exists as ${duplicateRes.rows[0].title || duplicateRes.rows[0].template_key}.`,
+            });
+        }
+
+        await pool.query(
+            `INSERT INTO gym_message_templates (
+                gym_id,
+                template_key,
+                title,
+                whatsapp_text,
+                sms_text,
+                whatsapp_template_name,
+                whatsapp_template_language,
+                whatsapp_template_category,
+                whatsapp_template_status,
+                whatsapp_template_error,
+                is_active,
+                updated_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, 'en_US', $7, 'NOT_SYNCED', NULL, TRUE, NOW())`,
+            [
+                gymId,
+                templateKey,
+                title,
+                whatsappText,
+                whatsappText,
+                buildTemplateName(gymId, templateKey, whatsappText),
+                templateCategory,
+            ]
+        );
+
+        const syncedState = await syncGymWhatsAppState(gymId);
+        const createdTemplate = (syncedState.templates || []).find((template) => template.template_key === templateKey) || null;
+        const whatsappStatus = String(syncedState.gym?.messaging_whatsapp_status || 'NOT_CONFIGURED').toUpperCase();
+        const templateStatus = normalizeTemplateStatus(createdTemplate?.whatsapp_template_status || 'NOT_SYNCED');
+
+        let message = 'Custom template created.';
+        if (whatsappStatus === 'CONNECTED') {
+            if (templateStatus === 'APPROVED') {
+                message = 'Custom template created and approved on MSG91.';
+            } else if (templateStatus === 'PENDING') {
+                message = 'Custom template created and submitted to MSG91 for approval.';
+            } else if (templateStatus === 'FAILED' || templateStatus === 'REJECTED') {
+                message = 'Custom template created, but MSG91 sync needs attention.';
+            } else {
+                message = 'Custom template created and queued for MSG91 sync.';
+            }
+        } else {
+            message = 'Custom template created. Connect the business WhatsApp number to submit it to MSG91.';
+        }
+
+        return res.status(201).json({
+            message,
+            template: createdTemplate,
+        });
+    } catch (err) {
+        console.error('CUSTOM TEMPLATE CREATE ERROR:', err.message);
+        if (isValidationError(err)) {
+            return res.status(err.statusCode || 400).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed to create template.' });
+    }
+});
+
 router.put('/integrations', auth, async (req, res) => {
     let client;
     let transactionOpen = false;
@@ -1209,7 +1396,7 @@ router.put('/integrations', auth, async (req, res) => {
             if (templateEntries.length > 0) {
                 for (const template of templateEntries) {
                     const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
-                    const templateCategory = pickTemplateCategory(template.template_key);
+                    const templateCategory = template.whatsapp_template_category || pickTemplateCategory(template.template_key, template.whatsapp_text);
 
                     await client.query(
                         `INSERT INTO gym_message_templates (

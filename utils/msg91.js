@@ -30,7 +30,150 @@ const TEMPLATE_PLACEHOLDER_DEFAULTS = {
     gym_name: 'GymVault',
 };
 
+const TEMPLATE_PLACEHOLDER_ALIASES = {
+    name: 'name',
+    member: 'name',
+    member_name: 'name',
+    customer: 'name',
+    customer_name: 'name',
+    plan: 'plan',
+    membership: 'plan',
+    membership_plan: 'plan',
+    days_left: 'days_left',
+    daysleft: 'days_left',
+    days: 'days_left',
+    expiry_days: 'days_left',
+    gym_name: 'gym_name',
+    gymname: 'gym_name',
+    gym: 'gym_name',
+    studio_name: 'gym_name',
+};
+
 const toTrimmedString = (value) => String(value || '').trim();
+
+const capitalizeSentenceStart = (value) => String(value || '').replace(/^\s*([a-z])/u, (match, character) => match.replace(character, character.toUpperCase()));
+
+const normalizeTemplatePlaceholderKey = (value) => {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    return TEMPLATE_PLACEHOLDER_ALIASES[normalized] || (TEMPLATE_PLACEHOLDER_DEFAULTS[normalized] ? normalized : '');
+};
+
+const normalizeLooseTemplatePlaceholders = (text) => String(text || '').replace(/(\{\{?|\[\[?)\s*([a-zA-Z][a-zA-Z0-9_\s-]{0,40})\s*(\}\}?|\]\]?)/g, (match, _open, rawPlaceholder) => {
+    const normalizedKey = normalizeTemplatePlaceholderKey(rawPlaceholder);
+    return normalizedKey ? `{{${normalizedKey}}}` : match;
+});
+
+const insertSuffixBeforeTerminalPunctuation = (text, suffix) => {
+    const normalizedText = toTrimmedString(text);
+    const normalizedSuffix = toTrimmedString(suffix);
+    if (!normalizedText || !normalizedSuffix) {
+        return normalizedText;
+    }
+
+    const punctuationMatch = normalizedText.match(/([.!?]+)$/);
+    if (!punctuationMatch) {
+        return `${normalizedText}${normalizedSuffix}`;
+    }
+
+    return `${normalizedText.slice(0, -punctuationMatch[1].length)}${normalizedSuffix}${punctuationMatch[1]}`;
+};
+
+const operationalizeTemplateCopy = (rawText) => {
+    let text = toTrimmedString(rawText)
+        .replace(/\s+/g, ' ')
+        .replace(/\s+([,.!?])/g, '$1');
+
+    if (!text) {
+        return '';
+    }
+
+    text = normalizeLooseTemplatePlaceholders(text)
+        .replace(/\bgym\s*vault\b/gi, '{{gym_name}}')
+        .replace(/\bgym\s*name\b/gi, '{{gym_name}}');
+
+    let placeholderKeys = extractTemplatePlaceholderKeys(text);
+
+    if (!placeholderKeys.includes('name')) {
+        if (/^(hi|hello|hey|namaste|good morning|good afternoon|good evening)\b/i.test(text)) {
+            text = text.replace(/^(hi|hello|hey|namaste|good morning|good afternoon|good evening)\b[\s,!.-]*/i, (_match, greeting) => `${capitalizeSentenceStart(greeting)} {{name}}, `);
+        } else {
+            text = `Hi {{name}}, ${text}`;
+        }
+    }
+
+    placeholderKeys = extractTemplatePlaceholderKeys(text);
+
+    if (!placeholderKeys.includes('gym_name')) {
+        if (/\bfrom\s+(?:the\s+)?(?:gym|studio|club)\b/i.test(text)) {
+            text = text.replace(/\bfrom\s+(?:the\s+)?(?:gym|studio|club)\b/i, 'from {{gym_name}}');
+        } else if (/\bat\s+(?:the\s+)?(?:gym|studio|club)\b/i.test(text)) {
+            text = text.replace(/\bat\s+(?:the\s+)?(?:gym|studio|club)\b/i, 'at {{gym_name}}');
+        } else {
+            text = insertSuffixBeforeTerminalPunctuation(text, ' from {{gym_name}}');
+        }
+    }
+
+    placeholderKeys = extractTemplatePlaceholderKeys(text);
+
+    if (!placeholderKeys.includes('plan')) {
+        if (/\byour current plan\b/i.test(text)) {
+            text = text.replace(/\byour current plan\b/i, '{{plan}}');
+        } else if (/\byour plan\b/i.test(text)) {
+            text = text.replace(/\byour plan\b/i, '{{plan}}');
+        } else if (/\byour membership\b/i.test(text)) {
+            text = text.replace(/\byour membership\b/i, 'your {{plan}} membership');
+        }
+    }
+
+    placeholderKeys = extractTemplatePlaceholderKeys(text);
+
+    if (!placeholderKeys.includes('days_left')) {
+        if (/\b(?:in|within)\s+\d+\s+day(?:s|\(s\))\b/i.test(text)) {
+            text = text.replace(/\b((?:in|within))\s+\d+\s+(day(?:s|\(s\)))\b/i, '$1 {{days_left}} $2');
+        } else if (/\b(expire|expires|expiring|expired|renewal reminder|renew soon|payment due|due soon)\b/i.test(text)) {
+            text = insertSuffixBeforeTerminalPunctuation(text, ' in {{days_left}} day(s)');
+        }
+    }
+
+    text = capitalizeSentenceStart(
+        text
+            .replace(/\s+/g, ' ')
+            .replace(/\s+([,.!?])/g, '$1')
+            .trim()
+    );
+
+    if (!/[.!?]$/.test(text)) {
+        text = `${text}.`;
+    }
+
+    return text;
+};
+
+const inferTemplateCategoryFromText = (templateKey, whatsappText = '') => {
+    const mappedCategory = TEMPLATE_CATEGORY_MAP[String(templateKey || '').trim().toUpperCase()];
+    if (mappedCategory) {
+        return mappedCategory;
+    }
+
+    const normalizedText = String(whatsappText || '').toLowerCase();
+    const utilitySignals = ['renew', 'renewal', 'expire', 'expired', 'payment', 'due', 'invoice', 'receipt', 'membership', 'schedule', 'timing', 'session', 'support'];
+    const marketingSignals = ['offer', 'promo', 'discount', 'sale', 'winback', 'comeback', 'invite', 'refer', 'join', 'special'];
+
+    if (utilitySignals.some((signal) => normalizedText.includes(signal))) {
+        return 'UTILITY';
+    }
+
+    if (marketingSignals.some((signal) => normalizedText.includes(signal))) {
+        return 'MARKETING';
+    }
+
+    return 'MARKETING';
+};
 
 const normalizeAbsoluteUrl = (value, fallback) => {
     const raw = toTrimmedString(value);
@@ -384,7 +527,7 @@ const buildTemplateName = (gymId, templateKey, whatsappText) => {
     return `gv_${gymId}_${sanitizedKey}_${signature}`.slice(0, 60);
 };
 
-const pickTemplateCategory = (templateKey) => TEMPLATE_CATEGORY_MAP[String(templateKey || '').trim().toUpperCase()] || 'UTILITY';
+const pickTemplateCategory = (templateKey, whatsappText = '') => inferTemplateCategoryFromText(templateKey, whatsappText);
 
 const buildTemplateDefinition = ({ gymId, templateKey, title, whatsappText, integratedNumber }) => {
     const placeholderKeys = extractTemplatePlaceholderKeys(whatsappText);
@@ -403,7 +546,7 @@ const buildTemplateDefinition = ({ gymId, templateKey, title, whatsappText, inte
         template_name: buildTemplateName(gymId, templateKey, whatsappText),
         template_title: toTrimmedString(title),
         language: 'en_US',
-        category: pickTemplateCategory(templateKey),
+        category: pickTemplateCategory(templateKey, whatsappText),
         components: [bodyComponent],
     };
 };
@@ -512,6 +655,7 @@ module.exports = {
     normalizeCountryCodePhone,
     normalizeE164Phone,
     normalizeLocalIndianPhone,
+    operationalizeTemplateCopy,
     pickTemplateCategory,
     requestMsg91Otp,
     sendWhatsAppTemplate,
