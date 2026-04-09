@@ -12,6 +12,12 @@ const {
     getGymBranchDirectory,
     resolveBranchWriteScope,
 } = require('../utils/branchAccess');
+const {
+    computeEffectiveBillingLimits,
+    getBillingConfig,
+    getGymBillingSnapshot,
+    getGymUsageSnapshot,
+} = require('../utils/platformSettings');
 
 const saasMiddleware = require('../middleware/saasMiddleware');
 
@@ -91,6 +97,24 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
         const normalizedRole = normalizeStaffRole(staff_role);
         const effectivePermissions = normalizePermissions(permissions, normalizedRole);
         const branchScope = await resolveBranchWriteScope(pool, req, req.body?.branch_id);
+        const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+            getBillingConfig(),
+            getGymBillingSnapshot(pool, req.user.gym_id),
+            getGymUsageSnapshot(pool, req.user.gym_id),
+        ]);
+
+        if (!gymBilling) {
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
+
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+        if (effectiveLimits.staff !== null && Number(usageSnapshot.staff || 0) + 1 > effectiveLimits.staff) {
+            return res.status(409).json({
+                error: `Your current plan allows up to ${effectiveLimits.staff} staff user${effectiveLimits.staff === 1 ? '' : 's'} including add-ons. Upgrade the plan or add staff capacity before creating another staff login.`,
+                allowed_staff: effectiveLimits.staff,
+                current_staff: Number(usageSnapshot.staff || 0),
+            });
+        }
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);

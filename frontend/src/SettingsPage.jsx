@@ -14,6 +14,13 @@ import PageLoader from './PageLoader';
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import { apiFetch } from './utils/apiFetch';
 import { reportClientError } from './utils/clientErrorReporter';
+import {
+  computeEffectiveLimits as computeCatalogEffectiveLimits,
+  formatPaiseAmount as formatBillingPaise,
+  getBillingQuotePreview as getCatalogBillingQuotePreview,
+  isAddonAllowedForPlan,
+  normalizeBillingCatalog as normalizeFrontendBillingCatalog,
+} from './utils/billingCatalog';
 
 const TABS = [
   { id: 'account', label: 'Account & Business', icon: User, group: 'Personal & Business' },
@@ -191,6 +198,21 @@ const ADDON_PACKS = [
   { key: 'extra_branch_1',     label: 'Extra Branch',                price: 599, icon: Building2,     desc: 'Add 1 more branch to your gym setup.' },
   { key: 'extra_hello_1',      label: 'Extra Hello Number',          price: 699, icon: Phone,         desc: 'Enable inbound Hello on 1 additional WhatsApp number.', requiresPlan: ['growth', 'pro'] },
 ];
+
+const BILLING_PLAN_THEME = {
+  test: { icon: Zap, color: 'text-amber-500', bg: 'bg-amber-50' },
+  basic: { icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+  growth: { icon: Zap, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+  pro: { icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+};
+
+const BILLING_ADDON_ICONS = {
+  extra_whatsapp_250: MessageSquare,
+  extra_staff_1: Users,
+  extra_members_100: User,
+  extra_branch_1: Building2,
+  extra_hello_1: Phone,
+};
 
 const STAFF_ROLE_OPTIONS = [
   'MANAGER',
@@ -548,6 +570,8 @@ const loadRazorpayScript = () => {
       staff: 0,
       storage: 0.1
   });
+  const [billingCatalog, setBillingCatalog] = useState(() => normalizeFrontendBillingCatalog());
+  const [effectiveLimits, setEffectiveLimits] = useState(() => computeCatalogEffectiveLimits(normalizeFrontendBillingCatalog(), 'pro'));
 
   const [integSubTab, setIntegSubTab] = useState('payments');
   const [expandedTemplate, setExpandedTemplate] = useState(null);
@@ -687,6 +711,39 @@ const loadRazorpayScript = () => {
     return String(log?.current_status || '').trim().toUpperCase() === deliveryLogFilter;
   });
   const activeDeliveryFilterLabel = DELIVERY_LOG_FILTERS.find((option) => option.value === deliveryLogFilter)?.label || 'All';
+  const normalizedBillingCatalog = useMemo(() => normalizeFrontendBillingCatalog(billingCatalog), [billingCatalog]);
+  const currentPlanMeta = normalizedBillingCatalog.plans[gymData.current_plan] || normalizedBillingCatalog.plans.pro;
+  const planCards = useMemo(
+    () => normalizedBillingCatalog.plan_order.map((planId) => {
+      const plan = normalizedBillingCatalog.plans[planId];
+      const theme = BILLING_PLAN_THEME[planId] || BILLING_PLAN_THEME.basic;
+      return {
+        ...plan,
+        ...theme,
+        price: billingCycle === 'annual' ? Number(plan.annual_price || 0) : Number(plan.monthly_price || 0),
+        billed: billingCycle === 'annual' ? Number(plan.annual_price || 0) : Number(plan.monthly_price || 0),
+        test: planId === 'test',
+        desc: plan.features?.[0] || '',
+      };
+    }),
+    [billingCycle, normalizedBillingCatalog]
+  );
+  const addonPacks = useMemo(
+    () => normalizedBillingCatalog.addon_order.map((addonKey) => {
+      const addon = normalizedBillingCatalog.addons[addonKey];
+      return {
+        ...addon,
+        icon: BILLING_ADDON_ICONS[addonKey] || Plus,
+        desc: addon.description,
+        requiresPlan: addon.requires_plans,
+      };
+    }),
+    [normalizedBillingCatalog]
+  );
+  const usageLimits = useMemo(
+    () => computeCatalogEffectiveLimits(normalizedBillingCatalog, gymData.current_plan, gymData, effectiveLimits),
+    [effectiveLimits, gymData, normalizedBillingCatalog]
+  );
 
   useEffect(() => {
     const fallbackBranchId = branchOptions[0]?.id || 'branch-1';
@@ -734,7 +791,12 @@ const loadRazorpayScript = () => {
             saas_valid_until: res.data.gym.saas_valid_until || '',
             current_plan: res.data.gym.current_plan || 'pro',
             saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly',
-            grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3)
+            grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3),
+            addon_extra_whatsapp: Number(res.data.gym.addon_extra_whatsapp || 0),
+            addon_extra_staff: Number(res.data.gym.addon_extra_staff || 0),
+            addon_extra_members: Number(res.data.gym.addon_extra_members || 0),
+            addon_extra_branches: Number(res.data.gym.addon_extra_branches || 0),
+            addon_extra_hello: Number(res.data.gym.addon_extra_hello || 0),
           }));
 
           const nextInterfacePreferences = {
@@ -753,6 +815,21 @@ const loadRazorpayScript = () => {
 
       if (res.data.usage) {
           setUsageData(res.data.usage);
+      }
+
+      if (res.data.billing_catalog) {
+        setBillingCatalog(normalizeFrontendBillingCatalog(res.data.billing_catalog));
+      }
+
+      if (res.data.effective_limits) {
+        setEffectiveLimits({
+          members: res.data.effective_limits.members ?? null,
+          staff: res.data.effective_limits.staff ?? null,
+          storage: res.data.effective_limits.storage ?? null,
+          branches: res.data.effective_limits.branches ?? null,
+          whatsapp: res.data.effective_limits.whatsapp ?? null,
+          hello: res.data.effective_limits.hello ?? null,
+        });
       }
 
     } catch (err) {
@@ -1524,8 +1601,9 @@ const loadRazorpayScript = () => {
   };
 
   const handleAddonPurchase = async (addonPack) => {
-      if (addonPack.requiresPlan && !addonPack.requiresPlan.includes(gymData.current_plan)) {
-          toast(`This add-on requires the ${addonPack.requiresPlan.join(' or ')} plan.`, 'error');
+      const requiredPlans = Array.isArray(addonPack.requires_plans) ? addonPack.requires_plans : addonPack.requiresPlan;
+      if (requiredPlans && requiredPlans.length > 0 && !requiredPlans.includes(gymData.current_plan)) {
+        toast(`This add-on requires the ${requiredPlans.join(' or ')} plan.`, 'error');
           return;
       }
       setProcessingAddonKey(addonPack.key);
@@ -1592,7 +1670,8 @@ const loadRazorpayScript = () => {
   };
 
   const handleSubscribe = async (selectedPlan) => {
-      const preview = getBillingQuotePreview({
+      const preview = getCatalogBillingQuotePreview({
+        billingCatalog: normalizedBillingCatalog,
         currentPlan: gymData.current_plan,
         currentCycle: gymData.saas_billing_cycle,
         currentStatus: realStatus,
@@ -1632,7 +1711,7 @@ const loadRazorpayScript = () => {
               currency: order.currency,
               name: `GymVault ${selectedPlan.name}`,
               description: previewCreditPaise > 0
-                ? `${selectedPlan.name} subscription • ₹${formatPaiseAmount(previewCreditPaise)} credit applied`
+                ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCreditPaise)} credit applied`
                 : `${billingCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
               image: checkoutImageUrl,
               order_id: order.id,
@@ -2193,7 +2272,7 @@ const loadRazorpayScript = () => {
                               </div>
                               <h3 className="text-3xl font-black text-white">Vault Active</h3>
                               <p className="text-sm text-slate-400 font-medium mt-1">
-                                  Your gym is running on {SAAS_PLANS[gymData.saas_billing_cycle]?.find(p => p.id === gymData.current_plan)?.name || 'Pro Vault'}.
+                                  Your gym is running on {currentPlanMeta?.name || 'Pro Vault'}.
                               </p>
                           </div>
                       </div>
@@ -2223,7 +2302,7 @@ const loadRazorpayScript = () => {
                     className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${billingCycle === 'annual' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                   >
                     Annually
-                    <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">Save 16%</span>
+                    <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">Flexible pricing</span>
                   </button>
                 </div>
               </div>
@@ -2239,14 +2318,15 @@ const loadRazorpayScript = () => {
                   className="flex gap-4 overflow-x-auto snap-x snap-mandatory pt-6 pb-4 scroll-smooth lg:grid lg:grid-cols-4 lg:overflow-visible lg:snap-none lg:pt-6"
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
                 >
-                  {SAAS_PLANS[billingCycle].map((plan) => {
+                  {planCards.map((plan) => {
                     const Icon = plan.icon;
                     const isCurrentPlan = gymData.current_plan === plan.id;
                     const isTrial = realStatus === 'FREE_TRIAL' && isCurrentPlan;
                     const isActive = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
                     const isSamePlanDifferentCycle = realStatus === 'ACTIVE' && isCurrentPlan && gymData.saas_billing_cycle !== billingCycle;
                     const needsRenewal = (realStatus === 'EXPIRED' || realStatus === 'GRACE_PERIOD') && isCurrentPlan && gymData.saas_billing_cycle === billingCycle;
-                    const planPreview = getBillingQuotePreview({
+                    const planPreview = getCatalogBillingQuotePreview({
+                      billingCatalog: normalizedBillingCatalog,
                       currentPlan: gymData.current_plan,
                       currentCycle: gymData.saas_billing_cycle,
                       currentStatus: realStatus,
@@ -2263,8 +2343,8 @@ const loadRazorpayScript = () => {
                     else if (needsRenewal) btnLabel = 'Renew Subscription';
                     else if (isSamePlanDifferentCycle) btnLabel = `Switch to ${billingCycle === 'annual' ? 'Annual' : 'Monthly'}`;
                     else if (plan.test) btnLabel = 'Pay \u20B91 \u2014 Test';
-                    else if (planPreview?.kind === 'prorated_upgrade') btnLabel = `Upgrade for ₹${formatPaiseAmount(planPreview.payablePaise)}`;
-                    else if (planPreview?.creditPaise > 0 && !planPreview?.error) btnLabel = `Switch for ₹${formatPaiseAmount(planPreview.payablePaise)}`;
+                    else if (planPreview?.kind === 'prorated_upgrade') btnLabel = `Upgrade for ₹${formatBillingPaise(planPreview.payablePaise)}`;
+                    else if (planPreview?.creditPaise > 0 && !planPreview?.error) btnLabel = `Switch for ₹${formatBillingPaise(planPreview.payablePaise)}`;
                     else if (isBlockedMidCycleSwitch) btnLabel = 'Schedule at Renewal';
 
                     return (
@@ -2313,11 +2393,11 @@ const loadRazorpayScript = () => {
                         <h3 className="text-lg font-black mb-0.5 text-slate-900">{plan.name}</h3>
                         <div className="flex items-baseline gap-1 mb-2 text-slate-900">
                           <span className="text-3xl font-black">&#8377;{plan.price}</span>
-                          <span className="text-sm font-medium text-slate-500">/mo</span>
+                          <span className="text-sm font-medium text-slate-500">/{billingCycle === 'annual' ? 'yr' : 'mo'}</span>
                         </div>
                         {!isActive && !plan.test && planPreview?.creditPaise > 0 && !planPreview?.error && (
                           <p className="mb-5 text-xs font-bold text-emerald-600">
-                            ₹{formatPaiseAmount(planPreview.creditPaise)} credit applied. Pay ₹{formatPaiseAmount(planPreview.payablePaise)} today.
+                            ₹{formatBillingPaise(planPreview.creditPaise)} credit applied. Pay ₹{formatBillingPaise(planPreview.payablePaise)} today.
                           </p>
                         )}
                         {!isActive && !plan.test && isBlockedMidCycleSwitch && (
@@ -2368,7 +2448,7 @@ const loadRazorpayScript = () => {
 
                 {/* dot indicators — mobile only */}
                 <div className="flex justify-center gap-1.5 mt-1 lg:hidden">
-                  {SAAS_PLANS[billingCycle].map((plan) => (
+                  {planCards.map((plan) => (
                     <div key={plan.id} className="w-1.5 h-1.5 rounded-full bg-slate-300" />
                   ))}
                 </div>
@@ -2376,7 +2456,7 @@ const loadRazorpayScript = () => {
 
               {/* Usage & Limits Dashboard */}
               {(() => {
-                const eLimits = getEffectiveLimits(gymData.current_plan, gymData);
+                const eLimits = usageLimits;
                 return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
@@ -2391,38 +2471,38 @@ const loadRazorpayScript = () => {
                       <ProgressBar 
                           label="Active Members" 
                           current={usageData.members} 
-                          max={eLimits.members} 
+                          max={eLimits.members ?? 'Unlimited'} 
                           icon={Users} 
                       />
                       <ProgressBar 
                           label="Staff Users" 
                           current={usageData.staff} 
-                          max={eLimits.staff} 
+                          max={eLimits.staff ?? 'Unlimited'} 
                           icon={User} 
                       />
                       <ProgressBar 
                           label="WhatsApp Messages / Month" 
-                          current={0} 
-                          max={eLimits.whatsapp} 
+                          current={integrationData.monthly_usage} 
+                          max={eLimits.whatsapp ?? 'Unlimited'} 
                           icon={MessageSquare} 
                       />
                       <ProgressBar 
                           label="Branches" 
-                          current={1} 
-                          max={eLimits.branches} 
+                          current={platformData.branches_count} 
+                          max={eLimits.branches ?? 'Unlimited'} 
                           icon={Building2} 
                       />
                       <ProgressBar 
                           label="Cloud Storage" 
                           current={usageData.storage} 
-                          max={eLimits.storage} 
+                          max={eLimits.storage ?? 'Unlimited'} 
                           unit="GB" 
                           icon={HardDrive} 
                       />
                       <ProgressBar 
                           label="Hello Inbound Numbers" 
-                          current={0} 
-                          max={eLimits.hello} 
+                          current={isWhatsAppConnected ? 1 : 0} 
+                          max={eLimits.hello ?? 'Unlimited'} 
                           icon={Phone} 
                       />
                   </div>
@@ -2441,9 +2521,9 @@ const loadRazorpayScript = () => {
                       </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-                      {ADDON_PACKS.map((addon) => {
+                      {addonPacks.map((addon) => {
                           const AddonIcon = addon.icon;
-                          const isRestricted = addon.requiresPlan && !addon.requiresPlan.includes(gymData.current_plan);
+                        const isRestricted = !isAddonAllowedForPlan(normalizedBillingCatalog, addon.key, gymData.current_plan);
                           const isProcessing = processingAddonKey === addon.key;
                           return (
                               <div key={addon.key} className={`p-5 rounded-2xl border transition-all ${isRestricted ? 'border-slate-100 bg-slate-50 opacity-60' : 'border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md'}`}>
@@ -2460,7 +2540,7 @@ const loadRazorpayScript = () => {
                                   <div className="flex items-center justify-between">
                                       <span className="text-lg font-black text-slate-900">₹{addon.price}</span>
                                       {isRestricted ? (
-                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Requires {addon.requiresPlan.join('/')}</span>
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Requires {(addon.requires_plans || addon.requiresPlan || []).join('/')}</span>
                                       ) : (
                                           <button
                                               onClick={() => handleAddonPurchase(addon)}

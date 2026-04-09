@@ -24,6 +24,7 @@ const {
     clearMemberAuthCookie,
 } = require('../utils/authCookies');
 const { DEFAULT_BRANCH_ID } = require('../utils/branchAccess');
+const { getBillingConfig, serializeBillingConfig } = require('../utils/platformSettings');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
@@ -1645,17 +1646,24 @@ router.post('/password-reset/confirm', async (req, res) => {
 
 // ─── AUTH CONFIG ──────────────────────────────────────────────────────────────
 // Returns which social providers are configured (for frontend feature detection)
-router.get('/config', (req, res) => {
-    res.json({
-        google_auth_enabled: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-        apple_client_id: process.env.APPLE_CLIENT_ID || null,
-        signup_email_otp_enabled: true,
-        signup_email_otp_mode: getSignupEmailOtpMode(),
-        admin_email_otp_enabled: false,
-        admin_email_otp_mode: 'disabled',
-        admin_phone_otp_enabled: false,
-        admin_phone_otp_mode: 'disabled',
-    });
+router.get('/config', async (_req, res) => {
+    try {
+        const billingConfig = await getBillingConfig();
+        res.json({
+            google_auth_enabled: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+            apple_client_id: process.env.APPLE_CLIENT_ID || null,
+            signup_email_otp_enabled: true,
+            signup_email_otp_mode: getSignupEmailOtpMode(),
+            admin_email_otp_enabled: false,
+            admin_email_otp_mode: 'disabled',
+            admin_phone_otp_enabled: false,
+            admin_phone_otp_mode: 'disabled',
+            billing_catalog: serializeBillingConfig(billingConfig, { includeTest: false }),
+        });
+    } catch (err) {
+        console.error('AUTH CONFIG ERROR:', err.message);
+        res.status(500).json({ message: 'Could not load auth config.' });
+    }
 });
 
 // ─── GOOGLE OAUTH 2.0 ─────────────────────────────────────────────────────────

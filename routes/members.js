@@ -27,6 +27,12 @@ const {
     resolveBranchReadScope,
     resolveBranchWriteScope,
 } = require('../utils/branchAccess');
+const {
+    computeEffectiveBillingLimits,
+    getBillingConfig,
+    getGymBillingSnapshot,
+    getGymUsageSnapshot,
+} = require('../utils/platformSettings');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -555,6 +561,25 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
         if (existingEmail.rows.length > 0) {
             await discardUploadedProfile(req);
             return res.status(400).json({ error: 'This email is already registered in your gym.' });
+        }
+
+        const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+            getBillingConfig(),
+            getGymBillingSnapshot(pool, gym_id),
+            getGymUsageSnapshot(pool, gym_id),
+        ]);
+        if (!gymBilling) {
+            await discardUploadedProfile(req);
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+        if (effectiveLimits.members !== null && Number(usageSnapshot.members || 0) + 1 > effectiveLimits.members) {
+            await discardUploadedProfile(req);
+            return res.status(409).json({
+                error: `Your current plan allows up to ${effectiveLimits.members} active members including add-ons. Upgrade the plan or add member capacity before creating another member.`,
+                allowed_members: effectiveLimits.members,
+                current_members: Number(usageSnapshot.members || 0),
+            });
         }
 
         const newMember = await pool.query(

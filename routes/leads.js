@@ -12,6 +12,12 @@ const {
     ensureTimestamp,
     isValidationError,
 } = require('../utils/fieldValidation');
+const {
+    computeEffectiveBillingLimits,
+    getBillingConfig,
+    getGymBillingSnapshot,
+    getGymUsageSnapshot,
+} = require('../utils/platformSettings');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -296,6 +302,26 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
         let createdNewMember = false;
 
         if (!member) {
+            const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+                getBillingConfig(),
+                getGymBillingSnapshot(client, gymId),
+                getGymUsageSnapshot(client, gymId),
+            ]);
+            if (!gymBilling) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Gym not found.' });
+            }
+
+            const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+            if (effectiveLimits.members !== null && Number(usageSnapshot.members || 0) + 1 > effectiveLimits.members) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    error: `Your current plan allows up to ${effectiveLimits.members} active members including add-ons. Upgrade the plan or add member capacity before converting this lead.`,
+                    allowed_members: effectiveLimits.members,
+                    current_members: Number(usageSnapshot.members || 0),
+                });
+            }
+
             const createdMember = await client.query(
                 `INSERT INTO members (gym_id, full_name, phone, email, joining_date, status)
                  VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')

@@ -31,10 +31,250 @@ const defaultSupportProfile = {
     timings: 'Mon-Sat · 9:00 AM to 7:00 PM IST',
 };
 
+const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
+const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
+
+const defaultBillingConfig = {
+    plan_order: BILLING_PLAN_ORDER,
+    addon_order: BILLING_ADDON_ORDER,
+    plans: {
+        test: {
+            id: 'test',
+            name: 'Test Drive',
+            monthly_price: 1,
+            annual_price: 1,
+            popular: false,
+            features: ['Full Feature Access', 'For Testing Only', 'Rs 1 Payment Test', 'Expires in 1 Day'],
+            limits: {
+                members: null,
+                staff: null,
+                storage: 2,
+                branches: null,
+                whatsapp: null,
+                hello: null,
+            },
+        },
+        basic: {
+            id: 'basic',
+            name: 'Basic',
+            monthly_price: 1,
+            annual_price: 10,
+            popular: false,
+            features: ['Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+            limits: {
+                members: 150,
+                staff: 2,
+                storage: 5,
+                branches: 1,
+                whatsapp: 500,
+                hello: 0,
+            },
+        },
+        growth: {
+            id: 'growth',
+            name: 'Growth',
+            monthly_price: 2,
+            annual_price: 20,
+            popular: true,
+            features: ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+            limits: {
+                members: 400,
+                staff: 5,
+                storage: 10,
+                branches: 2,
+                whatsapp: 1000,
+                hello: 1,
+            },
+        },
+        pro: {
+            id: 'pro',
+            name: 'Pro',
+            monthly_price: 3,
+            annual_price: 30,
+            popular: false,
+            features: ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+            limits: {
+                members: 1000,
+                staff: 10,
+                storage: 20,
+                branches: 3,
+                whatsapp: 2000,
+                hello: 1,
+            },
+        },
+    },
+    addons: {
+        extra_whatsapp_250: {
+            key: 'extra_whatsapp_250',
+            label: 'Extra 250 WhatsApp Messages',
+            description: 'Adds 250 more outbound WhatsApp messages to your monthly quota.',
+            price: 249,
+            increment: 250,
+            column: 'addon_extra_whatsapp',
+            limit_key: 'whatsapp',
+            requires_plans: [],
+        },
+        extra_staff_1: {
+            key: 'extra_staff_1',
+            label: 'Extra Staff User',
+            description: 'Add 1 more staff login to your current plan.',
+            price: 149,
+            increment: 1,
+            column: 'addon_extra_staff',
+            limit_key: 'staff',
+            requires_plans: [],
+        },
+        extra_members_100: {
+            key: 'extra_members_100',
+            label: 'Extra 100 Active Members',
+            description: 'Raises your active member cap by 100.',
+            price: 299,
+            increment: 100,
+            column: 'addon_extra_members',
+            limit_key: 'members',
+            requires_plans: [],
+        },
+        extra_branch_1: {
+            key: 'extra_branch_1',
+            label: 'Extra Branch',
+            description: 'Add 1 more branch to your gym setup.',
+            price: 599,
+            increment: 1,
+            column: 'addon_extra_branches',
+            limit_key: 'branches',
+            requires_plans: [],
+        },
+        extra_hello_1: {
+            key: 'extra_hello_1',
+            label: 'Extra Hello Number',
+            description: 'Enable inbound Hello on 1 additional WhatsApp number.',
+            price: 699,
+            increment: 1,
+            column: 'addon_extra_hello',
+            limit_key: 'hello',
+            requires_plans: ['growth', 'pro'],
+        },
+    },
+};
+
 const toSqlJson = (value) => JSON.stringify(value).replace(/'/g, "''");
 const featureFlagsSql = toSqlJson(defaultFeatureFlags);
 const automationSettingsSql = toSqlJson(defaultPlatformAutomationSettings);
 const supportProfileSql = toSqlJson(defaultSupportProfile);
+const billingConfigSql = toSqlJson(defaultBillingConfig);
+
+const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
+const GYM_ADDON_COLUMNS = ['addon_extra_whatsapp', 'addon_extra_staff', 'addon_extra_members', 'addon_extra_branches', 'addon_extra_hello'];
+
+const readNumber = (value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER, allowNull = false } = {}) => {
+    if (allowNull) {
+        if (value === null || value === undefined) return null;
+        if (typeof value === 'string' && !value.trim()) return null;
+        if (String(value).trim().toLowerCase() === 'unlimited') return null;
+    }
+
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+};
+
+const normalizeFeatureList = (value, fallback = []) => {
+    const source = Array.isArray(value)
+        ? value
+        : typeof value === 'string'
+            ? value.split(/\r?\n/)
+            : [];
+    const normalized = source
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 24);
+    return normalized.length > 0 ? normalized : [...fallback];
+};
+
+const normalizeRequiresPlans = (value, fallback = []) => {
+    const source = Array.isArray(value) ? value : [];
+    const allowed = new Set(BILLING_PLAN_ORDER);
+    const normalized = source
+        .map((item) => String(item || '').trim().toLowerCase())
+        .filter((item) => allowed.has(item));
+    return Array.from(new Set(normalized.length > 0 ? normalized : fallback));
+};
+
+const normalizePlanLimits = (limits, fallbackLimits = {}) => Object.fromEntries(
+    BILLING_LIMIT_KEYS.map((limitKey) => {
+        const fallbackValue = Object.prototype.hasOwnProperty.call(fallbackLimits, limitKey) ? fallbackLimits[limitKey] : null;
+        const nextValue = limits && typeof limits === 'object' ? limits[limitKey] : undefined;
+        return [
+            limitKey,
+            readNumber(nextValue, fallbackValue, {
+                min: limitKey === 'hello' ? 0 : 1,
+                max: limitKey === 'storage' ? 500 : 100000,
+                allowNull: fallbackValue === null,
+            }),
+        ];
+    })
+);
+
+const normalizeBillingPlan = (planId, value) => {
+    const defaults = defaultBillingConfig.plans[planId] || defaultBillingConfig.plans.basic;
+    const raw = value && typeof value === 'object' ? value : {};
+    return {
+        id: planId,
+        name: readText(raw.name) || defaults.name,
+        monthly_price: readNumber(raw.monthly_price, defaults.monthly_price, { min: 0, max: 100000 }),
+        annual_price: readNumber(raw.annual_price, defaults.annual_price, { min: 0, max: 100000 }),
+        popular: raw.popular === undefined ? defaults.popular : Boolean(raw.popular),
+        features: normalizeFeatureList(raw.features, defaults.features),
+        limits: normalizePlanLimits(raw.limits, defaults.limits),
+    };
+};
+
+const normalizeBillingAddon = (addonKey, value) => {
+    const defaults = defaultBillingConfig.addons[addonKey];
+    const raw = value && typeof value === 'object' ? value : {};
+    return {
+        key: addonKey,
+        label: readText(raw.label) || defaults.label,
+        description: readText(raw.description) || defaults.description,
+        price: readNumber(raw.price, defaults.price, { min: 0, max: 100000 }),
+        increment: readNumber(raw.increment, defaults.increment, { min: 1, max: 100000 }),
+        column: defaults.column,
+        limit_key: defaults.limit_key,
+        requires_plans: normalizeRequiresPlans(raw.requires_plans, defaults.requires_plans),
+    };
+};
+
+const normalizeBillingConfig = (value) => {
+    const raw = value && typeof value === 'object' ? value : {};
+    return {
+        plan_order: [...BILLING_PLAN_ORDER],
+        addon_order: [...BILLING_ADDON_ORDER],
+        plans: Object.fromEntries(BILLING_PLAN_ORDER.map((planId) => [planId, normalizeBillingPlan(planId, raw.plans?.[planId])])),
+        addons: Object.fromEntries(BILLING_ADDON_ORDER.map((addonKey) => [addonKey, normalizeBillingAddon(addonKey, raw.addons?.[addonKey])])),
+    };
+};
+
+const serializeBillingConfig = (value, { includeTest = true } = {}) => {
+    const billingConfig = normalizeBillingConfig(value);
+    const visiblePlanOrder = billingConfig.plan_order.filter((planId) => includeTest || planId !== 'test');
+    return {
+        plan_order: visiblePlanOrder,
+        addon_order: [...billingConfig.addon_order],
+        plans: Object.fromEntries(visiblePlanOrder.map((planId) => [planId, billingConfig.plans[planId]])),
+        addons: Object.fromEntries(billingConfig.addon_order.map((addonKey) => {
+            const addon = billingConfig.addons[addonKey];
+            return [addonKey, {
+                key: addon.key,
+                label: addon.label,
+                description: addon.description,
+                price: addon.price,
+                increment: addon.increment,
+                limit_key: addon.limit_key,
+                requires_plans: addon.requires_plans,
+            }];
+        })),
+    };
+};
 
 let ensurePlatformSettingsBasePromise;
 const ensurePlatformSettingsBase = async () => {
@@ -47,6 +287,7 @@ const ensurePlatformSettingsBase = async () => {
                 feature_flags JSONB DEFAULT '${featureFlagsSql}'::jsonb,
                 automation_settings JSONB DEFAULT '${automationSettingsSql}'::jsonb,
                 support_profile JSONB DEFAULT '${supportProfileSql}'::jsonb,
+                billing_config JSONB DEFAULT '${billingConfigSql}'::jsonb,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             ALTER TABLE platform_settings
@@ -58,6 +299,9 @@ const ensurePlatformSettingsBase = async () => {
             ALTER TABLE platform_settings
             ADD COLUMN IF NOT EXISTS support_profile JSONB
             DEFAULT '${supportProfileSql}'::jsonb;
+            ALTER TABLE platform_settings
+            ADD COLUMN IF NOT EXISTS billing_config JSONB
+            DEFAULT '${billingConfigSql}'::jsonb;
             INSERT INTO platform_settings (id)
             VALUES (1)
             ON CONFLICT (id) DO NOTHING;
@@ -67,6 +311,7 @@ const ensurePlatformSettingsBase = async () => {
                 feature_flags = COALESCE(feature_flags, '${featureFlagsSql}'::jsonb),
                 automation_settings = COALESCE(automation_settings, '${automationSettingsSql}'::jsonb),
                 support_profile = COALESCE(support_profile, '${supportProfileSql}'::jsonb),
+                billing_config = COALESCE(billing_config, '${billingConfigSql}'::jsonb),
                 updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
             WHERE id = 1;
         `).catch((err) => {
@@ -99,8 +344,138 @@ const normalizeSupportProfile = (value) => {
     };
 };
 
+const getBillingConfig = async (db = pool) => {
+    await ensurePlatformSettingsBase();
+    const result = await db.query(
+        'SELECT billing_config FROM platform_settings WHERE id = 1 LIMIT 1'
+    );
+    return normalizeBillingConfig(result.rows[0]?.billing_config);
+};
+
+let ensureGymBillingAddonSchemaPromise;
+const ensureGymBillingAddonSchema = async () => {
+    if (!ensureGymBillingAddonSchemaPromise) {
+        ensureGymBillingAddonSchemaPromise = pool.query(`
+            ALTER TABLE gyms
+            ADD COLUMN IF NOT EXISTS addon_extra_whatsapp INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_staff INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_members INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_branches INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS addon_extra_hello INTEGER DEFAULT 0;
+        `).catch((err) => {
+            ensureGymBillingAddonSchemaPromise = null;
+            throw err;
+        });
+    }
+
+    await ensureGymBillingAddonSchemaPromise;
+};
+
+const normalizePlanId = (value, fallback = 'basic') => {
+    const normalized = readText(value).toLowerCase();
+    return BILLING_PLAN_ORDER.includes(normalized) ? normalized : fallback;
+};
+
+const getBillingPlan = (billingConfig, planId, fallback = 'basic') => {
+    const normalizedConfig = normalizeBillingConfig(billingConfig);
+    const normalizedPlanId = normalizePlanId(planId, fallback);
+    return normalizedConfig.plans[normalizedPlanId] || normalizedConfig.plans[fallback] || normalizedConfig.plans.basic;
+};
+
+const getBillingPlanPrice = (billingConfig, planId, cycle = 'monthly') => {
+    const plan = getBillingPlan(billingConfig, planId);
+    return Number(cycle === 'annual' ? plan.annual_price : plan.monthly_price) || 0;
+};
+
+const computeEffectiveBillingLimits = (billingConfig, planId, gymData = {}) => {
+    const plan = getBillingPlan(billingConfig, planId);
+    return {
+        members: plan.limits.members === null ? null : plan.limits.members + (Number(gymData?.addon_extra_members) || 0),
+        staff: plan.limits.staff === null ? null : plan.limits.staff + (Number(gymData?.addon_extra_staff) || 0),
+        storage: plan.limits.storage === null ? null : plan.limits.storage,
+        branches: plan.limits.branches === null ? null : plan.limits.branches + (Number(gymData?.addon_extra_branches) || 0),
+        whatsapp: plan.limits.whatsapp === null ? null : plan.limits.whatsapp + (Number(gymData?.addon_extra_whatsapp) || 0),
+        hello: plan.limits.hello === null ? null : plan.limits.hello + (Number(gymData?.addon_extra_hello) || 0),
+    };
+};
+
+const getBillingAddon = (billingConfig, addonKey) => {
+    const normalizedConfig = normalizeBillingConfig(billingConfig);
+    const normalizedKey = readText(addonKey);
+    return normalizedConfig.addons[normalizedKey] || null;
+};
+
+const isAddonAllowedForPlan = (billingConfig, addonKey, planId) => {
+    const addon = getBillingAddon(billingConfig, addonKey);
+    if (!addon) return false;
+    if (!Array.isArray(addon.requires_plans) || addon.requires_plans.length === 0) return true;
+    return addon.requires_plans.includes(normalizePlanId(planId, 'basic'));
+};
+
+const getGymBillingSnapshot = async (db, gymId) => {
+    await ensureGymBillingAddonSchema();
+    const result = await db.query(
+        `SELECT
+            current_plan,
+            saas_billing_cycle,
+            saas_status,
+            saas_valid_until,
+            COALESCE(addon_extra_whatsapp, 0) AS addon_extra_whatsapp,
+            COALESCE(addon_extra_staff, 0) AS addon_extra_staff,
+            COALESCE(addon_extra_members, 0) AS addon_extra_members,
+            COALESCE(addon_extra_branches, 0) AS addon_extra_branches,
+            COALESCE(addon_extra_hello, 0) AS addon_extra_hello
+         FROM gyms
+         WHERE id = $1
+         LIMIT 1`,
+        [gymId]
+    );
+    return result.rows[0] || null;
+};
+
+const getGymUsageSnapshot = async (db, gymId) => {
+    const result = await db.query(
+        `SELECT
+            COALESCE((
+                SELECT COUNT(*)::INTEGER
+                FROM members m
+                WHERE m.gym_id = $1
+                  AND m.deleted_at IS NULL
+            ), 0) AS members,
+            COALESCE((
+                SELECT COUNT(*)::INTEGER
+                FROM users u
+                WHERE u.gym_id = $1
+                  AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
+            ), 0) AS staff,
+            COALESCE((
+                SELECT branches_count::INTEGER
+                FROM gyms g
+                WHERE g.id = $1
+                LIMIT 1
+            ), 1) AS branches`,
+        [gymId]
+    );
+    return result.rows[0] || { members: 0, staff: 0, branches: 1 };
+};
+
 module.exports = {
+    BILLING_ADDON_ORDER,
+    BILLING_PLAN_ORDER,
+    computeEffectiveBillingLimits,
+    defaultBillingConfig,
+    ensureGymBillingAddonSchema,
     defaultSupportProfile,
     ensurePlatformSettingsBase,
+    getBillingAddon,
+    getBillingConfig,
+    getBillingPlan,
+    getBillingPlanPrice,
+    getGymBillingSnapshot,
+    getGymUsageSnapshot,
+    isAddonAllowedForPlan,
+    normalizeBillingConfig,
+    normalizePlanId,
     normalizeSupportProfile,
+    serializeBillingConfig,
 };

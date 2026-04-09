@@ -41,6 +41,14 @@ const {
 const { clearUserAuthCookie } = require('../utils/authCookies');
 const { invalidateGymTimezoneCache } = require('../utils/gymTime');
 const {
+    computeEffectiveBillingLimits,
+    ensureGymBillingAddonSchema,
+    getBillingConfig,
+    getGymBillingSnapshot,
+    getGymUsageSnapshot,
+    serializeBillingConfig,
+} = require('../utils/platformSettings');
+const {
     ValidationError,
     ensureTrimmedString,
     ensureEmail,
@@ -138,7 +146,6 @@ let ensureMessagingSchemaPromise;
 let ensureMemberPaymentsSchemaPromise;
 let ensurePreferenceSchemaPromise;
 let ensurePlatformSchemaPromise;
-let ensureBillingAddonSchemaPromise;
 
 const MESSAGE_TEMPLATE_DEFAULTS = [
     {
@@ -924,21 +931,7 @@ const ensurePreferenceSchema = async () => {
 };
 
 const ensureBillingAddonSchema = async () => {
-    if (!ensureBillingAddonSchemaPromise) {
-        ensureBillingAddonSchemaPromise = pool.query(`
-            ALTER TABLE gyms
-            ADD COLUMN IF NOT EXISTS addon_extra_whatsapp INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_staff INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_members INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_branches INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_hello INTEGER DEFAULT 0;
-        `).catch((error) => {
-            ensureBillingAddonSchemaPromise = null;
-            throw error;
-        });
-    }
-
-    await ensureBillingAddonSchemaPromise;
+    await ensureGymBillingAddonSchema();
 };
 
 const ensurePlatformSchema = async () => {
@@ -996,7 +989,7 @@ router.get('/', auth, async (req, res) => {
     try {
         await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema(), ensureBillingAddonSchema()]);
 
-        const [userRes, gymRes] = await Promise.all([
+        const [userRes, gymRes, billingConfig] = await Promise.all([
             pool.query(
                 'SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1 LIMIT 1',
                 [req.user.id]
@@ -1036,18 +1029,20 @@ router.get('/', auth, async (req, res) => {
                     COALESCE((
                         SELECT COUNT(*)::INTEGER
                         FROM users u
-                                                WHERE u.gym_id = g.id
-                                                    AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
-                                        ), 0) AS staff_count
+                        WHERE u.gym_id = g.id
+                          AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
+                    ), 0) AS staff_count
                  FROM gyms g
                  LEFT JOIN gym_support_profiles sp ON sp.gym_id = g.id
                  WHERE g.id = $1
                  LIMIT 1`,
                 [req.user.gym_id]
             ),
+            getBillingConfig(),
         ]);
 
         const gym = gymRes.rows[0] || {};
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gym.current_plan, gym);
 
         res.json({
             account: userRes.rows[0] || {},
@@ -1074,6 +1069,8 @@ router.get('/', auth, async (req, res) => {
                 interface_compact_mode: gym.interface_compact_mode,
                 interface_dark_mode: gym.interface_dark_mode,
             },
+            billing_catalog: serializeBillingConfig(billingConfig),
+            effective_limits: effectiveLimits,
             support_profile: {
                 whatsapp: gym.whatsapp,
                 about_mission: gym.about_mission,
@@ -1720,9 +1717,24 @@ router.get('/platform', auth, async (req, res) => {
 router.put('/platform/branches', auth, async (req, res) => {
     try {
         await ensurePlatformSchema();
+        await ensureBillingAddonSchema();
 
         const city = ensureTrimmedString(req.body?.city, { field: 'city', max: 100 });
         const branchesCount = Math.min(25, Math.max(1, toPositiveInt(req.body?.branches_count, 1)));
+        const [billingConfig, gymBilling] = await Promise.all([
+            getBillingConfig(),
+            getGymBillingSnapshot(pool, req.user.gym_id),
+        ]);
+        if (!gymBilling) {
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+        if (effectiveLimits.branches !== null && branchesCount > effectiveLimits.branches) {
+            return res.status(409).json({
+                error: `Your current plan allows up to ${effectiveLimits.branches} branch${effectiveLimits.branches === 1 ? '' : 'es'} including add-ons. Increase the branch limit in HQ pricing or buy more branch capacity before saving this change.`,
+                allowed_branches: effectiveLimits.branches,
+            });
+        }
         const branchDirectory = normalizeBranchDirectoryInput(req.body?.branch_directory, branchesCount);
         const activeBranchIds = branchDirectory.map((branch) => branch.id);
         const outOfDirectoryBranchUsage = await getOutOfDirectoryBranchUsage(pool, req.user.gym_id, activeBranchIds);
@@ -2039,6 +2051,28 @@ router.post('/import/members', auth, async (req, res) => {
             batchPhones.add(phone);
             validRows.push({ full_name, email, phone });
         });
+
+        if (validRows.length > 0) {
+            const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+                getBillingConfig(),
+                getGymBillingSnapshot(pool, req.user.gym_id),
+                getGymUsageSnapshot(pool, req.user.gym_id),
+            ]);
+            if (!gymBilling) {
+                return res.status(404).json({ error: 'Gym not found.' });
+            }
+
+            const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+            const projectedMembers = Number(usageSnapshot.members || 0) + validRows.length;
+            if (effectiveLimits.members !== null && projectedMembers > effectiveLimits.members) {
+                return res.status(409).json({
+                    error: `This import would exceed your active member limit of ${effectiveLimits.members}. Upgrade the plan or add member capacity before importing more members.`,
+                    allowed_members: effectiveLimits.members,
+                    current_members: Number(usageSnapshot.members || 0),
+                    requested_import: validRows.length,
+                });
+            }
+        }
 
         let importedCount = 0;
         if (!dryRun && validRows.length > 0) {

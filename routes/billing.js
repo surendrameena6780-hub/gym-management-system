@@ -5,6 +5,16 @@ const crypto = require('crypto');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const { requireOwner } = require('../middleware/rbac');
+const {
+    ensureGymBillingAddonSchema,
+    getBillingAddon,
+    getBillingConfig,
+    getBillingPlanPrice,
+    getGymBillingSnapshot,
+    isAddonAllowedForPlan,
+    normalizePlanId,
+    serializeBillingConfig,
+} = require('../utils/platformSettings');
 const { recordRuntimeEvent } = require('../utils/runtimeTelemetry');
 
 router.use(auth, requireOwner);
@@ -62,47 +72,15 @@ const logBillingRazorpayError = (req, stage, error, metadata = {}) => {
     });
 };
 
-let ensureBillingAddonSchemaPromise;
-
-const ensureBillingAddonSchema = async () => {
-    if (!ensureBillingAddonSchemaPromise) {
-        ensureBillingAddonSchemaPromise = pool.query(`
-            ALTER TABLE gyms
-            ADD COLUMN IF NOT EXISTS addon_extra_whatsapp INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_staff INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_members INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_branches INTEGER DEFAULT 0,
-            ADD COLUMN IF NOT EXISTS addon_extra_hello INTEGER DEFAULT 0;
-        `).catch((error) => {
-            ensureBillingAddonSchemaPromise = null;
-            throw error;
-        });
-    }
-
-    await ensureBillingAddonSchemaPromise;
-};
-
-const SAAS_PRICING = {
-    monthly: { test: 1, basic: 1, growth: 2, pro: 3 },
-    annual:  { test: 1, basic: 10, growth: 20, pro: 30 },
-};
+const ensureBillingAddonSchema = ensureGymBillingAddonSchema;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CYCLE_DAYS = { monthly: 30, annual: 365 };
 const ACTIVE_CREDIT_STATUSES = new Set(['ACTIVE']);
 const MIN_RAZORPAY_AMOUNT_PAISE = 100;
 
-// Add-on packs (monthly, one-time purchase per billing period)
-const ADDON_PRICING = {
-    extra_whatsapp_250:  { price: 249, label: 'Extra 250 WhatsApp Messages', column: 'addon_extra_whatsapp',  increment: 250 },
-    extra_staff_1:       { price: 149, label: 'Extra Staff User',            column: 'addon_extra_staff',     increment: 1   },
-    extra_members_100:   { price: 299, label: 'Extra 100 Active Members',    column: 'addon_extra_members',   increment: 100 },
-    extra_branch_1:      { price: 599, label: 'Extra Branch',                column: 'addon_extra_branches',  increment: 1   },
-    extra_hello_1:       { price: 699, label: 'Extra Hello-enabled Number',  column: 'addon_extra_hello',     increment: 1   },
-};
-
 const normalizeCycle = (value) => String(value || 'monthly').trim().toLowerCase();
-const normalizePlanTier = (value) => String(value || 'pro').trim().toLowerCase();
+const normalizePlanTier = (value) => normalizePlanId(value, 'pro');
 
 const toPaise = (amountInr) => Math.max(0, Math.round((Number(amountInr) || 0) * 100));
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -122,17 +100,21 @@ const normalizePayablePaise = (value) => {
     return normalized;
 };
 
-const resolveSaasPrice = (planTier, cycle) => {
+const resolveSaasPrice = (billingConfig, planTier, cycle) => {
     const normalizedCycle = normalizeCycle(cycle);
     const normalizedPlan = normalizePlanTier(planTier);
-    const cycleMap = SAAS_PRICING[normalizedCycle];
-    if (!cycleMap || !Object.prototype.hasOwnProperty.call(cycleMap, normalizedPlan)) {
+    if (!['monthly', 'annual'].includes(normalizedCycle)) {
         return null;
     }
-    return { planTier: normalizedPlan, cycle: normalizedCycle, amountInr: cycleMap[normalizedPlan] };
+    return {
+        planTier: normalizedPlan,
+        cycle: normalizedCycle,
+        amountInr: getBillingPlanPrice(billingConfig, normalizedPlan, normalizedCycle),
+    };
 };
 
 const buildBillingQuote = ({
+    billingConfig,
     currentPlan,
     currentCycle,
     currentStatus,
@@ -141,7 +123,7 @@ const buildBillingQuote = ({
     targetCycle,
     now = Date.now(),
 }) => {
-    const resolvedTarget = resolveSaasPrice(targetPlan, targetCycle);
+    const resolvedTarget = resolveSaasPrice(billingConfig, targetPlan, targetCycle);
     if (!resolvedTarget) return null;
 
     const fullPricePaise = toPaise(resolvedTarget.amountInr);
@@ -159,7 +141,7 @@ const buildBillingQuote = ({
         error: null,
     };
 
-    const resolvedCurrent = resolveSaasPrice(currentPlan, currentCycle);
+    const resolvedCurrent = resolveSaasPrice(billingConfig, currentPlan, currentCycle);
     const validUntilMs = parseTimestampMs(currentValidUntil);
     const currentStatusNormalized = String(currentStatus || '').trim().toUpperCase();
     const hasActiveCredit = Boolean(
@@ -260,20 +242,15 @@ router.get('/config', (req, res) => {
 // --- 1. CREATE DYNAMIC SAAS ORDER ---
 router.post('/create-order', async (req, res) => {
     try {
-        const resolved = resolveSaasPrice(req.body.plan_tier, req.body.cycle);
+        const billingConfig = await getBillingConfig();
+        const resolved = resolveSaasPrice(billingConfig, req.body.plan_tier, req.body.cycle);
         if (!resolved) {
             return res.status(400).json({ error: 'Invalid plan_tier or cycle.' });
         }
 
-        const { rows } = await pool.query(
-            `SELECT current_plan, saas_billing_cycle, saas_status, saas_valid_until
-             FROM gyms
-             WHERE id = $1
-             LIMIT 1`,
-            [req.user.gym_id]
-        );
-        const gym = rows[0] || {};
+        const gym = await getGymBillingSnapshot(pool, req.user.gym_id) || {};
         const quote = buildBillingQuote({
+            billingConfig,
             currentPlan: gym.current_plan,
             currentCycle: gym.saas_billing_cycle,
             currentStatus: gym.saas_status,
@@ -365,7 +342,8 @@ router.post('/verify', async (req, res) => {
             return res.status(502).json({ error: 'Failed to verify payment order with Razorpay.' });
         }
 
-        const resolved = resolveSaasPrice(targetPlan, targetCycle);
+        const billingConfig = await getBillingConfig();
+        const resolved = resolveSaasPrice(billingConfig, targetPlan, targetCycle);
         if (!resolved) {
             return res.status(400).json({ error: 'Invalid order metadata for subscription update.' });
         }
@@ -447,6 +425,7 @@ router.post('/reset-test', async (req, res) => {
 router.get('/addons', async (req, res) => {
     try {
         await ensureBillingAddonSchema();
+        const billingConfig = await getBillingConfig();
         const { rows } = await pool.query(
             `SELECT
                 COALESCE(addon_extra_whatsapp, 0)  AS addon_extra_whatsapp,
@@ -457,7 +436,7 @@ router.get('/addons', async (req, res) => {
              FROM gyms WHERE id = $1`,
             [req.user.gym_id]
         );
-        res.json({ addons: rows[0] || {}, pricing: ADDON_PRICING });
+        res.json({ addons: rows[0] || {}, pricing: serializeBillingConfig(billingConfig).addons });
     } catch (err) {
         console.error('Addon fetch error:', err);
         res.status(500).json({ error: 'Failed to fetch add-ons.' });
@@ -467,10 +446,19 @@ router.get('/addons', async (req, res) => {
 // --- 5. CREATE ADD-ON ORDER ---
 router.post('/create-addon-order', async (req, res) => {
     try {
+        const billingConfig = await getBillingConfig();
         const addonKey = String(req.body.addon_key || '').trim();
-        const addon = ADDON_PRICING[addonKey];
+        const addon = getBillingAddon(billingConfig, addonKey);
         if (!addon) {
             return res.status(400).json({ error: 'Invalid add-on type.' });
+        }
+
+        const gym = await getGymBillingSnapshot(pool, req.user.gym_id);
+        if (!gym) {
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
+        if (!isAddonAllowedForPlan(billingConfig, addonKey, gym.current_plan)) {
+            return res.status(409).json({ error: 'This add-on is not available on your current plan.' });
         }
 
         const options = {
@@ -496,7 +484,8 @@ router.post('/create-addon-order', async (req, res) => {
 router.post('/verify-addon', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, addon_key } = req.body;
     const addonKey = String(addon_key || '').trim();
-    const addon = ADDON_PRICING[addonKey];
+    const billingConfig = await getBillingConfig();
+    const addon = getBillingAddon(billingConfig, addonKey);
     if (!addon) {
         return res.status(400).json({ error: 'Invalid add-on type.' });
     }
@@ -526,6 +515,13 @@ router.post('/verify-addon', async (req, res) => {
 
     try {
         await ensureBillingAddonSchema();
+        const gym = await getGymBillingSnapshot(pool, req.user.gym_id);
+        if (!gym) {
+            return res.status(404).json({ error: 'Gym not found.' });
+        }
+        if (!isAddonAllowedForPlan(billingConfig, addonKey, gym.current_plan)) {
+            return res.status(409).json({ error: 'This add-on is not available on your current plan.' });
+        }
         const col = addon.column;
         const { rows } = await pool.query(
             `UPDATE gyms

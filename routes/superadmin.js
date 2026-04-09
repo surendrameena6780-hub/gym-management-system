@@ -7,7 +7,12 @@ const rateLimit = require('express-rate-limit');
 const { pool } = require('../config/db');
 const webpush = require('web-push');
 const { setUserAuthCookie } = require('../utils/authCookies');
-const { ensurePlatformSettingsBase, normalizeSupportProfile } = require('../utils/platformSettings');
+const {
+    ensurePlatformSettingsBase,
+    normalizeBillingConfig,
+    normalizeSupportProfile,
+    serializeBillingConfig,
+} = require('../utils/platformSettings');
 const { getRuntimeTelemetrySnapshot, listRuntimeEvents } = require('../utils/runtimeTelemetry');
 
 // Configure VAPID (shared config)
@@ -946,6 +951,7 @@ router.get('/system', superAuth, async (_req, res) => {
         return res.json({
             ...base,
             automation_settings: normalizeAutomationSettings(base.automation_settings),
+            billing_config: serializeBillingConfig(base.billing_config),
             support_profile: normalizeSupportProfile(base.support_profile),
         });
     } catch (err) {
@@ -964,6 +970,9 @@ router.put('/system', superAuth, async (req, res) => {
     const automationSettings = req.body.automation_settings && typeof req.body.automation_settings === 'object'
         ? normalizeAutomationSettings(req.body.automation_settings)
         : null;
+    const billingConfig = req.body.billing_config && typeof req.body.billing_config === 'object'
+        ? normalizeBillingConfig(req.body.billing_config)
+        : null;
 
     try {
         await ensurePlatformSettingsBase();
@@ -975,6 +984,7 @@ router.put('/system', superAuth, async (req, res) => {
                  feature_flags = COALESCE($3::jsonb, feature_flags),
                  support_profile = COALESCE($4::jsonb, support_profile),
                  automation_settings = COALESCE($5::jsonb, automation_settings),
+                 billing_config = COALESCE($6::jsonb, billing_config),
                  updated_at = NOW()
              WHERE id = 1
              RETURNING *`,
@@ -984,6 +994,7 @@ router.put('/system', superAuth, async (req, res) => {
                 featureFlags ? JSON.stringify(featureFlags) : null,
                 supportProfile ? JSON.stringify(supportProfile) : null,
                 automationSettings ? JSON.stringify(automationSettings) : null,
+                billingConfig ? JSON.stringify(billingConfig) : null,
             ]
         );
 
@@ -992,7 +1003,7 @@ router.put('/system', superAuth, async (req, res) => {
             targetType: 'SYSTEM',
             targetId: '1',
             targetLabel: 'platform_settings',
-            details: { maintenanceMode, maintenanceMessage, featureFlags, supportProfile, automationSettings },
+            details: { maintenanceMode, maintenanceMessage, featureFlags, supportProfile, automationSettings, billingConfig },
         });
 
         return res.json(updated.rows[0]);

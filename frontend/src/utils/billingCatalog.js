@@ -1,0 +1,352 @@
+export const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
+export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
+
+const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
+const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
+const BILLING_DAY_MS = 24 * 60 * 60 * 1000;
+const ACTIVE_BILLING_CREDIT_STATUSES = new Set(['ACTIVE']);
+const MIN_CHECKOUT_PAISE = 100;
+
+export const defaultBillingCatalog = {
+  plan_order: [...BILLING_PLAN_ORDER],
+  addon_order: [...BILLING_ADDON_ORDER],
+  plans: {
+    test: {
+      id: 'test',
+      name: 'Test Drive',
+      monthly_price: 1,
+      annual_price: 1,
+      popular: false,
+      features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'],
+      limits: { members: null, staff: null, storage: 2, branches: null, whatsapp: null, hello: null },
+    },
+    basic: {
+      id: 'basic',
+      name: 'Basic',
+      monthly_price: 1,
+      annual_price: 10,
+      popular: false,
+      features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+      limits: { members: 150, staff: 2, storage: 5, branches: 1, whatsapp: 500, hello: 0 },
+    },
+    growth: {
+      id: 'growth',
+      name: 'Growth',
+      monthly_price: 2,
+      annual_price: 20,
+      popular: true,
+      features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+      limits: { members: 400, staff: 5, storage: 10, branches: 2, whatsapp: 1000, hello: 1 },
+    },
+    pro: {
+      id: 'pro',
+      name: 'Pro',
+      monthly_price: 3,
+      annual_price: 30,
+      popular: false,
+      features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+      limits: { members: 1000, staff: 10, storage: 20, branches: 3, whatsapp: 2000, hello: 1 },
+    },
+  },
+  addons: {
+    extra_whatsapp_250: {
+      key: 'extra_whatsapp_250',
+      label: 'Extra 250 WhatsApp Messages',
+      description: 'Adds 250 more outbound WhatsApp messages to your monthly quota.',
+      price: 249,
+      increment: 250,
+      limit_key: 'whatsapp',
+      requires_plans: [],
+    },
+    extra_staff_1: {
+      key: 'extra_staff_1',
+      label: 'Extra Staff User',
+      description: 'Add 1 more staff login to your current plan.',
+      price: 149,
+      increment: 1,
+      limit_key: 'staff',
+      requires_plans: [],
+    },
+    extra_members_100: {
+      key: 'extra_members_100',
+      label: 'Extra 100 Active Members',
+      description: 'Raises your active member cap by 100.',
+      price: 299,
+      increment: 100,
+      limit_key: 'members',
+      requires_plans: [],
+    },
+    extra_branch_1: {
+      key: 'extra_branch_1',
+      label: 'Extra Branch',
+      description: 'Add 1 more branch to your gym setup.',
+      price: 599,
+      increment: 1,
+      limit_key: 'branches',
+      requires_plans: [],
+    },
+    extra_hello_1: {
+      key: 'extra_hello_1',
+      label: 'Extra Hello Number',
+      description: 'Enable inbound Hello on 1 additional WhatsApp number.',
+      price: 699,
+      increment: 1,
+      limit_key: 'hello',
+      requires_plans: ['growth', 'pro'],
+    },
+  },
+};
+
+const readNumber = (value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER, allowNull = false } = {}) => {
+  if (allowNull) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string' && !value.trim()) return null;
+    if (String(value).trim().toLowerCase() === 'unlimited') return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+};
+
+const readText = (value, fallback = '') => {
+  const text = String(value ?? '').trim();
+  return text || fallback;
+};
+
+const normalizeFeatureList = (value, fallback = []) => {
+  const source = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/\r?\n/) : [];
+  const normalized = source.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 24);
+  return normalized.length > 0 ? normalized : [...fallback];
+};
+
+const normalizeRequiresPlans = (value, fallback = []) => {
+  const source = Array.isArray(value) ? value : [];
+  const allowed = new Set(BILLING_PLAN_ORDER);
+  const normalized = source.map((item) => String(item || '').trim().toLowerCase()).filter((item) => allowed.has(item));
+  return Array.from(new Set(normalized.length > 0 ? normalized : fallback));
+};
+
+const normalizePlanLimits = (value, fallback = {}) => Object.fromEntries(
+  BILLING_LIMIT_KEYS.map((limitKey) => {
+    const fallbackValue = Object.prototype.hasOwnProperty.call(fallback, limitKey) ? fallback[limitKey] : null;
+    const nextValue = value && typeof value === 'object' ? value[limitKey] : undefined;
+    return [
+      limitKey,
+      readNumber(nextValue, fallbackValue, {
+        min: limitKey === 'hello' ? 0 : 1,
+        max: limitKey === 'storage' ? 500 : 100000,
+        allowNull: fallbackValue === null,
+      }),
+    ];
+  })
+);
+
+const normalizePlan = (planId, value) => {
+  const fallback = defaultBillingCatalog.plans[planId] || defaultBillingCatalog.plans.basic;
+  const raw = value && typeof value === 'object' ? value : {};
+  return {
+    id: planId,
+    name: readText(raw.name, fallback.name),
+    monthly_price: readNumber(raw.monthly_price, fallback.monthly_price, { min: 0, max: 100000 }),
+    annual_price: readNumber(raw.annual_price, fallback.annual_price, { min: 0, max: 100000 }),
+    popular: raw.popular === undefined ? fallback.popular : Boolean(raw.popular),
+    features: normalizeFeatureList(raw.features, fallback.features),
+    limits: normalizePlanLimits(raw.limits, fallback.limits),
+  };
+};
+
+const normalizeAddon = (addonKey, value) => {
+  const fallback = defaultBillingCatalog.addons[addonKey];
+  const raw = value && typeof value === 'object' ? value : {};
+  return {
+    key: addonKey,
+    label: readText(raw.label, fallback.label),
+    description: readText(raw.description, fallback.description),
+    price: readNumber(raw.price, fallback.price, { min: 0, max: 100000 }),
+    increment: readNumber(raw.increment, fallback.increment, { min: 1, max: 100000 }),
+    limit_key: readText(raw.limit_key, fallback.limit_key),
+    requires_plans: normalizeRequiresPlans(raw.requires_plans, fallback.requires_plans),
+  };
+};
+
+export const normalizeBillingCatalog = (value, { includeTest = true } = {}) => {
+  const raw = value && typeof value === 'object' ? value : {};
+  const visiblePlanOrder = BILLING_PLAN_ORDER.filter((planId) => includeTest || planId !== 'test');
+  return {
+    plan_order: visiblePlanOrder,
+    addon_order: [...BILLING_ADDON_ORDER],
+    plans: Object.fromEntries(visiblePlanOrder.map((planId) => [planId, normalizePlan(planId, raw.plans?.[planId])])),
+    addons: Object.fromEntries(BILLING_ADDON_ORDER.map((addonKey) => [addonKey, normalizeAddon(addonKey, raw.addons?.[addonKey])])),
+  };
+};
+
+export const normalizePlanId = (value, fallback = 'basic') => {
+  const normalized = String(value || fallback).trim().toLowerCase();
+  return BILLING_PLAN_ORDER.includes(normalized) ? normalized : fallback;
+};
+
+export const normalizeCycle = (value) => {
+  const normalized = String(value || 'monthly').trim().toLowerCase();
+  return normalized === 'annual' ? 'annual' : 'monthly';
+};
+
+export const formatCurrencyInr = (amount) => `₹${new Intl.NumberFormat('en-IN', {
+  minimumFractionDigits: Number.isInteger(Number(amount) || 0) ? 0 : 2,
+  maximumFractionDigits: 2,
+}).format(Number(amount) || 0)}`;
+
+export const formatLimitValue = (value, unit = '') => {
+  if (value === null || value === undefined) return 'Unlimited';
+  return `${Number(value)}${unit}`;
+};
+
+export const getPlanChargeInr = (billingCatalog, planId, cycle) => {
+  const catalog = normalizeBillingCatalog(billingCatalog);
+  const resolvedPlan = catalog.plans[normalizePlanId(planId)] || catalog.plans.basic;
+  return Number(normalizeCycle(cycle) === 'annual' ? resolvedPlan.annual_price : resolvedPlan.monthly_price) || 0;
+};
+
+const clampBillingValue = (value, min, max) => Math.min(max, Math.max(min, value));
+const normalizePayablePaise = (value) => {
+  const normalized = Math.max(0, Math.round(Number(value) || 0));
+  if (normalized > 0 && normalized < MIN_CHECKOUT_PAISE) return MIN_CHECKOUT_PAISE;
+  return normalized;
+};
+
+export const formatPaiseAmount = (value) => {
+  const amount = (Number(value) || 0) / 100;
+  return new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
+
+export const getBillingQuotePreview = ({
+  billingCatalog,
+  currentPlan,
+  currentCycle,
+  currentStatus,
+  currentValidUntil,
+  targetPlan,
+  targetCycle,
+}) => {
+  const resolvedTargetPlan = normalizePlanId(targetPlan, 'basic');
+  const resolvedTargetCycle = normalizeCycle(targetCycle);
+  const resolvedCurrentPlan = normalizePlanId(currentPlan, 'basic');
+  const resolvedCurrentCycle = normalizeCycle(currentCycle);
+  const fullPricePaise = Math.round(getPlanChargeInr(billingCatalog, resolvedTargetPlan, resolvedTargetCycle) * 100);
+  const currentPricePaise = Math.round(getPlanChargeInr(billingCatalog, resolvedCurrentPlan, resolvedCurrentCycle) * 100);
+  const renewalDays = resolvedTargetPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[resolvedTargetCycle] || 30;
+  const preview = {
+    kind: 'fresh_purchase',
+    fullPricePaise,
+    payablePaise: fullPricePaise,
+    creditPaise: 0,
+    preserveCurrentExpiry: false,
+    renewalDays,
+    remainingRatio: 0,
+    error: null,
+  };
+
+  const expiryMs = Date.parse(currentValidUntil || '');
+  const hasActiveCredit = Boolean(
+    currentPricePaise > 0
+      && ACTIVE_BILLING_CREDIT_STATUSES.has(String(currentStatus || '').trim().toUpperCase())
+      && Number.isFinite(expiryMs)
+      && expiryMs > Date.now()
+  );
+
+  if (!hasActiveCredit) {
+    if (resolvedCurrentPlan === resolvedTargetPlan && resolvedCurrentCycle === resolvedTargetCycle) {
+      return { ...preview, kind: 'renewal' };
+    }
+    return preview;
+  }
+
+  const currentCycleDays = resolvedCurrentPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[resolvedCurrentCycle] || 30;
+  const remainingRatio = clampBillingValue((expiryMs - Date.now()) / (currentCycleDays * BILLING_DAY_MS), 0, 1);
+  const currentRemainingCreditPaise = Math.floor(currentPricePaise * remainingRatio);
+
+  if (resolvedCurrentPlan === resolvedTargetPlan && resolvedCurrentCycle === resolvedTargetCycle) {
+    return { ...preview, kind: 'renewal', remainingRatio };
+  }
+
+  if (resolvedCurrentCycle === resolvedTargetCycle) {
+    if (fullPricePaise <= currentPricePaise) {
+      return {
+        ...preview,
+        kind: 'downgrade_requires_renewal',
+        payablePaise: 0,
+        creditPaise: currentRemainingCreditPaise,
+        remainingRatio,
+        error: 'Lower-value plan changes should happen at renewal.',
+      };
+    }
+
+    return {
+      ...preview,
+      kind: 'prorated_upgrade',
+      payablePaise: normalizePayablePaise(Math.ceil(fullPricePaise * remainingRatio) - currentRemainingCreditPaise),
+      creditPaise: currentRemainingCreditPaise,
+      preserveCurrentExpiry: true,
+      remainingRatio,
+    };
+  }
+
+  if (fullPricePaise <= currentRemainingCreditPaise) {
+    return {
+      ...preview,
+      kind: 'downgrade_requires_renewal',
+      payablePaise: 0,
+      creditPaise: currentRemainingCreditPaise,
+      remainingRatio,
+      error: 'This lower-value switch should be scheduled at renewal.',
+    };
+  }
+
+  return {
+    ...preview,
+    kind: 'cycle_switch_with_credit',
+    payablePaise: normalizePayablePaise(fullPricePaise - currentRemainingCreditPaise),
+    creditPaise: currentRemainingCreditPaise,
+    remainingRatio,
+  };
+};
+
+export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, overrideLimits = null) => {
+  if (overrideLimits && typeof overrideLimits === 'object') {
+    return {
+      members: overrideLimits.members ?? null,
+      staff: overrideLimits.staff ?? null,
+      storage: overrideLimits.storage ?? null,
+      branches: overrideLimits.branches ?? null,
+      whatsapp: overrideLimits.whatsapp ?? null,
+      hello: overrideLimits.hello ?? null,
+    };
+  }
+
+  const catalog = normalizeBillingCatalog(billingCatalog);
+  const plan = catalog.plans[normalizePlanId(planId)] || catalog.plans.basic;
+  const addonMap = {
+    members: Number(gymData?.addon_extra_members || 0),
+    staff: Number(gymData?.addon_extra_staff || 0),
+    branches: Number(gymData?.addon_extra_branches || 0),
+    whatsapp: Number(gymData?.addon_extra_whatsapp || 0),
+    hello: Number(gymData?.addon_extra_hello || 0),
+  };
+
+  return Object.fromEntries(BILLING_LIMIT_KEYS.map((limitKey) => {
+    const baseValue = plan.limits?.[limitKey] ?? null;
+    if (baseValue === null || baseValue === undefined) return [limitKey, null];
+    return [limitKey, Number(baseValue) + Number(addonMap[limitKey] || 0)];
+  }));
+};
+
+export const isAddonAllowedForPlan = (billingCatalog, addonKey, planId) => {
+  const catalog = normalizeBillingCatalog(billingCatalog);
+  const addon = catalog.addons[String(addonKey || '').trim()];
+  if (!addon) return false;
+  if (!Array.isArray(addon.requires_plans) || addon.requires_plans.length === 0) return true;
+  return addon.requires_plans.includes(normalizePlanId(planId, 'basic'));
+};

@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { buildApiUrl } from './utils/apiUrl';
+import { normalizeBillingCatalog as normalizeFrontendBillingCatalog } from './utils/billingCatalog';
 import {
   Dumbbell, Mail, Lock, ArrowRight, ArrowLeft, User, Building2,
   Eye, EyeOff, Check, Phone, MapPin, Sun, Moon, Loader2, AlertCircle, Copy,
@@ -12,6 +13,12 @@ const PLANS = [
   { key: 'growth', label: 'Growth', price: '\u20B92', color: '#a855f7', desc: 'Up to 400 members'   },
   { key: 'pro',    label: 'Pro',    price: '\u20B93', color: '#10b981', desc: 'Up to 1,000 members' },
 ];
+
+const PLAN_THEME = {
+  basic: '#6366f1',
+  growth: '#a855f7',
+  pro: '#10b981',
+};
 
 const PENDING_GOOGLE_SIGNUP_KEY = 'gv_pending_google_signup';
 
@@ -150,6 +157,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
   const [showPwd, setShowPwd]           = useState(false);
   const [showConfirm, setShowConfirm]   = useState(false);
   const [selectedPlan, setSelectedPlan] = useState('basic');
+  const [billingCatalog, setBillingCatalog] = useState(() => normalizeFrontendBillingCatalog(undefined, { includeTest: false }));
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -161,6 +169,19 @@ export default function SignupPage({ onShowLogin, setToken }) {
   const stepFlow = isGoogleSignup ? [1, 2, 3] : [0, 1, 2, 3];
   const activeStepIndex = Math.max(stepFlow.indexOf(step), 0);
   const totalSteps = stepFlow.length;
+  const planOptions = billingCatalog.plan_order.map((planId) => {
+    const plan = billingCatalog.plans[planId];
+    const membersLimit = plan?.limits?.members == null
+      ? 'Unlimited members'
+      : `Up to ${Number(plan.limits.members).toLocaleString('en-IN')} members`;
+    return {
+      key: planId,
+      label: plan?.name || planId,
+      price: `₹${Number(plan?.monthly_price || 0)}`,
+      color: PLAN_THEME[planId] || '#6366f1',
+      desc: membersLimit,
+    };
+  });
 
   const clearPendingGoogleSignup = () => {
     sessionStorage.removeItem(PENDING_GOOGLE_SIGNUP_KEY);
@@ -180,6 +201,9 @@ export default function SignupPage({ onShowLogin, setToken }) {
         if (!cancelled) {
           setGoogleAuthEnabled(Boolean(res.data?.google_auth_enabled));
           setSignupEmailOtpMode(String(res.data?.signup_email_otp_mode || 'preview'));
+          if (res.data?.billing_catalog) {
+            setBillingCatalog(normalizeFrontendBillingCatalog(res.data.billing_catalog, { includeTest: false }));
+          }
         }
       })
       .catch(() => {
@@ -193,6 +217,11 @@ export default function SignupPage({ onShowLogin, setToken }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (planOptions.some((plan) => plan.key === selectedPlan)) return;
+    setSelectedPlan(planOptions[0]?.key || 'basic');
+  }, [planOptions, selectedPlan]);
 
   const resetSignupEmailOtpState = () => {
     setSignupEmailOtp('');
@@ -500,7 +529,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
   const trialEnd = new Date();
   trialEnd.setDate(trialEnd.getDate() + 14);
   const trialEndStr = trialEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const planObj = PLANS.find(p => p.key === selectedPlan);
+  const planObj = planOptions.find(p => p.key === selectedPlan);
 
   const STEP_TITLES = {
     0: 'Verify your email',
@@ -934,7 +963,7 @@ export default function SignupPage({ onShowLogin, setToken }) {
                     Choose Your Plan
                   </label>
                   <div className="grid grid-cols-3 gap-2">
-                    {PLANS.map(plan => (
+                    {planOptions.map(plan => (
                       <button key={plan.key} type="button" onClick={() => setSelectedPlan(plan.key)}
                         className="px-2 py-3 rounded-xl text-center transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
                         style={{

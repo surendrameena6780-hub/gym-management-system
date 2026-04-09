@@ -90,10 +90,10 @@ const SmartTipsPanel = ({ controller }) => {
           <button
             type="button"
             onClick={() => navigateTo('Dashboard', null, { action: 'broadcast' })}
-            className="w-full rounded-xl border border-dashed border-indigo-200 bg-indigo-50/50 p-3 text-center hover:bg-indigo-50 transition-colors"
+            className="w-full rounded-xl border border-dashed border-indigo-300 bg-indigo-100 p-3 text-center hover:bg-indigo-200 transition-colors"
           >
-            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-400">No campaigns this week</p>
-            <p className="text-[11px] font-bold text-indigo-600 mt-1">Run your first broadcast to see stats here</p>
+            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">No campaigns this week</p>
+            <p className="text-[11px] font-bold text-indigo-900 mt-1">Run your first broadcast to see stats here</p>
           </button>
         )}
 
@@ -152,8 +152,8 @@ const AttentionPanel = ({ controller }) => {
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
         {showSetupChecklist ? (
           <>
-            <div className="px-3 py-3 rounded-xl border border-indigo-100 bg-indigo-50/70">
-              <p className="text-[10px] font-black uppercase tracking-wider text-indigo-500">First-time Setup</p>
+            <div className="px-3 py-3 rounded-xl border border-indigo-200 bg-indigo-100">
+              <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">First-time Setup</p>
               <p className="text-sm font-black text-slate-800 mt-1">Set up the essentials before you start running the gym from here.</p>
               <p className="text-[10px] text-slate-500 font-semibold mt-1">
                 {setup.progress}% core setup complete. Finish these actions to unlock the full owner workflow.

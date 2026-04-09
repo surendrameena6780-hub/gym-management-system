@@ -4,6 +4,7 @@ import { reportClientError } from './utils/clientErrorReporter';
 import {
   Building2,
   Users,
+  CreditCard,
   ChevronDown,
   ChevronRight,
   ShieldAlert,
@@ -27,6 +28,11 @@ import {
   Bell,
 } from 'lucide-react';
 import PaginationControls from './components/PaginationControls';
+import {
+  BILLING_ADDON_ORDER,
+  BILLING_PLAN_ORDER,
+  normalizeBillingCatalog as normalizeFrontendBillingCatalog,
+} from './utils/billingCatalog';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -124,6 +130,22 @@ const AUTOMATION_TEMPLATE_FIELDS = [
   { key: 'MEMBER_COMEBACK', label: 'Member Comeback Push', audience: 'Member', placeholders: '{{first_name}}, {{days_inactive}}' },
 ];
 
+const BILLING_LIMIT_FIELDS = [
+  { key: 'members', label: 'Members' },
+  { key: 'staff', label: 'Staff Users' },
+  { key: 'branches', label: 'Branches' },
+  { key: 'whatsapp', label: 'WhatsApp / Month' },
+  { key: 'hello', label: 'Hello Numbers' },
+  { key: 'storage', label: 'Storage GB' },
+];
+
+const BILLING_PLAN_TINTS = {
+  test: 'border-amber-500/20 bg-amber-500/10',
+  basic: 'border-sky-500/20 bg-sky-500/10',
+  growth: 'border-indigo-500/20 bg-indigo-500/10',
+  pro: 'border-rose-500/20 bg-rose-500/10',
+};
+
 const mergeAutomationSettings = (value) => {
   const raw = value && typeof value === 'object' ? value : {};
   return {
@@ -177,6 +199,7 @@ function SuperAdminDashboard({ token, onLogout }) {
     maintenance_message: '',
     feature_flags: {},
     automation_settings: DEFAULT_AUTOMATION_SETTINGS,
+    billing_config: normalizeFrontendBillingCatalog(),
     support_profile: {
       phone: '',
       email: '',
@@ -226,6 +249,7 @@ function SuperAdminDashboard({ token, onLogout }) {
     busy: false,
     error: '',
   });
+  const billingConfig = normalizeFrontendBillingCatalog(system.billing_config);
 
   const groupedUsers = useMemo(() => {
     const groupsMap = new Map();
@@ -323,6 +347,7 @@ function SuperAdminDashboard({ token, onLogout }) {
         maintenance_message: payload.maintenance_message ?? prev.maintenance_message ?? '',
         feature_flags: payload.feature_flags || prev.feature_flags || {},
         automation_settings: mergeAutomationSettings(payload.automation_settings),
+        billing_config: normalizeFrontendBillingCatalog(payload.billing_config),
         support_profile: {
           phone: payload.support_profile?.phone ?? prev.support_profile?.phone ?? '',
           email: payload.support_profile?.email ?? prev.support_profile?.email ?? '',
@@ -670,6 +695,114 @@ function SuperAdminDashboard({ token, onLogout }) {
             [templateKey]: {
               ...nextAutomationSettings.message_templates[templateKey],
               [field]: value,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const updateBillingPlanField = (planId, field, value) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          plans: {
+            ...billingConfig.plans,
+            [planId]: {
+              ...billingConfig.plans[planId],
+              [field]: field === 'popular' ? Boolean(value) : value,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const updateBillingPlanLimit = (planId, limitKey, value) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      const nextValue = value === '' ? null : (Number.parseInt(value, 10) || 0);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          plans: {
+            ...billingConfig.plans,
+            [planId]: {
+              ...billingConfig.plans[planId],
+              limits: {
+                ...billingConfig.plans[planId].limits,
+                [limitKey]: nextValue,
+              },
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const updateBillingPlanFeatures = (planId, value) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          plans: {
+            ...billingConfig.plans,
+            [planId]: {
+              ...billingConfig.plans[planId],
+              features: String(value || '').split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean),
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const updateBillingAddonField = (addonKey, field, value) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      const nextValue = ['price', 'increment'].includes(field)
+        ? (value === '' ? 0 : (Number.parseInt(value, 10) || 0))
+        : value;
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          addons: {
+            ...billingConfig.addons,
+            [addonKey]: {
+              ...billingConfig.addons[addonKey],
+              [field]: nextValue,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const toggleBillingAddonPlan = (addonKey, planId) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      const currentPlans = Array.isArray(billingConfig.addons[addonKey]?.requires_plans)
+        ? billingConfig.addons[addonKey].requires_plans
+        : [];
+      const nextPlans = currentPlans.includes(planId)
+        ? currentPlans.filter((entry) => entry !== planId)
+        : [...currentPlans, planId];
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          addons: {
+            ...billingConfig.addons,
+            [addonKey]: {
+              ...billingConfig.addons[addonKey],
+              requires_plans: nextPlans,
             },
           },
         },
@@ -1291,6 +1424,198 @@ function SuperAdminDashboard({ token, onLogout }) {
               </div>
 
               <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Automation Settings</button>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <CreditCard size={14} className="text-indigo-400" />
+                <p className="text-xs uppercase tracking-widest font-black text-slate-400">Billing Catalog</p>
+              </div>
+
+              <p className="text-sm text-slate-400 max-w-3xl">
+                Edit plan names, monthly and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-3">Plans</p>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {BILLING_PLAN_ORDER.map((planId) => {
+                      const plan = billingConfig.plans[planId];
+                      if (!plan) return null;
+                      return (
+                        <div key={planId} className={`rounded-2xl border p-4 space-y-3 ${BILLING_PLAN_TINTS[planId] || 'border-white/10 bg-black/20'}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-white">{plan.name}</p>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mt-1">{planId}</p>
+                            </div>
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(plan.popular)}
+                                onChange={(e) => updateBillingPlanField(planId, 'popular', e.target.checked)}
+                              />
+                              Popular
+                            </label>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="md:col-span-1">
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Plan Name</p>
+                              <input
+                                type="text"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={plan.name}
+                                onChange={(e) => updateBillingPlanField(planId, 'name', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Monthly Price</p>
+                              <input
+                                type="number"
+                                min="0"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={plan.monthly_price}
+                                onChange={(e) => updateBillingPlanField(planId, 'monthly_price', Number.parseInt(e.target.value, 10) || 0)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Annual Price</p>
+                              <input
+                                type="number"
+                                min="0"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={plan.annual_price}
+                                onChange={(e) => updateBillingPlanField(planId, 'annual_price', Number.parseInt(e.target.value, 10) || 0)}
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Runtime Limits</p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              {BILLING_LIMIT_FIELDS.map((limitField) => (
+                                <div key={`${planId}-${limitField.key}`}>
+                                  <p className="text-[10px] font-bold text-slate-400 mb-1">{limitField.label}</p>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                    value={plan.limits?.[limitField.key] ?? ''}
+                                    placeholder={planId === 'test' ? 'Unlimited' : '0'}
+                                    onChange={(e) => updateBillingPlanLimit(planId, limitField.key, e.target.value)}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Feature Bullets</p>
+                            <textarea
+                              rows={6}
+                              className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm resize-y"
+                              value={(plan.features || []).join('\n')}
+                              onChange={(e) => updateBillingPlanFeatures(planId, e.target.value)}
+                              placeholder="One feature per line"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-3">Add-ons</p>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {BILLING_ADDON_ORDER.map((addonKey) => {
+                      const addon = billingConfig.addons[addonKey];
+                      if (!addon) return null;
+                      return (
+                        <div key={addonKey} className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-white">{addon.label}</p>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mt-1">Affects {addon.limit_key}</p>
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-white/5 text-slate-400 border border-white/10">
+                              {addonKey}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Label</p>
+                              <input
+                                type="text"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={addon.label}
+                                onChange={(e) => updateBillingAddonField(addonKey, 'label', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Price</p>
+                              <input
+                                type="number"
+                                min="0"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={addon.price}
+                                onChange={(e) => updateBillingAddonField(addonKey, 'price', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Increment</p>
+                              <input
+                                type="number"
+                                min="1"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={addon.increment}
+                                onChange={(e) => updateBillingAddonField(addonKey, 'increment', e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Description</p>
+                            <textarea
+                              rows={3}
+                              className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm resize-y"
+                              value={addon.description}
+                              onChange={(e) => updateBillingAddonField(addonKey, 'description', e.target.value)}
+                            />
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-2">Allowed Plans</p>
+                            <div className="flex flex-wrap gap-2">
+                              {BILLING_PLAN_ORDER.filter((planId) => planId !== 'test').map((planId) => {
+                                const active = (addon.requires_plans || []).includes(planId);
+                                return (
+                                  <button
+                                    key={`${addonKey}-${planId}`}
+                                    type="button"
+                                    onClick={() => toggleBillingAddonPlan(addonKey, planId)}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${active ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'}`}
+                                  >
+                                    {planId}
+                                  </button>
+                                );
+                              })}
+                              {(addon.requires_plans || []).length === 0 && (
+                                <span className="text-[11px] font-bold text-slate-500">Available on all paid plans.</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Billing Catalog</button>
             </div>
 
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
