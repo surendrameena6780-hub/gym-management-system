@@ -58,11 +58,11 @@ export const defaultBillingCatalog = {
       annual_price: 20,
       popular: true,
       features: [
-        'Up to 400 active members',
-        'Up to 2 branches',
-        '1 owner + 5 staff users',
-        '1,000 WhatsApp messages per month',
-        'Hello inbound on 1 number',
+        'Up to 400 active members / Branch',
+        'Multiple branches',
+        '1 owner + 5 staff users / Branch',
+        '1,000 WhatsApp messages per month / Branch',
+        'Hello inbound on 1 number / Branch',
         '10 GB cloud storage',
         'WhatsApp reply-to-lead capture',
         'Custom WhatsApp templates',
@@ -81,11 +81,11 @@ export const defaultBillingCatalog = {
       annual_price: 30,
       popular: false,
       features: [
-        'Up to 1,000 active members',
-        'Up to 3 branches',
-        '1 owner + 10 staff users',
-        '2,000 WhatsApp messages per month',
-        'Hello inbound on 1 number',
+        'Up to 1,000 active members / Branch',
+        'Multiple branches',
+        '1 owner + 10 staff users / Branch',
+        '2,000 WhatsApp messages per month / Branch',
+        'Hello inbound on 1 number / Branch',
         '20 GB cloud storage',
         'Full reply-to-lead workflow',
         'Custom WhatsApp templates',
@@ -184,9 +184,11 @@ const LEGACY_BILLING_PLAN_FEATURES = {
   ],
   growth: [
     ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+    ['Up to 400 active members', 'Up to 2 branches', '1 owner + 5 staff users', '1,000 WhatsApp messages per month', 'Hello inbound on 1 number', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
   ],
   pro: [
     ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+    ['Up to 1,000 active members', 'Up to 3 branches', '1 owner + 10 staff users', '2,000 WhatsApp messages per month', 'Hello inbound on 1 number', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
   ],
 };
 

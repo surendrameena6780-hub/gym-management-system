@@ -117,7 +117,7 @@ const buildDashboardAudienceHash = (memberIds = []) => {
 };
 
 export default function useDashboardPageController({ appRuntime, setCurrentPage, startTour, isActive = true }) {
-  const { token, toast, navigateTo: navTo } = appRuntime;
+  const { token, toast, navigateTo: navTo, branchScopeValue } = appRuntime;
   const navigateTo = useMemo(() => navTo || ((...args) => setCurrentPage?.(...args)), [navTo, setCurrentPage]);
 
   const [members, setMembers] = useState([]);
@@ -238,6 +238,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         ...authHeaders,
         timeout: DASHBOARD_REQUEST_TIMEOUT_MS,
         suppressGlobalErrorToast: true,
+        params: branchScopeValue ? { branch_id: branchScopeValue } : undefined,
       };
       const [
         membersRes, plansRes, statsRes,
@@ -353,7 +354,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         }, 120);
       }
     }
-  }, [authHeaders, toast]);
+  }, [authHeaders, branchScopeValue, toast]);
 
   const finalizeDashboardPaymentSuccess = useCallback(async (memberId) => {
     try {

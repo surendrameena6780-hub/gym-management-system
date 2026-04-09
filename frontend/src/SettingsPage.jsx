@@ -2018,6 +2018,26 @@ const loadRazorpayScript = () => {
                   </div>
                 </div>
 
+                {/* Active Branch Switcher */}
+                {appRuntime.canSelectOperationsBranch && (
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-black text-violet-600 uppercase tracking-widest flex items-center gap-2 border-b border-violet-50 pb-3"><Building2 size={14} /> Active Branch</h3>
+                    <p className="text-xs font-medium text-slate-500">Switch your active branch. All pages will immediately show data for the selected branch.</p>
+                    <div className="max-w-xs">
+                      <select
+                        value={appRuntime.operationsBranchId}
+                        onChange={(e) => appRuntime.setOperationsBranchId(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-violet-500/10 focus:border-violet-400 transition-all cursor-pointer"
+                      >
+                        {appRuntime.branchDirectory.map((branch) => (
+                          <option key={branch.id} value={branch.id}>{branch.name}</option>
+                        ))}
+                        <option value="all">All Branches</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-5">
                   <h3 className="text-xs font-black text-rose-500 uppercase tracking-widest flex items-center gap-2 border-b border-rose-50 pb-3"><Fingerprint size={14} /> Security Updates</h3>
                   <div className="grid grid-cols-1 desktop:grid-cols-2 lg:grid-cols-3 gap-5">

@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
+const { resolveBranchReadScope } = require('../utils/branchAccess');
 
 router.use(auth, saasMiddleware, requireOwner);
 
@@ -31,6 +32,8 @@ router.get('/stats', async (req, res) => {
     const gym_id = req.user.gym_id; 
 
     try {
+        const scope = await resolveBranchReadScope(pool, req);
+        const branchCondition = scope.branchId ? ` AND branch_id = '${scope.branchId.replace(/[^a-z0-9_-]/g, '')}'` : '';
         const result = await pool.query(
             `WITH gym_base AS (
                 SELECT id, COALESCE(is_active, TRUE) AS is_active
@@ -49,7 +52,7 @@ router.get('/stats', async (req, res) => {
                         0
                     ) AS monthly_revenue
                 FROM payments
-                WHERE gym_id = $1 AND deleted_at IS NULL
+                WHERE gym_id = $1 AND deleted_at IS NULL${branchCondition}
             ),
             members_summary AS (
                 SELECT
@@ -58,7 +61,7 @@ router.get('/stats', async (req, res) => {
                         WHERE COALESCE(last_visit, joining_date::timestamptz, NOW()) < NOW() - INTERVAL '14 days'
                     )::INTEGER AS inactive_members
                 FROM members
-                WHERE gym_id = $1 AND deleted_at IS NULL
+                WHERE gym_id = $1 AND deleted_at IS NULL${branchCondition}
             ),
             memberships_summary AS (
                 SELECT
@@ -69,7 +72,7 @@ router.get('/stats', async (req, res) => {
                     )::INTEGER AS expiring_soon,
                     COUNT(DISTINCT member_id) FILTER (WHERE status = 'EXPIRED')::INTEGER AS expired_members
                 FROM memberships
-                WHERE gym_id = $1 AND deleted_at IS NULL
+                WHERE gym_id = $1 AND deleted_at IS NULL${branchCondition}
             ),
             attendance_summary AS (
                 SELECT
@@ -78,7 +81,7 @@ router.get('/stats', async (req, res) => {
                           AND check_in_time < CURRENT_DATE + INTERVAL '1 day'
                     )::INTEGER AS today_checkins
                 FROM attendance
-                WHERE gym_id = $1 AND deleted_at IS NULL
+                WHERE gym_id = $1 AND deleted_at IS NULL${branchCondition}
             )
             SELECT
                 g.is_active,

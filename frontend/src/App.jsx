@@ -9,7 +9,7 @@ import PageLoader from './PageLoader';
 import SuspensionOverlay from './SuspensionOverlay'; 
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import { clearSessionToken, getSessionToken, setSessionToken } from './utils/authSession';
-import { ALL_BRANCHES_VALUE, DEFAULT_BRANCH_ID, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
+import { ALL_BRANCHES_VALUE, DEFAULT_BRANCH_ID, getBranchLabel, getBranchRequestValue, getDefaultBranchId, buildBranchOptions, normalizeBranchDirectory } from './utils/branchScope';
 import { reportClientError } from './utils/clientErrorReporter';
 import { lazyWithRecovery } from './utils/lazyWithRecovery';
 import {
@@ -17,7 +17,7 @@ import {
   LayoutDashboard, Users, Layers, CreditCard,
   ClipboardCheck, BarChart3, Settings, LogOut, Lock, Bell, User, LifeBuoy,
   Dumbbell,
-  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays // <-- ðŸš¨ ADDED TOUR ICONS
+  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays, Building2, ChevronDown
 } from 'lucide-react';
 
 const DashboardPage = lazyWithRecovery('dashboard', () => import('./DashboardPage'));
@@ -1165,8 +1165,11 @@ function App() {
   const fetchDashboard = useCallback(async () => {
     if (!token || isHQ || isSuspended || currentUser?.role !== 'OWNER') return;
     try {
+      const params = {};
+      if (branchScopeValue) params.branch_id = branchScopeValue;
       const res = await axios.get('/api/dashboard/stats', {
-        headers: { 'x-auth-token': token }
+        headers: { 'x-auth-token': token },
+        params,
       });
       if (res.data.is_active === false) {
         setIsSuspended(true);
@@ -1200,7 +1203,7 @@ function App() {
         toastRef.current?.('Dashboard stats are temporarily unavailable. Showing basic view.', 'warning');
       }
     }
-  }, [token, isHQ, isSuspended, currentUser?.role]);
+  }, [token, isHQ, isSuspended, currentUser?.role, branchScopeValue]);
 
   useEffect(() => {
     if (currentPage === 'Dashboard' && !isSuspended && currentUser?.role === 'OWNER') fetchDashboard();
@@ -1587,6 +1590,27 @@ function App() {
                 )}
                 </div>
 
+                {/* BRANCH SWITCHER — visible when owner has multiple branches */}
+                {canSelectOperationsBranch && (
+                  <div className="relative hidden sm:block">
+                    <label className="relative inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all">
+                      <Building2 size={14} className="text-indigo-500 shrink-0" />
+                      <span className="max-w-[120px] truncate">{getBranchLabel(normalizedBranchDirectory, operationsBranchId, { allLabel: 'All Branches' })}</span>
+                      <ChevronDown size={13} className="text-slate-400 shrink-0" />
+                      <select
+                        value={operationsBranchId}
+                        onChange={(e) => setOperationsBranchId(e.target.value)}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        aria-label="Switch branch"
+                      >
+                        {buildBranchOptions(normalizedBranchDirectory, { allLabel: 'All Branches' }).map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+
                {/* PROFILE MENU */}
                 <div className="relative">
                 <button 
@@ -1606,6 +1630,28 @@ function App() {
                         <p className="text-xs font-semibold text-slate-500 mt-0.5 truncate">{currentUser?.email || 'user@gymvault.com'}</p>
                       </div>
                       
+                      {/* Branch switcher inside profile dropdown */}
+                      {canSelectOperationsBranch && (
+                        <div className="px-3 py-2.5 border-b border-slate-100">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Active Branch</p>
+                          <label className="relative flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 cursor-pointer hover:border-indigo-300 transition-colors">
+                            <Building2 size={14} className="text-indigo-500 shrink-0" />
+                            <span className="text-xs font-bold text-slate-700 flex-1 truncate">{getBranchLabel(normalizedBranchDirectory, operationsBranchId, { allLabel: 'All Branches' })}</span>
+                            <ChevronDown size={13} className="text-slate-400 shrink-0" />
+                            <select
+                              value={operationsBranchId}
+                              onChange={(e) => setOperationsBranchId(e.target.value)}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              aria-label="Switch branch"
+                            >
+                              {buildBranchOptions(normalizedBranchDirectory, { allLabel: 'All Branches' }).map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      )}
+
                       <div className="p-2">
                         {canAccessPage('Settings') && (
                           <>

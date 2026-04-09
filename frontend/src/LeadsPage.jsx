@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   Search, Plus, X, Phone, MessageSquare, Target, Clock3, CalendarDays,
   Pencil, Trash2, ArrowRight, CheckCircle2, Sparkles,
 } from 'lucide-react';
 import { openWhatsAppConversation } from './utils/externalNavigation';
+import { getBranchRequestValue } from './utils/branchScope';
 import PageLoader from './PageLoader';
 import PaginationControls from './components/PaginationControls';
 
@@ -106,7 +107,10 @@ const requestDataRefresh = (source) => {
 };
 
 const LeadsPage = ({ appRuntime, canManage = false }) => {
-  const { token, toast, showConfirm, navigateTo } = appRuntime;
+  const { token, toast, showConfirm, navigateTo, currentUser, branchDirectory, defaultBranchId } = appRuntime;
+  const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
+  const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const branchQueryParams = useMemo(() => (branchScopeValue ? { branch_id: branchScopeValue } : {}), [branchScopeValue]);
   const [summary, setSummary] = useState(null);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +131,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
 
     try {
       const [summaryRes, leadsRes] = await Promise.all([
-        axios.get('/api/leads/summary', { headers: { 'x-auth-token': token } }),
+        axios.get('/api/leads/summary', { headers: { 'x-auth-token': token }, params: { ...branchQueryParams } }),
         axios.get('/api/leads', {
           headers: { 'x-auth-token': token },
           params: {
@@ -136,6 +140,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
             limit: pagination.limit,
             search: searchTerm || undefined,
             status: statusFilter,
+            ...branchQueryParams,
           },
         }),
       ]);
@@ -153,7 +158,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [pagination.limit, pagination.page, searchTerm, statusFilter, toast, token]);
+  }, [branchQueryParams, pagination.limit, pagination.page, searchTerm, statusFilter, toast, token]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -225,7 +230,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
         await axios.put(`/api/leads/${editingLead.id}`, payload, { headers: { 'x-auth-token': token } });
         toast?.('Lead updated successfully.', 'success');
       } else {
-        await axios.post('/api/leads', payload, { headers: { 'x-auth-token': token } });
+        await axios.post('/api/leads', { ...payload, branch_id: branchScopeValue || undefined }, { headers: { 'x-auth-token': token } });
         toast?.('Lead added successfully.', 'success');
       }
 

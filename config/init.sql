@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS leads (
     trial_date          TIMESTAMPTZ,
     converted_member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
     lost_reason         TEXT DEFAULT '',
+    branch_id           VARCHAR(60) DEFAULT 'branch-1',
     created_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

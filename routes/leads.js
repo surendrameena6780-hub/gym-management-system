@@ -18,6 +18,7 @@ const {
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
+const { resolveBranchReadScope, resolveBranchWriteScope } = require('../utils/branchAccess');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -46,6 +47,13 @@ router.use(auth, saasMiddleware);
 router.get('/summary', requirePermission('members:read'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
+        const scope = await resolveBranchReadScope(pool, req);
+        const queryParams = [gymId];
+        let branchFilter = '';
+        if (scope.branchId) {
+            queryParams.push(scope.branchId);
+            branchFilter = ` AND branch_id = $${queryParams.length}`;
+        }
         const result = await pool.query(
             `SELECT
                 COUNT(*)::INTEGER AS total,
@@ -64,8 +72,8 @@ router.get('/summary', requirePermission('members:read'), async (req, res) => {
                 )::INTEGER AS converted_this_month,
                 COUNT(*) FILTER (WHERE status = 'LOST')::INTEGER AS lost_leads
              FROM leads
-             WHERE gym_id = $1`,
-            [gymId]
+             WHERE gym_id = $1${branchFilter}`,
+            queryParams
         );
 
         return res.json(result.rows[0] || {});
@@ -78,6 +86,7 @@ router.get('/summary', requirePermission('members:read'), async (req, res) => {
 router.get('/', requirePermission('members:read'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
+        const scope = await resolveBranchReadScope(pool, req);
         const search = String(req.query.search || '').trim();
         const status = String(req.query.status || '').trim().toUpperCase();
         const paginate = String(req.query.paginate || '').toLowerCase() === 'true' || req.query.page !== undefined || req.query.limit !== undefined;
@@ -86,6 +95,11 @@ router.get('/', requirePermission('members:read'), async (req, res) => {
         const offset = (page - 1) * limit;
         const queryParams = [gymId];
         let whereClause = 'WHERE l.gym_id = $1';
+
+        if (scope.branchId) {
+            queryParams.push(scope.branchId);
+            whereClause += ` AND l.branch_id = $${queryParams.length}`;
+        }
 
         if (search) {
             queryParams.push(`%${search}%`);
@@ -151,13 +165,14 @@ router.get('/', requirePermission('members:read'), async (req, res) => {
 router.post('/', requirePermission('members:write'), async (req, res) => {
     try {
         const gymId = getGymIdFromRequest(req);
+        const scope = await resolveBranchWriteScope(pool, req);
         const payload = normalizeLeadPayload(req.body || {});
 
         const result = await pool.query(
             `INSERT INTO leads (
                 gym_id, full_name, phone, email, source, status, priority,
-                notes, next_follow_up_at, trial_date, last_contacted_at, lost_reason
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                notes, next_follow_up_at, trial_date, last_contacted_at, lost_reason, branch_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              RETURNING *`,
             [
                 gymId,
@@ -172,6 +187,7 @@ router.post('/', requirePermission('members:write'), async (req, res) => {
                 payload.trial_date,
                 payload.mark_contacted ? new Date().toISOString() : null,
                 payload.lost_reason,
+                scope.branchId || scope.defaultBranchId,
             ]
         );
 

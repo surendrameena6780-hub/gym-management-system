@@ -95,6 +95,7 @@ const ensureBranchScopeSchema = async () => {
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '${DEFAULT_BRANCH_ID}';
             ALTER TABLE IF EXISTS pos_products ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '${DEFAULT_BRANCH_ID}';
             ALTER TABLE IF EXISTS pos_sales ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '${DEFAULT_BRANCH_ID}';
+            ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '${DEFAULT_BRANCH_ID}';
 
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
             ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
@@ -116,6 +117,7 @@ const ensureBranchScopeSchema = async () => {
             UPDATE expenses SET branch_id = '${DEFAULT_BRANCH_ID}' WHERE COALESCE(branch_id, '') = '';
             UPDATE pos_products SET branch_id = '${DEFAULT_BRANCH_ID}' WHERE COALESCE(branch_id, '') = '';
             UPDATE pos_sales SET branch_id = '${DEFAULT_BRANCH_ID}' WHERE COALESCE(branch_id, '') = '';
+            UPDATE leads SET branch_id = '${DEFAULT_BRANCH_ID}' WHERE COALESCE(branch_id, '') = '';
 
             UPDATE memberships ms
             SET branch_id = COALESCE(NULLIF(ms.branch_id, ''), NULLIF(m.branch_id, ''), '${DEFAULT_BRANCH_ID}')
@@ -183,6 +185,7 @@ const ensureBranchScopeSchema = async () => {
             CREATE INDEX IF NOT EXISTS idx_payroll_entries_gym_branch_id ON payroll_entries(gym_id, branch_id);
             CREATE INDEX IF NOT EXISTS idx_pos_products_gym_branch_id ON pos_products(gym_id, branch_id);
             CREATE INDEX IF NOT EXISTS idx_pos_sales_gym_branch_id ON pos_sales(gym_id, branch_id);
+            CREATE INDEX IF NOT EXISTS idx_leads_gym_branch_id ON leads(gym_id, branch_id);
             CREATE INDEX IF NOT EXISTS idx_payroll_entries_status ON payroll_entries(gym_id, status, created_at DESC);
         `).catch((error) => {
             ensureBranchScopeSchemaPromise = null;
