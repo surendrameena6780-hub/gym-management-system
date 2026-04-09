@@ -328,6 +328,18 @@ This chat covered a large multi-step cleanup and feature pass beyond the older f
 
 **Rule going forward:** if optional media is referenced from many pages, fix missing-file behavior at the server boundary instead of relying only on per-component `img onError` handlers.
 
+### Final Follow-Up in This Chat (commit `2c3949a`)
+This was the last completed code batch in the conversation.
+
+**What it finalized:**
+- fixed the hidden Test Drive visibility bug globally for owner Settings billing cards,
+- fixed the repeated avatar/profile image console errors by serving a placeholder image response,
+- refreshed the project handoff report so the next chat inherits the real current repo state instead of an older partial summary.
+
+**Important nuance captured here:**
+- hidden current-plan metadata can exist in API payloads without making the plan visible/selectable again,
+- browser DevTools can still show the PWA install-banner informational line from `beforeinstallprompt`; that is not the same class of problem as app-originated `404`/runtime errors.
+
 ---
 
 ## 7. Working Rules & Conventions
@@ -342,6 +354,7 @@ This chat covered a large multi-step cleanup and feature pass beyond the older f
 7. **If a plan is hidden in superadmin**, owner-facing pages must obey `billing_config.plan_order`. Hidden current-plan metadata is allowed, hidden plan cards are not.
 8. **Optional media must not create browser console errors.** Missing avatar/profile assets should resolve to a fallback response, not a hard `404`.
 9. **When removing a setting from UI**, also neutralize its persisted/runtime effect so old saved values cannot keep changing behavior behind the scenes.
+10. **When updating the handoff report**, re-read the latest git log and the current report first; do not rely on memory of earlier batches.
 
 ### Validation Before Every Commit
 ```bash
@@ -394,6 +407,7 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 
 | Commit | Description |
 |---|---|
+| `2c3949a` | Fix hidden test plan visibility and avatar fallbacks |
 | `df374a8` | Complete phase 4 settings and POS updates |
 | `b2644bb` | Add per-branch system with owner branch switcher and data isolation |
 | `e98b424` | Support deleting Test Drive from the live billing catalog |
@@ -402,10 +416,9 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 | `b9cd3ac` | Implement editable billing catalog and enforce limits |
 | `34dc70b` | Fix signup plan persistence and staff usage counts |
 | `6510732` | Show real first-time owner setup actions on dashboard |
-| `8ad7808` | Document permanent Route transfer partner flow |
-| `44f35f2` | Restore Route transfer flow for partner payment links |
-| `29eb3a5` | Fix Razorpay link verification and stale-link handling |
-| `50efbaa` | Fix 10 UX issues and add payroll auto-pay |
+| `e0a1d69` | Add prorated subscription upgrades and quiet transient errors |
+| `25d2dd0` | Implement 3-tier subscription plans with add-ons |
+| `6889145` | Improve leads list readability |
 
 ---
 
@@ -418,6 +431,7 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 | Razorpay partner mode | Needs live server keys; test keys create invisible links |
 | Hidden Test Drive plan | Existing gyms may still retain `current_plan='test'`, but owner-facing upgrade cards must follow live `plan_order` and hide Test Drive if superadmin removed it |
 | Profile uploads | Old DB filenames may point to deleted files; `/uploads/profiles/*` now falls back to a placeholder image and should never be reverted to raw `404` behavior |
+| PWA install-banner warning | Chrome may log a `beforeinstallprompt` banner/information line when the app stores the install event for the custom Add to Screen flow; do not confuse this browser message with an app request failure |
 | Dark mode | Defaults ON; Interface Preferences now only exposes dark mode |
 | Automation tab in Settings | Marked "coming soon" in UI |
 | Report Settings tab in Settings | Marked "coming soon" in UI |
@@ -444,6 +458,7 @@ For urgent issues, always check:
 4. `config/db.js` always-run migrations for any new schema needed on live.
 5. `platform_settings.billing_config.plan_order` if a plan appears or disappears incorrectly in owner-facing billing.
 6. `/uploads/profiles/*` network responses if profile-image console errors reappear; the expected behavior is a real image or the placeholder SVG, never a hard `404`.
+7. Separate true app errors from the Chrome PWA install-banner info line before assuming a console issue still needs code changes.
 
 ---
 
@@ -454,12 +469,13 @@ This section is the detailed continuation record for the next AI session. It sum
 ### A. Starting Point for This Chat
 - The repo already had the broader gym-management stack described above.
 - Earlier work in this same chat had already started improving dashboard behavior, billing catalog control, and branch support.
-- Before the latest follow-up, the most recent completed commits in this chat were:
+- Before the final follow-up, the most recent completed commits in this chat were:
   - `63acf22` for a mixed stability/UX batch,
   - `0ded2e7` for dashboard attention-panel backfill,
   - `e98b424` for Test Drive deletion support in the billing catalog,
   - `b2644bb` for the per-branch system,
   - `df374a8` for the main Phase 4 settings/POS/defaults sweep.
+- The final follow-up commit in this chat was `2c3949a`.
 
 ### B. Major Themes of This Chat
 - Make branch behavior real across the app instead of superficial.
@@ -517,8 +533,8 @@ The following user-requested items were completed as one coordinated batch:
 - Frontend gating was added in `frontend/src/PaymentsPage.jsx`.
 - Auth payloads were updated to expose `saas_plan` on the current user so frontend gating has the right plan state immediately.
 
-### F. Current Follow-Up Completed in This Turn
-This follow-up turn addressed two remaining problems after `df374a8`:
+### F. Final Follow-Up Completed in This Chat (`2c3949a`)
+This follow-up addressed the remaining issues after `df374a8` and closed the chat with the final report refresh:
 
 1. Hidden Test Drive still appearing on a gym currently on Test Drive
 - Root cause: the owner settings billing page was prepending the current hidden plan back into the visible card list.
@@ -531,12 +547,16 @@ This follow-up turn addressed two remaining problems after `df374a8`:
 - Fix: the server now returns a placeholder SVG for missing valid profile-image requests under `/uploads/profiles/*`.
 - Result: profile-image failures degrade cleanly without polluting the console across the app.
 
+3. Handoff/report accuracy
+- The authoritative report was refreshed again after the final commit so the next chat sees the actual latest commit history, the final hidden-plan/avatar fixes, and the working rules reinforced during this conversation.
+
 ### G. Validation Done During This Chat
 - Frontend production build was run repeatedly with `npm --prefix frontend run build` and passed after the major batches.
 - Backend syntax checks were run with `node --check` on touched files such as `server.js`, `routes/settings.js`, `routes/memberships.js`, `routes/member.js`, `routes/users.js`, `routes/finance.js`, `routes/auth.js`, and `utils/platformSettings.js`.
 - A serializer sanity check confirmed the intended behavior for hidden Test Drive:
   - visible `plan_order` excludes `test`,
   - serialized `plans` can still include `test` metadata when the current gym is on that plan.
+- The final follow-up commit was created and pushed after those validations.
 
 ### H. Collaboration Style Reinforced in This Chat
 - The user expects completed fixes, not partial analysis.
@@ -544,10 +564,12 @@ This follow-up turn addressed two remaining problems after `df374a8`:
 - Layout changes should be avoided unless specifically requested.
 - When the user says something must apply globally, the fix must be audited for platform scope, schema defaults, existing-gym backfills, and duplicate helper logic.
 - Console noise matters. Optional broken media should be fixed at the source, not treated as acceptable because the UI visually falls back.
+- The handoff report itself is part of the deliverable when a long multi-step chat is ending; it should be updated from the repo state, not left stale.
 
 ### I. Recurring Errors / Pitfalls Future Chats Must Remember
 - **Hidden-plan reappearance bug:** do not reinsert hidden current plans into owner-facing billing card order.
 - **Duplicated default helpers:** check both `routes/settings.js` and `routes/memberships.js` for member-payment-related defaults.
 - **Profile-image 404 spam:** missing uploads must never return hard `404`s to the frontend when the asset is optional.
+- **PWA install-banner DevTools line:** Chrome may show the `beforeinstallprompt` informational warning when the custom install flow stores the event; do not misclassify that as a failed app request.
 - **Razorpay test-vs-live mismatch:** invisible payment links in dashboard issues often come from test-mode server keys.
 - **Owner-facing billing visibility bugs:** inspect `platform_settings.billing_config`, then `/api/settings`, then `SettingsPage.jsx` visible plan ordering logic.
