@@ -38,7 +38,7 @@ const SmartTipsPanel = ({ controller }) => {
 
   return (
     <div
-      className="relative p-[1.5px] rounded-[24px] shadow-[0_4px_24px_rgba(99,102,241,0.2)]"
+      className="relative h-full p-[1.5px] rounded-[24px] shadow-[0_4px_24px_rgba(99,102,241,0.2)]"
       style={{
         background: 'linear-gradient(135deg, #6366f1, #a855f7, #ec4899)',
         opacity: 0,
@@ -135,7 +135,7 @@ const AttentionPanel = ({ controller }) => {
 
   return (
     <Card
-      className="p-0 overflow-hidden flex-1 flex flex-col"
+      className="p-0 overflow-hidden h-full flex flex-col"
       style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 500ms forwards' }}
     >
       <div className="px-5 py-4 border-b border-slate-100/80 flex justify-between items-center bg-slate-50/50">
@@ -243,7 +243,7 @@ const DesktopRevenuePulsePanel = ({ controller }) => {
 
   return (
     <Card
-      className="hidden desktop:block p-5 overflow-hidden relative"
+      className="col-span-12 desktop:col-span-8 hidden desktop:block p-5 overflow-hidden relative"
       style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 420ms forwards' }}
     >
       <div className="absolute inset-0 pointer-events-none opacity-[0.7]">
@@ -577,12 +577,11 @@ const DashboardPageView = ({ controller, isActive = true }) => {
           {topCards.map((card) => <KPICard key={card.title} {...card} />)}
         </div>
 
-        <div className="grid grid-cols-12 gap-5 desktop:items-start">
-          <div className="col-span-12 desktop:col-span-8 space-y-5">
-            <Card
-              className="p-6 flex flex-col"
-              style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 340ms forwards' }}
-            >
+        <div className="grid grid-cols-12 gap-5">
+          <Card
+            className="col-span-12 desktop:col-span-8 h-full p-6 flex flex-col"
+            style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 340ms forwards' }}
+          >
               <div className="flex items-start justify-between mb-5">
                 <div>
                   <h3 className="font-black text-slate-900 text-lg tracking-tight">Revenue Trend</h3>
@@ -604,7 +603,7 @@ const DashboardPageView = ({ controller, isActive = true }) => {
                   ))}
                 </div>
               </div>
-              <div className="flex-1 min-h-[220px] desktop:h-[320px]">
+            <div className="flex-1 min-h-[220px]">
                 {displayChartData.length > 0 ? (
                   <SafeResponsiveContainer
                     isActive={isActive}
@@ -653,14 +652,16 @@ const DashboardPageView = ({ controller, isActive = true }) => {
                     <p className="text-sm font-bold text-slate-300">No revenue data for this period</p>
                   </div>
                 )}
-              </div>
-            </Card>
+            </div>
+          </Card>
 
-            <DesktopRevenuePulsePanel controller={controller} />
+          <div className="col-span-12 desktop:col-span-4">
+            <SmartTipsPanel controller={controller} />
           </div>
 
-          <div className="col-span-12 desktop:col-span-4 flex flex-col gap-5">
-            <SmartTipsPanel controller={controller} />
+          <DesktopRevenuePulsePanel controller={controller} />
+
+          <div className="col-span-12 desktop:col-span-4">
             <AttentionPanel controller={controller} />
           </div>
         </div>
