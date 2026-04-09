@@ -139,6 +139,23 @@ const BILLING_LIMIT_FIELDS = [
   { key: 'storage', label: 'Storage GB' },
 ];
 
+const BILLING_CAPABILITY_FIELDS = [
+  {
+    key: 'custom_templates',
+    label: 'Custom Templates',
+    description: 'Allow gym owners to create and edit owner-made WhatsApp templates in Settings.',
+  },
+];
+
+const SYSTEM_SECTIONS = [
+  { id: 'runtime', label: 'Runtime', icon: Activity },
+  { id: 'automation', label: 'Automation', icon: Bell },
+  { id: 'billing', label: 'Billing', icon: CreditCard },
+  { id: 'whatsapp', label: 'WhatsApp', icon: Send },
+  { id: 'support', label: 'Support', icon: Ticket },
+  { id: 'controls', label: 'Controls', icon: Settings },
+];
+
 const BILLING_PLAN_TINTS = {
   test: 'border-amber-500/20 bg-amber-500/10',
   basic: 'border-sky-500/20 bg-sky-500/10',
@@ -180,6 +197,7 @@ function SuperAdminDashboard({ token, onLogout }) {
   const headers = useMemo(() => ({ headers: { 'x-super-token': token } }), [token]);
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [activeSystemSection, setActiveSystemSection] = useState('runtime');
   const [loading, setLoading] = useState(true);
   const initialLoadRef = useRef(false);
 
@@ -763,6 +781,28 @@ function SuperAdminDashboard({ token, onLogout }) {
     });
   };
 
+  const updateBillingPlanCapability = (planId, capabilityKey, value) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          plans: {
+            ...billingConfig.plans,
+            [planId]: {
+              ...billingConfig.plans[planId],
+              capabilities: {
+                ...(billingConfig.plans[planId]?.capabilities || {}),
+                [capabilityKey]: Boolean(value),
+              },
+            },
+          },
+        },
+      };
+    });
+  };
+
   const updateBillingAddonField = (addonKey, field, value) => {
     setSystem((prev) => {
       const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
@@ -1180,6 +1220,20 @@ function SuperAdminDashboard({ token, onLogout }) {
 
         {activeTab === 'system' && (
           <div className="space-y-4">
+            {/* Sub-navigation */}
+            <div className="flex flex-wrap gap-1.5 bg-white/5 border border-white/10 rounded-2xl p-2">
+              {SYSTEM_SECTIONS.map((sec) => {
+                const Icon = sec.icon;
+                const active = activeSystemSection === sec.id;
+                return (
+                  <button key={sec.id} type="button" onClick={() => setActiveSystemSection(sec.id)} className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'}`}>
+                    <Icon size={13} /> {sec.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeSystemSection === 'runtime' && (
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1239,7 +1293,9 @@ function SuperAdminDashboard({ token, onLogout }) {
                 </div>
               </div>
             </div>
+            )}
 
+            {activeSystemSection === 'automation' && (
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Bell size={14} className="text-indigo-400" />
@@ -1425,7 +1481,9 @@ function SuperAdminDashboard({ token, onLogout }) {
 
               <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Automation Settings</button>
             </div>
+            )}
 
+            {activeSystemSection === 'billing' && (
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4">
               <div className="flex items-center gap-2">
                 <CreditCard size={14} className="text-indigo-400" />
@@ -1617,7 +1675,9 @@ function SuperAdminDashboard({ token, onLogout }) {
 
               <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Billing Catalog</button>
             </div>
+            )}
 
+            {activeSystemSection === 'controls' && (
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <p className="text-xs uppercase tracking-widest font-black text-slate-400">Global Controls</p>
               <label className="flex items-center justify-between p-3 rounded-xl bg-black/30 border border-white/10">
@@ -1637,7 +1697,10 @@ function SuperAdminDashboard({ token, onLogout }) {
 
               <button onClick={saveSystem} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm">Save Settings</button>
             </div>
+            )}
 
+            {activeSystemSection === 'whatsapp' && (
+            <>
             {/* WhatsApp Webhook Configuration */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <p className="text-xs uppercase tracking-widest font-black text-slate-400">WhatsApp Webhook (MSG91)</p>
@@ -1667,7 +1730,11 @@ function SuperAdminDashboard({ token, onLogout }) {
                 <button type="button" onClick={loadWebhookUrl} className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 font-bold text-sm">Load Webhook URL</button>
               )}
             </div>
+            </>
+            )}
 
+            {activeSystemSection === 'support' && (
+            <>
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <p className="text-xs uppercase tracking-widest font-black text-slate-400">Global Help & Support Contact</p>
               <p className="text-sm text-slate-500">
@@ -1775,6 +1842,8 @@ function SuperAdminDashboard({ token, onLogout }) {
                 <Send size={14} /> Send to {broadcast.target_gym_id ? 'selected gym' : 'all gyms'}
               </button>
             </div>
+            </>
+            )}
           </div>
         )}
 

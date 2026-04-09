@@ -33,6 +33,22 @@ const defaultSupportProfile = {
 
 const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
 const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
+const BILLING_CAPABILITY_KEYS = ['custom_templates'];
+
+const defaultBillingCapabilities = {
+    test: {
+        custom_templates: true,
+    },
+    basic: {
+        custom_templates: false,
+    },
+    growth: {
+        custom_templates: true,
+    },
+    pro: {
+        custom_templates: true,
+    },
+};
 
 const defaultBillingConfig = {
     plan_order: BILLING_PLAN_ORDER,
@@ -45,6 +61,7 @@ const defaultBillingConfig = {
             annual_price: 1,
             popular: false,
             features: ['Full Feature Access', 'For Testing Only', 'Rs 1 Payment Test', 'Expires in 1 Day'],
+            capabilities: { ...defaultBillingCapabilities.test },
             limits: {
                 members: null,
                 staff: null,
@@ -61,6 +78,7 @@ const defaultBillingConfig = {
             annual_price: 10,
             popular: false,
             features: ['Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+            capabilities: { ...defaultBillingCapabilities.basic },
             limits: {
                 members: 150,
                 staff: 2,
@@ -77,6 +95,7 @@ const defaultBillingConfig = {
             annual_price: 20,
             popular: true,
             features: ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+            capabilities: { ...defaultBillingCapabilities.growth },
             limits: {
                 members: 400,
                 staff: 5,
@@ -93,6 +112,7 @@ const defaultBillingConfig = {
             annual_price: 30,
             popular: false,
             features: ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+            capabilities: { ...defaultBillingCapabilities.pro },
             limits: {
                 members: 1000,
                 staff: 10,
@@ -215,6 +235,15 @@ const normalizePlanLimits = (limits, fallbackLimits = {}) => Object.fromEntries(
     })
 );
 
+const normalizePlanCapabilities = (capabilities, fallback = {}) => Object.fromEntries(
+    BILLING_CAPABILITY_KEYS.map((capabilityKey) => [
+        capabilityKey,
+        Object.prototype.hasOwnProperty.call(capabilities || {}, capabilityKey)
+            ? Boolean(capabilities[capabilityKey])
+            : Boolean(fallback?.[capabilityKey]),
+    ])
+);
+
 const normalizeBillingPlan = (planId, value) => {
     const defaults = defaultBillingConfig.plans[planId] || defaultBillingConfig.plans.basic;
     const raw = value && typeof value === 'object' ? value : {};
@@ -225,6 +254,7 @@ const normalizeBillingPlan = (planId, value) => {
         annual_price: readNumber(raw.annual_price, defaults.annual_price, { min: 0, max: 100000 }),
         popular: raw.popular === undefined ? defaults.popular : Boolean(raw.popular),
         features: normalizeFeatureList(raw.features, defaults.features),
+        capabilities: normalizePlanCapabilities(raw.capabilities, defaults.capabilities),
         limits: normalizePlanLimits(raw.limits, defaults.limits),
     };
 };
@@ -387,6 +417,12 @@ const getBillingPlanPrice = (billingConfig, planId, cycle = 'monthly') => {
     return Number(cycle === 'annual' ? plan.annual_price : plan.monthly_price) || 0;
 };
 
+const hasBillingCapability = (billingConfig, planId, capabilityKey) => {
+    if (!BILLING_CAPABILITY_KEYS.includes(readText(capabilityKey))) return false;
+    const plan = getBillingPlan(billingConfig, planId);
+    return Boolean(plan?.capabilities?.[capabilityKey]);
+};
+
 const computeEffectiveBillingLimits = (billingConfig, planId, gymData = {}) => {
     const plan = getBillingPlan(billingConfig, planId);
     return {
@@ -461,6 +497,7 @@ const getGymUsageSnapshot = async (db, gymId) => {
 
 module.exports = {
     BILLING_ADDON_ORDER,
+    BILLING_CAPABILITY_KEYS,
     BILLING_PLAN_ORDER,
     computeEffectiveBillingLimits,
     defaultBillingConfig,
@@ -473,6 +510,7 @@ module.exports = {
     getBillingPlanPrice,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
+    hasBillingCapability,
     isAddonAllowedForPlan,
     normalizeBillingConfig,
     normalizePlanId,

@@ -1853,14 +1853,14 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[ { label: 'Total Members', count: counts.All, icon: Users, bg: 'bg-indigo-50', ic: 'text-indigo-600' }, { label: 'Active', count: counts.Active, icon: CheckCircle, bg: 'bg-emerald-50', ic: 'text-emerald-600' }, { label: 'Expired', count: counts.Expired, icon: Clock, bg: 'bg-rose-50', ic: 'text-rose-600' }, { label: 'Unpaid', count: counts.Unpaid, icon: AlertTriangle, bg: 'bg-amber-50', ic: 'text-amber-600' } ].map((card) => (
-          <div key={card.label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+          <div key={card.label} className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
             <div className={`w-10 h-10 rounded-xl ${card.bg} ${card.ic} flex items-center justify-center shrink-0`}><card.icon size={18} /></div>
             <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{card.label}</p><p className="text-2xl font-black text-slate-900 leading-none">{loading ? '—' : card.count}</p></div>
           </div>
         ))}
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div className="bg-white backdrop-blur-sm rounded-[28px] border border-slate-200/60 p-4 sm:p-6 flex flex-1 min-h-0 flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="space-y-3">
           <div className="relative sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
             <div className="min-w-0 pr-[9rem] sm:pr-1">

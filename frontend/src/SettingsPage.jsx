@@ -18,6 +18,7 @@ import {
   computeEffectiveLimits as computeCatalogEffectiveLimits,
   formatPaiseAmount as formatBillingPaise,
   getBillingQuotePreview as getCatalogBillingQuotePreview,
+  hasBillingCapability,
   isAddonAllowedForPlan,
   normalizeBillingCatalog as normalizeFrontendBillingCatalog,
 } from './utils/billingCatalog';
@@ -604,7 +605,6 @@ const loadRazorpayScript = () => {
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [revealedApiKey, setRevealedApiKey] = useState('');
   const [copiedApiKey, setCopiedApiKey] = useState(false);
-  const [copiedDeliveryCallback, setCopiedDeliveryCallback] = useState(false);
   const [deliveryLogFilter, setDeliveryLogFilter] = useState('ALL');
   const [webhookForm, setWebhookForm] = useState(() => createWebhookDraft());
   const [webhookSaving, setWebhookSaving] = useState(false);
@@ -713,6 +713,8 @@ const loadRazorpayScript = () => {
   const activeDeliveryFilterLabel = DELIVERY_LOG_FILTERS.find((option) => option.value === deliveryLogFilter)?.label || 'All';
   const normalizedBillingCatalog = useMemo(() => normalizeFrontendBillingCatalog(billingCatalog), [billingCatalog]);
   const currentPlanMeta = normalizedBillingCatalog.plans[gymData.current_plan] || normalizedBillingCatalog.plans.pro;
+  const currentPlanName = currentPlanMeta?.name || 'Current plan';
+  const canManageCustomTemplates = hasBillingCapability(normalizedBillingCatalog, gymData.current_plan, 'custom_templates');
   const planCards = useMemo(
     () => normalizedBillingCatalog.plan_order.map((planId) => {
       const plan = normalizedBillingCatalog.plans[planId];
@@ -971,7 +973,8 @@ const loadRazorpayScript = () => {
   }, [activeTab, isActive, isOwner, loadIntegrations, loadPlatform]);
 
   const updateBranchCount = (value) => {
-    const nextCount = Math.max(1, Math.min(25, Number.parseInt(value, 10) || 1));
+    const maxAllowed = usageLimits.branches || 25;
+    const nextCount = Math.max(1, Math.min(maxAllowed, Number.parseInt(value, 10) || 1));
     setPlatformData((prev) => ({
       ...prev,
       branches_count: nextCount,
@@ -986,6 +989,14 @@ const loadRazorpayScript = () => {
     }));
   };
 
+  const deleteBranch = (branchIndex) => {
+    setPlatformData((prev) => {
+      if (prev.branch_directory.length <= 1) return prev;
+      const nextDir = prev.branch_directory.filter((_, i) => i !== branchIndex);
+      return { ...prev, branches_count: nextDir.length, branch_directory: nextDir };
+    });
+  };
+
   const saveBranchControls = async () => {
     setPlatformSaving(true);
     try {
@@ -995,10 +1006,11 @@ const loadRazorpayScript = () => {
         branch_directory: platformData.branch_directory,
       }, headers);
       const payload = res.data || {};
+      const maxBranches = usageLimits.branches || 25;
       setPlatformData((prev) => ({
         ...prev,
         city: String(payload.city || ''),
-        branches_count: Math.max(1, Math.min(25, Number.parseInt(payload.branches_count, 10) || prev.branches_count)),
+        branches_count: Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || prev.branches_count)),
         branch_directory: buildBranchDirectoryState(payload.branches_count || prev.branches_count, payload.branch_directory || prev.branch_directory),
       }));
       toast(payload.message || 'Branch controls saved successfully.', 'success');
@@ -1027,19 +1039,6 @@ const loadRazorpayScript = () => {
       toast('API key copied to clipboard.', 'success');
     } catch {
       toast('Failed to copy API key. Copy it manually.', 'warning');
-    }
-  };
-
-  const copyDeliveryCallbackToClipboard = async () => {
-    const callbackUrl = String(platformData.whatsapp_delivery?.callback_url || '').trim();
-    if (!callbackUrl) return;
-    try {
-      await navigator.clipboard.writeText(callbackUrl);
-      setCopiedDeliveryCallback(true);
-      window.setTimeout(() => setCopiedDeliveryCallback(false), 1500);
-      toast('WhatsApp callback URL copied.', 'success');
-    } catch {
-      toast('Failed to copy callback URL. Copy it manually.', 'warning');
     }
   };
 
@@ -1217,6 +1216,10 @@ const loadRazorpayScript = () => {
 
   const handleCreateCustomTemplate = async (e) => {
     e.preventDefault();
+    if (!canManageCustomTemplates) {
+      toast(`${currentPlanName} does not include custom templates. Upgrade the gym plan or enable the capability in Billing Catalog.`, 'warning');
+      return;
+    }
     if (!customTemplateDraft.raw_text.trim()) {
       toast('Enter raw message copy first.', 'warning');
       return;
@@ -1956,7 +1959,7 @@ const loadRazorpayScript = () => {
         ))}
       </div>
 
-      <div className={`${mobileMenuVisible ? 'hidden' : 'block'} md:block flex-1 bg-white/80 backdrop-blur-xl border border-white/60 rounded-[28px] shadow-sm overflow-y-auto relative custom-scrollbar`}>
+      <div className={`${mobileMenuVisible ? 'hidden' : 'block'} md:block flex-1 bg-slate-50/80 backdrop-blur-xl border border-slate-200/60 rounded-[28px] shadow-sm overflow-y-auto relative custom-scrollbar`}>
         <div className="sticky top-0 z-20 desktop:hidden flex items-center gap-3 px-4 py-4 border-b border-slate-100 bg-white/95 backdrop-blur-xl">
           <button
             type="button"
@@ -2640,22 +2643,22 @@ const loadRazorpayScript = () => {
 
                   {/* â•â• PAYMENTS TAB â•â• */}
                   {integSubTab === 'payments' && (
-                    <div id="settings-integration-panel-payments" role="tabpanel" aria-labelledby="settings-integration-tab-payments" className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-payments" role="tabpanel" aria-labelledby="settings-integration-tab-payments" className="settings-owner-contrast space-y-4 animate-in fade-in duration-200">
 
                       {/* Razorpay Connect Hero Card */}
-                      <div className={`rounded-2xl p-5 sm:p-6 border ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-50 border-emerald-200' : 'bg-gradient-to-br from-indigo-50 to-white border-indigo-200'}`}>
+                      <div className={`rounded-2xl p-5 sm:p-6 border ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/60 border-white/10'}`}>
                         <div className="flex flex-wrap items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
                               <div className={`w-2.5 h-2.5 rounded-full ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'bg-emerald-500' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'bg-amber-400' : 'bg-slate-300'}`} />
-                              <span className={`text-xs font-black uppercase tracking-wider ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'text-emerald-700' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'text-amber-700' : 'text-slate-500'}`}>
+                              <span className={`text-xs font-black uppercase tracking-wider ${integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'text-emerald-300' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'text-amber-300' : 'text-slate-300'}`}>
                                 {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connected via Razorpay Route' : integrationData.member_payments?.onboarding_status === 'AUTHORIZED' ? 'Authorized - Setup Pending' : integrationData.member_payments?.onboarding_status === 'FAILED' ? 'Connection Failed' : 'Not Connected'}
                               </span>
                             </div>
-                            <h3 className="text-lg font-black text-slate-900 mb-1">
+                            <h3 className="text-lg font-black text-white mb-1">
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Razorpay Connected' : 'Connect with Razorpay'}
                             </h3>
-                            <p className="text-xs font-medium text-slate-500 mb-4 break-all">
+                            <p className="text-xs font-medium text-slate-300 mb-4 break-all">
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? `Account: ${integrationData.member_payments.connected_account_id}` : 'Members pay membership fees directly to your account. GymVault auto-collects its platform fee via Route.'}
                             </p>
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
@@ -2665,14 +2668,14 @@ const loadRazorpayScript = () => {
                               </button>
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
                                 <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}
-                                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 active:scale-95 transition-all disabled:opacity-60">
+                                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-200 font-bold text-sm hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-200 active:scale-95 transition-all disabled:opacity-60">
                                   {disconnectingGateway ? 'Disconnecting...' : 'Disconnect'}
                                 </button>
                               )}
                             </div>
                           </div>
-                          <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center shrink-0 self-start">
-                            <CreditCard size={22} className="text-indigo-500" />
+                          <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/10 shadow-sm flex items-center justify-center shrink-0 self-start">
+                            <CreditCard size={22} className="text-indigo-300" />
                           </div>
                         </div>
                       </div>
@@ -2771,7 +2774,7 @@ const loadRazorpayScript = () => {
 
                   {/* â•â• MESSAGING TAB â•â• */}
                   {integSubTab === 'messaging' && (
-                    <div id="settings-integration-panel-messaging" role="tabpanel" aria-labelledby="settings-integration-tab-messaging" className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-messaging" role="tabpanel" aria-labelledby="settings-integration-tab-messaging" className="settings-owner-contrast space-y-4 animate-in fade-in duration-200">
                       {isWhatsAppConnected && !whatsappNumberEditorOpen ? (
                         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -3031,7 +3034,7 @@ const loadRazorpayScript = () => {
 
                   {/* â•â• CAMPAIGNS TAB â•â• */}
                   {integSubTab === 'campaigns' && (
-                    <div id="settings-integration-panel-campaigns" role="tabpanel" aria-labelledby="settings-integration-tab-campaigns" className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-campaigns" role="tabpanel" aria-labelledby="settings-integration-tab-campaigns" className="settings-owner-contrast space-y-4 animate-in fade-in duration-200">
 
                       {/* Usage + Controls */}
                       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5">
@@ -3098,69 +3101,89 @@ const loadRazorpayScript = () => {
                           <p className="text-xs text-slate-500 font-medium">{'Placeholders: {{name}}, {{plan}}, {{days_left}}, {{gym_name}}'}</p>
                         </div>
                         <div className="px-5 pb-4">
-                          <div className="rounded-2xl border border-dashed border-purple-200 bg-gradient-to-br from-purple-50 via-white to-emerald-50 p-4">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div>
-                                <p className="text-sm font-black text-slate-900">Create a Custom Template</p>
-                                <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">Type raw copy once. GymVault will add placeholders like {'{{name}}'} and {'{{gym_name}}'}, save the operational version, and submit it to MSG91 for approval.</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setCustomTemplateComposerOpen((prev) => !prev)}
-                                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-black hover:bg-purple-700 active:scale-[0.98] transition-all"
-                              >
-                                <Plus size={14} /> {customTemplateComposerOpen ? 'Close Composer' : 'Create Template'}
-                              </button>
-                            </div>
-                            {customTemplateComposerOpen && (
-                              <form onSubmit={handleCreateCustomTemplate} className="mt-4 space-y-3">
-                                <div>
-                                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Internal Label (Optional)</label>
-                                  <input
-                                    value={customTemplateDraft.title}
-                                    onChange={(e) => setCustomTemplateDraft((prev) => ({ ...prev, title: e.target.value }))}
-                                    placeholder="Winback Offer, Festive Reminder, Personal Check-in"
-                                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Raw Message</label>
-                                  <textarea
-                                    rows={4}
-                                    value={customTemplateDraft.raw_text}
-                                    onChange={(e) => setCustomTemplateDraft((prev) => ({ ...prev, raw_text: e.target.value }))}
-                                    placeholder="hello from gym vault, we miss you. come back this week and reply if you want help"
-                                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none"
-                                  />
-                                </div>
-                                <div className="rounded-xl bg-white/80 border border-purple-100 px-3 py-3">
-                                  <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">Approval is still controlled by MSG91 and WhatsApp review, but creation and submission are automatic from here.</p>
-                                </div>
-                                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                          <div className="rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/50 p-4">
+                            {canManageCustomTemplates ? (
+                              <>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div>
+                                    <p className="text-sm font-black text-white">Create a Custom Template</p>
+                                    <p className="text-xs text-slate-300 font-medium mt-1 leading-relaxed">Type raw copy once. GymVault will add placeholders like {'{{name}}'} and {'{{gym_name}}'}, save the operational version, and submit it to MSG91 for approval.</p>
+                                  </div>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setCustomTemplateComposerOpen(false);
-                                      setCustomTemplateDraft({ title: '', raw_text: '' });
-                                    }}
-                                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-black hover:bg-white transition-colors"
+                                    onClick={() => setCustomTemplateComposerOpen((prev) => !prev)}
+                                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-black hover:bg-purple-700 active:scale-[0.98] transition-all"
                                   >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="submit"
-                                    disabled={customTemplateCreating}
-                                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-black hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-60"
-                                  >
-                                    <Plus size={14} /> {customTemplateCreating ? 'Creating...' : 'Create & Sync'}
+                                    <Plus size={14} /> {customTemplateComposerOpen ? 'Close Composer' : 'Create Template'}
                                   </button>
                                 </div>
-                              </form>
+                                {customTemplateComposerOpen && (
+                                  <form onSubmit={handleCreateCustomTemplate} className="mt-4 space-y-3">
+                                    <div>
+                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Internal Label (Optional)</label>
+                                      <input
+                                        value={customTemplateDraft.title}
+                                        onChange={(e) => setCustomTemplateDraft((prev) => ({ ...prev, title: e.target.value }))}
+                                        placeholder="Winback Offer, Festive Reminder, Personal Check-in"
+                                        className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/30 text-sm font-semibold text-slate-100 placeholder:text-slate-500 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/10 outline-none"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Raw Message</label>
+                                      <textarea
+                                        rows={4}
+                                        value={customTemplateDraft.raw_text}
+                                        onChange={(e) => setCustomTemplateDraft((prev) => ({ ...prev, raw_text: e.target.value }))}
+                                        placeholder="hello from gym vault, we miss you. come back this week and reply if you want help"
+                                        className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/30 text-sm font-semibold text-slate-100 placeholder:text-slate-500 resize-none focus:border-purple-400 focus:ring-2 focus:ring-purple-500/10 outline-none"
+                                      />
+                                    </div>
+                                    <div className="rounded-xl bg-black/30 border border-white/10 px-3 py-3">
+                                      <p className="text-[11px] font-semibold text-slate-300 leading-relaxed">Approval is still controlled by MSG91 and WhatsApp review, but creation and submission are automatic from here.</p>
+                                    </div>
+                                    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setCustomTemplateComposerOpen(false);
+                                          setCustomTemplateDraft({ title: '', raw_text: '' });
+                                        }}
+                                        className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-slate-200 text-sm font-black hover:bg-white/10 transition-colors"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="submit"
+                                        disabled={customTemplateCreating}
+                                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-black hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-60"
+                                      >
+                                        <Plus size={14} /> {customTemplateCreating ? 'Creating...' : 'Create & Sync'}
+                                      </button>
+                                    </div>
+                                  </form>
+                                )}
+                              </>
+                            ) : (
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-black text-white">Custom Templates Locked</p>
+                                  <p className="text-xs text-slate-300 font-medium mt-1 leading-relaxed">{currentPlanName} does not include owner-created WhatsApp templates. Built-in templates stay available, but custom template creation and editing are locked until this capability is enabled in Billing Catalog or the gym is upgraded.</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openTab('billing')}
+                                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 border border-amber-400/25 text-amber-100 text-sm font-black hover:bg-amber-500/25 transition-all"
+                                >
+                                  <CreditCard size={14} /> Open Billing
+                                </button>
+                              </div>
                             )}
                           </div>
                         </div>
                         <div className="divide-y divide-slate-100">
-                          {(integrationData.templates || []).map((template, index) => (
+                          {(integrationData.templates || []).map((template, index) => {
+                            const customTemplateLocked = isCustomMessageTemplate(template) && !canManageCustomTemplates;
+                            return (
                             <div key={template.template_key}>
                               <button type="button"
                                 onClick={() => setExpandedTemplate(expandedTemplate === template.template_key ? null : template.template_key)}
@@ -3187,12 +3210,13 @@ const loadRazorpayScript = () => {
                                 <div className="px-5 pb-5 space-y-3 animate-in fade-in duration-150 bg-slate-50/50">
                                   <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                                     <input value={template.title}
+                                      disabled={customTemplateLocked}
                                       onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], title: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
-                                      className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-800 focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                                      className={`flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-800 focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none ${customTemplateLocked ? 'opacity-60 cursor-not-allowed' : ''}`} />
                                     <div className="flex items-center gap-2 shrink-0">
                                       <span className="text-xs font-bold text-slate-500">Active</span>
-                                      <button type="button" onClick={() => { const next = [...integrationData.templates]; next[index] = { ...next[index], is_active: next[index].is_active === false ? true : false }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
-                                        className={`relative w-9 h-5 rounded-full transition-colors ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                      <button type="button" disabled={customTemplateLocked} onClick={() => { const next = [...integrationData.templates]; next[index] = { ...next[index], is_active: next[index].is_active === false ? true : false }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
+                                        className={`relative w-9 h-5 rounded-full transition-colors ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'} ${customTemplateLocked ? 'opacity-60 cursor-not-allowed' : ''}`}>
                                         <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${template.is_active !== false ? 'translate-x-4' : ''}`} />
                                       </button>
                                     </div>
@@ -3201,8 +3225,9 @@ const loadRazorpayScript = () => {
                                     <div>
                                       <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">WhatsApp Template Copy</label>
                                       <textarea rows={4} value={template.whatsapp_text}
+                                        disabled={customTemplateLocked}
                                         onChange={(e) => { const next = [...integrationData.templates]; next[index] = { ...next[index], whatsapp_text: e.target.value }; setIntegrationData(prev => ({ ...prev, templates: next })); }}
-                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                                        className={`w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 resize-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none ${customTemplateLocked ? 'opacity-60 cursor-not-allowed' : ''}`} />
                                     </div>
                                     <div className="space-y-3">
                                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
@@ -3219,7 +3244,9 @@ const loadRazorpayScript = () => {
                                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                                         <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Notes</p>
                                         <p className="mt-1 text-[11px] font-semibold text-slate-600 leading-relaxed">
-                                          {isCustomMessageTemplate(template)
+                                          {customTemplateLocked
+                                            ? `${currentPlanName} currently locks custom template editing. Upgrade the gym or enable the custom template capability in Billing Catalog to change this template again.`
+                                            : isCustomMessageTemplate(template)
                                             ? 'Custom templates can be edited here too. GymVault keeps the copy placeholder-aware and resubmits any changed version to MSG91 for review.'
                                             : 'Use placeholders like {{name}}, {{plan}}, {{days_left}}, and {{gym_name}}. Changing the copy creates a new provider template version for approval.'}
                                         </p>
@@ -3229,7 +3256,7 @@ const loadRazorpayScript = () => {
                                 </div>
                               )}
                             </div>
-                          ))}
+                          );})}
                         </div>
                       </div>
 
@@ -3243,7 +3270,7 @@ const loadRazorpayScript = () => {
                   )}
 
                   {integSubTab === 'platform' && (
-                    <div id="settings-integration-panel-platform" role="tabpanel" aria-labelledby="settings-integration-tab-platform" className="space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-platform" role="tabpanel" aria-labelledby="settings-integration-tab-platform" className="settings-owner-contrast space-y-4 animate-in fade-in duration-200">
                       {platformLoading ? (
                         <div className="p-10 bg-white border border-slate-100 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading platform settings...</div>
                       ) : (
@@ -3269,17 +3296,34 @@ const loadRazorpayScript = () => {
                                   <input
                                     type="number"
                                     min="1"
-                                    max="25"
+                                    max={usageLimits.branches || 25}
                                     value={platformData.branches_count}
                                     onChange={(e) => updateBranchCount(e.target.value)}
                                     className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-slate-300 focus:ring-2 focus:ring-slate-100 outline-none"
                                   />
+                                  {usageLimits.branches !== null && (
+                                    <p className="text-[10px] font-bold mt-1.5 text-slate-400">
+                                      Your plan allows up to {usageLimits.branches} branch{usageLimits.branches === 1 ? '' : 'es'}.
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                               <div className="space-y-3">
                                 {platformData.branch_directory.map((branch, index) => (
                                   <div key={branch.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Branch {index + 1}</p>
+                                    <div className="flex items-center justify-between mb-3">
+                                      <p className="text-xs font-black uppercase tracking-widest text-slate-400">Branch {index + 1}</p>
+                                      {platformData.branch_directory.length > 1 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => deleteBranch(index)}
+                                          className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                                          title="Delete branch"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      )}
+                                    </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                       <input
                                         value={branch.name}
@@ -3491,48 +3535,24 @@ const loadRazorpayScript = () => {
                             <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-4">
                               <div className="space-y-4">
 
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                                <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     <div>
-                                      <p className="text-sm font-black text-slate-900">MSG91 Webhook Setup</p>
-                                      <p className="text-xs font-semibold text-slate-500 mt-1 leading-relaxed">Use this exact callback URL in MSG91. Replies become follow-up leads only when MSG91 sends inbound events to this endpoint.</p>
+                                      <p className="text-sm font-black text-white">HQ-Managed WhatsApp Webhook</p>
+                                      <p className="text-xs font-semibold text-slate-300 mt-1 leading-relaxed">You do not create a new MSG91 webhook for every gym. HQ configures the shared webhook once in SuperAdmin, and GymVault routes delivery reports and inbound replies to the correct gym automatically.</p>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={copyDeliveryCallbackToClipboard}
-                                      disabled={!platformData.whatsapp_delivery?.callback_url}
-                                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-black hover:bg-slate-100 transition-all disabled:opacity-60"
-                                    >
-                                      {copiedDeliveryCallback ? <Check size={13} /> : <Link size={13} />}
-                                      {copiedDeliveryCallback ? 'Copied' : 'Copy URL'}
-                                    </button>
+                                    <span className={`inline-flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.18em] ${platformData.whatsapp_delivery?.webhook_token_configured ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-200' : 'bg-amber-500/15 border border-amber-500/30 text-amber-100'}`}>
+                                      <span className={`h-2 w-2 rounded-full ${platformData.whatsapp_delivery?.webhook_token_configured ? 'bg-emerald-400' : 'bg-amber-300'}`} />
+                                      {platformData.whatsapp_delivery?.webhook_token_configured ? 'Protected at HQ' : 'HQ setup needs token hardening'}
+                                    </span>
                                   </div>
 
-                                  <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 mb-2">Callback URL</p>
-                                    <p className="text-xs font-bold text-slate-700 break-all">{platformData.whatsapp_delivery?.callback_url || 'Callback URL unavailable'}</p>
-                                  </div>
-
-                                  <div className={`rounded-2xl border px-3 py-3 ${platformData.whatsapp_delivery?.webhook_token_configured ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                                    <p className={`text-xs font-black uppercase tracking-[0.18em] ${platformData.whatsapp_delivery?.webhook_token_configured ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                      {platformData.whatsapp_delivery?.webhook_token_configured ? 'Webhook token protected' : 'Webhook token not configured'}
-                                    </p>
-                                    <p className={`mt-1 text-[11px] font-semibold leading-5 ${platformData.whatsapp_delivery?.webhook_token_configured ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                      {platformData.whatsapp_delivery?.webhook_token_configured
-                                        ? 'Copy the full URL exactly as shown above. The token is already embedded in that URL.'
-                                        : 'This server is currently accepting webhook calls without a token. You can still use the URL above, but adding MSG91_WHATSAPP_WEBHOOK_TOKEN on the server is safer.'}
-                                    </p>
-                                  </div>
-
-                                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-3">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-700 mb-2">Required in MSG91</p>
-                                    <div className="space-y-1.5 text-[11px] font-semibold leading-5 text-indigo-700">
-                                      <p>1. Create one webhook for On Inbound Request Received using the exact callback URL above.</p>
-                                      <p>2. Create one webhook for On Inbound Report Received using the same callback URL.</p>
-                                      <p>3. Keep one webhook for On Delivered Events using the same callback URL.</p>
-                                      <p>4. In MSG91, make sure Pause Webhook is turned OFF for all three webhooks. A paused webhook will not send events to GymVault.</p>
-                                      <p>5. If MSG91 still shows no inbound logs, open Number → Integration and enable Allow inbound in Hello, then try the reply again.</p>
-                                      <p>6. If MSG91 shows failed webhook logs, open the snapshot and verify the saved URL matches this full callback URL exactly.</p>
+                                  <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-3">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200 mb-2">What this means for your gym</p>
+                                    <div className="space-y-1.5 text-[11px] font-semibold leading-5 text-slate-300">
+                                      <p>1. Delivery reports shown below already come through the shared HQ webhook.</p>
+                                      <p>2. Inbound WhatsApp replies can still create follow-up leads without any extra webhook setup inside this gym account.</p>
+                                      <p>3. If delivery logs stop updating, that is an HQ webhook issue, not a per-gym configuration step.</p>
                                     </div>
                                   </div>
                                 </div>

@@ -545,7 +545,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {summaryCards.map((card) => (
-          <div key={card.label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+          <div key={card.label} className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${card.box}`}>
               <card.icon size={18} />
             </div>
@@ -571,7 +571,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-        <div className="xl:col-span-4 bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+        <div className="xl:col-span-4 bg-white backdrop-blur-sm rounded-[28px] border border-slate-200/60 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -624,15 +624,15 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                      <div className="rounded-xl bg-white/80 border border-white px-2 py-2.5">
+                      <div className="rounded-xl bg-white border border-white px-2 py-2.5">
                         <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Seats</p>
                         <p className="text-sm font-black text-slate-900">{classType.capacity || 20}</p>
                       </div>
-                      <div className="rounded-xl bg-white/80 border border-white px-2 py-2.5">
+                      <div className="rounded-xl bg-white border border-white px-2 py-2.5">
                         <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Upcoming</p>
                         <p className="text-sm font-black text-slate-900">{classType.upcoming_sessions || 0}</p>
                       </div>
-                      <div className="rounded-xl bg-white/80 border border-white px-2 py-2.5">
+                      <div className="rounded-xl bg-white border border-white px-2 py-2.5">
                         <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Coach</p>
                         <p className="text-sm font-black text-slate-900 truncate">{classType.trainer_name || 'Desk'}</p>
                       </div>
@@ -645,7 +645,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                           <button onClick={() => openSessionModal(null, classType.id)} className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wide transition-all ${theme.button}`}>
                             Schedule
                           </button>
-                          <button type="button" aria-label={`Edit ${classType.title}`} onClick={() => openTypeModal(classType)} className="p-2 rounded-xl bg-white/80 border border-white text-slate-500 hover:text-slate-800 transition-all">
+                          <button type="button" aria-label={`Edit ${classType.title}`} onClick={() => openTypeModal(classType)} className="p-2 rounded-xl bg-white border border-white text-slate-500 hover:text-slate-800 transition-all">
                             <Pencil size={13} />
                           </button>
                         </div>
@@ -660,7 +660,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
           </div>
         </div>
 
-        <div className="xl:col-span-8 bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+        <div className="xl:col-span-8 bg-white backdrop-blur-sm rounded-[28px] border border-slate-200/60 p-4 sm:p-6 flex flex-col gap-4 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-black text-slate-900">Next 14 Days Schedule</h2>
@@ -726,15 +726,15 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                           </div>
 
                           <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                            <div className="rounded-xl bg-white/80 border border-white px-2 py-2.5">
+                            <div className="rounded-xl bg-white border border-white px-2 py-2.5">
                               <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Booked</p>
                               <p className="text-sm font-black text-slate-900">{bookedCount}/{capacity}</p>
                             </div>
-                            <div className="rounded-xl bg-white/80 border border-white px-2 py-2.5">
+                            <div className="rounded-xl bg-white border border-white px-2 py-2.5">
                               <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Waitlist</p>
                               <p className="text-sm font-black text-slate-900">{waitlistCount}</p>
                             </div>
-                            <div className="rounded-xl bg-white/80 border border-white px-2 py-2.5">
+                            <div className="rounded-xl bg-white border border-white px-2 py-2.5">
                               <p className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1">Checked-In</p>
                               <p className="text-sm font-black text-slate-900">{session.checked_in_count || 0}</p>
                             </div>
@@ -757,7 +757,7 @@ const ClassesPage = ({ appRuntime, canManage = false }) => {
                               Bookings
                             </button>
                             {canManage && (
-                              <button type="button" aria-label={`Edit ${session.class_title}`} onClick={() => openSessionModal(session)} className="px-3 py-2.5 rounded-xl bg-white/80 border border-white text-slate-600 hover:text-slate-900 transition-all">
+                              <button type="button" aria-label={`Edit ${session.class_title}`} onClick={() => openSessionModal(session)} className="px-3 py-2.5 rounded-xl bg-white border border-white text-slate-600 hover:text-slate-900 transition-all">
                                 <Pencil size={14} />
                               </button>
                             )}

@@ -131,7 +131,7 @@ const SmartTipsPanel = ({ controller }) => {
 };
 
 const AttentionPanel = ({ controller }) => {
-  const { dashboardData, setup } = controller;
+  const { dashboardData, setup, isAutomating } = controller;
   const setupActionRows = dashboardData.setupActionRows || [];
   const showSetupChecklist = dashboardData.actionRows.length === 0 && setupActionRows.length > 0;
 

@@ -397,7 +397,7 @@ function HelpSupportPage({ appRuntime }) {
   if (accessDenied) {
     return (
       <div className="space-y-5">
-        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+        <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
           <div className="flex items-center gap-2 mb-2">
             <LifeBuoy size={18} className="text-indigo-500" />
             <h2 className="text-lg font-black text-slate-900">Help & Support</h2>
@@ -410,7 +410,7 @@ function HelpSupportPage({ appRuntime }) {
 
   return (
     <div className="space-y-5 min-h-full pb-6 flex flex-col">
-      <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+      <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
         <div className="flex items-center gap-2 mb-2">
           <LifeBuoy size={18} className="text-indigo-500" />
           <h2 className="text-lg font-black text-slate-900">Help & Support</h2>
@@ -420,7 +420,7 @@ function HelpSupportPage({ appRuntime }) {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 flex-1 min-h-0">
         <div className="xl:col-span-2 space-y-5 min-h-0 flex flex-col">
-          <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+          <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
             <div className="flex items-center gap-2 mb-4">
               <Ticket size={16} className="text-indigo-500" />
               <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Raise a Ticket</h3>
@@ -466,7 +466,7 @@ function HelpSupportPage({ appRuntime }) {
             </form>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 min-h-0 flex-1 flex flex-col">
+          <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5 min-h-0 flex-1 flex flex-col">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-4">My Tickets</h3>
             {tickets.length === 0 ? (
               <div className="py-8 text-center text-sm font-bold text-slate-400">No tickets raised yet.</div>
@@ -495,7 +495,7 @@ function HelpSupportPage({ appRuntime }) {
         </div>
 
         <div className="flex flex-col gap-5 overflow-y-auto pr-1 min-h-0">
-          <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+          <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-3">Quick Contact</h3>
             <div className="space-y-2.5 text-sm">
               <a href={`tel:${overview.contact.phone}`} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-100 bg-white text-slate-700 font-semibold hover:bg-slate-50">
@@ -510,7 +510,7 @@ function HelpSupportPage({ appRuntime }) {
             </div>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+          <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-3">Know Us</h3>
             <div className="space-y-2.5 text-xs font-semibold text-slate-600">
               <p className="flex items-start gap-2"><Building2 size={14} className="text-indigo-500 mt-0.5" /> {overview.about.mission}</p>
@@ -519,7 +519,7 @@ function HelpSupportPage({ appRuntime }) {
             </div>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-4">
+          <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-4">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-2">Support Insights</h3>
 
             <div className="grid grid-cols-2 gap-2">

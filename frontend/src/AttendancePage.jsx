@@ -979,19 +979,19 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   return (
     <div className="space-y-5 p-2">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up">
+        <div className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 gv-fade-up">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Today's Check-ins</p>
           <h3 className="text-3xl font-black text-slate-900 mt-1">{animatedTodayCheckins}</h3>
         </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-1">
+        <div className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 gv-fade-up gv-fade-up-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Yesterday</p>
           <h3 className="text-3xl font-black text-slate-900 mt-1">{animatedYesterdayCheckins}</h3>
         </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-2">
+        <div className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 gv-fade-up gv-fade-up-2">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Members Today</p>
           <h3 className="text-3xl font-black text-emerald-600 mt-1">{animatedActiveMembersToday}</h3>
         </div>
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/70 p-4 gv-fade-up gv-fade-up-3">
+        <div className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 gv-fade-up gv-fade-up-3">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Peak Hour Today</p>
           <h3 className="text-3xl font-black text-indigo-600 mt-1">{peakHourLabel}</h3>
           <p className="text-xs font-bold text-slate-400 mt-1">{animatedPeakHourCount} check-ins</p>
@@ -1008,7 +1008,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       {/* ═══════ CHECK-IN OPS TAB ═══════ */}
       {attendanceTab === 'checkin' && (<>
 
-      <div ref={checkinOpsRef} className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+      <div ref={checkinOpsRef} className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
         <div className="flex items-center gap-2 mb-4">
           <Shield size={18} className="text-indigo-500" />
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Attendance Mode</h3>
@@ -1093,7 +1093,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-1 bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+        <div className="xl:col-span-1 bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
           <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-3">Quick Check-In Panel</h3>
 
           <div className="relative mb-3">
@@ -1189,7 +1189,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
           )}
         </div>
 
-        <div ref={liveFeedRef} className="xl:col-span-2 bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+        <div ref={liveFeedRef} className="xl:col-span-2 bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Live Feed + Records</h3>
             <div className="flex items-center gap-2">
@@ -1302,7 +1302,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+      <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-2 min-w-0">
             <Activity size={16} className="text-indigo-500 shrink-0" />
@@ -1391,7 +1391,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+      <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <h3 className="text-sm font-black uppercase tracking-wider text-slate-900">Inactive Members (Retention Risk)</h3>
           <div className="flex items-center gap-2">
@@ -1430,7 +1430,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5">
+      <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5">
         <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-4">Engagement Leaderboard (30D)</h3>
         {leaderboard.length === 0 ? (
           <div className="py-6 text-center text-slate-400 font-bold text-sm">No leaderboard data yet.</div>
@@ -1476,7 +1476,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
       {/* ═══════ ACCESS POLICIES TAB ═══════ */}
       {attendanceTab === 'policies' && isOwner && (
-        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 space-y-4">
+        <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Access Policies</h3>
@@ -1526,7 +1526,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
 
       {/* ═══════ READER HEALTH TAB ═══════ */}
       {attendanceTab === 'health' && isOwner && (
-        <div className="bg-white/80 backdrop-blur-sm rounded-[24px] border border-white/70 p-5 space-y-4">
+        <div className="bg-white backdrop-blur-sm rounded-[24px] border border-slate-200/60 p-5 space-y-4">
           <div>
             <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Reader Health & Diagnostics</h3>
             <p className="text-xs text-slate-400 mt-0.5">RFID reader status, unknown tags, and system diagnostics</p>

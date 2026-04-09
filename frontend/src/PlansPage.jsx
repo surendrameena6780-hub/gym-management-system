@@ -248,7 +248,7 @@ const PlansPage = ({ appRuntime }) => {
           to   { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-5 sm:p-6 lg:p-8"
+      <div className="bg-white backdrop-blur-sm rounded-[28px] border border-slate-200/60 p-5 sm:p-6 lg:p-8"
         style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
 
       {/* HEADER */}

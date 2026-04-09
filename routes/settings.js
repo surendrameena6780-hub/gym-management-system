@@ -46,6 +46,7 @@ const {
     getBillingConfig,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
+    hasBillingCapability,
     serializeBillingConfig,
 } = require('../utils/platformSettings');
 const {
@@ -1189,6 +1190,15 @@ router.post('/integrations/templates/custom', auth, async (req, res) => {
         await ensureMessagingSchema();
 
         const gymId = req.user.gym_id;
+        const [billingConfig, gymBillingSnapshot] = await Promise.all([
+            getBillingConfig(),
+            getGymBillingSnapshot(pool, gymId),
+        ]);
+        if (!hasBillingCapability(billingConfig, gymBillingSnapshot?.current_plan || 'basic', 'custom_templates')) {
+            return res.status(403).json({
+                error: 'Custom templates are not included in this gym plan. Upgrade the plan or enable the capability in Billing Catalog.',
+            });
+        }
         await seedMessageTemplates(gymId);
 
         const rawText = ensureTrimmedString(req.body?.raw_text, {
@@ -1421,6 +1431,13 @@ router.put('/integrations', auth, async (req, res) => {
 
             const templateEntries = normalizeIntegrationTemplatesInput(req.body?.templates);
             if (templateEntries.length > 0) {
+                const hasCustomTemplatesInPayload = templateEntries.some((template) => String(template.template_key || '').trim().toUpperCase().startsWith(CUSTOM_TEMPLATE_KEY_PREFIX));
+                if (hasCustomTemplatesInPayload) {
+                    const billingConfig = await getBillingConfig(client);
+                    if (!hasBillingCapability(billingConfig, currentGym.current_plan || 'basic', 'custom_templates')) {
+                        throw new ValidationError('Custom templates are locked on this gym plan. Upgrade the plan or enable the capability in Billing Catalog before editing them.');
+                    }
+                }
                 for (const template of templateEntries) {
                     const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
                     const templateCategory = template.whatsapp_template_category || pickTemplateCategory(template.template_key, template.whatsapp_text);

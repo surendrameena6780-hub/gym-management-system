@@ -305,7 +305,7 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
       </div>
 
       {/* ── Plain Summary ── */}
-      <div className="bg-white/80 backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
+      <div className="bg-white backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
         <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Quick Summary</p>
         <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
           <div className="space-y-2">

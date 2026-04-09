@@ -343,7 +343,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
     <div className="flex min-h-0 flex-col gap-3 sm:gap-5 p-1 sm:p-2">
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
         {metrics.map((metric) => (
-          <div key={metric.label} className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
+          <div key={metric.label} className="bg-white backdrop-blur-sm rounded-2xl border border-slate-200/60 p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 16px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.03)' }}>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${metric.box}`}>
               <metric.icon size={18} />
             </div>
@@ -355,7 +355,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
         ))}
       </div>
 
-      <div className="bg-white/80 backdrop-blur-sm rounded-[28px] border border-white/70 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div className="bg-white backdrop-blur-sm rounded-[28px] border border-slate-200/60 p-4 sm:p-6 flex flex-col gap-4 sm:gap-5 overflow-hidden" style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">

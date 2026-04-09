@@ -1,5 +1,6 @@
 export const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
 export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
+export const BILLING_CAPABILITY_KEYS = ['custom_templates'];
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
 const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
@@ -18,6 +19,7 @@ export const defaultBillingCatalog = {
       annual_price: 1,
       popular: false,
       features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'],
+      capabilities: { custom_templates: true },
       limits: { members: null, staff: null, storage: 2, branches: null, whatsapp: null, hello: null },
     },
     basic: {
@@ -27,6 +29,7 @@ export const defaultBillingCatalog = {
       annual_price: 10,
       popular: false,
       features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+      capabilities: { custom_templates: false },
       limits: { members: 150, staff: 2, storage: 5, branches: 1, whatsapp: 500, hello: 0 },
     },
     growth: {
@@ -36,6 +39,7 @@ export const defaultBillingCatalog = {
       annual_price: 20,
       popular: true,
       features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+      capabilities: { custom_templates: true },
       limits: { members: 400, staff: 5, storage: 10, branches: 2, whatsapp: 1000, hello: 1 },
     },
     pro: {
@@ -45,6 +49,7 @@ export const defaultBillingCatalog = {
       annual_price: 30,
       popular: false,
       features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+      capabilities: { custom_templates: true },
       limits: { members: 1000, staff: 10, storage: 20, branches: 3, whatsapp: 2000, hello: 1 },
     },
   },
@@ -142,6 +147,15 @@ const normalizePlanLimits = (value, fallback = {}) => Object.fromEntries(
   })
 );
 
+const normalizePlanCapabilities = (value, fallback = {}) => Object.fromEntries(
+  BILLING_CAPABILITY_KEYS.map((capabilityKey) => [
+    capabilityKey,
+    Object.prototype.hasOwnProperty.call(value || {}, capabilityKey)
+      ? Boolean(value[capabilityKey])
+      : Boolean(fallback?.[capabilityKey]),
+  ])
+);
+
 const normalizePlan = (planId, value) => {
   const fallback = defaultBillingCatalog.plans[planId] || defaultBillingCatalog.plans.basic;
   const raw = value && typeof value === 'object' ? value : {};
@@ -152,6 +166,7 @@ const normalizePlan = (planId, value) => {
     annual_price: readNumber(raw.annual_price, fallback.annual_price, { min: 0, max: 100000 }),
     popular: raw.popular === undefined ? fallback.popular : Boolean(raw.popular),
     features: normalizeFeatureList(raw.features, fallback.features),
+    capabilities: normalizePlanCapabilities(raw.capabilities, fallback.capabilities),
     limits: normalizePlanLimits(raw.limits, fallback.limits),
   };
 };
@@ -205,6 +220,14 @@ export const getPlanChargeInr = (billingCatalog, planId, cycle) => {
   const catalog = normalizeBillingCatalog(billingCatalog);
   const resolvedPlan = catalog.plans[normalizePlanId(planId)] || catalog.plans.basic;
   return Number(normalizeCycle(cycle) === 'annual' ? resolvedPlan.annual_price : resolvedPlan.monthly_price) || 0;
+};
+
+export const hasBillingCapability = (billingCatalog, planId, capabilityKey) => {
+  const key = String(capabilityKey || '').trim();
+  if (!BILLING_CAPABILITY_KEYS.includes(key)) return false;
+  const catalog = normalizeBillingCatalog(billingCatalog);
+  const resolvedPlan = catalog.plans[normalizePlanId(planId)] || catalog.plans.basic;
+  return Boolean(resolvedPlan?.capabilities?.[key]);
 };
 
 const clampBillingValue = (value, min, max) => Math.min(max, Math.max(min, value));
