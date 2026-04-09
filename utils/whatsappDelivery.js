@@ -52,7 +52,7 @@ const normalizeWebhookDirection = (value) => {
     const raw = toTrimmedString(value).toLowerCase();
     if (!raw) return '';
     if (raw === '1') return 'outbound';
-    if (raw === '2') return 'inbound';
+    if (raw === '0' || raw === '2') return 'inbound';
     if (raw.includes('inbound')) return 'inbound';
     if (raw.includes('outbound')) return 'outbound';
     return raw;
