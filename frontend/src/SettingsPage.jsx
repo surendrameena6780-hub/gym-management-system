@@ -545,7 +545,7 @@ const loadRazorpayScript = () => {
 
   const [usageData, setUsageData] = useState({
       members: 0,
-      staff: 1,
+      staff: 0,
       storage: 0.1
   });
 
@@ -2395,7 +2395,7 @@ const loadRazorpayScript = () => {
                           icon={Users} 
                       />
                       <ProgressBar 
-                          label="Staff Accounts" 
+                          label="Staff Users" 
                           current={usageData.staff} 
                           max={eLimits.staff} 
                           icon={User} 

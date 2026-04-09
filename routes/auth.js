@@ -36,6 +36,12 @@ if (process.env.NODE_ENV === 'production' && String(process.env.MEMBER_OTP_BYPAS
 const isProduction = process.env.NODE_ENV === 'production';
 
 const normalizeAuthMode = (value) => (String(value || '').trim().toLowerCase() === 'signup' ? 'signup' : 'login');
+const SIGNUP_PLAN_ALIASES = Object.freeze({ elite: 'growth' });
+const normalizeSignupPlan = (value, fallback = 'basic') => {
+    const normalized = String(value || '').trim().toLowerCase();
+    const canonical = SIGNUP_PLAN_ALIASES[normalized] || normalized;
+    return ['basic', 'growth', 'pro'].includes(canonical) ? canonical : fallback;
+};
 
 const isLocalHostname = (hostname) => ['localhost', '127.0.0.1'].includes(String(hostname || '').toLowerCase());
 
@@ -676,9 +682,7 @@ const createOauthOwnerAccount = async ({
 
     const ownerName = buildOAuthOwnerName(fullName, email);
     const resolvedGymName = truncateText(gymName || buildOAuthGymName(ownerName), 100) || 'My Gym';
-    const resolvedPlan = ['basic', 'pro', 'elite'].includes(String(selectedPlan || '').toLowerCase())
-        ? String(selectedPlan).toLowerCase()
-        : 'pro';
+    const resolvedPlan = normalizeSignupPlan(selectedPlan, 'pro');
     const resolvedBranchesCount = Math.max(1, Number.parseInt(branchesCount, 10) || 1);
     const normalizedPhone = String(ownerPhone || '').replace(/\D/g, '').slice(-10) || null;
 
@@ -889,7 +893,7 @@ router.post('/register-owner', async (req, res) => {
     const gym_address   = req.body?.gym_address   ? String(req.body.gym_address).trim()   : null;
     const gym_city      = req.body?.gym_city      ? String(req.body.gym_city).trim()      : null;
     const branches_count = parseInt(req.body?.branches_count) || 1;
-    const selected_plan = ['basic', 'pro', 'elite'].includes(req.body?.selected_plan) ? req.body.selected_plan : 'basic';
+    const selected_plan = normalizeSignupPlan(req.body?.selected_plan, 'basic');
 
     if (!gym_name || !full_name || !email || !password) {
         return res.status(400).json({ message: 'All fields are required.' });
@@ -1807,9 +1811,7 @@ router.post('/google/signup/complete', async (req, res) => {
     const gymAddress = req.body?.gym_address ? String(req.body.gym_address).trim() : null;
     const gymCity = req.body?.gym_city ? String(req.body.gym_city).trim() : null;
     const branchesCount = Number.parseInt(req.body?.branches_count, 10) || 1;
-    const selectedPlan = ['basic', 'pro', 'elite'].includes(String(req.body?.selected_plan || '').toLowerCase())
-        ? String(req.body.selected_plan).toLowerCase()
-        : 'basic';
+    const selectedPlan = normalizeSignupPlan(req.body?.selected_plan, 'basic');
 
     if (!signupToken) {
         return res.status(400).json({ message: 'Google signup session is missing. Please continue with Google again.' });

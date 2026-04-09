@@ -1036,8 +1036,9 @@ router.get('/', auth, async (req, res) => {
                     COALESCE((
                         SELECT COUNT(*)::INTEGER
                         FROM users u
-                        WHERE u.gym_id = g.id
-                    ), 1) AS staff_count
+                                                WHERE u.gym_id = g.id
+                                                    AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
+                                        ), 0) AS staff_count
                  FROM gyms g
                  LEFT JOIN gym_support_profiles sp ON sp.gym_id = g.id
                  WHERE g.id = $1
@@ -1081,7 +1082,7 @@ router.get('/', auth, async (req, res) => {
             },
             usage: {
                 members: Number.parseInt(gym.member_count || 0, 10),
-                staff: Number.parseInt(gym.staff_count || 1, 10),
+                staff: Number.parseInt(gym.staff_count || 0, 10),
                 storage: 0.1,
             }
         });
