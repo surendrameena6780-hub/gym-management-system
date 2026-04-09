@@ -28,6 +28,19 @@ const toPrimitiveString = (value) => (
         : ''
 );
 
+const parseStructuredString = (value) => {
+    const raw = toTrimmedString(value);
+    if (!raw) return null;
+    const firstChar = raw[0];
+    if (firstChar !== '{' && firstChar !== '[') return null;
+
+    try {
+        return JSON.parse(raw);
+    } catch (_err) {
+        return null;
+    }
+};
+
 const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
 
 const truncateText = (value, max = 240) => {
@@ -64,6 +77,13 @@ const createCorrelationId = () => `gvwa_${Date.now()}_${crypto.randomBytes(6).to
 
 const pickFirstPrimitiveByKeys = (value, keys, seen = new Set()) => {
     if (value === null || value === undefined) return '';
+    if (typeof value === 'string') {
+        const parsed = parseStructuredString(value);
+        if (parsed && typeof parsed === 'object') {
+            return pickFirstPrimitiveByKeys(parsed, keys, seen);
+        }
+        return '';
+    }
     if (typeof value !== 'object') return '';
     if (seen.has(value)) return '';
     seen.add(value);
@@ -202,10 +222,15 @@ const isInboundWebhookCandidate = (item) => {
     const hasExplicitReplyPayload = Boolean(
         toPrimitiveString(item?.reply)
         || toPrimitiveString(item?.replyText)
+        || toPrimitiveString(item?.replyMsgId)
         || toPrimitiveString(item?.from)
         || toPrimitiveString(item?.sender)
         || toPrimitiveString(item?.sender_name)
         || toPrimitiveString(item?.profile_name)
+        || toPrimitiveString(item?.customerName)
+        || toPrimitiveString(item?.contentType)
+        || toPrimitiveString(item?.messages)
+        || toPrimitiveString(item?.contacts)
     );
     const hasDeliveryLifecycle = Boolean(
         toTrimmedString(item?.status || item?.delivery_status || item?.event_type || item?.eventType)
