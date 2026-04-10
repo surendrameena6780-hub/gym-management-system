@@ -17,6 +17,10 @@ const { writeAuditLog } = require('../utils/auditLog');
 const { getGymTimezone } = require('../utils/gymTime');
 const { signAttendanceToken, verifyAttendanceToken } = require('../utils/attendanceTokens');
 const { sendPushToGym } = require('./push');
+const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
+
+const ATTENDANCE_OVERVIEW_TTL = 15; // seconds
+const ATTENDANCE_SUMMARY_TTL = 15; // seconds
 
 const CHECKIN_METHODS = new Set(['STAFF', 'QR', 'SELF', 'RFID']);
 const RFID_DEVICE_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DISABLED']);
@@ -1444,6 +1448,11 @@ router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'
     const gym_id = req.user.gym_id;
     try {
         const { branchId } = await resolveBranchReadScope(pool, req);
+
+        const cacheKey = buildCacheKey('attendance', 'summary', gym_id, branchId || 'all');
+        const cached = await cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+
         const gymTimezone = await getGymTimezone(pool, gym_id);
         const params = [gym_id, gymTimezone];
         const branchClause = getBranchFilterSql(params, branchId, `COALESCE(a.branch_id, ${DEFAULT_BRANCH_SQL})`);
@@ -1467,6 +1476,7 @@ router.get('/summary', auth, saasMiddleware, requirePermission('attendance:read'
              ORDER BY hour ASC`,
                         params
         );
+        await cacheSet(cacheKey, result.rows, ATTENDANCE_SUMMARY_TTL);
         res.json(result.rows);
     } catch (err) {
         console.error("ATTENDANCE SUMMARY ERROR:", err.message);
@@ -1479,6 +1489,11 @@ router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read
     try {
         const gym_id = req.user.gym_id;
         const { branchId } = await resolveBranchReadScope(pool, req);
+
+        const cacheKey = buildCacheKey('attendance', 'overview', gym_id, branchId || 'all');
+        const cached = await cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+
         const gymTimezone = await getGymTimezone(pool, gym_id);
         const todayParams = [gym_id, gymTimezone];
         const todayBranchClause = getBranchFilterSql(todayParams, branchId, `COALESCE(branch_id, ${DEFAULT_BRANCH_SQL})`);
@@ -1532,13 +1547,15 @@ router.get('/overview', auth, saasMiddleware, requirePermission('attendance:read
         ]);
 
         const peak = peakHour.rows[0] || null;
-        res.json({
+        const overviewResponse = {
             today_checkins: today.rows[0]?.count || 0,
             yesterday_checkins: yesterday.rows[0]?.count || 0,
             active_members_today: activeToday.rows[0]?.count || 0,
             peak_hour_today: peak ? peak.hour : null,
             peak_hour_count: peak ? peak.count : 0
-        });
+        };
+        await cacheSet(cacheKey, overviewResponse, ATTENDANCE_OVERVIEW_TTL);
+        res.json(overviewResponse);
     } catch (err) {
         console.error('ATTENDANCE OVERVIEW ERROR:', err.message);
         res.status(500).json({ error: 'Server Error' });

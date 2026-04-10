@@ -22,6 +22,9 @@ const {
     resolveBranchReadScope,
     resolveBranchWriteScope,
 } = require('../utils/branchAccess');
+const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
+
+const FINANCE_OVERVIEW_TTL = 30; // seconds
 
 const gymId = (req) => { const v = Number.parseInt(req?.user?.gym_id ?? req?.user?.gymId, 10); return Number.isInteger(v) ? v : null; };
 const POS_ENABLED_PLANS = new Set(['growth', 'pro']);
@@ -328,6 +331,11 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
         const periodStart = periodConfig.startAt ? periodConfig.startAt.toISOString() : null;
         const periodEnd = periodConfig.endAt ? periodConfig.endAt.toISOString() : null;
         const branchScope = await resolveBranchReadScope(pool, req);
+
+        const cacheKey = buildCacheKey('finance', 'overview', gid, periodConfig.key, branchScope.branchId || 'all');
+        const cached = await cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+
         const overviewParams = branchScope.branchId ? [gid, periodStart, periodEnd, branchScope.branchId] : [gid, periodStart, periodEnd];
         const overdueParams = branchScope.branchId ? [gid, branchScope.branchId] : [gid];
         const rootBranchFilter = branchScope.branchId ? ' AND branch_id = $4' : '';
@@ -402,7 +410,7 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
         const periodOutflows = Number(expenses.period_expenses || 0) + Number(payroll.period_payroll || 0);
         const periodProfit = periodIncome - periodOutflows;
 
-        return res.json({
+        const financeResponse = {
             revenue,
             expenses,
             payroll,
@@ -415,7 +423,10 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
                 period_outflows: periodOutflows,
                 period_profit: periodProfit,
             },
-        });
+        };
+
+        await cacheSet(cacheKey, financeResponse, FINANCE_OVERVIEW_TTL);
+        return res.json(financeResponse);
     } catch (err) {
         console.error('FINANCE OVERVIEW:', err.message);
         if (err instanceof BranchAccessError) {

@@ -2,8 +2,10 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { getRequestCookie, OWNER_AUTH_COOKIE } = require('../utils/authCookies');
 const { DEFAULT_BRANCH_ID, ensureBranchScopeSchema } = require('../utils/branchAccess');
+const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const AUTH_SESSION_CACHE_TTL = 60; // seconds
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'secret' || process.env.JWT_SECRET === 'gymvault_dev_secret_2026') {
     throw new Error('FATAL: JWT_SECRET is missing or insecure.');
@@ -51,24 +53,31 @@ module.exports = async (req, res, next) => {
             });
         }
 
-        const sessionResult = await pool.query(
-            `SELECT u.id,
-                    u.gym_id,
-                    u.role,
-                    u.staff_role,
-                    u.branch_id,
-                    u.permissions,
-                    COALESCE(u.is_active, TRUE) AS user_is_active,
-                    COALESCE(g.is_active, TRUE) AS gym_is_active,
-                    UPPER(COALESCE(g.gym_access_status, 'ACTIVE')) AS gym_access_status
-             FROM users u
-             JOIN gyms g ON g.id = u.gym_id
-             WHERE u.id = $1 AND u.gym_id = $2
-             LIMIT 1`,
-            [userId, gymId]
-        );
+        const sessionCacheKey = buildCacheKey('auth', 'session', userId, gymId);
+        let session = await cacheGet(sessionCacheKey);
 
-        const session = sessionResult.rows[0];
+        if (!session) {
+            const sessionResult = await pool.query(
+                `SELECT u.id,
+                        u.gym_id,
+                        u.role,
+                        u.staff_role,
+                        u.branch_id,
+                        u.permissions,
+                        COALESCE(u.is_active, TRUE) AS user_is_active,
+                        COALESCE(g.is_active, TRUE) AS gym_is_active,
+                        UPPER(COALESCE(g.gym_access_status, 'ACTIVE')) AS gym_access_status
+                 FROM users u
+                 JOIN gyms g ON g.id = u.gym_id
+                 WHERE u.id = $1 AND u.gym_id = $2
+                 LIMIT 1`,
+                [userId, gymId]
+            );
+            session = sessionResult.rows[0] || null;
+            if (session) {
+                await cacheSet(sessionCacheKey, session, AUTH_SESSION_CACHE_TTL);
+            }
+        }
         if (!session) {
             return res.status(401).json({
                 success: false,

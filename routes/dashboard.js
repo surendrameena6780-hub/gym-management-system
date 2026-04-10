@@ -5,6 +5,9 @@ const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
 const { resolveBranchReadScope } = require('../utils/branchAccess');
+const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
+
+const DASHBOARD_STATS_TTL = 15; // seconds
 
 router.use(auth, saasMiddleware, requireOwner);
 
@@ -34,6 +37,11 @@ router.get('/stats', async (req, res) => {
     try {
         const scope = await resolveBranchReadScope(pool, req);
         const branchCondition = scope.branchId ? ` AND branch_id = '${scope.branchId.replace(/[^a-z0-9_-]/g, '')}'` : '';
+
+        const cacheKey = buildCacheKey('dashboard', 'stats', gym_id, scope.branchId || 'all');
+        const cached = await cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+
         const result = await pool.query(
             `WITH gym_base AS (
                 SELECT id, COALESCE(is_active, TRUE) AS is_active
@@ -109,7 +117,7 @@ router.get('/stats', async (req, res) => {
             return res.json({ is_active: false });
         }
 
-        res.json({
+        const statsResponse = {
             is_active: true,
             active_members: parseInt(result.rows[0].active_members || 0, 10),
             total_earnings: parseFloat(result.rows[0].total_earnings || 0),
@@ -119,7 +127,10 @@ router.get('/stats', async (req, res) => {
             unpaid_members: parseInt(result.rows[0].unpaid_members || 0, 10),
             expired_members: parseInt(result.rows[0].expired_members || 0, 10),
             inactive_members: parseInt(result.rows[0].inactive_members || 0, 10)
-        });
+        };
+
+        await cacheSet(cacheKey, statsResponse, DASHBOARD_STATS_TTL);
+        res.json(statsResponse);
 
     } catch (err) {
         console.error("DASHBOARD STATS ERROR:", err.message);

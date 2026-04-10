@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { connectDB, pool } = require('./config/db');
+const { disconnectCache } = require('./utils/cache');
 const fs = require('fs'); 
 const path = require('path');
 const { PROFILE_UPLOAD_DIR, allowedProfileImageExtensions } = require('./utils/profileUploads');
@@ -177,9 +178,12 @@ app.use(compression({ threshold: 1024 }));
 app.use(enforceRequestPayloadLimits);
 app.use(runtimeTelemetryMiddleware);
 
+const isLoadTest = process.env.LOAD_TEST_MODE === 'true';
+if (isLoadTest) console.log('⚡ LOAD_TEST_MODE enabled — rate limiters set to 999999');
+
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: isProduction ? 600 : 5000,
+    max: isLoadTest ? 999999 : (isProduction ? 600 : 5000),
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -197,7 +201,7 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: isProduction ? 25 : 500,
+    max: isLoadTest ? 999999 : (isProduction ? 25 : 500),
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: true,
@@ -217,7 +221,7 @@ const authLimiter = rateLimit({
 
 const buildScopedLimiter = ({ windowMs, productionMax, developmentMax, code, description }) => rateLimit({
     windowMs,
-    max: isProduction ? productionMax : developmentMax,
+    max: isLoadTest ? 999999 : (isProduction ? productionMax : developmentMax),
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -482,6 +486,14 @@ const scheduleRecurringJob = (job, intervalMs, runImmediately = true) => {
 };
 
 const startBackgroundJobs = () => {
+    // PM2 cluster mode: only instance 0 should run background jobs to prevent duplicates.
+    // INSTANCE_ID is set by PM2 via the instance_var config in ecosystem.config.js.
+    const instanceId = process.env.INSTANCE_ID;
+    if (instanceId !== undefined && instanceId !== '0') {
+        console.log(`Worker ${instanceId}: skipping background jobs (handled by instance 0)`);
+        return () => {};
+    }
+
     const stopJobs = [];
 
     stopJobs.push(scheduleRecurringJob(() => checkExpirations().catch((err) => {
@@ -559,6 +571,7 @@ const initiateShutdown = async (reason, exitCode = 0) => {
 
     try {
         await closeHttpServer();
+        await disconnectCache();
         await pool.end();
     } catch (err) {
         console.error('SHUTDOWN ERROR:', err.message);

@@ -11,6 +11,9 @@ const {
     DEFAULT_BRANCH_ID,
     resolveBranchReadScope,
 } = require('../utils/branchAccess');
+const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
+
+const INSIGHTS_OVERVIEW_TTL = 30; // seconds
 
 const RANGE_TO_MONTHS = {
     '1M': 1,
@@ -63,6 +66,11 @@ router.get('/overview', requirePermission('insights:read'), async (req, res) => 
 
     try {
         const { branchId } = await resolveBranchReadScope(pool, req);
+
+        const cacheKey = buildCacheKey('insights', 'overview', gymId, range, branchId || 'all');
+        const cached = await cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+
         const gymTimezone = await getGymTimezone(pool, gymId);
         const memberParams = [gymId];
         const membershipBranchClause = getBranchFilterSql(memberParams, branchId, `COALESCE(ms.branch_id, ${DEFAULT_BRANCH_SQL})`);
@@ -308,7 +316,7 @@ router.get('/overview', requirePermission('insights:read'), async (req, res) => 
             days_inactive: member.days_inactive,
         }));
 
-        return res.json({
+        const insightsResponse = {
             range,
             revenue: {
                 graphData: revenueGraphRes.rows,
@@ -336,7 +344,10 @@ router.get('/overview', requirePermission('insights:read'), async (req, res) => 
                 })),
                 topMembers,
             },
-        });
+        };
+
+        await cacheSet(cacheKey, insightsResponse, INSIGHTS_OVERVIEW_TTL);
+        return res.json(insightsResponse);
     } catch (err) {
         return sendInsightsRouteError(res, err, 'INSIGHTS OVERVIEW ERROR:', 'Failed to load insights overview.');
     }

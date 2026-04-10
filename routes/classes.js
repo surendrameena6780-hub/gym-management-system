@@ -19,6 +19,9 @@ const {
     ensureTimestamp,
     isValidationError,
 } = require('../utils/fieldValidation');
+const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
+
+const CLASSES_SUMMARY_TTL = 15; // seconds
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -202,6 +205,11 @@ router.get('/summary', requirePermission('attendance:read'), async (req, res) =>
     try {
         const gymId = getGymIdFromRequest(req);
         const { branchId } = await resolveBranchReadScope(pool, req);
+
+        const cacheKey = buildCacheKey('classes', 'summary', gymId, branchId || 'all');
+        const cached = await cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+
         const typeParams = [gymId];
         const typeBranchClause = getBranchFilterSql(typeParams, branchId);
         const todayParams = [gymId];
@@ -248,13 +256,16 @@ router.get('/summary', requirePermission('attendance:read'), async (req, res) =>
             ),
         ]);
 
-        return res.json({
+        const summaryResponse = {
             active_types: typesRes.rows[0]?.count || 0,
             today_sessions: todayRes.rows[0]?.count || 0,
             upcoming_sessions: upcomingRes.rows[0]?.count || 0,
             booked_today: bookedRes.rows[0]?.count || 0,
             checked_in_today: checkinRes.rows[0]?.count || 0,
-        });
+        };
+
+        await cacheSet(cacheKey, summaryResponse, CLASSES_SUMMARY_TTL);
+        return res.json(summaryResponse);
     } catch (err) {
         return sendClassesRouteError(res, err, 'CLASSES SUMMARY ERROR:', 'Failed to load class summary.');
     }
