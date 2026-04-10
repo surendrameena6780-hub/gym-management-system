@@ -1268,6 +1268,9 @@ export default function LoginPage({ setToken, onShowSignup }) {
   const [memberLoginLoading, setMemberLoginLoading] = useState(false);
   const [memberData, setMemberData] = useState(null);
   const [memberToken, setMemberToken] = useState(null);
+  const [memberOtpStep, setMemberOtpStep] = useState('phone');
+  const [memberOtp, setMemberOtp]   = useState('');
+  const [memberOtpDelivery, setMemberOtpDelivery] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1388,10 +1391,34 @@ export default function LoginPage({ setToken, onShowSignup }) {
     e.preventDefault();
     setMemberLoginLoading(true); setError(''); setNotice('');
     try {
-      const res = await axios.post('/api/auth/member/login', { phone });
+      const res = await axios.post('/api/auth/member/send-otp', { phone });
+      setMemberOtpDelivery({
+        maskedEmail: res.data?.masked_email || '',
+        expiresInMinutes: res.data?.expires_in_minutes || 10,
+        previewOtp: res.data?.preview_otp || '',
+        previewNotice: res.data?.preview_notice || '',
+      });
+      setMemberOtpStep('otp');
+      setNotice(res.data?.message || 'A login code has been sent.');
+    } catch (err) {
+      const retry = err?.response?.data?.retry_after_seconds;
+      const apiMessage = err?.response?.data?.message || 'Unable to send login code. Please try again.';
+      setError(retry ? `Please wait ${retry}s before requesting another code.` : apiMessage);
+    }
+    finally { setMemberLoginLoading(false); }
+  };
+
+  const handleMemberVerifyOtp = async (e) => {
+    e.preventDefault();
+    setMemberLoginLoading(true); setError(''); setNotice('');
+    try {
+      const res = await axios.post('/api/auth/member/verify-otp', { phone, otp: memberOtp });
       setMemberData(res.data.member);
       setMemberToken(res.data.token);
-    } catch (err) { setError(err?.response?.data?.message || 'Unable to login with this phone number.'); }
+      setMemberOtpStep('phone');
+      setMemberOtp('');
+      setMemberOtpDelivery(null);
+    } catch (err) { setError(err?.response?.data?.message || 'Invalid login code. Please try again.'); }
     finally { setMemberLoginLoading(false); }
   };
 
@@ -1493,7 +1520,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
         member={memberData}
         token={memberToken}
         onMemberChange={setMemberData}
-        onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setError(''); }}
+        onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setMemberOtp(''); setMemberOtpStep('phone'); setMemberOtpDelivery(null); setError(''); }}
       />
     );
   }
@@ -1744,9 +1771,10 @@ export default function LoginPage({ setToken, onShowSignup }) {
           {/* ════════ MEMBER FORM ════════ */}
           {tab === 'MEMBER' && !memberData && (
             <>
+              {memberOtpStep === 'phone' && (
               <form onSubmit={handleMemberLogin} className="space-y-4">
                 <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
-                  Enter your registered phone number to open your membership portal instantly.
+                  Enter your registered phone number. We'll send a login code to your email on file.
                 </p>
                 <div>
                   <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Phone Number</label>
@@ -1767,10 +1795,51 @@ export default function LoginPage({ setToken, onShowSignup }) {
                     opacity: (memberLoginLoading || phone.length < 10) ? 0.65 : 1,
                   }}>
                   {memberLoginLoading
-                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Opening portal...</>
-                    : <>Continue <ArrowRight size={16} /></>}
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending code...</>
+                    : <>Send Login Code <ArrowRight size={16} /></>}
                 </button>
               </form>
+              )}
+
+              {memberOtpStep === 'otp' && (
+              <form onSubmit={handleMemberVerifyOtp} className="space-y-4">
+                <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
+                  Enter the 6-digit code sent to {memberOtpDelivery?.maskedEmail || 'your email'}.
+                </p>
+                {memberOtpDelivery?.previewOtp && (
+                  <div className="px-3.5 py-3 rounded-xl text-[11px] font-medium text-amber-300 leading-relaxed"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    {memberOtpDelivery.previewNotice && <span className="block mb-1 text-slate-400">{memberOtpDelivery.previewNotice}</span>}
+                    Preview OTP: <span className="font-bold tracking-widest">{memberOtpDelivery.previewOtp}</span>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Login Code</label>
+                  <input required type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                    value={memberOtp}
+                    onChange={(e) => setMemberOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    className="w-full px-4 py-3.5 rounded-xl text-white text-center text-lg font-bold tracking-[0.3em] placeholder-slate-700 outline-none transition-all"
+                    style={iBase} onFocus={iFocus} onBlur={iBlur} />
+                </div>
+                <button disabled={memberLoginLoading || memberOtp.length < 6}
+                  className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                    boxShadow: '0 8px 28px rgba(99,102,241,0.5)',
+                    opacity: (memberLoginLoading || memberOtp.length < 6) ? 0.65 : 1,
+                  }}>
+                  {memberLoginLoading
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying...</>
+                    : <>Verify & Open Portal <ArrowRight size={16} /></>}
+                </button>
+                <button type="button"
+                  onClick={() => { setMemberOtpStep('phone'); setMemberOtp(''); setError(''); setNotice(''); }}
+                  className="w-full text-center text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors mt-1">
+                  ← Back to phone number
+                </button>
+              </form>
+              )}
             </>
           )}
 

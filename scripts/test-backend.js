@@ -321,17 +321,24 @@ const runAuthenticatedSettingsSmoke = async (auth) => {
     throw new Error('Integrations payload is missing member_payments or templates.');
   }
 
+  const mp = integrationState.member_payments || {};
+  const hasCollectionChannel = Boolean(
+    String(mp.upi_id || '').trim()
+    || (String(mp.connect_mode || '').toUpperCase() === 'MANUAL' && String(mp.razorpay_key_id || '').trim())
+    || String(mp.connect_mode || '').toUpperCase() === 'PARTNER'
+  );
+
   const paymentSave = await fetchJson('/api/settings/integrations', {
     method: 'PUT',
     headers,
     body: {
       save_scope: 'payments',
       member_payments: {
-        enabled: Boolean(integrationState.member_payments?.enabled),
-        connect_mode: String(integrationState.member_payments?.connect_mode || 'MANUAL').toUpperCase(),
-        razorpay_key_id: String(integrationState.member_payments?.razorpay_key_id || '').trim(),
+        enabled: hasCollectionChannel ? Boolean(mp.enabled) : false,
+        connect_mode: String(mp.connect_mode || 'MANUAL').toUpperCase(),
+        razorpay_key_id: String(mp.razorpay_key_id || '').trim(),
         razorpay_key_secret: '',
-        upi_id: String(integrationState.member_payments?.upi_id || '').trim(),
+        upi_id: String(mp.upi_id || '').trim(),
       },
     },
   });

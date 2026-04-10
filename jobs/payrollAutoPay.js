@@ -29,36 +29,50 @@ async function runPayrollAutoPay() {
     let skipped = 0;
 
     for (const cfg of configs.rows) {
-      // Check if a payroll entry already exists for this month
-      const existing = await pool.query(
-        `SELECT id FROM payroll_entries
-         WHERE gym_id = $1 AND user_id = $2 AND pay_period = $3
-         LIMIT 1`,
-        [cfg.gym_id, cfg.user_id, monthLabel]
-      );
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      if (existing.rows.length > 0) {
-        skipped++;
-        continue;
+        // Check if a payroll entry already exists for this month (locked row)
+        const existing = await client.query(
+          `SELECT id FROM payroll_entries
+           WHERE gym_id = $1 AND user_id = $2 AND pay_period = $3
+           LIMIT 1
+           FOR UPDATE`,
+          [cfg.gym_id, cfg.user_id, monthLabel]
+        );
+
+        if (existing.rows.length > 0) {
+          skipped++;
+          await client.query('COMMIT');
+          continue;
+        }
+
+        const netPay = Math.max(0, parseFloat(cfg.base_pay) || 0);
+
+        await client.query(
+          `INSERT INTO payroll_entries
+           (gym_id, user_id, pay_period, base_pay, commission, deductions, net_pay, status, notes, branch_id)
+           VALUES ($1, $2, $3, $4, 0, 0, $5, 'PENDING_APPROVAL', $6, $7)
+           ON CONFLICT (gym_id, user_id, pay_period) DO NOTHING`,
+          [
+            cfg.gym_id,
+            cfg.user_id,
+            monthLabel,
+            netPay,
+            netPay,
+            `Auto-generated payroll for ${cfg.staff_name || 'staff'}`,
+            cfg.branch_id || DEFAULT_BRANCH_ID,
+          ]
+        );
+        created++;
+        await client.query('COMMIT');
+      } catch (entryErr) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        console.error(`[payroll-auto-pay] Entry error for user ${cfg.user_id}:`, entryErr.message);
+      } finally {
+        client.release();
       }
-
-      const netPay = Math.max(0, parseFloat(cfg.base_pay) || 0);
-
-      await pool.query(
-        `INSERT INTO payroll_entries
-         (gym_id, user_id, pay_period, base_pay, commission, deductions, net_pay, status, notes, branch_id)
-         VALUES ($1, $2, $3, $4, 0, 0, $5, 'PENDING_APPROVAL', $6, $7)`,
-        [
-          cfg.gym_id,
-          cfg.user_id,
-          monthLabel,
-          netPay,
-          netPay,
-          `Auto-generated payroll for ${cfg.staff_name || 'staff'}`,
-          cfg.branch_id || DEFAULT_BRANCH_ID,
-        ]
-      );
-      created++;
     }
 
     if (created > 0 || skipped > 0) {

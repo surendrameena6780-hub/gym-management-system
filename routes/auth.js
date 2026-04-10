@@ -81,11 +81,10 @@ const getGoogleRedirectUri = () => {
     return `${parsed.origin}${parsed.pathname}`;
 };
 
-const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', source = '', extraParams = {} } = {}) => {
+const buildFrontendAuthRedirect = ({ mode = 'login', error = '', source = '', extraParams = {} } = {}) => {
     const targetPath = mode === 'signup' ? '/signup' : '/login';
     const params = new URLSearchParams();
     if (error) params.set('auth_error', error);
-    if (token) params.set('token', token);
     if (source) params.set('auth_source', source);
     Object.entries(extraParams || {}).forEach(([key, value]) => {
         if (value !== undefined && value !== null && String(value) !== '') {
@@ -99,6 +98,7 @@ const buildFrontendAuthRedirect = ({ mode = 'login', error = '', token = '', sou
 const GOOGLE_SIGNUP_TOKEN_TTL_SECONDS = 15 * 60;
 const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
 const SIGNUP_EMAIL_VERIFY_PURPOSE = 'SIGNUP_EMAIL_VERIFY';
+const MEMBER_LOGIN_PURPOSE = 'MEMBER_LOGIN';
 const PASSWORD_RESET_OTP_TTL_MINUTES = 10;
 const PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60;
 const PASSWORD_RESET_MAX_VERIFY_ATTEMPTS = 5;
@@ -107,6 +107,9 @@ const ADMIN_EMAIL_LOGIN_PURPOSE = 'ADMIN_EMAIL_LOGIN';
 const ADMIN_LOGIN_OTP_TTL_MINUTES = 10;
 const ADMIN_LOGIN_RESEND_COOLDOWN_SECONDS = 60;
 const ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS = 5;
+const MEMBER_LOGIN_OTP_TTL_MINUTES = 10;
+const MEMBER_LOGIN_RESEND_COOLDOWN_SECONDS = 60;
+const MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS = 5;
 const SIGNUP_EMAIL_VERIFY_TOKEN_TTL = '30m';
 
 const AUTH_CONTEXT_SELECT = `
@@ -591,7 +594,37 @@ const sendMemberAuthResponse = async (res, member, message = 'Login successful.'
     return res.json(payload);
 };
 
-const handleMemberPhoneLogin = async (req, res) => {
+const buildMemberLoginOtpDelivery = async ({ email, otp, memberName }) => {
+    const maskedEmail = maskEmailAddress(email);
+
+    if (isEmailTransportConfigured()) {
+        const greetingName = String(memberName || '').trim().split(/\s+/)[0] || 'there';
+        await sendOtpEmail({
+            to: email,
+            subject: 'Your GymVault member login code',
+            title: 'Sign in to your Member Portal',
+            intro: `Hi ${greetingName}, use this one-time code to access your GymVault membership portal. It expires in ${MEMBER_LOGIN_OTP_TTL_MINUTES} minutes.`,
+            otp,
+            footer: 'If you did not request this sign-in code, you can safely ignore this email.',
+        });
+
+        return {
+            channel: 'email',
+            masked_email: maskedEmail,
+            preview_otp: '',
+            preview_notice: '',
+        };
+    }
+
+    return {
+        channel: 'preview',
+        masked_email: maskedEmail,
+        preview_otp: otp,
+        preview_notice: 'SMTP is not configured yet, so the login code is shown directly here for preview.',
+    };
+};
+
+const handleMemberSendOtp = async (req, res) => {
     const phone = normalizeMemberPhoneDigits(req.body?.phone);
 
     if (!phone || phone.length !== 10) {
@@ -604,10 +637,144 @@ const handleMemberPhoneLogin = async (req, res) => {
             return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
         }
 
+        const memberEmail = String(member.email || '').trim().toLowerCase();
+        if (!memberEmail || !isValidEmailAddress(memberEmail)) {
+            return res.status(400).json({ message: 'No email address on file. Please contact your gym to update your profile.' });
+        }
+
+        await cleanupExpiredEmailOtps();
+
+        const activeOtp = await pool.query(
+            `SELECT created_at
+             FROM password_reset_otps
+             WHERE email = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [memberEmail, MEMBER_LOGIN_PURPOSE]
+        );
+
+        if (activeOtp.rows[0]?.created_at) {
+            const elapsedSeconds = Math.floor((Date.now() - new Date(activeOtp.rows[0].created_at).getTime()) / 1000);
+            const retryAfterSeconds = Math.max(0, MEMBER_LOGIN_RESEND_COOLDOWN_SECONDS - elapsedSeconds);
+            if (retryAfterSeconds > 0) {
+                return res.status(429).json({
+                    message: `Please wait ${retryAfterSeconds} seconds before requesting a new code.`,
+                    retry_after_seconds: retryAfterSeconds,
+                });
+            }
+        }
+
+        const otp = generatePasswordResetOtp();
+        const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+
+        await withTransaction(async (client) => {
+            await client.query(
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW()
+                 WHERE email = $1
+                   AND purpose = $2
+                   AND consumed_at IS NULL`,
+                [memberEmail, MEMBER_LOGIN_PURPOSE]
+            );
+            await client.query(
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
+                 VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
+                [memberEmail, MEMBER_LOGIN_PURPOSE, otpHash, MEMBER_LOGIN_OTP_TTL_MINUTES]
+            );
+        });
+
+        const delivery = await buildMemberLoginOtpDelivery({ email: memberEmail, otp, memberName: member.full_name });
+
+        return res.json({
+            message: delivery.channel === 'email'
+                ? `A login code was sent to ${delivery.masked_email}.`
+                : `A preview login code is ready for ${delivery.masked_email}.`,
+            masked_email: delivery.masked_email,
+            expires_in_minutes: MEMBER_LOGIN_OTP_TTL_MINUTES,
+            preview_otp: delivery.preview_otp,
+            preview_notice: delivery.preview_notice,
+        });
+    } catch (err) {
+        console.error('MEMBER SEND OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not send login code right now. Please try again.' });
+    }
+};
+
+const handleMemberVerifyOtp = async (req, res) => {
+    const phone = normalizeMemberPhoneDigits(req.body?.phone);
+    const otp = String(req.body?.otp || '').replace(/\D/g, '').slice(0, 6);
+
+    if (!phone || phone.length !== 10) {
+        return res.status(400).json({ message: 'Please enter a valid 10-digit phone number.' });
+    }
+    if (otp.length !== 6) {
+        return res.status(400).json({ message: 'Please enter the 6-digit OTP.' });
+    }
+
+    try {
+        const member = await loadMemberPortalContextByPhone(phone);
+        if (!member) {
+            return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
+        }
+
+        const memberEmail = String(member.email || '').trim().toLowerCase();
+        if (!memberEmail || !isValidEmailAddress(memberEmail)) {
+            return res.status(400).json({ message: 'No email address on file. Please contact your gym.' });
+        }
+
+        await cleanupExpiredEmailOtps();
+
+        const activeOtp = await pool.query(
+            `SELECT id, otp_hash, attempts
+             FROM password_reset_otps
+             WHERE email = $1
+               AND purpose = $2
+               AND consumed_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [memberEmail, MEMBER_LOGIN_PURPOSE]
+        );
+
+        const otpRow = activeOtp.rows[0];
+        if (!otpRow) {
+            return res.status(400).json({ message: 'The login code is invalid or expired. Request a new one.' });
+        }
+
+        const previousAttempts = Number(otpRow.attempts || 0);
+        if (previousAttempts >= MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS) {
+            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
+            return res.status(400).json({ message: 'Too many invalid attempts. Request a new code.' });
+        }
+
+        const isMatch = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
+        if (!isMatch) {
+            const nextAttempts = previousAttempts + 1;
+            await pool.query(
+                `UPDATE password_reset_otps
+                 SET attempts = $1,
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                 WHERE id = $3`,
+                [nextAttempts, MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id]
+            );
+
+            const attemptsLeft = Math.max(0, MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS - nextAttempts);
+            return res.status(400).json({
+                message: attemptsLeft > 0
+                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
+                    : 'Too many invalid attempts. Request a new code.',
+            });
+        }
+
+        await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
+
         return sendMemberAuthResponse(res, member, 'Login successful.');
     } catch (err) {
-        console.error('MEMBER PHONE LOGIN ERROR:', err.message);
-        return res.status(500).json({ message: 'Could not login right now. Please try again.' });
+        console.error('MEMBER VERIFY OTP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not verify login code. Please try again.' });
     }
 };
 
@@ -1805,7 +1972,7 @@ router.get('/google/callback', async (req, res) => {
         });
 
         setUserAuthCookie(res, token);
-        res.redirect(buildFrontendAuthRedirect({ mode, token, source: 'google' }));
+        res.redirect(buildFrontendAuthRedirect({ mode, source: 'google' }));
     } catch (err) {
         console.error('GOOGLE OAUTH ERROR:', err);
         res.redirect(buildFrontendAuthRedirect({ mode, error: 'server_error' }));
@@ -2011,10 +2178,9 @@ router.post('/apple', async (req, res) => {
     }
 });
 
-// ─── MEMBER PORTAL: phone-based self-service login ───────────────────────────
-router.post('/member/login', handleMemberPhoneLogin);
-router.post('/member/send-otp', handleMemberPhoneLogin);
-router.post('/member/verify-otp', handleMemberPhoneLogin);
+// ─── MEMBER PORTAL: email OTP self-service login ────────────────────────────
+router.post('/member/send-otp', handleMemberSendOtp);
+router.post('/member/verify-otp', handleMemberVerifyOtp);
 
 router.post('/logout', (_req, res) => {
     clearUserAuthCookie(res);

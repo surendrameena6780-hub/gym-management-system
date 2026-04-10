@@ -408,6 +408,9 @@ router.post('/verify', async (req, res) => {
 
 // --- 3. RESET TEST PLAN TIMER (dev only, only works if current_plan is 'test') ---
 router.post('/reset-test', async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ error: 'Not found' });
+    }
     try {
         const { rows } = await pool.query('SELECT current_plan FROM gyms WHERE id = $1', [req.user.gym_id]);
         if (!rows[0] || rows[0].current_plan !== 'test') {

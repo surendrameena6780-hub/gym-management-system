@@ -1,11 +1,13 @@
 const { pool } = require('../config/db');
 
 const checkExpirations = async () => {
+    const client = await pool.connect();
     try {
         console.log("Running Expiry Janitor...");
+        await client.query('BEGIN');
 
         // Step 1: Mark any ACTIVE membership as EXPIRED if the end_date is in the past
-        const result = await pool.query(`
+        const result = await client.query(`
             UPDATE memberships
             SET status = 'EXPIRED'
             WHERE end_date < CURRENT_DATE AND status = 'ACTIVE'
@@ -13,7 +15,7 @@ const checkExpirations = async () => {
 
         // Step 2: Sync member status — set ACTIVE members to UNPAID
         // when they no longer have any non-expired, non-deleted memberships.
-        const memberResult = await pool.query(`
+        const memberResult = await client.query(`
             UPDATE members
             SET status = 'UNPAID'
             WHERE status = 'ACTIVE'
@@ -24,9 +26,13 @@ const checkExpirations = async () => {
               )
         `);
 
+        await client.query('COMMIT');
         console.log(`✅ Janitor finished. ${result.rowCount} memberships expired. ${memberResult.rowCount} members set to UNPAID.`);
     } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
         console.error("Janitor Error:", err.message);
+    } finally {
+        client.release();
     }
 };
 

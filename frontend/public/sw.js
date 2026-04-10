@@ -77,12 +77,22 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || '/';
+  const rawUrl = event.notification.data?.url || '/';
+  // Only allow same-origin or relative URLs
+  let targetUrl = '/';
+  try {
+    const resolved = new URL(rawUrl, self.location.origin);
+    if (resolved.origin === self.location.origin) {
+      targetUrl = resolved.href;
+    }
+  } catch (_e) {
+    targetUrl = self.location.origin + '/';
+  }
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      const existing = windowClients.find((c) => c.url === url && 'focus' in c);
+      const existing = windowClients.find((c) => c.url === targetUrl && 'focus' in c);
       if (existing) return existing.focus();
-      if (self.clients.openWindow) return self.clients.openWindow(url);
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })
   );
 });

@@ -1,0 +1,294 @@
+{
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {
+            "setup": {
+                "groups": {},
+                "checks": {
+                        "setup healthz status is 200": {
+                            "name": "setup healthz status is 200",
+                            "path": "::setup::setup healthz status is 200",
+                            "id": "52cf0e86ae72334631543b8cf12e8409",
+                            "passes": 1,
+                            "fails": 0
+                        },
+                        "setup auth works": {
+                            "path": "::setup::setup auth works",
+                            "id": "83ee81d1965aef7955d85a2fdb1b0c7d",
+                            "passes": 1,
+                            "fails": 0,
+                            "name": "setup auth works"
+                        }
+                    },
+                "name": "setup",
+                "path": "::setup",
+                "id": "5c0f8025f7e0b6654089e5b00e950f1a"
+            }
+        },
+        "checks": {
+            "healthz status is 200": {
+                "fails": 0,
+                "name": "healthz status is 200",
+                "path": "::healthz status is 200",
+                "id": "b1dcb6305e1a7be2db9fd35109fecc20",
+                "passes": 50
+            },
+            "auth_me_members status is 200": {
+                "name": "auth_me_members status is 200",
+                "path": "::auth_me_members status is 200",
+                "id": "269bdfb8625b97a3e47a45e145980ccb",
+                "passes": 401,
+                "fails": 0
+            },
+            "auth_me_members content-type is json": {
+                "id": "2c33bb0c0c24fdab64bc597b64ddd5eb",
+                "passes": 401,
+                "fails": 0,
+                "name": "auth_me_members content-type is json",
+                "path": "::auth_me_members content-type is json"
+            },
+            "auth_me status is 200": {
+                "passes": 801,
+                "fails": 0,
+                "name": "auth_me status is 200",
+                "path": "::auth_me status is 200",
+                "id": "1a3653ec9153eba6d3127b26f55b8c0d"
+            },
+            "auth_me content-type is json": {
+                "name": "auth_me content-type is json",
+                "path": "::auth_me content-type is json",
+                "id": "c5beee25e4634f80c711ff05955921cd",
+                "passes": 801,
+                "fails": 0
+            },
+            "members_list status is 200": {
+                "passes": 401,
+                "fails": 0,
+                "name": "members_list status is 200",
+                "path": "::members_list status is 200",
+                "id": "23ac5d7b28b339dbf1cfd1c3abd69548"
+            },
+            "members_list content-type is json": {
+                "fails": 0,
+                "name": "members_list content-type is json",
+                "path": "::members_list content-type is json",
+                "id": "3d455d0170c7807d42c23d3cc31eb348",
+                "passes": 401
+            },
+            "members_summary status is 200": {
+                "path": "::members_summary status is 200",
+                "id": "885ffeda5e32df7abf82407cdf78d114",
+                "passes": 401,
+                "fails": 0,
+                "name": "members_summary status is 200"
+            },
+            "members_summary content-type is json": {
+                "path": "::members_summary content-type is json",
+                "id": "da522dae2a47aa63843035f6cb588379",
+                "passes": 401,
+                "fails": 0,
+                "name": "members_summary content-type is json"
+            },
+            "dashboard_stats status is 200": {
+                "name": "dashboard_stats status is 200",
+                "path": "::dashboard_stats status is 200",
+                "id": "e7d0a8b48dd23f49168305a9c5b2f8b8",
+                "passes": 801,
+                "fails": 0
+            },
+            "dashboard_stats content-type is json": {
+                "name": "dashboard_stats content-type is json",
+                "path": "::dashboard_stats content-type is json",
+                "id": "9d625085f0723cbdab46b7bfb3c949a6",
+                "passes": 801,
+                "fails": 0
+            },
+            "dashboard_setup_status status is 200": {
+                "name": "dashboard_setup_status status is 200",
+                "path": "::dashboard_setup_status status is 200",
+                "id": "b0738c57e56758b2eed01e3df9def859",
+                "passes": 801,
+                "fails": 0
+            },
+            "dashboard_setup_status content-type is json": {
+                "passes": 801,
+                "fails": 0,
+                "name": "dashboard_setup_status content-type is json",
+                "path": "::dashboard_setup_status content-type is json",
+                "id": "f8ec85fa8de5a44929602e6750f42c16"
+            },
+            "notifications_list status is 200": {
+                "name": "notifications_list status is 200",
+                "path": "::notifications_list status is 200",
+                "id": "96ad61152201b3285d80798bdc137cbf",
+                "passes": 801,
+                "fails": 0
+            },
+            "notifications_list content-type is json": {
+                "name": "notifications_list content-type is json",
+                "path": "::notifications_list content-type is json",
+                "id": "6cfd9b4385b79c7a1c5315845d41ca92",
+                "passes": 801,
+                "fails": 0
+            }
+        }
+    },
+    "metrics": {
+        "http_req_blocked": {
+            "min": 0,
+            "med": 0.5825,
+            "p(90)": 1.16206,
+            "p(95)": 1.2395299999999998,
+            "p(99)": 1.7106800000000006,
+            "max": 5.614,
+            "avg": 0.635444023323616
+        },
+        "http_req_duration": {
+            "p(99)": 1109.5749640000001,
+            "max": 1306.2469,
+            "avg": 470.6320279210564,
+            "min": 1.6902,
+            "med": 436.8826,
+            "p(90)": 775.0706000000001,
+            "p(95)": 883.9847999999998,
+            "thresholds": {
+                "p(95)<2000": false,
+                "p(99)<4000": false
+            }
+        },
+        "http_req_duration{scenario:dashboard_boot}": {
+            "med": 430.4782,
+            "p(90)": 717.8921000000004,
+            "p(95)": 840.49536,
+            "p(99)": 1024.0197689999998,
+            "max": 1095.6374,
+            "avg": 452.6445538701608,
+            "min": 17.4041,
+            "thresholds": {
+                "p(95)<2200": false
+            }
+        },
+        "data_received": {
+            "count": 14957717,
+            "rate": 1354115.5221809687
+        },
+        "http_reqs": {
+            "count": 4459,
+            "rate": 403.67130314104344
+        },
+        "http_req_waiting": {
+            "p(90)": 774.6488400000002,
+            "p(95)": 883.33661,
+            "p(99)": 1108.7806340000002,
+            "max": 1306.2469,
+            "avg": 470.3285007176489,
+            "min": 1.6902,
+            "med": 436.7191
+        },
+        "data_sent": {
+            "count": 2638873,
+            "rate": 238896.00868663707
+        },
+        "iterations": {
+            "count": 1252,
+            "rate": 113.3430077444688
+        },
+        "http_req_receiving": {
+            "p(95)": 0.9163,
+            "p(99)": 1.01261,
+            "max": 2.5581,
+            "avg": 0.252765911639381,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0.77856
+        },
+        "http_req_tls_handshaking": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0,
+            "avg": 0
+        },
+        "http_req_sending": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0.5561,
+            "p(99)": 0.6242720000000002,
+            "max": 1.5559,
+            "avg": 0.050761291769455014
+        },
+        "http_req_connecting": {
+            "med": 0.5542,
+            "p(90)": 1.1384400000000001,
+            "p(95)": 1.1884699999999995,
+            "p(99)": 1.5249,
+            "max": 4.3671,
+            "avg": 0.5650766539582878,
+            "min": 0
+        },
+        "vus_max": {
+            "value": 1020,
+            "min": 1020,
+            "max": 1020
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 4459,
+            "thresholds": {
+                "rate<0.03": false
+            },
+            "value": 0
+        },
+        "iteration_duration": {
+            "avg": 905.2917370607038,
+            "min": 2.8379,
+            "med": 921.41635,
+            "p(90)": 1413.17809,
+            "p(95)": 1522.706515,
+            "p(99)": 1691.631596,
+            "max": 1756.2987
+        },
+        "vus": {
+            "value": 71,
+            "min": 36,
+            "max": 169
+        },
+        "http_req_duration{scenario:members_page}": {
+            "p(90)": 893.5245,
+            "p(95)": 1044.8542799999996,
+            "p(99)": 1258.142068,
+            "max": 1306.2469,
+            "avg": 531.7862834580216,
+            "min": 9.0266,
+            "med": 515.4122,
+            "thresholds": {
+                "p(95)<2500": false
+            }
+        },
+        "checks": {
+            "passes": 8866,
+            "fails": 0,
+            "thresholds": {
+                "rate>0.99": false
+            },
+            "value": 1
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(90)": 775.0706000000001,
+            "p(95)": 883.9847999999998,
+            "p(99)": 1109.5749640000001,
+            "max": 1306.2469,
+            "avg": 470.6320279210564,
+            "min": 1.6902,
+            "med": 436.8826
+        }
+    },
+    "setup_data": {
+        "baseUrl": "http://localhost:5000"
+    }
+}

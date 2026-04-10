@@ -453,18 +453,18 @@ function App() {
     });
   }, [currentPage]);
 
-  // Handle ?token= query param from Google / Apple OAuth redirect
+  // Handle ?auth_source= from Google / Apple OAuth redirect (cookie-based auth)
+  const oauthCookiePending = useRef(false);
+  const [authCheckBump, setAuthCheckBump] = useState(0);
   useEffect(() => {
     if (isHQ) return;
     const params   = new URLSearchParams(window.location.search);
-    const urlToken = params.get('token');
-    if (!urlToken) return;
+    const authSource = params.get('auth_source');
+    if (!authSource) return;
     stabilizeViewportAfterAuth();
-    setSessionToken(urlToken);
-    writeStoredUser(null);
-    setCurrentUser(null);
-    setToken(urlToken);
-    setIsAuthChecking(true);
+    // Token is in the HttpOnly cookie now, trigger a /me check
+    oauthCookiePending.current = true;
+    setAuthCheckBump((n) => n + 1);
     window.history.replaceState({}, '', '/dashboard');
   }, [isHQ, stabilizeViewportAfterAuth]);
 
@@ -625,7 +625,7 @@ function App() {
       return undefined;
     }
 
-    if (!token) {
+    if (!token && !oauthCookiePending.current) {
       writeStoredUser(null);
       setCurrentUser(null);
       setBranchDirectory([]);
@@ -637,8 +637,11 @@ function App() {
 
     let cancelled = false;
     setIsAuthChecking(true);
+    const pendingOAuth = oauthCookiePending.current;
+    oauthCookiePending.current = false;
 
-    axios.get('/api/auth/me', { headers: { 'x-auth-token': token } })
+    const headers = token ? { 'x-auth-token': token } : {};
+    axios.get('/api/auth/me', { headers })
       .then((res) => {
         if (cancelled) return;
 
@@ -710,7 +713,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [token, isHQ, clearAuthState]);
+  }, [token, isHQ, clearAuthState, authCheckBump]);
 
   useEffect(() => {
     if (isHQ || !token || String(currentUser?.role || '').toUpperCase() !== 'OWNER') return undefined;

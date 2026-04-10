@@ -307,6 +307,7 @@ ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_channel VA
 ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS payout_destination_label VARCHAR(160) DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_payroll_auto_config_gym ON payroll_auto_config(gym_id);
 CREATE INDEX IF NOT EXISTS idx_payroll_entries_gym_period_status ON payroll_entries(gym_id, pay_period, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_entries_gym_user_period ON payroll_entries(gym_id, user_id, pay_period);
 CREATE INDEX IF NOT EXISTS idx_payroll_payout_settings_gym ON payroll_payout_settings(gym_id);
 CREATE INDEX IF NOT EXISTS idx_payroll_staff_destinations_gym ON payroll_staff_destinations(gym_id);
 CREATE TABLE IF NOT EXISTS pos_products (
