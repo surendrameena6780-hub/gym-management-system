@@ -7,7 +7,7 @@
 
 **GymVault** is a full-stack SaaS gym management application built for Indian gym owners. It is a Progressive Web App (PWA) installable on mobile and desktop.
 
-**Live deployment:** Render (backend) + Vercel (frontend).  
+**Live deployment:** Frontend `https://gymvault.tech` (Vercel) + Backend `https://gym-management-system-4nfu.onrender.com` (Render).  
 **Database:** PostgreSQL hosted on Supabase.  
 **Repo location:** `c:\Users\Surender Meena\Desktop\gym-management-system`
 
@@ -21,6 +21,8 @@
 | Runtime | Node.js 20.18.0 (pinned via `.node-version` and `package.json engines`) |
 | Framework | Express 5 |
 | Database | PostgreSQL via `pg` pool (Supabase hosted) |
+| Process Manager | PM2 / `pm2-runtime` on production Render |
+| Cache | Redis-compatible cache with in-memory fallback (`utils/cache.js`) |
 | Auth | JWT (`jsonwebtoken`), bcrypt, Google OAuth, Apple Sign-In |
 | Payments | Razorpay SDK (member collection + SaaS billing) |
 | Messaging | MSG91 WhatsApp API |
@@ -47,6 +49,7 @@
 ## 3. Workspace Structure
 
 ```
+ecosystem.config.js        — PM2 runtime config, Render-safe process sizing
 server.js                  — app entry, route registration, cron jobs
 config/
   db.js                    — pool, always-run boot migrations
@@ -66,6 +69,7 @@ jobs/
   notificationAutomation.js— owner/staff engagement nudges (3 slots/day)
   payrollAutoPay.js        — monthly payroll entry auto-generation
 utils/
+  cache.js                 — Redis/in-memory cache utility for auth + heavy read routes
   gymTime.js               — timezone-aware date helpers
   fieldValidation.js       — reusable semantic validation (ensureTrimmedString, ensureEmail, etc.)
   secretCrypto.js          — encrypt/decrypt Razorpay secrets
@@ -75,6 +79,7 @@ utils/
   lazyWithRecovery.js      — lazy chunk loader with hard-reload fallback
   clientErrorReporter.js   — sends frontend JS errors to /api/support/client-errors
 scripts/
+  smoke-production.js      — checks live frontend/backend deployment
   test-backend.js          — smoke test suite (self-starts server, mints owner token)
   dev-all.js               — starts backend + frontend together
   seed-bot-members.js      — seeds 50 demo members for testing
@@ -102,7 +107,7 @@ All pages in `App.jsx` are mounted once and toggled visible via `getPageVisibili
 - Owner users have `role = 'OWNER'` and full access.
 - Staff users have `role = 'STAFF'` with a `staff_role` (MANAGER, RECEPTION, TRAINER, etc.) and explicit `permissions[]` array.
 - `PAGE_PERMISSIONS` in `App.jsx` gates entire pages; `owner:only` pages (Settings, RFID Setup) never mount for staff.
-- `authMiddleware.js` re-queries the DB on every request to reject revoked/inactive accounts even on valid JWTs.
+- `authMiddleware.js` validates JWTs and revalidates user/gym active state against DB-backed session data using a short cache, so revoked or inactive accounts still get rejected quickly without hitting Postgres on every single request.
 
 ### SaaS Billing
 - Live owner-facing catalog is driven by `platform_settings.billing_config.plan_order`.
@@ -138,6 +143,15 @@ Any multi-step write must use a dedicated `client = await pool.connect()` with e
 - This codebase has duplicated schema/default helpers in more than one route file. A setting changed only in `routes/settings.js` may still behave differently elsewhere if `routes/memberships.js` or another route carries its own helper.
 - Owner-facing billing views must respect the live billing catalog order from platform settings. If hidden current-plan metadata is needed, include it without making the hidden plan selectable again.
 - Optional media should fail soft. Missing profile uploads must return a placeholder response instead of a `404`, otherwise every page that renders the avatar will spam the browser console even if the UI hides the broken image.
+
+### Production Runtime & Read Scaling
+- Production Render starts with `npm run start:render`, which uses `pm2-runtime ecosystem.config.js`.
+- `ecosystem.config.js` auto-detects Render and uses a low-memory-safe single worker on the current 512 MB plan instead of aggressive cluster defaults.
+- Larger Render plans can later scale with `PM2_INSTANCES`, `NODE_HEAP_MB`, and `PM2_MAX_MEMORY_MB`, but that should only happen after Redis is provisioned and headroom is available.
+- `utils/cache.js` uses Redis when `REDIS_URL` exists and falls back to process-local memory when it does not.
+- Current cached paths include auth session validation plus the heaviest read endpoints: dashboard stats, insights overview, finance overview, classes summary, attendance overview, and attendance summary.
+- Background jobs are cluster-safe: only PM2 instance `0` should run recurring jobs when multiple workers are enabled later.
+- `https://gymvault.tech` is the real app URL. `https://gym-management-system-4nfu.onrender.com` is backend/API only; `/healthz` is the primary backend validation endpoint.
 
 ---
 
@@ -218,9 +232,11 @@ Additional current behavior:
 
 ### Developer / Ops Tooling
 - `npm run smoke:backend` — full authenticated backend smoke test suite
+- `npm run smoke:production` — live frontend/backend production validation
 - `npm run dev:all` — starts backend + frontend together
 - `npm run seed:bot-members` / `npm run clean:bot-members` — demo data
 - `scripts/rfid-bridge-simulator.js` — RFID hardware simulator
+- `scripts/k6-full-load-test.js` — comprehensive 8-scenario backend load test
 - Runtime telemetry stored in `system_runtime_events` table, viewable in superadmin
 
 ---
@@ -366,7 +382,7 @@ node --check utils/[changed].js          # syntax-check changed shared backend u
 
 ### Security Rules We Follow
 - All multi-step DB writes use dedicated pool client + BEGIN/COMMIT/ROLLBACK.
-- Auth middleware re-checks DB on every request (invalidates stale JWTs immediately).
+- Auth middleware revalidates DB-backed user/gym state through a short-lived cache, which preserves near-immediate invalidation without forcing a Postgres lookup on every request.
 - All inputs go through `utils/fieldValidation.js` helpers at route boundaries.
 - Rate limiting on all public routes; tighter limits on push subscribe.
 - Exports capped by `EXPORT_ROW_LIMIT` and `EXPORTS_HOUR_LIMIT`.
@@ -380,6 +396,10 @@ node --check utils/[changed].js          # syntax-check changed shared backend u
   - If no live gym-level keys are saved in Settings, member collection links will be test-mode links.
   - Test-mode links do not appear in the Razorpay live merchant dashboard.
 - Node version pinned to **20.18.0** (Render was defaulting to 22 and crashing).
+- Production Render must keep using `npm run start:render` on the current 512 MB plan.
+- Current Render-safe environment sizing for the live backend is conservative: `DB_POOL_MAX=25`, `DB_POOL_MIN=5`, single PM2 worker, reduced heap.
+- The current Supabase pooled connection settings on Render are working; do not casually swap pooler mode/host/port on a live deploy without a specific reason.
+- `REDIS_URL` is still the next important infra addition before enabling multi-worker scaling or expecting more burst tolerance.
 - `RUN_DB_INIT_ON_BOOT=true` is required for `init.sql` to run on production; otherwise only `db.js` always-run migrations execute.
 
 ### Tailwind Breakpoints
@@ -407,17 +427,18 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 
 | Commit | Description |
 |---|---|
+| `3488844` | Update production readiness with April 10 deployment status |
+| `4f5ed9c` | Make Render PM2 config safe for 512 MB instances |
+| `17f86e1` | Add Render PM2 runtime start script |
+| `a4078bb` | Production capacity upgrade: PM2, Redis-compatible caching, pool tuning |
+| `f51c82f` | Comprehensive k6 load test (34K requests, 265 VUs, 10 min) |
+| `a9d92cf` | Security hardening and load test infrastructure |
+| `2c9d5e7` | Refresh project context handoff report |
 | `2c3949a` | Fix hidden test plan visibility and avatar fallbacks |
 | `df374a8` | Complete phase 4 settings and POS updates |
 | `b2644bb` | Add per-branch system with owner branch switcher and data isolation |
 | `e98b424` | Support deleting Test Drive from the live billing catalog |
 | `0ded2e7` | Keep dashboard attention panel populated |
-| `63acf22` | Fix contrast, plan gating, branch limits, dashboard crash, and superadmin layout |
-| `b9cd3ac` | Implement editable billing catalog and enforce limits |
-| `34dc70b` | Fix signup plan persistence and staff usage counts |
-| `6510732` | Show real first-time owner setup actions on dashboard |
-| `e0a1d69` | Add prorated subscription upgrades and quiet transient errors |
-| `25d2dd0` | Implement 3-tier subscription plans with add-ons |
 | `6889145` | Improve leads list readability |
 
 ---
@@ -436,6 +457,10 @@ The app sidebar is visible only at `desktop:` (1100px+). Below that, mobile bott
 | Automation tab in Settings | Marked "coming soon" in UI |
 | Report Settings tab in Settings | Marked "coming soon" in UI |
 | Multi-branch isolation | Branch scope helpers in place; UI for branch switching exists for owners |
+| Current Render backend plan | 512 MB plan is launch-usable but has limited burst headroom; do not assume it is the final scaling shape |
+| Redis on production | Cache currently works with in-memory fallback, but shared Redis is still recommended before broader scale-up |
+| Heavy stress tests on production | Do not run large k6 stress tests against the tiny live production box |
+| Frontend vs backend URLs | `gymvault.tech` is the app UI; `onrender.com` is API/health only |
 | `RUN_DB_INIT_ON_BOOT` on Render | Must be `true` for new schema additions to apply on deploy |
 
 ---
@@ -449,6 +474,10 @@ When starting a new session, tell the AI:
 - Do not change design/layout unless explicitly asked.
 - Run `npm --prefix frontend run build` before every commit.
 - If touching backend routes or shared backend utilities, run `node --check` on the changed files.
+- After any production deploy, run `npm run smoke:production` and verify `/healthz` on the live backend.
+- Treat `https://gymvault.tech` as the app URL and the Render URL as backend/API only.
+- On the current 512 MB Render plan, keep the conservative runtime path (`npm run start:render`, `DB_POOL_MAX=25`, `DB_POOL_MIN=5`) unless the infra plan changes.
+- Add `REDIS_URL` before enabling multi-worker scaling or expecting comfortable burst tolerance.
 - If a user says something should apply globally, inspect both platform settings and every duplicated schema/default helper before assuming the fix is complete.
 
 For urgent issues, always check:
@@ -459,6 +488,9 @@ For urgent issues, always check:
 5. `platform_settings.billing_config.plan_order` if a plan appears or disappears incorrectly in owner-facing billing.
 6. `/uploads/profiles/*` network responses if profile-image console errors reappear; the expected behavior is a real image or the placeholder SVG, never a hard `404`.
 7. Separate true app errors from the Chrome PWA install-banner info line before assuming a console issue still needs code changes.
+8. Render metrics: memory, CPU, restart count, and response time.
+9. Supabase observability: database connections and shared pooler client connections.
+10. Live backend `/healthz` plus `npm run smoke:production` after deploys.
 
 ---
 
@@ -573,3 +605,101 @@ This follow-up addressed the remaining issues after `df374a8` and closed the cha
 - **PWA install-banner DevTools line:** Chrome may show the `beforeinstallprompt` informational warning when the custom install flow stores the event; do not misclassify that as a failed app request.
 - **Razorpay test-vs-live mismatch:** invisible payment links in dashboard issues often come from test-mode server keys.
 - **Owner-facing billing visibility bugs:** inspect `platform_settings.billing_config`, then `/api/settings`, then `SettingsPage.jsx` visible plan ordering logic.
+
+---
+
+## 12. April 10, 2026 Deployment, Load Test, and Upgrade Triggers
+
+This section captures everything completed on April 10, 2026 so a new chat can pick up from the exact current production state.
+
+### What Was Done Today
+
+1. Ran a comprehensive backend load test locally with k6 across 8 scenarios and 45+ endpoints.
+2. Confirmed the backend survived a 10-minute run at 34K+ requests and 265 VUs without crashing, which showed the main issue was capacity headroom and DB pressure rather than a single fatal code bug.
+3. Added a Redis-compatible cache utility with in-memory fallback in `utils/cache.js`.
+4. Cached auth session validation to cut repeated Postgres lookups on authenticated traffic.
+5. Cached the heaviest read endpoints: dashboard stats, insights overview, finance overview, classes summary, attendance overview, and attendance summary.
+6. Added PM2 ecosystem support in `ecosystem.config.js`.
+7. Added Render-safe startup support with `npm run start:render` using `pm2-runtime`.
+8. Made background jobs safe for future multi-worker operation by limiting timer execution to the intended PM2 instance.
+9. Fixed a production deployment failure caused by over-aggressive PM2 defaults on a 512 MB Render plan by switching Render to a safe single-worker low-heap configuration.
+10. Deployed the backend successfully to Render and confirmed the backend `/healthz` endpoint returns `status=ok` and `database=reachable`.
+11. Confirmed `https://gymvault.tech` correctly rewrites `/api/*` calls to the Render backend.
+12. Ran the live production smoke suite successfully: 8 passed, 0 warnings, 0 failures.
+13. Manually verified that pages were opening and no page-level breakage was reported after deploy.
+14. Updated the readiness and handoff documentation so future chats inherit the real current state.
+
+### Current Live Launch Posture
+
+- Backend URL: `https://gym-management-system-4nfu.onrender.com`
+- Frontend URL: `https://gymvault.tech`
+- Current backend plan: Render 512 MB instance
+- Current runtime mode: PM2-managed single worker in `fork` mode
+- Current live guidance: suitable for a controlled launch with roughly 20-25 gyms of 500-600 members each under normal day-to-day usage
+- Important limitation: current deployment should not be described as unlimited or spike-proof; it still has limited burst headroom until Redis is provisioned and/or the Render plan is increased
+
+### Safety Checks To Keep In Mind
+
+#### Green: Safe To Keep Current Plan
+- Render memory usually stays below `75%`
+- Render CPU usually stays below `70%`
+- No restart events appear in Render
+- App pages feel normal, especially Dashboard, Finance, Insights, Members, and Attendance
+- Backend `/healthz` remains healthy
+- `npm run smoke:production` passes
+- Supabase connection graphs stay stable without long sustained spikes
+
+#### Yellow: Watch Closely / Plan Upgrade Soon
+- Render memory often stays above `85%`
+- Render CPU often stays above `85%`
+- Response times start feeling slow on heavy pages
+- Dashboard or insights starts taking noticeably longer to load
+- Supabase database connections stay high for long periods during ordinary usage
+- Users report intermittent slowness even though the app still works
+
+#### Red: Upgrade Immediately
+- Render shows out-of-memory events or restarts
+- Backend `/healthz` fails or becomes intermittent
+- Requests start timing out or users see broken/blank pages
+- Render logs show repeated pool/connection errors, unhandled exceptions, or startup failures
+- Supabase connection behavior becomes unstable during normal traffic
+
+### What To Check Every Time After Deploying
+
+1. Open `https://gym-management-system-4nfu.onrender.com/healthz`
+2. Run:
+
+```bash
+npm run smoke:production
+```
+
+3. Open `https://gymvault.tech`
+4. Click Dashboard, Members, Attendance, Payments, Finance, and Insights
+5. Keep Render logs open while clicking through those pages
+6. Review Render metrics: memory, CPU, response time, restart count
+7. Review Supabase observability: database connections and pooler client connections
+
+### When To Upgrade The Render Plan
+
+Upgrade the backend plan if any one of these becomes normal:
+
+1. Memory pressure is consistently high
+2. Restarts happen more than once
+3. Heavy pages feel slow during normal business hours
+4. More owner/staff users are actively using the system at the same time than the current box can comfortably absorb
+5. You want real burst headroom instead of just “it works”
+
+### What To Do Before Multi-Worker Scaling
+
+1. Add `REDIS_URL`
+2. Recheck Render memory headroom on the upgraded plan
+3. Revisit `DB_POOL_MAX`, `DB_POOL_MIN`, `PM2_INSTANCES`, and `NODE_HEAP_MB`
+4. Only then consider more than one worker on Render
+
+### Permanent Deployment Reminders
+
+1. `gymvault.tech` is the real app. Do not treat the Render root URL as the user-facing app UI.
+2. Keep using `npm run start:render` on the current production setup.
+3. Do not run the large k6 stress suite on the tiny live production box.
+4. If any secret or password is exposed in screenshots/chat/logs, rotate it immediately.
+5. If a future deploy changes infra behavior, verify both Render logs and Supabase observability before assuming the code is at fault.
