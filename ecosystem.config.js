@@ -2,34 +2,51 @@
  * PM2 Ecosystem Configuration
  *
  * Start in cluster mode:   pm2 start ecosystem.config.js
- * Stop:                     pm2 stop gym-api
- * Restart with 0-downtime:  pm2 reload gym-api
- * Monitor:                  pm2 monit
- * Logs:                     pm2 logs gym-api
+ * Stop:                    pm2 stop gym-api
+ * Restart with 0-downtime: pm2 reload gym-api
+ * Monitor:                 pm2 monit
+ * Logs:                    pm2 logs gym-api
  *
  * Background jobs (expiry checks, notifications, retention, payroll, backups)
- * are automatically limited to **one** worker (instance_var INSTANCE_ID === '0')
- * to prevent duplicate execution across the cluster.
+ * are automatically limited to one worker (INSTANCE_ID === '0') to prevent
+ * duplicate execution across the cluster.
  *
  * Environment variables consumed by the app:
- *   REDIS_URL          — Enables cross-worker cache sharing (recommended for cluster)
- *   DB_POOL_MAX        — Per-worker PG pool size (default 100; total = instances × max)
- *   NODE_OPTIONS       — V8 flags; heap limit set below
+ *   REDIS_URL            Enables cross-worker cache sharing.
+ *   DB_POOL_MAX          Per-worker PG pool size.
+ *   PM2_INSTANCES        Number of app workers. Use 'max' on bigger machines.
+ *   NODE_HEAP_MB         Max V8 heap per worker in MB.
+ *   PM2_MAX_MEMORY_MB    Restart threshold per worker in MB.
  */
+
+const parsePositiveInt = (value, fallback) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const isRender = String(process.env.RENDER || '').trim().toLowerCase() === 'true'
+    || Boolean(process.env.RENDER_SERVICE_ID);
+const rawInstances = String(process.env.PM2_INSTANCES || '').trim().toLowerCase();
+const instances = rawInstances === 'max'
+    ? 'max'
+    : parsePositiveInt(rawInstances, isRender ? 1 : null) || (isRender ? 1 : 'max');
+const execMode = instances === 'max' || instances > 1 ? 'cluster' : 'fork';
+const heapMb = parsePositiveInt(process.env.NODE_HEAP_MB, isRender ? 384 : 2048);
+const maxMemoryMb = parsePositiveInt(process.env.PM2_MAX_MEMORY_MB, isRender ? 460 : 1800);
 
 module.exports = {
     apps: [
         {
             name: 'gym-api',
             script: 'server.js',
-            instances: 'max',
-            exec_mode: 'cluster',
+            instances,
+            exec_mode: execMode,
             instance_var: 'INSTANCE_ID',
-            node_args: '--max-old-space-size=2048',
-            max_memory_restart: '1800M',
+            node_args: `--max-old-space-size=${heapMb}`,
+            max_memory_restart: `${maxMemoryMb}M`,
             env: {
                 NODE_ENV: 'production',
-                NODE_OPTIONS: '--max-old-space-size=2048',
+                NODE_OPTIONS: `--max-old-space-size=${heapMb}`,
             },
             // Graceful shutdown
             kill_timeout: 20000,
