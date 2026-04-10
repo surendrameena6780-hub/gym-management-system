@@ -163,7 +163,7 @@ The GymVault backend **survived a full 10-minute stress test at 265 concurrent u
 - **Finding:** Single Node.js process can handle ~265 concurrent connections before TCP saturation
 - **Recommendation:** For 500+ concurrent users, use PM2 cluster mode or Docker horizontal scaling
 
----
+
 
 ## Performance Assessment
 

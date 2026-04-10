@@ -30,6 +30,7 @@ const {
 const {
     computeEffectiveBillingLimits,
     getBillingConfig,
+    getBranchUsageSnapshot,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
@@ -563,20 +564,34 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             return res.status(400).json({ error: 'This email is already registered in your gym.' });
         }
 
-        const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+        const [billingConfig, gymBilling, usageSnapshot, branchUsage] = await Promise.all([
             getBillingConfig(),
             getGymBillingSnapshot(pool, gym_id),
             getGymUsageSnapshot(pool, gym_id),
+            getBranchUsageSnapshot(pool, gym_id, branchScope.branchId),
         ]);
         if (!gymBilling) {
             await discardUploadedProfile(req);
             return res.status(404).json({ error: 'Gym not found.' });
         }
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+        if (effectiveLimits.members_per_branch !== null && Number(branchUsage.members || 0) + 1 > effectiveLimits.members_per_branch) {
+            const totalCapacityHint = effectiveLimits.members !== null && Number(effectiveLimits.capacity_branches || 1) > 1
+                ? ` (${effectiveLimits.members} total across ${effectiveLimits.capacity_branches} configured branch${effectiveLimits.capacity_branches === 1 ? '' : 'es'})`
+                : '';
+            await discardUploadedProfile(req);
+            return res.status(409).json({
+                error: `Your current plan allows up to ${effectiveLimits.members_per_branch} members in this branch${totalCapacityHint}. Delete an expired or unpaid member, or add more member capacity before creating another member.`,
+                allowed_members: effectiveLimits.members_per_branch,
+                current_members: Number(branchUsage.members || 0),
+                current_gym_members: Number(usageSnapshot.members || 0),
+                branch_id: branchScope.branchId,
+            });
+        }
         if (effectiveLimits.members !== null && Number(usageSnapshot.members || 0) + 1 > effectiveLimits.members) {
             await discardUploadedProfile(req);
             return res.status(409).json({
-                error: `Your current plan allows up to ${effectiveLimits.members} active members including add-ons. Upgrade the plan or add member capacity before creating another member.`,
+                error: `Your current plan allows up to ${effectiveLimits.members} members across ${effectiveLimits.capacity_branches || 1} configured branch${Number(effectiveLimits.capacity_branches || 1) === 1 ? '' : 'es'} including add-ons. Delete an expired or unpaid member, or add more member capacity before creating another member.`,
                 allowed_members: effectiveLimits.members,
                 current_members: Number(usageSnapshot.members || 0),
             });

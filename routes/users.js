@@ -16,6 +16,7 @@ const {
 const {
     computeEffectiveBillingLimits,
     getBillingConfig,
+    getBranchUsageSnapshot,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
@@ -112,10 +113,11 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
         const normalizedRole = normalizeStaffRole(staff_role);
         const effectivePermissions = normalizePermissions(permissions, normalizedRole);
         const branchScope = await resolveBranchWriteScope(pool, req, req.body?.branch_id);
-        const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+        const [billingConfig, gymBilling, usageSnapshot, branchUsage] = await Promise.all([
             getBillingConfig(),
             getGymBillingSnapshot(pool, req.user.gym_id),
             getGymUsageSnapshot(pool, req.user.gym_id),
+            getBranchUsageSnapshot(pool, req.user.gym_id, branchScope.branchId),
         ]);
 
         if (!gymBilling) {
@@ -123,9 +125,21 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
         }
 
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+        if (effectiveLimits.staff_per_branch !== null && Number(branchUsage.staff || 0) + 1 > effectiveLimits.staff_per_branch) {
+            const totalCapacityHint = effectiveLimits.staff !== null && Number(effectiveLimits.capacity_branches || 1) > 1
+                ? ` (${effectiveLimits.staff} total across ${effectiveLimits.capacity_branches} configured branch${effectiveLimits.capacity_branches === 1 ? '' : 'es'})`
+                : '';
+            return res.status(409).json({
+                error: `Your current plan allows up to ${effectiveLimits.staff_per_branch} staff user${effectiveLimits.staff_per_branch === 1 ? '' : 's'} in this branch${totalCapacityHint} including add-ons. Delete a staff user or add more staff capacity before creating another staff login.`,
+                allowed_staff: effectiveLimits.staff_per_branch,
+                current_staff: Number(branchUsage.staff || 0),
+                current_gym_staff: Number(usageSnapshot.staff || 0),
+                branch_id: branchScope.branchId,
+            });
+        }
         if (effectiveLimits.staff !== null && Number(usageSnapshot.staff || 0) + 1 > effectiveLimits.staff) {
             return res.status(409).json({
-                error: `Your current plan allows up to ${effectiveLimits.staff} staff user${effectiveLimits.staff === 1 ? '' : 's'} including add-ons. Upgrade the plan or add staff capacity before creating another staff login.`,
+                error: `Your current plan allows up to ${effectiveLimits.staff} staff user${effectiveLimits.staff === 1 ? '' : 's'} across ${effectiveLimits.capacity_branches || 1} configured branch${Number(effectiveLimits.capacity_branches || 1) === 1 ? '' : 'es'} including add-ons. Delete a staff user or add more staff capacity before creating another staff login.`,
                 allowed_staff: effectiveLimits.staff,
                 current_staff: Number(usageSnapshot.staff || 0),
             });

@@ -45,6 +45,7 @@ const {
     ensureGymBillingAddonSchema,
     getBillingConfig,
     getBillingPlan,
+    getBranchUsageSnapshot,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
     hasBillingCapability,
@@ -61,6 +62,7 @@ const {
     isValidationError,
 } = require('../utils/fieldValidation');
 const {
+    DEFAULT_BRANCH_ID,
     branchSchemaMiddleware,
     getGymBranchDirectory,
     getBranchName,
@@ -580,7 +582,11 @@ const loadMessagingState = async (gymId) => {
                 member_razorpay_connected_account_id,
                 member_payments_connected_at,
                 name,
-                current_plan
+                current_plan,
+                COALESCE(branches_count, 1) AS branches_count,
+                COALESCE(addon_extra_whatsapp, 0) AS addon_extra_whatsapp,
+                COALESCE(addon_extra_branches, 0) AS addon_extra_branches,
+                COALESCE(addon_extra_hello, 0) AS addon_extra_hello
              FROM gyms
              WHERE id = $1
              LIMIT 1`,
@@ -1006,7 +1012,7 @@ router.get('/', auth, async (req, res) => {
     try {
         await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema(), ensureBillingAddonSchema()]);
 
-        const [userRes, gymRes, billingConfig] = await Promise.all([
+        const [userRes, gymRes, billingConfig, usageSnapshot] = await Promise.all([
             pool.query(
                 'SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1 LIMIT 1',
                 [req.user.id]
@@ -1026,6 +1032,8 @@ router.get('/', auth, async (req, res) => {
                     g.current_plan,
                     g.saas_billing_cycle,
                     g.grace_period_days,
+                    COALESCE(g.branches_count, 1) AS branches_count,
+                    COALESCE(g.branch_directory, '[]'::jsonb) AS branch_directory,
                     COALESCE(g.addon_extra_whatsapp, 0) AS addon_extra_whatsapp,
                     COALESCE(g.addon_extra_staff, 0)    AS addon_extra_staff,
                     COALESCE(g.addon_extra_members, 0)  AS addon_extra_members,
@@ -1056,9 +1064,12 @@ router.get('/', auth, async (req, res) => {
                 [req.user.gym_id]
             ),
             getBillingConfig(),
+            getGymUsageSnapshot(pool, req.user.gym_id),
         ]);
 
         const gym = gymRes.rows[0] || {};
+        const branchesCount = Math.max(1, toPositiveInt(gym.branches_count, 1));
+        const branchDirectory = normalizeBranchDirectory(gym.branch_directory, branchesCount);
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gym.current_plan, gym);
 
         res.json({
@@ -1077,6 +1088,8 @@ router.get('/', auth, async (req, res) => {
                 current_plan: gym.current_plan,
                 saas_billing_cycle: gym.saas_billing_cycle,
                 grace_period_days: gym.grace_period_days,
+                branches_count: branchesCount,
+                branch_directory: branchDirectory,
                 addon_extra_whatsapp: Number.parseInt(gym.addon_extra_whatsapp || 0, 10),
                 addon_extra_staff: Number.parseInt(gym.addon_extra_staff || 0, 10),
                 addon_extra_members: Number.parseInt(gym.addon_extra_members || 0, 10),
@@ -1095,8 +1108,9 @@ router.get('/', auth, async (req, res) => {
                 sla: gym.sla,
             },
             usage: {
-                members: Number.parseInt(gym.member_count || 0, 10),
-                staff: Number.parseInt(gym.staff_count || 0, 10),
+                members: Number.parseInt(usageSnapshot.members || 0, 10),
+                staff: Number.parseInt(usageSnapshot.staff || 0, 10),
+                branches: Number.parseInt(usageSnapshot.branches || branchesCount || 1, 10),
                 storage: 0.1,
             }
         });
@@ -1153,11 +1167,9 @@ router.get('/integrations', auth, async (req, res) => {
         const row = messagingState.gym || {};
         const templates = messagingState.templates || [];
         const gymPlan = String(row.current_plan || 'basic').toLowerCase();
-        const planWhatsAppLimit = (() => {
-            const billingConfig = getBillingConfig();
-            const plan = getBillingPlan(billingConfig, gymPlan);
-            return plan?.limits?.whatsapp ?? 500;
-        })();
+        const billingConfig = await getBillingConfig();
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymPlan, row);
+        const planWhatsAppLimit = effectiveLimits.whatsapp ?? 500;
         // Always derive monthly limit from plan — plan-locked, not user-editable
         const monthlyLimit = planWhatsAppLimit || 500;
         const monthlySent = toPositiveInt(usageRes.rows[0]?.monthly_sent, 0);
@@ -1359,10 +1371,15 @@ router.put('/integrations', auth, async (req, res) => {
             `SELECT
                 messaging_owner_mobile,
                 messaging_whatsapp_number,
+                current_plan,
+                COALESCE(branches_count, 1) AS branches_count,
                 bulk_enabled,
                 bulk_monthly_limit,
                 bulk_per_campaign_limit,
                 bulk_channels,
+                COALESCE(addon_extra_whatsapp, 0) AS addon_extra_whatsapp,
+                COALESCE(addon_extra_branches, 0) AS addon_extra_branches,
+                COALESCE(addon_extra_hello, 0) AS addon_extra_hello,
                 member_razorpay_key_secret_enc,
                 member_payments_connect_mode,
                 member_payments_onboarding_status,
@@ -1428,19 +1445,9 @@ router.put('/integrations', auth, async (req, res) => {
 
         if (shouldSaveCampaigns) {
             const bulkEnabled = Boolean(req.body?.bulk_enabled ?? currentGym.bulk_enabled);
-            const planBasedDefault = (() => {
-                try {
-                    const bc = getBillingConfig();
-                    const p = getBillingPlan(bc, currentGym.current_plan || 'basic');
-                    return p?.limits?.whatsapp ?? 500;
-                } catch { return 500; }
-            })();
-            const monthlyLimit = ensureInteger(req.body?.bulk_monthly_limit, {
-                field: 'bulk_monthly_limit',
-                min: 10,
-                max: 100000,
-                defaultValue: toPositiveInt(currentGym.bulk_monthly_limit, planBasedDefault),
-            });
+            const billingConfig = await getBillingConfig(client);
+            const effectiveLimits = computeEffectiveBillingLimits(billingConfig, currentGym.current_plan || 'basic', currentGym);
+            const monthlyLimit = effectiveLimits.whatsapp ?? 500;
             const perCampaign = ensureInteger(req.body?.bulk_per_campaign_limit, {
                 field: 'bulk_per_campaign_limit',
                 min: 1,
@@ -2036,6 +2043,8 @@ router.post('/import/members', auth, async (req, res) => {
     try {
         const csvText = ensureTrimmedString(req.body?.csv_text, { field: 'csv_text', required: true, max: 500000 });
         const dryRun = req.body?.dry_run === true;
+        const branchDirectory = await getGymBranchDirectory(pool, req.user.gym_id);
+        const defaultBranchId = branchDirectory[0]?.id || DEFAULT_BRANCH_ID;
 
         const rows = parseCsvText(csvText);
         if (rows.length === 0) {
@@ -2110,10 +2119,21 @@ router.post('/import/members', auth, async (req, res) => {
             }
 
             const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+            const branchUsage = await getBranchUsageSnapshot(pool, req.user.gym_id, defaultBranchId);
+            const projectedBranchMembers = Number(branchUsage.members || 0) + validRows.length;
             const projectedMembers = Number(usageSnapshot.members || 0) + validRows.length;
+            if (effectiveLimits.members_per_branch !== null && projectedBranchMembers > effectiveLimits.members_per_branch) {
+                return res.status(409).json({
+                    error: `This import would exceed the ${effectiveLimits.members_per_branch}-member limit for ${getBranchName(branchDirectory, defaultBranchId) || 'the default branch'}. Delete expired or unpaid members there, or add more member capacity before importing more members.`,
+                    allowed_members: effectiveLimits.members_per_branch,
+                    current_members: Number(branchUsage.members || 0),
+                    requested_import: validRows.length,
+                    branch_id: defaultBranchId,
+                });
+            }
             if (effectiveLimits.members !== null && projectedMembers > effectiveLimits.members) {
                 return res.status(409).json({
-                    error: `This import would exceed your active member limit of ${effectiveLimits.members}. Upgrade the plan or add member capacity before importing more members.`,
+                    error: `This import would exceed your ${effectiveLimits.members}-member capacity across ${effectiveLimits.capacity_branches || 1} configured branch${Number(effectiveLimits.capacity_branches || 1) === 1 ? '' : 'es'}. Delete expired or unpaid members, or add more member capacity before importing more members.`,
                     allowed_members: effectiveLimits.members,
                     current_members: Number(usageSnapshot.members || 0),
                     requested_import: validRows.length,
@@ -2127,9 +2147,9 @@ router.post('/import/members', auth, async (req, res) => {
             await client.query('BEGIN');
             for (const row of validRows) {
                 await client.query(
-                    `INSERT INTO members (full_name, email, phone, gym_id, joining_date, status)
-                     VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')`,
-                    [row.full_name, row.email, row.phone, req.user.gym_id]
+                    `INSERT INTO members (full_name, email, phone, gym_id, joining_date, status, branch_id)
+                     VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID', $5)`,
+                    [row.full_name, row.email, row.phone, req.user.gym_id, defaultBranchId]
                 );
                 importedCount += 1;
             }

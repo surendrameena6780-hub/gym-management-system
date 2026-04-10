@@ -4,6 +4,7 @@ export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extr
 export const BILLING_CAPABILITY_KEYS = ['custom_templates'];
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
+const BILLING_BRANCH_SCALED_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp', 'hello']);
 const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
 const BILLING_DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_BILLING_CREDIT_STATUSES = new Set(['ACTIVE']);
@@ -37,7 +38,7 @@ export const defaultBillingCatalog = {
       annual_price: 10,
       popular: false,
       features: [
-        'Up to 150 active members',
+        'Up to 150 members',
         '1 branch included',
         '1 owner + 2 staff users',
         '500 WhatsApp messages per month',
@@ -58,7 +59,7 @@ export const defaultBillingCatalog = {
       annual_price: 20,
       popular: true,
       features: [
-        'Up to 400 active members / Branch',
+        'Up to 400 members / Branch',
         'Multiple branches',
         '1 owner + 5 staff users / Branch',
         '1,000 WhatsApp messages per month / Branch',
@@ -81,7 +82,7 @@ export const defaultBillingCatalog = {
       annual_price: 30,
       popular: false,
       features: [
-        'Up to 1,000 active members / Branch',
+        'Up to 1,000 members / Branch',
         'Multiple branches',
         '1 owner + 10 staff users / Branch',
         '2,000 WhatsApp messages per month / Branch',
@@ -119,8 +120,8 @@ export const defaultBillingCatalog = {
     },
     extra_members_100: {
       key: 'extra_members_100',
-      label: 'Extra 100 Active Members',
-      description: 'Raises your active member cap by 100.',
+      label: 'Extra 100 Members',
+      description: 'Raises your member capacity by 100.',
       price: 299,
       increment: 100,
       limit_key: 'members',
@@ -181,14 +182,17 @@ const LEGACY_BILLING_PLAN_FEATURES = {
   ],
   basic: [
     ['Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+    ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
   ],
   growth: [
     ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
     ['Up to 400 active members', 'Up to 2 branches', '1 owner + 5 staff users', '1,000 WhatsApp messages per month', 'Hello inbound on 1 number', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
+    ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
   ],
   pro: [
     ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
     ['Up to 1,000 active members', 'Up to 3 branches', '1 owner + 10 staff users', '2,000 WhatsApp messages per month', 'Hello inbound on 1 number', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
+    ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
   ],
 };
 
@@ -439,16 +443,29 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
   if (overrideLimits && typeof overrideLimits === 'object') {
     return {
       members: overrideLimits.members ?? null,
+      members_per_branch: overrideLimits.members_per_branch ?? null,
       staff: overrideLimits.staff ?? null,
+      staff_per_branch: overrideLimits.staff_per_branch ?? null,
       storage: overrideLimits.storage ?? null,
       branches: overrideLimits.branches ?? null,
+      configured_branches: overrideLimits.configured_branches ?? null,
+      capacity_branches: overrideLimits.capacity_branches ?? null,
       whatsapp: overrideLimits.whatsapp ?? null,
+      whatsapp_per_branch: overrideLimits.whatsapp_per_branch ?? null,
       hello: overrideLimits.hello ?? null,
+      hello_per_branch: overrideLimits.hello_per_branch ?? null,
     };
   }
 
   const catalog = normalizeBillingCatalog(billingCatalog);
   const plan = catalog.plans[normalizePlanId(planId)] || catalog.plans.basic;
+  const configuredBranches = Math.max(1, Number.parseInt(gymData?.branches_count ?? gymData?.branches ?? 1, 10) || 1);
+  const allowedBranches = plan.limits?.branches === null || plan.limits?.branches === undefined
+    ? null
+    : Number(plan.limits.branches) + Number(gymData?.addon_extra_branches || 0);
+  const capacityBranches = allowedBranches === null
+    ? configuredBranches
+    : Math.max(1, Math.min(configuredBranches, Number(allowedBranches) || configuredBranches));
   const addonMap = {
     members: Number(gymData?.addon_extra_members || 0),
     staff: Number(gymData?.addon_extra_staff || 0),
@@ -457,11 +474,30 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
     hello: Number(gymData?.addon_extra_hello || 0),
   };
 
-  return Object.fromEntries(BILLING_LIMIT_KEYS.map((limitKey) => {
+  return BILLING_LIMIT_KEYS.reduce((accumulator, limitKey) => {
     const baseValue = plan.limits?.[limitKey] ?? null;
-    if (baseValue === null || baseValue === undefined) return [limitKey, null];
-    return [limitKey, Number(baseValue) + Number(addonMap[limitKey] || 0)];
-  }));
+    if (baseValue === null || baseValue === undefined) {
+      accumulator[limitKey] = null;
+      if (BILLING_BRANCH_SCALED_LIMIT_KEYS.has(limitKey)) {
+        accumulator[`${limitKey}_per_branch`] = null;
+      }
+      return accumulator;
+    }
+
+    const perBranchValue = Number(baseValue) + Number(addonMap[limitKey] || 0);
+    accumulator[limitKey] = BILLING_BRANCH_SCALED_LIMIT_KEYS.has(limitKey)
+      ? perBranchValue * capacityBranches
+      : perBranchValue;
+
+    if (BILLING_BRANCH_SCALED_LIMIT_KEYS.has(limitKey)) {
+      accumulator[`${limitKey}_per_branch`] = perBranchValue;
+    }
+
+    return accumulator;
+  }, {
+    configured_branches: configuredBranches,
+    capacity_branches: capacityBranches,
+  });
 };
 
 export const isAddonAllowedForPlan = (billingCatalog, addonKey, planId) => {

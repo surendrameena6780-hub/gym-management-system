@@ -12,9 +12,11 @@ const EXPORTS_PER_HOUR_LIMIT = Math.max(1, parseInt(process.env.EXPORTS_PER_HOUR
 
 router.use(auth, saasMiddleware);
 
+const isLoadTest = process.env.LOAD_TEST_MODE === 'true';
+
 const exportRateLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
-    max: EXPORTS_PER_HOUR_LIMIT,
+    max: isLoadTest ? 999999 : EXPORTS_PER_HOUR_LIMIT,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => `${gymId(req) || 'nogym'}:${req.user?.id || 'anon'}`,

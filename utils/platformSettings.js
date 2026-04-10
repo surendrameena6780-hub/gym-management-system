@@ -86,7 +86,7 @@ const defaultBillingConfig = {
             annual_price: 10,
             popular: false,
             features: [
-                'Up to 150 active members',
+                'Up to 150 members',
                 '1 branch included',
                 '1 owner + 2 staff users',
                 '500 WhatsApp messages per month',
@@ -114,7 +114,7 @@ const defaultBillingConfig = {
             annual_price: 20,
             popular: true,
             features: [
-                'Up to 400 active members / Branch',
+                'Up to 400 members / Branch',
                 'Multiple branches',
                 '1 owner + 5 staff users / Branch',
                 '1,000 WhatsApp messages per month / Branch',
@@ -144,7 +144,7 @@ const defaultBillingConfig = {
             annual_price: 30,
             popular: false,
             features: [
-                'Up to 1,000 active members / Branch',
+                'Up to 1,000 members / Branch',
                 'Multiple branches',
                 '1 owner + 10 staff users / Branch',
                 '2,000 WhatsApp messages per month / Branch',
@@ -191,8 +191,8 @@ const defaultBillingConfig = {
         },
         extra_members_100: {
             key: 'extra_members_100',
-            label: 'Extra 100 Active Members',
-            description: 'Raises your active member cap by 100.',
+            label: 'Extra 100 Members',
+            description: 'Raises your member capacity by 100.',
             price: 299,
             increment: 100,
             column: 'addon_extra_members',
@@ -230,6 +230,8 @@ const billingConfigSql = toSqlJson(defaultBillingConfig);
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
 const GYM_ADDON_COLUMNS = ['addon_extra_whatsapp', 'addon_extra_staff', 'addon_extra_members', 'addon_extra_branches', 'addon_extra_hello'];
+const BILLING_BRANCH_SCALED_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp', 'hello']);
+const DEFAULT_BRANCH_ID = 'branch-1';
 
 const readNumber = (value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER, allowNull = false } = {}) => {
     if (allowNull) {
@@ -267,12 +269,17 @@ const LEGACY_BILLING_PLAN_FEATURES = {
     ],
     basic: [
         ['Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
+        ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'],
     ],
     growth: [
         ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+        ['Up to 400 active members', 'Up to 2 branches', '1 owner + 5 staff users', '1,000 WhatsApp messages per month', 'Hello inbound on 1 number', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
+        ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
     ],
     pro: [
         ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+        ['Up to 1,000 active members', 'Up to 3 branches', '1 owner + 10 staff users', '2,000 WhatsApp messages per month', 'Hello inbound on 1 number', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
+        ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
     ],
 };
 
@@ -529,15 +536,36 @@ const hasBillingCapability = (billingConfig, planId, capabilityKey) => {
     return Boolean(plan?.capabilities?.[capabilityKey]);
 };
 
+const resolveConfiguredBranchesCount = (gymData = {}) => {
+    const parsed = Number.parseInt(gymData?.branches_count ?? gymData?.branches, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+};
+
 const computeEffectiveBillingLimits = (billingConfig, planId, gymData = {}) => {
     const plan = getBillingPlan(billingConfig, planId);
+    const configuredBranches = resolveConfiguredBranchesCount(gymData);
+    const allowedBranches = plan.limits.branches === null ? null : plan.limits.branches + (Number(gymData?.addon_extra_branches) || 0);
+    const capacityBranches = allowedBranches === null
+        ? configuredBranches
+        : Math.max(1, Math.min(configuredBranches, Number(allowedBranches) || configuredBranches));
+    const perBranchMembers = plan.limits.members === null ? null : plan.limits.members + (Number(gymData?.addon_extra_members) || 0);
+    const perBranchStaff = plan.limits.staff === null ? null : plan.limits.staff + (Number(gymData?.addon_extra_staff) || 0);
+    const perBranchWhatsApp = plan.limits.whatsapp === null ? null : plan.limits.whatsapp + (Number(gymData?.addon_extra_whatsapp) || 0);
+    const perBranchHello = plan.limits.hello === null ? null : plan.limits.hello + (Number(gymData?.addon_extra_hello) || 0);
+
     return {
-        members: plan.limits.members === null ? null : plan.limits.members + (Number(gymData?.addon_extra_members) || 0),
-        staff: plan.limits.staff === null ? null : plan.limits.staff + (Number(gymData?.addon_extra_staff) || 0),
+        members: perBranchMembers === null ? null : perBranchMembers * capacityBranches,
+        members_per_branch: perBranchMembers,
+        staff: perBranchStaff === null ? null : perBranchStaff * capacityBranches,
+        staff_per_branch: perBranchStaff,
         storage: plan.limits.storage === null ? null : plan.limits.storage,
-        branches: plan.limits.branches === null ? null : plan.limits.branches + (Number(gymData?.addon_extra_branches) || 0),
-        whatsapp: plan.limits.whatsapp === null ? null : plan.limits.whatsapp + (Number(gymData?.addon_extra_whatsapp) || 0),
-        hello: plan.limits.hello === null ? null : plan.limits.hello + (Number(gymData?.addon_extra_hello) || 0),
+        branches: allowedBranches,
+        configured_branches: configuredBranches,
+        capacity_branches: capacityBranches,
+        whatsapp: perBranchWhatsApp === null ? null : perBranchWhatsApp * capacityBranches,
+        whatsapp_per_branch: perBranchWhatsApp,
+        hello: perBranchHello === null ? null : perBranchHello * capacityBranches,
+        hello_per_branch: perBranchHello,
     };
 };
 
@@ -559,6 +587,7 @@ const getGymBillingSnapshot = async (db, gymId) => {
     const result = await db.query(
         `SELECT
             current_plan,
+            COALESCE(branches_count, 1) AS branches_count,
             saas_billing_cycle,
             saas_status,
             saas_valid_until,
@@ -601,8 +630,34 @@ const getGymUsageSnapshot = async (db, gymId) => {
     return result.rows[0] || { members: 0, staff: 0, branches: 1 };
 };
 
+const getBranchUsageSnapshot = async (db, gymId, branchId) => {
+    const normalizedBranchId = readText(branchId) || DEFAULT_BRANCH_ID;
+    const result = await db.query(
+        `SELECT
+            COALESCE((
+                SELECT COUNT(*)::INTEGER
+                FROM members m
+                WHERE m.gym_id = $1
+                  AND m.deleted_at IS NULL
+                  AND COALESCE(m.branch_id, $2) = $2
+            ), 0) AS members,
+            COALESCE((
+                SELECT COUNT(*)::INTEGER
+                FROM users u
+                WHERE u.gym_id = $1
+                  AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
+                  AND COALESCE(u.branch_id, $2) = $2
+            ), 0) AS staff,
+            $2::TEXT AS branch_id`,
+        [gymId, normalizedBranchId]
+    );
+
+    return result.rows[0] || { members: 0, staff: 0, branch_id: normalizedBranchId };
+};
+
 module.exports = {
     BILLING_ADDON_ORDER,
+    BILLING_BRANCH_SCALED_LIMIT_KEYS,
     BILLING_CAPABILITY_KEYS,
     BILLING_CORE_PLAN_IDS,
     BILLING_PLAN_ORDER,
@@ -615,6 +670,7 @@ module.exports = {
     getBillingConfig,
     getBillingPlan,
     getBillingPlanPrice,
+    getBranchUsageSnapshot,
     getVisibleBillingPlanOrder,
     getGymBillingSnapshot,
     getGymUsageSnapshot,

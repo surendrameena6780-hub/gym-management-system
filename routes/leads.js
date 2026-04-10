@@ -15,10 +15,11 @@ const {
 const {
     computeEffectiveBillingLimits,
     getBillingConfig,
+    getBranchUsageSnapshot,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
-const { resolveBranchReadScope, resolveBranchWriteScope } = require('../utils/branchAccess');
+const { DEFAULT_BRANCH_ID, resolveBranchReadScope, resolveBranchWriteScope } = require('../utils/branchAccess');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -318,10 +319,12 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
         let createdNewMember = false;
 
         if (!member) {
-            const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
+            const targetBranchId = String(lead.branch_id || DEFAULT_BRANCH_ID);
+            const [billingConfig, gymBilling, usageSnapshot, branchUsage] = await Promise.all([
                 getBillingConfig(),
                 getGymBillingSnapshot(client, gymId),
                 getGymUsageSnapshot(client, gymId),
+                getBranchUsageSnapshot(client, gymId, targetBranchId),
             ]);
             if (!gymBilling) {
                 await client.query('ROLLBACK');
@@ -329,20 +332,33 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
             }
 
             const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+            if (effectiveLimits.members_per_branch !== null && Number(branchUsage.members || 0) + 1 > effectiveLimits.members_per_branch) {
+                const totalCapacityHint = effectiveLimits.members !== null && Number(effectiveLimits.capacity_branches || 1) > 1
+                    ? ` (${effectiveLimits.members} total across ${effectiveLimits.capacity_branches} configured branch${effectiveLimits.capacity_branches === 1 ? '' : 'es'})`
+                    : '';
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    error: `Your current plan allows up to ${effectiveLimits.members_per_branch} members in this branch${totalCapacityHint}. Delete an expired or unpaid member, or add more member capacity before converting this lead.`,
+                    allowed_members: effectiveLimits.members_per_branch,
+                    current_members: Number(branchUsage.members || 0),
+                    current_gym_members: Number(usageSnapshot.members || 0),
+                    branch_id: targetBranchId,
+                });
+            }
             if (effectiveLimits.members !== null && Number(usageSnapshot.members || 0) + 1 > effectiveLimits.members) {
                 await client.query('ROLLBACK');
                 return res.status(409).json({
-                    error: `Your current plan allows up to ${effectiveLimits.members} active members including add-ons. Upgrade the plan or add member capacity before converting this lead.`,
+                    error: `Your current plan allows up to ${effectiveLimits.members} members across ${effectiveLimits.capacity_branches || 1} configured branch${Number(effectiveLimits.capacity_branches || 1) === 1 ? '' : 'es'} including add-ons. Delete an expired or unpaid member, or add more member capacity before converting this lead.`,
                     allowed_members: effectiveLimits.members,
                     current_members: Number(usageSnapshot.members || 0),
                 });
             }
 
             const createdMember = await client.query(
-                `INSERT INTO members (gym_id, full_name, phone, email, joining_date, status)
-                 VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID')
+                `INSERT INTO members (gym_id, full_name, phone, email, joining_date, status, branch_id)
+                 VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID', $5)
                  RETURNING *`,
-                [gymId, lead.full_name, lead.phone, lead.email || null]
+                [gymId, lead.full_name, lead.phone, lead.email || null, targetBranchId]
             );
             member = createdMember.rows[0];
             createdNewMember = true;

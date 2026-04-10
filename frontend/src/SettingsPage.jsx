@@ -46,15 +46,15 @@ const normalizeSettingsTab = (value) => {
 const SAAS_PLANS = {
   monthly: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic',  name: 'Basic',      price: 1, billed: 1,  features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'basic',  name: 'Basic',      price: 1, billed: 1,  features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 400 Members / Branch', 'Up to 2 Branches', '1 Owner + 5 Staff Users / Branch', '1,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 1,000 Members / Branch', 'Up to 3 Branches', '1 Owner + 10 Staff Users / Branch', '2,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
   annual: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic',  name: 'Basic',      price: 1, billed: 10, features: ['Up to 150 Active Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'basic',  name: 'Basic',      price: 1, billed: 10, features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 400 Members / Branch', 'Up to 2 Branches', '1 Owner + 5 Staff Users / Branch', '1,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 1,000 Members / Branch', 'Up to 3 Branches', '1 Owner + 10 Staff Users / Branch', '2,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
 };
 
@@ -194,7 +194,7 @@ const getEffectiveLimits = (planId, gymData) => {
 const ADDON_PACKS = [
   { key: 'extra_whatsapp_250', label: 'Extra 250 WhatsApp Messages', price: 249, icon: MessageSquare, desc: 'Adds 250 more outbound WhatsApp messages to your monthly quota.' },
   { key: 'extra_staff_1',      label: 'Extra Staff User',            price: 149, icon: Users,         desc: 'Add 1 more staff login to your current plan.' },
-  { key: 'extra_members_100',  label: 'Extra 100 Active Members',    price: 299, icon: User,          desc: 'Raises your active member cap by 100.' },
+  { key: 'extra_members_100',  label: 'Extra 100 Members',           price: 299, icon: User,          desc: 'Raises your member capacity by 100.' },
   { key: 'extra_branch_1',     label: 'Extra Branch',                price: 599, icon: Building2,     desc: 'Add 1 more branch to your gym setup.' },
   { key: 'extra_hello_1',      label: 'Extra Hello Number',          price: 699, icon: Phone,         desc: 'Enable inbound Hello on 1 additional WhatsApp number.', requiresPlan: ['growth', 'pro'] },
 ];
@@ -562,16 +562,21 @@ const loadRazorpayScript = () => {
   const [gymData, setGymData] = useState({ 
     name: '', phone: '', email: '', address: '', 
     currency: '₹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
-    saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: 'pro', saas_billing_cycle: 'monthly', grace_period_days: 3
+    saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: String(currentUser?.saas_plan || 'basic').toLowerCase(), saas_billing_cycle: 'monthly', grace_period_days: 3
   });
 
   const [usageData, setUsageData] = useState({
       members: 0,
       staff: 0,
+      branches: 1,
       storage: 0.1
   });
   const [billingCatalog, setBillingCatalog] = useState(() => normalizeFrontendBillingCatalog());
-  const [effectiveLimits, setEffectiveLimits] = useState(() => computeCatalogEffectiveLimits(normalizeFrontendBillingCatalog(), 'pro'));
+  const [effectiveLimits, setEffectiveLimits] = useState(() => computeCatalogEffectiveLimits(
+    normalizeFrontendBillingCatalog(),
+    String(currentUser?.saas_plan || 'basic').toLowerCase(),
+    { branches_count: 1 }
+  ));
 
   const [integSubTab, setIntegSubTab] = useState('payments');
   const [expandedTemplate, setExpandedTemplate] = useState(null);
@@ -637,11 +642,19 @@ const loadRazorpayScript = () => {
     approved_template_count: 0,
     sms_ready: false,
     bulk_enabled: true,
-    bulk_monthly_limit: PLAN_LIMITS[currentUser?.saas_plan]?.whatsapp || 500,
+    bulk_monthly_limit: computeCatalogEffectiveLimits(
+      normalizeFrontendBillingCatalog(),
+      String(currentUser?.saas_plan || 'basic').toLowerCase(),
+      { branches_count: 1 }
+    ).whatsapp || 500,
     bulk_per_campaign_limit: 50,
     bulk_channels: { whatsapp: true, sms: false },
     monthly_usage: 0,
-    monthly_remaining: 500,
+    monthly_remaining: computeCatalogEffectiveLimits(
+      normalizeFrontendBillingCatalog(),
+      String(currentUser?.saas_plan || 'basic').toLowerCase(),
+      { branches_count: 1 }
+    ).whatsapp || 500,
     templates: DEFAULT_MESSAGE_TEMPLATES,
     member_payments: {
       enabled: true,
@@ -793,6 +806,11 @@ const loadRazorpayScript = () => {
       }
 
       if (res.data.gym) {
+          const resolvedBranchesCount = Math.max(1, Math.min(25, Number.parseInt(res.data.gym.branches_count, 10) || 1));
+          const resolvedBranchDirectory = buildBranchDirectoryState(
+            resolvedBranchesCount,
+            Array.isArray(res.data.gym.branch_directory) ? res.data.gym.branch_directory : []
+          );
           setGymData(prev => ({
             ...prev,
             name: res.data.gym.name || prev.name,
@@ -814,6 +832,11 @@ const loadRazorpayScript = () => {
             addon_extra_branches: Number(res.data.gym.addon_extra_branches || 0),
             addon_extra_hello: Number(res.data.gym.addon_extra_hello || 0),
           }));
+          setPlatformData((prev) => ({
+            ...prev,
+            branches_count: resolvedBranchesCount,
+            branch_directory: resolvedBranchDirectory,
+          }));
 
           const nextInterfacePreferences = {
             reduce_motion: false,
@@ -830,7 +853,10 @@ const loadRazorpayScript = () => {
       }
 
       if (res.data.usage) {
-          setUsageData(res.data.usage);
+          setUsageData((prev) => ({
+            ...prev,
+            ...res.data.usage,
+          }));
       }
 
       if (res.data.billing_catalog) {
@@ -840,12 +866,22 @@ const loadRazorpayScript = () => {
       if (res.data.effective_limits) {
         setEffectiveLimits({
           members: res.data.effective_limits.members ?? null,
+          members_per_branch: res.data.effective_limits.members_per_branch ?? null,
           staff: res.data.effective_limits.staff ?? null,
+          staff_per_branch: res.data.effective_limits.staff_per_branch ?? null,
           storage: res.data.effective_limits.storage ?? null,
           branches: res.data.effective_limits.branches ?? null,
+          configured_branches: res.data.effective_limits.configured_branches ?? null,
+          capacity_branches: res.data.effective_limits.capacity_branches ?? null,
           whatsapp: res.data.effective_limits.whatsapp ?? null,
+          whatsapp_per_branch: res.data.effective_limits.whatsapp_per_branch ?? null,
           hello: res.data.effective_limits.hello ?? null,
+          hello_per_branch: res.data.effective_limits.hello_per_branch ?? null,
         });
+        setIntegrationData((prev) => ({
+          ...prev,
+          bulk_monthly_limit: Number(res.data.effective_limits.whatsapp ?? prev.bulk_monthly_limit ?? 500),
+        }));
       }
 
     } catch (err) {
@@ -918,7 +954,7 @@ const loadRazorpayScript = () => {
         approved_template_count: Number(payload.approved_template_count || 0),
         sms_ready: Boolean(payload.sms_ready),
         bulk_enabled: payload.bulk_enabled !== false,
-        bulk_monthly_limit: Number(payload.bulk_monthly_limit || (PLAN_LIMITS[gymData.current_plan]?.whatsapp) || 500),
+        bulk_monthly_limit: Number(payload.bulk_monthly_limit ?? prev.bulk_monthly_limit ?? 500),
         bulk_per_campaign_limit: Number(payload.bulk_per_campaign_limit || 50),
         bulk_channels: payload.bulk_channels || { whatsapp: true, sms: false },
         monthly_usage: Number(payload.monthly_usage || 0),
@@ -1294,7 +1330,6 @@ const loadRazorpayScript = () => {
 
     if (normalizedScope === 'campaigns' || normalizedScope === 'all') {
       payload.bulk_enabled = integrationData.bulk_enabled;
-      payload.bulk_monthly_limit = integrationData.bulk_monthly_limit;
       payload.bulk_per_campaign_limit = integrationData.bulk_per_campaign_limit;
       payload.bulk_channels = integrationData.bulk_channels;
       payload.templates = integrationData.templates;
@@ -2522,13 +2557,13 @@ const loadRazorpayScript = () => {
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
                           <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
-                          <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp ? ' + add-ons' : ''}.</p>
+                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Multi-branch plans scale member, staff, WhatsApp, and Hello capacity by configured branches.</p>
                       </div>
                   </div>
                   
                   <div className="grid grid-cols-1 desktop:grid-cols-2 gap-x-12 gap-y-8 mt-6">
                       <ProgressBar 
-                          label="Active Members" 
+                        label="Members" 
                           current={usageData.members} 
                           max={eLimits.members ?? 'Unlimited'} 
                           icon={Users} 

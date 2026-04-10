@@ -703,3 +703,39 @@ Upgrade the backend plan if any one of these becomes normal:
 3. Do not run the large k6 stress suite on the tiny live production box.
 4. If any secret or password is exposed in screenshots/chat/logs, rotate it immediately.
 5. If a future deploy changes infra behavior, verify both Render logs and Supabase observability before assuming the code is at fault.
+
+
+Production Readiness Improvements
+
+CRITICAL (Before Launch)
+
+Secure .env — Remove from git history, rotate all credentials, disable OTP_BYPASS
+Hardcoded production URLs — Parameterize via VITE_API_URL
+Payment race conditions — Add FOR UPDATE locks to prevent double-collection
+OTP brute-force protection — Add account lockout after 3 failed attempts
+Expired member check-in blocking — Reject attendance for EXPIRED/FROZEN members
+Campaign duplicate send protection — Disable button after click, track campaign runs
+
+HIGH PRIORITY (First Month)
+
+Bulk member actions — Select multiple → send reminder, freeze, export
+Membership renewal automation — Reminders at 30/7/1 days, auto-renew option
+Trainer-member assignment — Trainers see "My Members" with progress
+Lead follow-up automation — Auto-reminders, trial-to-member conversion
+Attendance streaks & gamification — 7/30/100-day badges, push notifications
+Payment retry for failed dues — Auto-retry with backoff schedule
+
+MEDIUM PRIORITY (Growth)
+
+Member body stats tracking — Weight/BMI trends, progress photos
+Referral program — Member referral codes with reward credits
+Staff performance KPIs — Per-staff metrics, commission tracking
+Custom report builder — Scheduled PDF reports emailed monthly
+Trainer companion PWA — Mobile-optimized trainer view
+
+LOW PRIORITY (Polish)
+
+Family memberships — Group billing for families
+POS merchandise catalog — Product inventory + sales tracking
+Custom staff roles — Role builder with granular permissions
+API for third-party integration — REST API + webhooks for external apps
