@@ -1,8 +1,10 @@
 require('dotenv').config();
 
+const bcrypt = require('bcryptjs');
 const { pool } = require('../config/db');
 
 const BOT_EMAIL_DOMAIN = 'seed.gymvault.bot';
+const BOT_STAFF_EMAIL_DOMAIN = 'staff.gymvault.bot';
 const DEFAULT_STATUS_MIX = {
   ACTIVE: 10,
   UNPAID: 10,
@@ -14,12 +16,18 @@ const DEFAULT_STATUS_MIX = {
 const FIRST_NAMES = [
   'Aarav', 'Vivaan', 'Aditya', 'Kabir', 'Arjun', 'Reyansh', 'Ishaan', 'Rohan', 'Karan', 'Neeraj',
   'Priya', 'Ananya', 'Meera', 'Aisha', 'Sneha', 'Kavya', 'Ritika', 'Pooja', 'Naina', 'Ira',
+  'Raj', 'Vikram', 'Deepak', 'Suresh', 'Pankaj', 'Rahul', 'Sanjay', 'Manish', 'Nikhil', 'Amit',
+  'Ritu', 'Sonal', 'Tanvi', 'Gauri', 'Nikita', 'Simran', 'Komal', 'Bhavna', 'Heena', 'Divya',
 ];
 
 const LAST_NAMES = [
   'Sharma', 'Verma', 'Mehta', 'Singh', 'Patel', 'Kapoor', 'Nair', 'Reddy', 'Joshi', 'Bansal',
   'Khanna', 'Mishra', 'Gupta', 'Malhotra', 'Yadav', 'Rana', 'Chawla', 'Arora', 'Saxena', 'Pillai',
+  'Bhat', 'Rathi', 'Dubey', 'Chauhan', 'Thakur', 'Pandey', 'Dixit', 'Kulkarni', 'Iyer', 'Desai',
 ];
+
+const STAFF_ROLES = ['TRAINER', 'RECEPTIONIST', 'TRAINER', 'MANAGER', 'TRAINER'];
+const DEFAULT_STAFF_PASSWORD = 'Staff@1234';
 
 const toDateOnly = (date) => date.toISOString().slice(0, 10);
 
@@ -35,11 +43,23 @@ const parseArgs = () => {
     gymName: '',
     replace: true,
     mix: { ...DEFAULT_STATUS_MIX },
+    staffPerBranch: 0,
+    perBranch: false,
   };
 
   for (const arg of process.argv.slice(2)) {
     if (arg === '--keep-existing') {
       options.replace = false;
+      continue;
+    }
+
+    if (arg === '--per-branch') {
+      options.perBranch = true;
+      continue;
+    }
+
+    if (arg.startsWith('--staff=')) {
+      options.staffPerBranch = Math.max(0, Number.parseInt(arg.split('=')[1], 10) || 0);
       continue;
     }
 
@@ -306,10 +326,10 @@ const deleteExistingBotMembers = async (client, gymId) => {
   return result.rowCount || 0;
 };
 
-const insertSeedMember = async (client, gymId, seed, sequence) => {
+const insertSeedMember = async (client, gymId, seed, sequence, branchId) => {
   const memberInsert = await client.query(
-    `INSERT INTO members (gym_id, full_name, phone, email, joining_date, last_visit, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO members (gym_id, full_name, phone, email, joining_date, last_visit, status, branch_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id`,
     [
       gymId,
@@ -319,6 +339,7 @@ const insertSeedMember = async (client, gymId, seed, sequence) => {
       seed.joiningDate,
       seed.lastVisit ? seed.lastVisit.toISOString() : null,
       seed.memberStatus,
+      branchId,
     ]
   );
 
@@ -326,8 +347,8 @@ const insertSeedMember = async (client, gymId, seed, sequence) => {
 
   if (seed.membership) {
     await client.query(
-      `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         gymId,
         memberId,
@@ -335,14 +356,15 @@ const insertSeedMember = async (client, gymId, seed, sequence) => {
         toDateOnly(seed.membership.startDate),
         toDateOnly(seed.membership.endDate),
         seed.membership.status,
+        branchId,
       ]
     );
   }
 
   if (seed.payment) {
     await client.query(
-      `INSERT INTO payments (gym_id, user_id, plan_id, amount_paid, amount_due, total_amount, payment_mode, transaction_id, invoice_id, notes, status, payment_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      `INSERT INTO payments (gym_id, user_id, plan_id, amount_paid, amount_due, total_amount, payment_mode, transaction_id, invoice_id, notes, status, payment_date, branch_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         gymId,
         memberId,
@@ -356,9 +378,56 @@ const insertSeedMember = async (client, gymId, seed, sequence) => {
         `Bot member seed (${seed.memberStatus})`,
         seed.payment.status,
         seed.payment.paymentDate.toISOString(),
+        branchId,
       ]
     );
   }
+};
+
+const loadBranchDirectory = async (client, gymId) => {
+  const res = await client.query(
+    `SELECT branches_count, branch_directory FROM gyms WHERE id = $1 LIMIT 1`,
+    [gymId]
+  );
+  const row = res.rows[0] || {};
+  const count = Math.max(1, Number(row.branches_count) || 1);
+  const directory = Array.isArray(row.branch_directory) ? row.branch_directory : [];
+  if (directory.length === 0) {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `branch-${i + 1}`,
+      name: i === 0 ? 'Main Branch' : `Branch ${i + 1}`,
+    }));
+  }
+  return directory.slice(0, count).map((b, i) => ({
+    id: b.id || `branch-${i + 1}`,
+    name: b.name || (i === 0 ? 'Main Branch' : `Branch ${i + 1}`),
+  }));
+};
+
+const deleteExistingBotStaff = async (client, gymId) => {
+  const result = await client.query(
+    `DELETE FROM users WHERE gym_id = $1 AND lower(email) LIKE $2 AND UPPER(role) != 'OWNER'`,
+    [gymId, `%@${BOT_STAFF_EMAIL_DOMAIN}`]
+  );
+  return result.rowCount || 0;
+};
+
+const insertBotStaff = async (client, gymId, branchId, staffIndex, branchIndex) => {
+  const firstName = FIRST_NAMES[(branchIndex * 5 + staffIndex) % FIRST_NAMES.length];
+  const lastName = LAST_NAMES[(branchIndex * 5 + staffIndex + 3) % LAST_NAMES.length];
+  const fullName = `${firstName} ${lastName}`;
+  const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}.b${branchIndex + 1}.s${staffIndex + 1}@${BOT_STAFF_EMAIL_DOMAIN}`;
+  const staffRole = STAFF_ROLES[staffIndex % STAFF_ROLES.length];
+  const salt = await bcrypt.genSalt(10);
+  const hash = await bcrypt.hash(DEFAULT_STAFF_PASSWORD, salt);
+
+  await client.query(
+    `INSERT INTO users (gym_id, full_name, email, password_hash, role, staff_role, branch_id, is_active, permissions)
+     VALUES ($1, $2, $3, $4, 'STAFF', $5, $6, TRUE, $7::jsonb)
+     ON CONFLICT (email) DO NOTHING`,
+    [gymId, fullName, email, hash, staffRole, branchId, JSON.stringify({})]
+  );
+  return { fullName, email, staffRole, branchId };
 };
 
 const main = async () => {
@@ -371,11 +440,45 @@ const main = async () => {
 
     const gym = await resolveTargetGym(client, options.gymId, options.gymName);
     const plans = await loadPlans(client, gym.id);
+    const branches = await loadBranchDirectory(client, gym.id);
     const removed = options.replace ? await deleteExistingBotMembers(client, gym.id) : 0;
-    const seeds = buildSeedMembers(gym.id, statusList, plans);
+    const removedStaff = options.staffPerBranch > 0 ? await deleteExistingBotStaff(client, gym.id) : 0;
 
-    for (let index = 0; index < seeds.length; index += 1) {
-      await insertSeedMember(client, gym.id, seeds[index], index + 1);
+    let totalSeeded = 0;
+    let totalStaff = 0;
+    const branchResults = [];
+
+    const targetBranches = options.perBranch ? branches : [branches[0]];
+
+    for (const branch of targetBranches) {
+      const branchSeeds = buildSeedMembers(gym.id, statusList, plans);
+
+      for (let index = 0; index < branchSeeds.length; index += 1) {
+        // Make emails unique per branch
+        const seed = { ...branchSeeds[index] };
+        seed.email = seed.email.replace(`@${BOT_EMAIL_DOMAIN}`, `.${branch.id}@${BOT_EMAIL_DOMAIN}`);
+        seed.phone = buildPhone(gym.id, totalSeeded + index + 1);
+        await insertSeedMember(client, gym.id, seed, totalSeeded + index + 1, branch.id);
+      }
+
+      let branchStaff = 0;
+      if (options.staffPerBranch > 0) {
+        const branchIdx = targetBranches.indexOf(branch);
+        for (let s = 0; s < options.staffPerBranch; s++) {
+          await insertBotStaff(client, gym.id, branch.id, s, branchIdx);
+          branchStaff++;
+        }
+      }
+
+      branchResults.push({
+        branch_id: branch.id,
+        branch_name: branch.name,
+        members_seeded: branchSeeds.length,
+        staff_seeded: branchStaff,
+      });
+
+      totalSeeded += branchSeeds.length;
+      totalStaff += branchStaff;
     }
 
     await client.query('COMMIT');
@@ -383,9 +486,12 @@ const main = async () => {
     console.log(JSON.stringify({
       gym_id: gym.id,
       gym_name: gym.name,
-      seeded: seeds.length,
-      removed_existing: removed,
+      total_members_seeded: totalSeeded,
+      total_staff_seeded: totalStaff,
+      removed_existing_members: removed,
+      removed_existing_staff: removedStaff,
       mix: options.mix,
+      branches: branchResults,
     }, null, 2));
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

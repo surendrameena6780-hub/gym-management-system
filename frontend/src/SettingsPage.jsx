@@ -637,7 +637,7 @@ const loadRazorpayScript = () => {
     approved_template_count: 0,
     sms_ready: false,
     bulk_enabled: true,
-    bulk_monthly_limit: 500,
+    bulk_monthly_limit: PLAN_LIMITS[currentUser?.saas_plan]?.whatsapp || 500,
     bulk_per_campaign_limit: 50,
     bulk_channels: { whatsapp: true, sms: false },
     monthly_usage: 0,
@@ -865,13 +865,15 @@ const loadRazorpayScript = () => {
     fetchSettings();
   }, [fetchSettings, isActive, isOwner, token]);
 
+  const effectiveStaffBranch = branchScopeValue || defaultBranchId || 'branch-1';
+
   const fetchStaff = useCallback(async () => {
     if (!token) return;
     setLoadingStaff(true);
     try {
       const res = await axios.get('/api/users/staff', {
         ...headers,
-        params: branchScopeValue ? { branch_id: branchScopeValue } : undefined,
+        params: { branch_id: effectiveStaffBranch },
       });
       setStaffMembers(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
@@ -879,14 +881,14 @@ const loadRazorpayScript = () => {
     } finally {
       setLoadingStaff(false);
     }
-  }, [branchScopeValue, headers, toast, token]);
+  }, [effectiveStaffBranch, headers, toast, token]);
 
   useEffect(() => {
     if (!isActive || !isOwner) return;
     if (activeTab === 'staff') {
       fetchStaff();
     }
-  }, [activeTab, fetchStaff, isActive, isOwner, branchScopeValue]);
+  }, [activeTab, fetchStaff, isActive, isOwner, effectiveStaffBranch]);
 
   const loadIntegrations = useCallback(async () => {
     if (!token) return;
@@ -916,7 +918,7 @@ const loadRazorpayScript = () => {
         approved_template_count: Number(payload.approved_template_count || 0),
         sms_ready: Boolean(payload.sms_ready),
         bulk_enabled: payload.bulk_enabled !== false,
-        bulk_monthly_limit: Number(payload.bulk_monthly_limit || 500),
+        bulk_monthly_limit: Number(payload.bulk_monthly_limit || (PLAN_LIMITS[gymData.current_plan]?.whatsapp) || 500),
         bulk_per_campaign_limit: Number(payload.bulk_per_campaign_limit || 50),
         bulk_channels: payload.bulk_channels || { whatsapp: true, sms: false },
         monthly_usage: Number(payload.monthly_usage || 0),
@@ -2782,7 +2784,7 @@ const loadRazorpayScript = () => {
                             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Razorpay Key ID</label>
                             <input value={integrationData.member_payments?.razorpay_key_id || ''}
                               onChange={(e) => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, razorpay_key_id: e.target.value } }))}
-                              placeholder="rzp_live_xxxxx"
+                              placeholder="rzp_live_xxxxx" autoComplete="off" name="razorpay_key_id_field"
                               className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
                           </div>
                           <div>
@@ -2790,6 +2792,7 @@ const loadRazorpayScript = () => {
                             <input type="password" value={integrationData.member_payments?.razorpay_key_secret || ''}
                               onChange={(e) => setIntegrationData(prev => ({ ...prev, member_payments: { ...prev.member_payments, razorpay_key_secret: e.target.value } }))}
                               placeholder={integrationData.member_payments?.has_razorpay_secret ? 'Saved securely (enter to replace)' : 'rzp_live_secret_xxxxx'}
+                              autoComplete="new-password" name="razorpay_secret_field"
                               className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
                           </div>
                         </div>
@@ -3123,10 +3126,10 @@ const loadRazorpayScript = () => {
                         {/* Limits */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
                           <div>
-                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Monthly Limit</label>
+                            <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Monthly Limit <span className="text-purple-500 font-bold">(set by plan)</span></label>
                             <input type="number" min="10" value={integrationData.bulk_monthly_limit}
-                              onChange={(e) => setIntegrationData(prev => ({ ...prev, bulk_monthly_limit: e.target.value }))}
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-purple-300 focus:ring-2 focus:ring-purple-100 outline-none" />
+                              readOnly disabled
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-sm font-semibold text-slate-500 cursor-not-allowed outline-none" />
                           </div>
                           <div>
                             <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Per Campaign</label>

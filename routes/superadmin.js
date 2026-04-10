@@ -484,27 +484,20 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
                 archived_by: 'SUPERADMIN',
             })]
         );
-        await client.query('UPDATE users SET is_active = FALSE WHERE gym_id = $1', [gymId]);
-        await client.query(
-            `UPDATE gyms
-             SET is_active = FALSE,
-                 gym_access_status = 'SUSPENDED',
-                 suspended_at = COALESCE(suspended_at, NOW()),
-                 suspended_reason = COALESCE(NULLIF(suspended_reason, ''), 'Archived by superadmin')
-             WHERE id = $1`,
-            [gymId]
-        );
+
+        // Hard delete — CASCADE foreign keys handle child tables
+        await client.query('DELETE FROM gyms WHERE id = $1', [gymId]);
 
         await client.query('COMMIT');
 
         await logAudit({
-            action: 'GYM_ARCHIVED',
+            action: 'GYM_DELETED',
             targetType: 'GYM',
             targetId: gymId,
             targetLabel: gym.rows[0].name,
         });
 
-        return res.json({ message: 'Gym archived and access revoked.' });
+        return res.json({ message: 'Gym permanently deleted.' });
     } catch (err) {
         try {
             await client.query('ROLLBACK');

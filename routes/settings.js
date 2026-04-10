@@ -44,6 +44,7 @@ const {
     computeEffectiveBillingLimits,
     ensureGymBillingAddonSchema,
     getBillingConfig,
+    getBillingPlan,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
     hasBillingCapability,
@@ -578,7 +579,8 @@ const loadMessagingState = async (gymId) => {
                 member_payments_onboarding_status,
                 member_razorpay_connected_account_id,
                 member_payments_connected_at,
-                name
+                name,
+                current_plan
              FROM gyms
              WHERE id = $1
              LIMIT 1`,
@@ -1150,7 +1152,14 @@ router.get('/integrations', auth, async (req, res) => {
 
         const row = messagingState.gym || {};
         const templates = messagingState.templates || [];
-        const monthlyLimit = toPositiveInt(row.bulk_monthly_limit, 500);
+        const gymPlan = String(row.current_plan || 'basic').toLowerCase();
+        const planWhatsAppLimit = (() => {
+            const billingConfig = getBillingConfig();
+            const plan = getBillingPlan(billingConfig, gymPlan);
+            return plan?.limits?.whatsapp ?? 500;
+        })();
+        // Always derive monthly limit from plan — plan-locked, not user-editable
+        const monthlyLimit = planWhatsAppLimit || 500;
         const monthlySent = toPositiveInt(usageRes.rows[0]?.monthly_sent, 0);
         const templateSummary = summarizeTemplateSyncStatus(templates);
         const platformOtpMode = getMsg91OtpMode().toLowerCase();
@@ -1419,11 +1428,18 @@ router.put('/integrations', auth, async (req, res) => {
 
         if (shouldSaveCampaigns) {
             const bulkEnabled = Boolean(req.body?.bulk_enabled ?? currentGym.bulk_enabled);
+            const planBasedDefault = (() => {
+                try {
+                    const bc = getBillingConfig();
+                    const p = getBillingPlan(bc, currentGym.current_plan || 'basic');
+                    return p?.limits?.whatsapp ?? 500;
+                } catch { return 500; }
+            })();
             const monthlyLimit = ensureInteger(req.body?.bulk_monthly_limit, {
                 field: 'bulk_monthly_limit',
                 min: 10,
                 max: 100000,
-                defaultValue: toPositiveInt(currentGym.bulk_monthly_limit, 500),
+                defaultValue: toPositiveInt(currentGym.bulk_monthly_limit, planBasedDefault),
             });
             const perCampaign = ensureInteger(req.body?.bulk_per_campaign_limit, {
                 field: 'bulk_per_campaign_limit',
