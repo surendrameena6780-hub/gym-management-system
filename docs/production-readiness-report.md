@@ -1,11 +1,13 @@
 # GymVault — Production Readiness Report
 
 **Date:** June 2025  
-**Status Reviewed:** April 2026  
+**Status Reviewed:** April 10, 2026  
 **Target Scale:** 100 gyms × 500 members = 50,000 members  
-**Overall Verdict:** READY FOR PRODUCTION — No open critical blockers; remaining items are hardening follow-ups
+**Overall Verdict:** READY FOR CONTROLLED PRODUCTION LAUNCH — Live deployment verified; remaining items are capacity-margin and hardening follow-ups
 
 > Update (April 2026): Previously audited critical blockers and several high-priority findings have been remediated in code. This report now keeps only the partially mitigated or still-open risks that need follow-up.
+
+> Update (April 10, 2026): The production backend is live on Render at `https://gym-management-system-4nfu.onrender.com`, the frontend is live at `https://gymvault.tech`, backend `/healthz` is passing, the production smoke suite passed 8/8 checks, and page-level manual verification completed without reported breakage. Capacity hardening added today includes PM2 runtime support, Render-safe low-memory startup, auth/analytics caching, and cluster-safe background job coordination.
 
 ---
 
@@ -25,17 +27,19 @@
 12. [Dependency & Vulnerability Report](#12-dependency--vulnerability-report)
 13. [What's Working Well](#13-whats-working-well)
 14. [Remaining Follow-Up Priority](#14-remaining-follow-up-priority)
+15. [April 10 Deployment Summary & Always-Remember Checklist](#15-april-10-deployment-summary--always-remember-checklist)
 
 ---
 
 ## 1. Executive Summary
 
-GymVault is a multi-tenant SaaS gym management system with a solid foundation. The SQL layer is well-parameterized (no injection risks), CORS/Helmet/rate-limiting are in place, and the frontend is responsive with PWA support.
+GymVault is a multi-tenant SaaS gym management system with a solid foundation. The SQL layer is well-parameterized (no injection risks), CORS/Helmet/rate-limiting are in place, the frontend is responsive with PWA support, and the current production deployment has now been validated end-to-end.
 
-No open critical production blockers remain. The main remaining follow-up areas are field-level input validation, long-retention partition strategy, uneven page-specific async recovery, accessibility, large frontend bundles, in-process background job coordination, and missing automated smoke coverage.
+No open critical production blockers remain. The main remaining follow-up areas are field-level input validation, long-retention partition strategy, uneven page-specific async recovery, accessibility, large frontend bundles, Redis provisioning for shared cache, and maintaining enough Render headroom as real production concurrency grows.
 
 **Can it handle 100 gyms with 500 members each?**  
-Yes. With the current pool configuration and added scale indexes, this codebase is in a workable state for that target load.
+Codebase/data model: yes, this codebase is in a workable state for that target load.  
+Current live deployment: the present 512 MB Render instance is suitable to start with roughly 20-25 gyms of 500-600 members each under normal day-to-day usage, but it should not be treated as guaranteed headroom for heavy all-at-once spikes until Redis is provisioned and/or the backend plan is increased.
 
 ---
 
@@ -46,10 +50,12 @@ Yes. With the current pool configuration and added scale indexes, this codebase 
 | **Runtime** | Node.js | 20.18.0 |
 | **Backend Framework** | Express | 5.2.1 |
 | **Database** | PostgreSQL | via pg 8.18.0 |
+| **Process Manager** | PM2 / pm2-runtime | 5.4.3 |
 | **Frontend Framework** | React | 19.2.0 |
 | **Build Tool** | Vite | 7.3.1 |
 | **CSS** | Tailwind CSS | 4.1.18 |
 | **Auth** | JWT (jsonwebtoken 9.0.3) |
+| **Cache** | Redis-compatible cache with in-memory fallback | custom + ioredis 5.10.1 |
 | **Payments** | Razorpay | 2.9.6 |
 | **WhatsApp/SMS** | MSG91 (custom integration) |
 | **Push Notifications** | web-push | 3.6.7 |
@@ -163,6 +169,27 @@ No open critical production blockers remain.
 #### Verdict
 **The current application can comfortably handle 100 gyms × 500 members with the pool and index fixes already in place.** No architectural changes are required for that target scale.
 
+### April 10, 2026 Deployment Reality
+
+This section reflects the live production deployment, not just codebase potential.
+
+| Item | Current State |
+|---|---|
+| Frontend URL | `https://gymvault.tech` |
+| Backend URL | `https://gym-management-system-4nfu.onrender.com` |
+| Backend health | PASS (`/healthz` returned `status=ok`, `database=reachable`) |
+| Production smoke test | PASS (8 checks passed, 0 warnings, 0 failures) |
+| Frontend to backend rewrite | PASS (`/api/*` on `gymvault.tech` correctly reaches Render backend) |
+| Current Render runtime mode | PM2-managed single worker in `fork` mode on 512 MB plan |
+| Current Render safety posture | Memory-safe startup with reduced heap and non-cluster default on Render |
+| Current practical launch guidance | Good for a controlled launch with 20-25 gyms at 500-600 members each under normal usage |
+
+Important distinction:
+
+- `onrender.com` is the backend/API URL, not the end-user app UI.
+- `gymvault.tech` is the actual frontend URL users should open.
+- Current production readiness is stronger than before, but the current 512 MB backend plan still has limited burst headroom.
+
 ---
 
 ## 9. Security Audit
@@ -235,9 +262,9 @@ The database pool now runs with explicit production-oriented limits and timeouts
 ## 12. Dependency & Vulnerability Report
 
 ### Backend (package.json)
-- **Vulnerabilities:** 0
-- **Dependencies:** 16 production, 1 dev
-- **Status:** Dependency footprint is acceptable; `twilio` remains in active OTP fallback paths.
+- **Vulnerabilities:** 3 currently reported by `npm audit` after adding PM2 runtime support (1 low, 1 moderate, 1 critical)
+- **Dependencies:** production dependencies increased to include `ioredis` and `pm2`
+- **Status:** Current deployment is operationally passing smoke tests, but the PM2-related audit findings should be reviewed in the next hardening pass.
 
 ### Frontend (package.json)
 - **Vulnerabilities:** 0
@@ -257,10 +284,12 @@ The database pool now runs with explicit production-oriented limits and timeouts
 | **Helmet** | Security headers properly configured |
 | **Env Validation** | Server refuses to start with weak JWT_SECRET or missing vars |
 | **Database Pooling** | Production pool sizing, timeouts, and boot-time scale indexes are now configured |
+| **Capacity Hardening** | Auth/session validation plus the heaviest analytics/summary routes now use cache-first reads with Redis-compatible fallback |
 | **Migration Tracking** | Named schema migrations run under advisory lock and are recorded in `schema_migrations` |
 | **File Upload Security** | Magic byte + extension validation, nosniff headers |
 | **API Response Format** | Consistent `{ success, data, error }` pattern throughout |
 | **Frontend Resilience** | Auth restoration, global API failure surfacing, and page-level error boundaries are now wired into the SPA shell |
+| **Production Validation** | Live backend health, frontend rewrite checks, and production smoke suite all passed on April 10, 2026 |
 | **PWA** | Full offline support, install prompts, service worker caching |
 | **Mobile Design** | Safe area insets, responsive grid, touch-friendly buttons |
 | **Background Jobs** | Automated expiry checks, notification nudges, retention maintenance, and database backups are wired in |
@@ -278,19 +307,75 @@ The database pool now runs with explicit production-oriented limits and timeouts
 | 2 | Normalize page-specific async error cleanup and retry UX | 1-2 hours | Reduces spinner-stall and partial-state failures |
 | 3 | Expand audit logging beyond notifications into more sensitive admin actions | 1 hour | Improves traceability |
 | 4 | Document backup restore procedures and backup retention policy | 30-60 min | Reduces operational recovery risk |
+| 5 | Provision Redis and set `REDIS_URL` on Render | 30 min | Enables shared cache across future workers and stronger burst handling |
 
 ### Phase 2: First Week of Production
 | # | Fix | Effort |
 |---|-----|--------|
-| 5 | Review long-term partitioning thresholds for attendance and event-heavy tables | 30-60 min |
-| 6 | Normalize button sizing tokens across common actions | 30-45 min |
+| 6 | Review long-term partitioning thresholds for attendance and event-heavy tables | 30-60 min |
+| 7 | Normalize button sizing tokens across common actions | 30-45 min |
+| 8 | Monitor Render memory/CPU plus Supabase connection graphs daily during launch week | 10 min/day |
 
 ### Phase 3: Month 1 (Hardening)
 | # | Fix | Effort |
 |---|-----|--------|
-| 7 | Split remaining oversized frontend pages after the dashboard extraction | 2-4 hours |
-| 8 | Resolve remaining lint warnings and hook dependency debt | 2-4 hours |
-| 9 | Evolve retention / archival into a formal partition policy for very large tables | 1-2 hours |
+| 9 | Split remaining oversized frontend pages after the dashboard extraction | 2-4 hours |
+| 10 | Resolve remaining lint warnings and hook dependency debt | 2-4 hours |
+| 11 | Evolve retention / archival into a formal partition policy for very large tables | 1-2 hours |
+
+---
+
+## 15. April 10 Deployment Summary & Always-Remember Checklist
+
+### What Was Done Today
+
+1. Added a Redis-compatible cache layer with in-memory fallback for production safety.
+2. Cached auth session validation to cut repeated database lookups on authenticated traffic.
+3. Cached the heaviest read endpoints, including dashboard stats, insights overview, finance overview, classes summary, and attendance overview/summary.
+4. Added PM2 ecosystem support for production process management.
+5. Added a Render-safe start command using `pm2-runtime`.
+6. Made background jobs cluster-safe so only the intended worker runs timers when scaling later.
+7. Tuned Render startup behavior so the 512 MB plan runs one memory-safe worker instead of overcommitting memory.
+8. Deployed the live backend successfully on Render.
+9. Verified live backend health with `/healthz`.
+10. Verified the frontend on `https://gymvault.tech` rewrites API requests to the live backend correctly.
+11. Ran the live production smoke suite successfully: 8 passed, 0 warnings, 0 failed.
+12. Manually validated that the main pages opened without reported breakage.
+
+### Keep In Mind Every Time
+
+1. `https://gymvault.tech` is the real app URL. `https://gym-management-system-4nfu.onrender.com` is the backend/API only.
+2. On the current 512 MB Render plan, keep the safe startup path: `npm run start:render`.
+3. On the current Render plan, keep conservative pool settings in the environment: `DB_POOL_MAX=25` and `DB_POOL_MIN=5`.
+4. Do not switch the backend to aggressive PM2 cluster mode on the 512 MB plan.
+5. Use the existing Supabase pooled connection setup for the persistent backend; do not swap it to transaction-mode pooler for this app runtime.
+6. Add `REDIS_URL` before the next scaling step so cache is shared properly across future workers.
+7. Do not run large k6 stress tests directly against the tiny production instance. Use staging or a larger box for heavy load testing.
+8. Watch Render metrics regularly: memory, CPU, restarts, and response time.
+9. Watch Supabase observability regularly: active database connections and pooler client connections.
+10. If any secret is ever exposed in chat, screenshots, or logs, rotate it immediately.
+11. Render can override repo runtime settings with environment variables, so keep Node pinned to 20.18.0 consistently.
+12. The current deployment is good for launch and normal day-to-day usage, but it is not the final scaling shape for large traffic spikes.
+
+### Quick Re-Validation Commands
+
+```bash
+npm run smoke:production
+```
+
+```text
+https://gym-management-system-4nfu.onrender.com/healthz
+```
+
+### Launch-Week Green / Yellow / Red Guide
+
+| Status | What It Means |
+|---|---|
+| Green | Pages feel normal, no restarts, memory stays comfortably below saturation, smoke test passes |
+| Yellow | Dashboard/insights start slowing, memory stays high, or connection graphs spike during normal use |
+| Red | Render restarts, memory errors return, requests time out, or users report broken/blank pages |
+
+If status becomes yellow, add Redis and consider a bigger Render plan. If status becomes red, upgrade the backend plan immediately before traffic grows further.
 
 ---
 
