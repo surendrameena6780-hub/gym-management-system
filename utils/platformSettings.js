@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { getBranchName, normalizeBranchDirectory } = require('./branchAccess');
 
 const defaultFeatureFlags = {
     support: true,
@@ -541,31 +542,82 @@ const resolveConfiguredBranchesCount = (gymData = {}) => {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 };
 
+const resolveAllowedBranchesCount = (plan, gymData = {}) => {
+    if (plan?.limits?.branches === null) return null;
+    const rawAllowedBranches = Number(plan?.limits?.branches || 0) + (Number(gymData?.addon_extra_branches) || 0);
+    return Math.max(1, rawAllowedBranches || 1);
+};
+
+const resolveScaledBranchCapacity = ({ configuredBranches, allowedBranches }) => {
+    if (allowedBranches === null) {
+        return {
+            pooledSingleBranch: false,
+            pooledBranchMultiplier: 1,
+            scaleBranches: configuredBranches,
+        };
+    }
+
+    if (configuredBranches === 1) {
+        return {
+            pooledSingleBranch: allowedBranches > 1,
+            pooledBranchMultiplier: Math.max(1, allowedBranches),
+            scaleBranches: Math.max(1, allowedBranches),
+        };
+    }
+
+    return {
+        pooledSingleBranch: false,
+        pooledBranchMultiplier: 1,
+        scaleBranches: Math.max(1, Math.min(configuredBranches, allowedBranches)),
+    };
+};
+
+const computeBranchAwareLimit = (baseValue, addonValue, branchCapacity) => {
+    if (baseValue === null) {
+        return {
+            total: null,
+            perConfiguredBranch: null,
+            perIncludedBranch: null,
+        };
+    }
+
+    const perIncludedBranch = Number(baseValue) + Number(addonValue || 0);
+    return {
+        total: perIncludedBranch * branchCapacity.scaleBranches,
+        perConfiguredBranch: perIncludedBranch * branchCapacity.pooledBranchMultiplier,
+        perIncludedBranch,
+    };
+};
+
 const computeEffectiveBillingLimits = (billingConfig, planId, gymData = {}) => {
     const plan = getBillingPlan(billingConfig, planId);
     const configuredBranches = resolveConfiguredBranchesCount(gymData);
-    const allowedBranches = plan.limits.branches === null ? null : plan.limits.branches + (Number(gymData?.addon_extra_branches) || 0);
-    const capacityBranches = allowedBranches === null
-        ? configuredBranches
-        : Math.max(1, Math.min(configuredBranches, Number(allowedBranches) || configuredBranches));
-    const perBranchMembers = plan.limits.members === null ? null : plan.limits.members + (Number(gymData?.addon_extra_members) || 0);
-    const perBranchStaff = plan.limits.staff === null ? null : plan.limits.staff + (Number(gymData?.addon_extra_staff) || 0);
-    const perBranchWhatsApp = plan.limits.whatsapp === null ? null : plan.limits.whatsapp + (Number(gymData?.addon_extra_whatsapp) || 0);
-    const perBranchHello = plan.limits.hello === null ? null : plan.limits.hello + (Number(gymData?.addon_extra_hello) || 0);
+    const allowedBranches = resolveAllowedBranchesCount(plan, gymData);
+    const branchCapacity = resolveScaledBranchCapacity({ configuredBranches, allowedBranches });
+    const membersLimit = computeBranchAwareLimit(plan.limits.members, gymData?.addon_extra_members, branchCapacity);
+    const staffLimit = computeBranchAwareLimit(plan.limits.staff, gymData?.addon_extra_staff, branchCapacity);
+    const whatsAppLimit = computeBranchAwareLimit(plan.limits.whatsapp, gymData?.addon_extra_whatsapp, branchCapacity);
+    const helloLimit = computeBranchAwareLimit(plan.limits.hello, gymData?.addon_extra_hello, branchCapacity);
 
     return {
-        members: perBranchMembers === null ? null : perBranchMembers * capacityBranches,
-        members_per_branch: perBranchMembers,
-        staff: perBranchStaff === null ? null : perBranchStaff * capacityBranches,
-        staff_per_branch: perBranchStaff,
+        members: membersLimit.total,
+        members_per_branch: membersLimit.perConfiguredBranch,
+        members_per_included_branch: membersLimit.perIncludedBranch,
+        staff: staffLimit.total,
+        staff_per_branch: staffLimit.perConfiguredBranch,
+        staff_per_included_branch: staffLimit.perIncludedBranch,
         storage: plan.limits.storage === null ? null : plan.limits.storage,
         branches: allowedBranches,
         configured_branches: configuredBranches,
-        capacity_branches: capacityBranches,
-        whatsapp: perBranchWhatsApp === null ? null : perBranchWhatsApp * capacityBranches,
-        whatsapp_per_branch: perBranchWhatsApp,
-        hello: perBranchHello === null ? null : perBranchHello * capacityBranches,
-        hello_per_branch: perBranchHello,
+        capacity_branches: branchCapacity.scaleBranches,
+        pooled_single_branch: branchCapacity.pooledSingleBranch,
+        pooled_branch_multiplier: branchCapacity.pooledBranchMultiplier,
+        whatsapp: whatsAppLimit.total,
+        whatsapp_per_branch: whatsAppLimit.perConfiguredBranch,
+        whatsapp_per_included_branch: whatsAppLimit.perIncludedBranch,
+        hello: helloLimit.total,
+        hello_per_branch: helloLimit.perConfiguredBranch,
+        hello_per_included_branch: helloLimit.perIncludedBranch,
     };
 };
 
@@ -588,6 +640,7 @@ const getGymBillingSnapshot = async (db, gymId) => {
         `SELECT
             current_plan,
             COALESCE(branches_count, 1) AS branches_count,
+            COALESCE(branch_directory, '[]'::jsonb) AS branch_directory,
             saas_billing_cycle,
             saas_status,
             saas_valid_until,
@@ -655,6 +708,75 @@ const getBranchUsageSnapshot = async (db, gymId, branchId) => {
     return result.rows[0] || { members: 0, staff: 0, branch_id: normalizedBranchId };
 };
 
+const getGymBranchUsageBreakdown = async (db, gymId, branchDirectoryValue = null, configuredBranches = 1) => {
+    const normalizedDirectory = Array.isArray(branchDirectoryValue)
+        ? normalizeBranchDirectory(branchDirectoryValue, configuredBranches)
+        : [];
+    const branchMap = new Map(normalizedDirectory.map((branch) => [branch.id, branch]));
+
+    const result = await db.query(
+        `WITH member_counts AS (
+            SELECT COALESCE(branch_id, $2) AS branch_id, COUNT(*)::INTEGER AS members
+            FROM members
+            WHERE gym_id = $1
+              AND deleted_at IS NULL
+            GROUP BY COALESCE(branch_id, $2)
+        ),
+        staff_counts AS (
+            SELECT COALESCE(branch_id, $2) AS branch_id, COUNT(*)::INTEGER AS staff
+            FROM users
+            WHERE gym_id = $1
+              AND COALESCE(UPPER(role), 'STAFF') <> 'OWNER'
+            GROUP BY COALESCE(branch_id, $2)
+        ),
+        branch_ids AS (
+            SELECT branch_id FROM member_counts
+            UNION
+            SELECT branch_id FROM staff_counts
+        )
+        SELECT
+            branch_ids.branch_id,
+            COALESCE(member_counts.members, 0) AS members,
+            COALESCE(staff_counts.staff, 0) AS staff
+        FROM branch_ids
+        LEFT JOIN member_counts ON member_counts.branch_id = branch_ids.branch_id
+        LEFT JOIN staff_counts ON staff_counts.branch_id = branch_ids.branch_id
+        ORDER BY branch_ids.branch_id ASC`,
+        [gymId, DEFAULT_BRANCH_ID]
+    );
+
+    const usageByBranchId = new Map(
+        result.rows.map((row) => [String(row.branch_id || DEFAULT_BRANCH_ID), {
+            branch_id: String(row.branch_id || DEFAULT_BRANCH_ID),
+            branch_name: getBranchName(normalizedDirectory, row.branch_id || DEFAULT_BRANCH_ID) || String(row.branch_id || DEFAULT_BRANCH_ID),
+            members: Number(row.members || 0),
+            staff: Number(row.staff || 0),
+        }])
+    );
+
+    const orderedBranchIds = normalizedDirectory.length > 0
+        ? normalizedDirectory.map((branch) => branch.id)
+        : Array.from(usageByBranchId.keys());
+
+    const rows = orderedBranchIds.map((branchId) => {
+        const branchUsage = usageByBranchId.get(branchId);
+        return branchUsage || {
+            branch_id: branchId,
+            branch_name: getBranchName(normalizedDirectory, branchId) || branchId,
+            members: 0,
+            staff: 0,
+        };
+    });
+
+    usageByBranchId.forEach((branchUsage, branchId) => {
+        if (!orderedBranchIds.includes(branchId)) {
+            rows.push(branchUsage);
+        }
+    });
+
+    return rows;
+};
+
 module.exports = {
     BILLING_ADDON_ORDER,
     BILLING_BRANCH_SCALED_LIMIT_KEYS,
@@ -671,6 +793,7 @@ module.exports = {
     getBillingPlan,
     getBillingPlanPrice,
     getBranchUsageSnapshot,
+    getGymBranchUsageBreakdown,
     getVisibleBillingPlanOrder,
     getGymBillingSnapshot,
     getGymUsageSnapshot,

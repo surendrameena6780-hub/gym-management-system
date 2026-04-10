@@ -444,16 +444,22 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
     return {
       members: overrideLimits.members ?? null,
       members_per_branch: overrideLimits.members_per_branch ?? null,
+      members_per_included_branch: overrideLimits.members_per_included_branch ?? null,
       staff: overrideLimits.staff ?? null,
       staff_per_branch: overrideLimits.staff_per_branch ?? null,
+      staff_per_included_branch: overrideLimits.staff_per_included_branch ?? null,
       storage: overrideLimits.storage ?? null,
       branches: overrideLimits.branches ?? null,
       configured_branches: overrideLimits.configured_branches ?? null,
       capacity_branches: overrideLimits.capacity_branches ?? null,
+      pooled_single_branch: Boolean(overrideLimits.pooled_single_branch),
+      pooled_branch_multiplier: overrideLimits.pooled_branch_multiplier ?? 1,
       whatsapp: overrideLimits.whatsapp ?? null,
       whatsapp_per_branch: overrideLimits.whatsapp_per_branch ?? null,
+      whatsapp_per_included_branch: overrideLimits.whatsapp_per_included_branch ?? null,
       hello: overrideLimits.hello ?? null,
       hello_per_branch: overrideLimits.hello_per_branch ?? null,
+      hello_per_included_branch: overrideLimits.hello_per_included_branch ?? null,
     };
   }
 
@@ -463,9 +469,13 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
   const allowedBranches = plan.limits?.branches === null || plan.limits?.branches === undefined
     ? null
     : Number(plan.limits.branches) + Number(gymData?.addon_extra_branches || 0);
+  const pooledSingleBranch = allowedBranches !== null && configuredBranches === 1 && Number(allowedBranches || 1) > 1;
+  const pooledBranchMultiplier = pooledSingleBranch ? Math.max(1, Number(allowedBranches || 1)) : 1;
   const capacityBranches = allowedBranches === null
     ? configuredBranches
-    : Math.max(1, Math.min(configuredBranches, Number(allowedBranches) || configuredBranches));
+    : pooledSingleBranch
+      ? Math.max(1, Number(allowedBranches || 1))
+      : Math.max(1, Math.min(configuredBranches, Number(allowedBranches) || configuredBranches));
   const addonMap = {
     members: Number(gymData?.addon_extra_members || 0),
     staff: Number(gymData?.addon_extra_staff || 0),
@@ -480,23 +490,27 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
       accumulator[limitKey] = null;
       if (BILLING_BRANCH_SCALED_LIMIT_KEYS.has(limitKey)) {
         accumulator[`${limitKey}_per_branch`] = null;
+        accumulator[`${limitKey}_per_included_branch`] = null;
       }
       return accumulator;
     }
 
-    const perBranchValue = Number(baseValue) + Number(addonMap[limitKey] || 0);
+    const perIncludedBranchValue = Number(baseValue) + Number(addonMap[limitKey] || 0);
     accumulator[limitKey] = BILLING_BRANCH_SCALED_LIMIT_KEYS.has(limitKey)
-      ? perBranchValue * capacityBranches
-      : perBranchValue;
+      ? perIncludedBranchValue * capacityBranches
+      : perIncludedBranchValue;
 
     if (BILLING_BRANCH_SCALED_LIMIT_KEYS.has(limitKey)) {
-      accumulator[`${limitKey}_per_branch`] = perBranchValue;
+      accumulator[`${limitKey}_per_branch`] = perIncludedBranchValue * pooledBranchMultiplier;
+      accumulator[`${limitKey}_per_included_branch`] = perIncludedBranchValue;
     }
 
     return accumulator;
   }, {
     configured_branches: configuredBranches,
     capacity_branches: capacityBranches,
+    pooled_single_branch: pooledSingleBranch,
+    pooled_branch_multiplier: pooledBranchMultiplier,
   });
 };
 

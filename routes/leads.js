@@ -43,6 +43,45 @@ const normalizeLeadPayload = (payload = {}) => {
     };
 };
 
+const buildScaledLimitHint = (effectiveLimits, totalLimitKey) => {
+    const totalLimit = effectiveLimits?.[totalLimitKey];
+    if (totalLimit === null || totalLimit === undefined) return '';
+
+    const includedBranches = Number(effectiveLimits?.branches || 1);
+    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
+        return ` (pooled from ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'})`;
+    }
+
+    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
+    if (scaledBranches > 1) {
+        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
+        const scopeLabel = scaledBranches === configuredBranches
+            ? 'configured branch'
+            : 'active branch entitlement';
+        return ` (${totalLimit} total across ${scaledBranches} ${scopeLabel}${scaledBranches === 1 ? '' : 's'})`;
+    }
+
+    return '';
+};
+
+const describeScaledLimitScope = (effectiveLimits) => {
+    const includedBranches = Number(effectiveLimits?.branches || 1);
+    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
+        return `after pooling ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'} into your current branch`;
+    }
+
+    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
+    if (scaledBranches > 1) {
+        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
+        if (scaledBranches === configuredBranches) {
+            return `across ${scaledBranches} configured branch${scaledBranches === 1 ? '' : 'es'}`;
+        }
+        return `across ${scaledBranches} branch entitlement${scaledBranches === 1 ? '' : 's'} available under your current plan`;
+    }
+
+    return 'in your current branch';
+};
+
 router.use(auth, saasMiddleware);
 
 router.get('/summary', requirePermission('members:read'), async (req, res) => {
@@ -333,9 +372,7 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
 
             const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
             if (effectiveLimits.members_per_branch !== null && Number(branchUsage.members || 0) + 1 > effectiveLimits.members_per_branch) {
-                const totalCapacityHint = effectiveLimits.members !== null && Number(effectiveLimits.capacity_branches || 1) > 1
-                    ? ` (${effectiveLimits.members} total across ${effectiveLimits.capacity_branches} configured branch${effectiveLimits.capacity_branches === 1 ? '' : 'es'})`
-                    : '';
+                const totalCapacityHint = buildScaledLimitHint(effectiveLimits, 'members');
                 await client.query('ROLLBACK');
                 return res.status(409).json({
                     error: `Your current plan allows up to ${effectiveLimits.members_per_branch} members in this branch${totalCapacityHint}. Delete an expired or unpaid member, or add more member capacity before converting this lead.`,
@@ -348,7 +385,7 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
             if (effectiveLimits.members !== null && Number(usageSnapshot.members || 0) + 1 > effectiveLimits.members) {
                 await client.query('ROLLBACK');
                 return res.status(409).json({
-                    error: `Your current plan allows up to ${effectiveLimits.members} members across ${effectiveLimits.capacity_branches || 1} configured branch${Number(effectiveLimits.capacity_branches || 1) === 1 ? '' : 'es'} including add-ons. Delete an expired or unpaid member, or add more member capacity before converting this lead.`,
+                    error: `Your current plan allows up to ${effectiveLimits.members} members ${describeScaledLimitScope(effectiveLimits)} including add-ons. Delete an expired or unpaid member, or add more member capacity before converting this lead.`,
                     allowed_members: effectiveLimits.members,
                     current_members: Number(usageSnapshot.members || 0),
                 });

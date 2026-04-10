@@ -562,7 +562,13 @@ const loadRazorpayScript = () => {
   const [gymData, setGymData] = useState({ 
     name: '', phone: '', email: '', address: '', 
     currency: '₹', timezone: 'Asia/Kolkata', tax_id: '', website: '',
-    saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: String(currentUser?.saas_plan || 'basic').toLowerCase(), saas_billing_cycle: 'monthly', grace_period_days: 3
+    saas_status: 'FREE_TRIAL', saas_valid_until: '', current_plan: String(currentUser?.saas_plan || 'basic').toLowerCase(), saas_billing_cycle: 'monthly', grace_period_days: 3,
+    branches_count: 1,
+    addon_extra_whatsapp: 0,
+    addon_extra_staff: 0,
+    addon_extra_members: 0,
+    addon_extra_branches: 0,
+    addon_extra_hello: 0,
   });
 
   const [usageData, setUsageData] = useState({
@@ -756,10 +762,53 @@ const loadRazorpayScript = () => {
     }),
     [normalizedBillingCatalog]
   );
+  const billingPreviewGymData = useMemo(() => ({
+    ...gymData,
+    branches_count: Math.max(1, Number.parseInt(platformData.branches_count ?? gymData.branches_count ?? 1, 10) || 1),
+  }), [gymData, platformData.branches_count]);
+  const canUseServerEffectiveLimits = Number(platformData.branches_count || 1) === Number(gymData.branches_count || 1);
   const usageLimits = useMemo(
-    () => computeCatalogEffectiveLimits(normalizedBillingCatalog, gymData.current_plan, gymData, effectiveLimits),
-    [effectiveLimits, gymData, normalizedBillingCatalog]
+    () => computeCatalogEffectiveLimits(
+      normalizedBillingCatalog,
+      gymData.current_plan,
+      billingPreviewGymData,
+      canUseServerEffectiveLimits ? effectiveLimits : null
+    ),
+    [billingPreviewGymData, canUseServerEffectiveLimits, effectiveLimits, gymData.current_plan, normalizedBillingCatalog]
   );
+  const applyEffectiveLimitsPayload = useCallback((limits) => {
+    if (!limits || typeof limits !== 'object') return;
+
+    setEffectiveLimits({
+      members: limits.members ?? null,
+      members_per_branch: limits.members_per_branch ?? null,
+      members_per_included_branch: limits.members_per_included_branch ?? null,
+      staff: limits.staff ?? null,
+      staff_per_branch: limits.staff_per_branch ?? null,
+      staff_per_included_branch: limits.staff_per_included_branch ?? null,
+      storage: limits.storage ?? null,
+      branches: limits.branches ?? null,
+      configured_branches: limits.configured_branches ?? null,
+      capacity_branches: limits.capacity_branches ?? null,
+      pooled_single_branch: Boolean(limits.pooled_single_branch),
+      pooled_branch_multiplier: limits.pooled_branch_multiplier ?? 1,
+      whatsapp: limits.whatsapp ?? null,
+      whatsapp_per_branch: limits.whatsapp_per_branch ?? null,
+      whatsapp_per_included_branch: limits.whatsapp_per_included_branch ?? null,
+      hello: limits.hello ?? null,
+      hello_per_branch: limits.hello_per_branch ?? null,
+      hello_per_included_branch: limits.hello_per_included_branch ?? null,
+    });
+
+    setIntegrationData((prev) => {
+      const monthlyLimit = Number(limits.whatsapp ?? prev.bulk_monthly_limit ?? 500);
+      return {
+        ...prev,
+        bulk_monthly_limit: monthlyLimit,
+        monthly_remaining: Math.max(0, monthlyLimit - Number(prev.monthly_usage || 0)),
+      };
+    });
+  }, []);
   const defaultStaffBranchId = branchScopeValue || defaultBranchId || branchOptions[0]?.id || 'branch-1';
 
   useEffect(() => {
@@ -823,9 +872,10 @@ const loadRazorpayScript = () => {
             email: res.data.gym.support_email || prev.email,
             saas_status: res.data.gym.saas_status || 'FREE_TRIAL',
             saas_valid_until: res.data.gym.saas_valid_until || '',
-            current_plan: res.data.gym.current_plan || 'pro',
+            current_plan: res.data.gym.current_plan || 'basic',
             saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly',
             grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3),
+            branches_count: resolvedBranchesCount,
             addon_extra_whatsapp: Number(res.data.gym.addon_extra_whatsapp || 0),
             addon_extra_staff: Number(res.data.gym.addon_extra_staff || 0),
             addon_extra_members: Number(res.data.gym.addon_extra_members || 0),
@@ -864,24 +914,7 @@ const loadRazorpayScript = () => {
       }
 
       if (res.data.effective_limits) {
-        setEffectiveLimits({
-          members: res.data.effective_limits.members ?? null,
-          members_per_branch: res.data.effective_limits.members_per_branch ?? null,
-          staff: res.data.effective_limits.staff ?? null,
-          staff_per_branch: res.data.effective_limits.staff_per_branch ?? null,
-          storage: res.data.effective_limits.storage ?? null,
-          branches: res.data.effective_limits.branches ?? null,
-          configured_branches: res.data.effective_limits.configured_branches ?? null,
-          capacity_branches: res.data.effective_limits.capacity_branches ?? null,
-          whatsapp: res.data.effective_limits.whatsapp ?? null,
-          whatsapp_per_branch: res.data.effective_limits.whatsapp_per_branch ?? null,
-          hello: res.data.effective_limits.hello ?? null,
-          hello_per_branch: res.data.effective_limits.hello_per_branch ?? null,
-        });
-        setIntegrationData((prev) => ({
-          ...prev,
-          bulk_monthly_limit: Number(res.data.effective_limits.whatsapp ?? prev.bulk_monthly_limit ?? 500),
-        }));
+        applyEffectiveLimitsPayload(res.data.effective_limits);
       }
 
     } catch (err) {
@@ -890,7 +923,7 @@ const loadRazorpayScript = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [headers, toast]);
+  }, [applyEffectiveLimitsPayload, headers, toast]);
 
   useEffect(() => {
     if (!token || !isActive || !isOwner) {
@@ -1068,7 +1101,12 @@ const loadRazorpayScript = () => {
         branches_count: Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || prev.branches_count)),
         branch_directory: buildBranchDirectoryState(payload.branches_count || prev.branches_count, payload.branch_directory || prev.branch_directory),
       }));
+      setGymData((prev) => ({
+        ...prev,
+        branches_count: Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || prev.branches_count || 1)),
+      }));
       toast(payload.message || 'Branch controls saved successfully.', 'success');
+      await fetchSettings();
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to save branch controls.', 'error');
     } finally {
@@ -1478,8 +1516,7 @@ const loadRazorpayScript = () => {
       await axios.post('/api/users/staff', staffForm, headers);
       toast('Staff member created successfully.', 'success');
       setStaffForm({ full_name: '', email: '', password: '', staff_role: 'TRAINER', branch_id: defaultStaffBranchId });
-      fetchStaff();
-      setUsageData((prev) => ({ ...prev, staff: Number(prev.staff || 0) + 1 }));
+      await Promise.all([fetchStaff(), fetchSettings()]);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to add staff member.', 'error');
     } finally {
@@ -1498,7 +1535,7 @@ const loadRazorpayScript = () => {
         permissions: Array.isArray(overrides.permissions) ? overrides.permissions : (staff.permissions || []),
       }, headers);
       toast(successMessage, 'success');
-      fetchStaff();
+      await Promise.all([fetchStaff(), fetchSettings()]);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to update staff member.', 'error');
     } finally {
@@ -1554,11 +1591,7 @@ const loadRazorpayScript = () => {
         delete next[staff.id];
         return next;
       });
-      await fetchStaff();
-      setUsageData((prev) => ({
-        ...prev,
-        staff: Math.max(0, Number(prev.staff || 0) - 1),
-      }));
+      await Promise.all([fetchStaff(), fetchSettings()]);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to delete staff member.', 'error');
     } finally {
@@ -1704,18 +1737,29 @@ const loadRazorpayScript = () => {
               order_id: order.id,
               handler: async function (response) {
                   try {
-                      await axios.post('/api/billing/verify-addon', {
+                    const verifyRes = await axios.post('/api/billing/verify-addon', {
                           razorpay_order_id: response.razorpay_order_id,
                           razorpay_payment_id: response.razorpay_payment_id,
                           razorpay_signature: response.razorpay_signature,
                           addon_key: addonPack.key,
                       }, headers);
+                    if (verifyRes.data?.addons) {
+                    setGymData((prev) => ({
+                      ...prev,
+                      addon_extra_whatsapp: Number(verifyRes.data.addons.addon_extra_whatsapp ?? prev.addon_extra_whatsapp ?? 0),
+                      addon_extra_staff: Number(verifyRes.data.addons.addon_extra_staff ?? prev.addon_extra_staff ?? 0),
+                      addon_extra_members: Number(verifyRes.data.addons.addon_extra_members ?? prev.addon_extra_members ?? 0),
+                      addon_extra_branches: Number(verifyRes.data.addons.addon_extra_branches ?? prev.addon_extra_branches ?? 0),
+                      addon_extra_hello: Number(verifyRes.data.addons.addon_extra_hello ?? prev.addon_extra_hello ?? 0),
+                    }));
+                    }
+                    applyEffectiveLimitsPayload(verifyRes.data?.effective_limits);
                       toast(`${addonPack.label} added successfully!`, 'success');
-                      setTimeout(() => { fetchSettings(); }, 1500);
+                    await fetchSettings();
                   } catch (err) {
                       reportClientError('Addon verify', err);
                       toast('Add-on payment received. Syncing...', 'warning');
-                      setTimeout(() => { fetchSettings(); }, 2000);
+                    await fetchSettings();
                   } finally {
                       setProcessingAddonKey(null);
                   }
@@ -1805,6 +1849,17 @@ const loadRazorpayScript = () => {
                             ? prev.saas_valid_until
                             : new Date(Date.now() + optDays * 24 * 60 * 60 * 1000).toISOString()
                       }));
+                      applyEffectiveLimitsPayload(computeCatalogEffectiveLimits(
+                        normalizedBillingCatalog,
+                        selectedPlan.id,
+                        {
+                          ...gymData,
+                          current_plan: selectedPlan.id,
+                          saas_billing_cycle: billingCycle,
+                          branches_count: Math.max(1, Number.parseInt(platformData.branches_count ?? gymData.branches_count ?? 1, 10) || 1),
+                        },
+                        null
+                      ));
 
                       setLocalInvoice({
                           id: response.razorpay_payment_id,
@@ -1829,12 +1884,12 @@ const loadRazorpayScript = () => {
                           cycle: billingCycle
                       }, headers);
 
-                      setTimeout(() => { fetchSettings(); }, 1500);
+                        await fetchSettings();
                       
                   } catch (err) {
                       reportClientError('Settings billing sync', err);
                       toast("Payment received. System is syncing...", "warning");
-                      setTimeout(() => { fetchSettings(); }, 2000);
+                        await fetchSettings();
                   } finally {
                       setIsProcessingPayment(false);
                   }
@@ -2551,13 +2606,18 @@ const loadRazorpayScript = () => {
               {/* Usage & Limits Dashboard */}
               {(() => {
                 const eLimits = usageLimits;
+                const scaledBranchSummary = eLimits.pooled_single_branch
+                  ? `Your ${currentPlanName} plan is using 1 configured branch, so GymVault pools ${eLimits.branches || 1} included branch entitlements into that branch. This raises the single-branch caps to ${eLimits.members_per_branch ?? 'Unlimited'} members, ${eLimits.staff_per_branch ?? 'Unlimited'} staff users, and ${eLimits.whatsapp_per_branch ?? 'Unlimited'} WhatsApp messages per month.`
+                  : Number(eLimits.capacity_branches || 1) > 1
+                    ? `This gym is using ${platformData.branches_count} configured branches. Each branch can use up to ${eLimits.members_per_included_branch ?? eLimits.members_per_branch ?? 'Unlimited'} members, ${eLimits.staff_per_included_branch ?? eLimits.staff_per_branch ?? 'Unlimited'} staff users, and ${eLimits.whatsapp_per_included_branch ?? eLimits.whatsapp_per_branch ?? 'Unlimited'} WhatsApp messages per month.`
+                    : `This gym is currently operating on a single branch entitlement. The totals below match the current branch caps.`;
                 return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
                           <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
-                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Multi-branch plans scale member, staff, WhatsApp, and Hello capacity by configured branches.</p>
+                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Growth and Pro plans keep their included branch capacity: with one configured branch the capacity is pooled into that branch, and with multiple configured branches it splits branch-wise.</p>
                       </div>
                   </div>
                   
@@ -2594,11 +2654,14 @@ const loadRazorpayScript = () => {
                           icon={HardDrive} 
                       />
                       <ProgressBar 
-                          label="Hello Inbound Numbers" 
+                          label="Connected Hello Numbers" 
                           current={isWhatsAppConnected ? 1 : 0} 
                           max={eLimits.hello ?? 'Unlimited'} 
                           icon={Phone} 
                       />
+                  </div>
+                  <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600 leading-6">
+                    {scaledBranchSummary}
                   </div>
               </div>
                 );

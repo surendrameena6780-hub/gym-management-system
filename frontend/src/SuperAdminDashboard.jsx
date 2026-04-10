@@ -193,6 +193,45 @@ const mergeAutomationSettings = (value) => {
   };
 };
 
+const createEmptyGymEditModal = () => ({
+  open: false,
+  gymId: null,
+  gym_name: '',
+  phone: '',
+  support_email: '',
+  website: '',
+  plan: 'pro',
+  branches_count: 1,
+  addon_extra_whatsapp: 0,
+  addon_extra_staff: 0,
+  addon_extra_members: 0,
+  addon_extra_branches: 0,
+  addon_extra_hello: 0,
+  saving: false,
+  error: '',
+});
+
+const formatLimitDisplay = (value) => {
+  if (value === null || value === undefined) return 'Unlimited';
+  return Number(value || 0).toLocaleString();
+};
+
+const formatUsageDisplay = (current, limit) => `${Number(current || 0).toLocaleString()} / ${formatLimitDisplay(limit)}`;
+
+const describeEffectiveLimitMode = (effectiveLimits = {}) => {
+  const includedBranches = Number(effectiveLimits?.branches || 1);
+  if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
+    return `This gym has one configured branch, so GymVault pools ${includedBranches} included branch entitlements into that branch.`;
+  }
+
+  const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
+  if (scaledBranches > 1) {
+    return `Branch-scaled limits are currently split across ${scaledBranches} active branch entitlements.`;
+  }
+
+  return 'Branch-scaled limits currently resolve to a single active branch entitlement.';
+};
+
 function SuperAdminDashboard({ token, onLogout }) {
   const headers = useMemo(() => ({ headers: { 'x-super-token': token } }), [token]);
 
@@ -246,17 +285,7 @@ function SuperAdminDashboard({ token, onLogout }) {
   const [dangerGym, setDangerGym] = useState({ gymId: '', confirmName: '' });
   const [dangerUser, setDangerUser] = useState({ userId: '', confirmText: '' });
   const [showGymViewModal, setShowGymViewModal] = useState(false);
-  const [gymEditModal, setGymEditModal] = useState({
-    open: false,
-    gymId: null,
-    gym_name: '',
-    phone: '',
-    support_email: '',
-    website: '',
-    plan: 'pro',
-    saving: false,
-    error: '',
-  });
+  const [gymEditModal, setGymEditModal] = useState(createEmptyGymEditModal);
   const [gymActionModal, setGymActionModal] = useState({
     open: false,
     mode: '',
@@ -421,11 +450,20 @@ function SuperAdminDashboard({ token, onLogout }) {
     }
   }, [handleApiError, headers, runtimeFilters.event_type, runtimeFilters.q, runtimeFilters.severity, runtimePagination.limit, runtimePagination.page]);
 
+  const loadWebhookUrl = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/superadmin/system/whatsapp-webhook', headers);
+      setWebhookData(res.data);
+    } catch {
+      // Ignore webhook helper failures in the dashboard bootstrap path.
+    }
+  }, [headers]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     await Promise.all([loadOverview(), loadGyms(), loadUsers(), loadTickets(), loadReports(), loadSystem(), loadLogs(), loadTelemetry(), loadRuntimeEvents(), loadWebhookUrl()]);
     setLoading(false);
-  }, [loadGyms, loadLogs, loadOverview, loadReports, loadRuntimeEvents, loadSystem, loadTelemetry, loadTickets, loadUsers]);
+  }, [loadGyms, loadLogs, loadOverview, loadReports, loadRuntimeEvents, loadSystem, loadTelemetry, loadTickets, loadUsers, loadWebhookUrl]);
 
   useEffect(() => {
     if (initialLoadRef.current) {
@@ -475,18 +513,30 @@ function SuperAdminDashboard({ token, onLogout }) {
     loadLogs();
   };
 
-  const openGymEditModal = (gym) => {
-    setGymEditModal({
-      open: true,
-      gymId: gym.id,
-      gym_name: gym.gym_name || '',
-      phone: gym.phone || '',
-      support_email: gym.support_email || '',
-      website: gym.website || '',
-      plan: gym.plan || 'pro',
-      saving: false,
-      error: '',
-    });
+  const openGymEditModal = async (gym) => {
+    try {
+      const detail = selectedGym?.id === gym.id && selectedGym?.effective_limits
+        ? selectedGym
+        : (await axios.get(`/api/superadmin/gyms/${gym.id}`, headers)).data;
+      setGymEditModal({
+        ...createEmptyGymEditModal(),
+        open: true,
+        gymId: detail.id,
+        gym_name: detail.gym_name || '',
+        phone: detail.phone || '',
+        support_email: detail.support_email || '',
+        website: detail.website || '',
+        plan: detail.plan || 'pro',
+        branches_count: Number(detail.branches_count || 1),
+        addon_extra_whatsapp: Number(detail.addon_extra_whatsapp || 0),
+        addon_extra_staff: Number(detail.addon_extra_staff || 0),
+        addon_extra_members: Number(detail.addon_extra_members || 0),
+        addon_extra_branches: Number(detail.addon_extra_branches || 0),
+        addon_extra_hello: Number(detail.addon_extra_hello || 0),
+      });
+    } catch (err) {
+      handleApiError(err);
+    }
   };
 
   const saveGymEdits = async () => {
@@ -496,6 +546,11 @@ function SuperAdminDashboard({ token, onLogout }) {
       support_email: gymEditModal.support_email,
       website: gymEditModal.website,
       plan: gymEditModal.plan,
+      addon_extra_whatsapp: Number(gymEditModal.addon_extra_whatsapp || 0),
+      addon_extra_staff: Number(gymEditModal.addon_extra_staff || 0),
+      addon_extra_members: Number(gymEditModal.addon_extra_members || 0),
+      addon_extra_branches: Number(gymEditModal.addon_extra_branches || 0),
+      addon_extra_hello: Number(gymEditModal.addon_extra_hello || 0),
     };
 
     if (!payload.gym_name.trim()) {
@@ -506,17 +561,7 @@ function SuperAdminDashboard({ token, onLogout }) {
     try {
       setGymEditModal((prev) => ({ ...prev, saving: true, error: '' }));
       await axios.put(`/api/superadmin/gyms/${gymEditModal.gymId}`, payload, headers);
-      setGymEditModal({
-        open: false,
-        gymId: null,
-        gym_name: '',
-        phone: '',
-        support_email: '',
-        website: '',
-        plan: 'pro',
-        saving: false,
-        error: '',
-      });
+      setGymEditModal(createEmptyGymEditModal());
       loadGyms();
       loadLogs();
       if (selectedGym?.id === gymEditModal.gymId) {
@@ -693,13 +738,6 @@ function SuperAdminDashboard({ token, onLogout }) {
       handleApiError(err);
       alert(err?.response?.data?.error || 'Failed to save system settings');
     }
-  };
-
-  const loadWebhookUrl = async () => {
-    try {
-      const res = await axios.get('/api/superadmin/system/whatsapp-webhook', headers);
-      setWebhookData(res.data);
-    } catch { /* ignore */ }
   };
 
   const updateAutomationTemplate = (templateKey, field, value) => {
@@ -1526,6 +1564,9 @@ function SuperAdminDashboard({ token, onLogout }) {
               <p className="text-sm text-slate-400 max-w-3xl">
                 Edit plan names, monthly and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
               </p>
+              <p className="text-xs text-slate-500 max-w-3xl">
+                Members, staff, WhatsApp, and Hello limits are stored per included branch entitlement. If a Growth or Pro gym runs only one configured branch, its included branch capacity is pooled into that branch instead of being discarded.
+              </p>
 
               <div className="space-y-4">
                 <div>
@@ -2030,12 +2071,64 @@ function SuperAdminDashboard({ token, onLogout }) {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Owner</p><p className="font-black text-white">{selectedGym.owner_name || '-'}</p><p className="text-slate-400 mt-0.5">{selectedGym.owner_email || '-'}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Plan / Status</p><p className="font-black text-white uppercase">{selectedGym.plan} · {selectedGym.status}</p></div>
+                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Configured / Allowed Branches</p><p className="font-black text-white">{selectedGym.branches_count} / {formatLimitDisplay(selectedGym.effective_limits?.branches)}</p></div>
+                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Members</p><p className="font-black text-white">{formatUsageDisplay(selectedGym.total_members, selectedGym.effective_limits?.members)}</p><p className="text-slate-400 mt-0.5">{formatLimitDisplay(selectedGym.effective_limits?.members_per_branch)} per active branch</p></div>
+                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Staff Users</p><p className="font-black text-white">{formatUsageDisplay(selectedGym.total_staff, selectedGym.effective_limits?.staff)}</p><p className="text-slate-400 mt-0.5">{formatLimitDisplay(selectedGym.effective_limits?.staff_per_branch)} per active branch</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Phone</p><p className="font-black text-white">{selectedGym.phone || '-'}</p></div>
-                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Members</p><p className="font-black text-white">{selectedGym.total_members}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Revenue</p><p className="font-black text-white">₹{Number(selectedGym.total_revenue || 0).toLocaleString()}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Last Activity</p><p className="font-black text-white">{selectedGym.last_active ? new Date(selectedGym.last_active).toLocaleString('en-GB') : '-'}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10 md:col-span-2"><p className="text-slate-500">Support Email</p><p className="font-black text-white">{selectedGym.support_email || '-'}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Website</p><p className="font-black text-white truncate">{selectedGym.website || '-'}</p></div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
+                <div>
+                  <p className="text-xs uppercase tracking-widest font-black text-slate-400">Effective Capacity</p>
+                  <p className="text-sm text-slate-300 mt-1">{describeEffectiveLimitMode(selectedGym.effective_limits)}</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3"><p className="text-slate-500">WhatsApp / Month</p><p className="font-black text-white">{formatLimitDisplay(selectedGym.effective_limits?.whatsapp)}</p></div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3"><p className="text-slate-500">Hello Numbers</p><p className="font-black text-white">{formatLimitDisplay(selectedGym.effective_limits?.hello)}</p></div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3"><p className="text-slate-500">Storage</p><p className="font-black text-white">{formatLimitDisplay(selectedGym.effective_limits?.storage)} GB</p></div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: 'Extra WhatsApp', value: Number(selectedGym.addon_extra_whatsapp || 0) },
+                    { label: 'Extra Staff', value: Number(selectedGym.addon_extra_staff || 0) },
+                    { label: 'Extra Members', value: Number(selectedGym.addon_extra_members || 0) },
+                    { label: 'Extra Branches', value: Number(selectedGym.addon_extra_branches || 0) },
+                    { label: 'Extra Hello', value: Number(selectedGym.addon_extra_hello || 0) },
+                  ].filter((item) => item.value > 0).map((addon) => (
+                    <span key={addon.label} className="px-2.5 py-1 rounded-full border border-indigo-400/20 bg-indigo-500/10 text-indigo-200 text-[11px] font-black uppercase tracking-wide">
+                      {addon.label}: +{addon.value}
+                    </span>
+                  ))}
+                  {!Number(selectedGym.addon_extra_whatsapp || 0)
+                    && !Number(selectedGym.addon_extra_staff || 0)
+                    && !Number(selectedGym.addon_extra_members || 0)
+                    && !Number(selectedGym.addon_extra_branches || 0)
+                    && !Number(selectedGym.addon_extra_hello || 0) && (
+                    <span className="text-xs font-bold text-slate-500">No add-ons purchased.</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
+                <div>
+                  <p className="text-xs uppercase tracking-widest font-black text-slate-400">Branch Breakdown</p>
+                  <p className="text-sm text-slate-500 mt-1">Live members and staff per branch.</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(selectedGym.branch_usage_breakdown || []).map((branch) => (
+                    <div key={branch.branch_id} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <p className="text-sm font-black text-white">{branch.branch_name || branch.branch_id}</p>
+                      <p className="text-xs text-slate-400 mt-1">{Number(branch.members || 0).toLocaleString()} members · {Number(branch.staff || 0).toLocaleString()} staff</p>
+                    </div>
+                  ))}
+                  {(!selectedGym.branch_usage_breakdown || selectedGym.branch_usage_breakdown.length === 0) && (
+                    <p className="text-sm text-slate-500">No branch usage found.</p>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end">
@@ -2066,6 +2159,20 @@ function SuperAdminDashboard({ token, onLogout }) {
                   <option value="pro">Pro</option>
                 </select>
                 <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm md:col-span-2" placeholder="Website" value={gymEditModal.website} onChange={(e) => setGymEditModal((prev) => ({ ...prev, website: e.target.value }))} />
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+                <div>
+                  <p className="text-xs uppercase tracking-widest font-black text-slate-400">Per-Gym Capacity Overrides</p>
+                  <p className="text-sm text-slate-500 mt-1">Configured branches: {gymEditModal.branches_count}. These add-ons change the effective limits for this gym without editing branch topology.</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra WhatsApp" value={gymEditModal.addon_extra_whatsapp} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_whatsapp: e.target.value }))} />
+                  <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Staff" value={gymEditModal.addon_extra_staff} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_staff: e.target.value }))} />
+                  <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Members" value={gymEditModal.addon_extra_members} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_members: e.target.value }))} />
+                  <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Branches" value={gymEditModal.addon_extra_branches} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_branches: e.target.value }))} />
+                  <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Hello" value={gymEditModal.addon_extra_hello} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_hello: e.target.value }))} />
+                </div>
               </div>
 
               {gymEditModal.error && <p className="text-sm text-rose-400 font-semibold">{gymEditModal.error}</p>}

@@ -6,11 +6,14 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const { requireOwner } = require('../middleware/rbac');
 const {
+    computeEffectiveBillingLimits,
     ensureGymBillingAddonSchema,
     getBillingAddon,
     getBillingConfig,
+    getGymBranchUsageBreakdown,
     getBillingPlanPrice,
     getGymBillingSnapshot,
+    getGymUsageSnapshot,
     isBillingPlanVisible,
     isAddonAllowedForPlan,
     normalizePlanId,
@@ -233,6 +236,109 @@ const buildBillingPreviewPayload = (quote, currentValidUntil = null) => ({
     error: quote.error,
   });
 
+const BILLING_GUARD_LIMIT_KEYS = [
+    'members',
+    'members_per_branch',
+    'staff',
+    'staff_per_branch',
+    'branches',
+    'whatsapp',
+    'whatsapp_per_branch',
+    'hello',
+    'hello_per_branch',
+];
+
+const isLowerLimit = (currentValue, targetValue) => {
+    if (currentValue === null || currentValue === undefined) {
+        return targetValue !== null && targetValue !== undefined;
+    }
+    if (targetValue === null || targetValue === undefined) {
+        return false;
+    }
+    return Number(targetValue) < Number(currentValue);
+};
+
+const isRestrictivePlanChange = (currentLimits, targetLimits) => (
+    BILLING_GUARD_LIMIT_KEYS.some((limitKey) => isLowerLimit(currentLimits?.[limitKey], targetLimits?.[limitKey]))
+);
+
+const describeScaledLimitScope = (effectiveLimits) => {
+    const includedBranches = Number(effectiveLimits?.branches || 1);
+    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
+        return `after pooling ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'} into the current branch`;
+    }
+
+    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
+    if (scaledBranches > 1) {
+        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
+        if (scaledBranches === configuredBranches) {
+            return `across ${scaledBranches} configured branch${scaledBranches === 1 ? '' : 'es'}`;
+        }
+        return `across ${scaledBranches} branch entitlement${scaledBranches === 1 ? '' : 's'} available under the target plan`;
+    }
+
+    return 'in the current branch';
+};
+
+const buildPlanChangeViolations = ({ gymBilling, usageSnapshot, branchUsageBreakdown, targetLimits }) => {
+    const violations = [];
+    const configuredBranches = Number(gymBilling?.branches_count || 1);
+
+    if (targetLimits.branches !== null && configuredBranches > targetLimits.branches) {
+        violations.push(`This gym already has ${configuredBranches} configured branch${configuredBranches === 1 ? '' : 'es'}, but the target plan allows ${targetLimits.branches}. Reduce branches before switching plans.`);
+    }
+
+    if (targetLimits.members !== null && Number(usageSnapshot?.members || 0) > targetLimits.members) {
+        violations.push(`This gym currently has ${Number(usageSnapshot.members || 0)} members, but the target plan allows ${targetLimits.members} ${describeScaledLimitScope(targetLimits)}.`);
+    }
+
+    if (targetLimits.staff !== null && Number(usageSnapshot?.staff || 0) > targetLimits.staff) {
+        violations.push(`This gym currently has ${Number(usageSnapshot.staff || 0)} staff users, but the target plan allows ${targetLimits.staff} ${describeScaledLimitScope(targetLimits)}.`);
+    }
+
+    if (!Boolean(targetLimits?.pooled_single_branch)) {
+        if (targetLimits.members_per_branch !== null) {
+            const violatingMemberBranch = branchUsageBreakdown.find((branchUsage) => Number(branchUsage.members || 0) > targetLimits.members_per_branch);
+            if (violatingMemberBranch) {
+                violations.push(`${violatingMemberBranch.branch_name} currently has ${violatingMemberBranch.members} members, which exceeds the target branch limit of ${targetLimits.members_per_branch}.`);
+            }
+        }
+
+        if (targetLimits.staff_per_branch !== null) {
+            const violatingStaffBranch = branchUsageBreakdown.find((branchUsage) => Number(branchUsage.staff || 0) > targetLimits.staff_per_branch);
+            if (violatingStaffBranch) {
+                violations.push(`${violatingStaffBranch.branch_name} currently has ${violatingStaffBranch.staff} staff users, which exceeds the target branch limit of ${targetLimits.staff_per_branch}.`);
+            }
+        }
+    }
+
+    return violations;
+};
+
+const validatePlanChangeCompatibility = async ({ db, gymId, billingConfig, gymBilling, targetPlan }) => {
+    const currentLimits = computeEffectiveBillingLimits(billingConfig, gymBilling?.current_plan, gymBilling || {});
+    const targetLimits = computeEffectiveBillingLimits(billingConfig, targetPlan, gymBilling || {});
+
+    if (!isRestrictivePlanChange(currentLimits, targetLimits)) {
+        return { targetLimits, violations: [] };
+    }
+
+    const [usageSnapshot, branchUsageBreakdown] = await Promise.all([
+        getGymUsageSnapshot(db, gymId),
+        getGymBranchUsageBreakdown(db, gymId, gymBilling?.branch_directory, Number(gymBilling?.branches_count || 1)),
+    ]);
+
+    return {
+        targetLimits,
+        violations: buildPlanChangeViolations({
+            gymBilling,
+            usageSnapshot,
+            branchUsageBreakdown,
+            targetLimits,
+        }),
+    };
+};
+
 // --- 0. PUBLIC CONFIG — returns the Razorpay key_id to authenticated frontend ---
 router.get('/config', (req, res) => {
     const keyId = process.env.RAZORPAY_KEY_ID;
@@ -265,6 +371,23 @@ router.post('/create-order', async (req, res) => {
 
         if (!quote) {
             return res.status(400).json({ error: 'Unable to build billing quote.' });
+        }
+
+        const compatibility = await validatePlanChangeCompatibility({
+            db: pool,
+            gymId: req.user.gym_id,
+            billingConfig,
+            gymBilling: gym,
+            targetPlan: resolved.planTier,
+        });
+
+        if (compatibility.violations.length > 0) {
+            return res.status(409).json({
+                error: compatibility.violations[0],
+                details: compatibility.violations,
+                effective_limits: compatibility.targetLimits,
+                billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+            });
         }
 
         if (quote.error) {
@@ -360,6 +483,28 @@ router.post('/verify', async (req, res) => {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
+                const gymBilling = await getGymBillingSnapshot(client, req.user.gym_id);
+                if (!gymBilling) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ error: 'Gym not found.' });
+                }
+
+                const compatibility = await validatePlanChangeCompatibility({
+                    db: client,
+                    gymId: req.user.gym_id,
+                    billingConfig,
+                    gymBilling,
+                    targetPlan,
+                });
+                if (compatibility.violations.length > 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({
+                        error: compatibility.violations[0],
+                        details: compatibility.violations,
+                        effective_limits: compatibility.targetLimits,
+                    });
+                }
+
                 if (preserveCurrentExpiry) {
                     await client.query(
                         `UPDATE gyms
@@ -542,7 +687,15 @@ router.post('/verify-addon', async (req, res) => {
                 COALESCE(addon_extra_hello, 0)     AS addon_extra_hello`,
             [addon.increment, req.user.gym_id]
         );
-        res.json({ message: `${addon.label} added successfully!`, addons: rows[0] });
+        const updatedGym = await getGymBillingSnapshot(pool, req.user.gym_id);
+        const effectiveLimits = updatedGym
+            ? computeEffectiveBillingLimits(billingConfig, updatedGym.current_plan, updatedGym)
+            : null;
+        res.json({
+            message: `${addon.label} added successfully!`,
+            addons: rows[0],
+            effective_limits: effectiveLimits,
+        });
     } catch (err) {
         console.error('Addon apply error:', err);
         res.status(500).json({ error: 'Failed to apply add-on.' });

@@ -39,6 +39,45 @@ const normalizePermissions = (permissions, staffRole) => {
     return getDefaultPermissionsByStaffRole(staffRole);
 };
 
+const buildScaledLimitHint = (effectiveLimits, totalLimitKey) => {
+    const totalLimit = effectiveLimits?.[totalLimitKey];
+    if (totalLimit === null || totalLimit === undefined) return '';
+
+    const includedBranches = Number(effectiveLimits?.branches || 1);
+    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
+        return ` (pooled from ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'})`;
+    }
+
+    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
+    if (scaledBranches > 1) {
+        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
+        const scopeLabel = scaledBranches === configuredBranches
+            ? 'configured branch'
+            : 'active branch entitlement';
+        return ` (${totalLimit} total across ${scaledBranches} ${scopeLabel}${scaledBranches === 1 ? '' : 's'})`;
+    }
+
+    return '';
+};
+
+const describeScaledLimitScope = (effectiveLimits) => {
+    const includedBranches = Number(effectiveLimits?.branches || 1);
+    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
+        return `after pooling ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'} into your current branch`;
+    }
+
+    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
+    if (scaledBranches > 1) {
+        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
+        if (scaledBranches === configuredBranches) {
+            return `across ${scaledBranches} configured branch${scaledBranches === 1 ? '' : 'es'}`;
+        }
+        return `across ${scaledBranches} branch entitlement${scaledBranches === 1 ? '' : 's'} available under your current plan`;
+    }
+
+    return 'in your current branch';
+};
+
 // GET /api/users — Returns gym users for admin dropdowns
 router.get('/', auth, async (req, res) => {
     try {
@@ -126,9 +165,7 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
 
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
         if (effectiveLimits.staff_per_branch !== null && Number(branchUsage.staff || 0) + 1 > effectiveLimits.staff_per_branch) {
-            const totalCapacityHint = effectiveLimits.staff !== null && Number(effectiveLimits.capacity_branches || 1) > 1
-                ? ` (${effectiveLimits.staff} total across ${effectiveLimits.capacity_branches} configured branch${effectiveLimits.capacity_branches === 1 ? '' : 'es'})`
-                : '';
+            const totalCapacityHint = buildScaledLimitHint(effectiveLimits, 'staff');
             return res.status(409).json({
                 error: `Your current plan allows up to ${effectiveLimits.staff_per_branch} staff user${effectiveLimits.staff_per_branch === 1 ? '' : 's'} in this branch${totalCapacityHint} including add-ons. Delete a staff user or add more staff capacity before creating another staff login.`,
                 allowed_staff: effectiveLimits.staff_per_branch,
@@ -139,7 +176,7 @@ router.post('/staff', auth, requireOwner, saasMiddleware, async (req, res) => {
         }
         if (effectiveLimits.staff !== null && Number(usageSnapshot.staff || 0) + 1 > effectiveLimits.staff) {
             return res.status(409).json({
-                error: `Your current plan allows up to ${effectiveLimits.staff} staff user${effectiveLimits.staff === 1 ? '' : 's'} across ${effectiveLimits.capacity_branches || 1} configured branch${Number(effectiveLimits.capacity_branches || 1) === 1 ? '' : 'es'} including add-ons. Delete a staff user or add more staff capacity before creating another staff login.`,
+                error: `Your current plan allows up to ${effectiveLimits.staff} staff user${effectiveLimits.staff === 1 ? '' : 's'} ${describeScaledLimitScope(effectiveLimits)} including add-ons. Delete a staff user or add more staff capacity before creating another staff login.`,
                 allowed_staff: effectiveLimits.staff,
                 current_staff: Number(usageSnapshot.staff || 0),
             });
@@ -204,9 +241,34 @@ router.put('/staff/:id', auth, requireOwner, saasMiddleware, async (req, res) =>
 
         const normalizedRole = normalizeStaffRole(staff_role);
         const effectivePermissions = normalizePermissions(permissions, normalizedRole);
+        const currentBranchId = existing.rows[0].branch_id || DEFAULT_BRANCH_ID;
         const nextBranchScope = req.body?.branch_id === undefined
-            ? { branchId: existing.rows[0].branch_id || DEFAULT_BRANCH_ID }
+            ? { branchId: currentBranchId }
             : await resolveBranchWriteScope(pool, req, req.body?.branch_id);
+
+        if (nextBranchScope.branchId !== currentBranchId) {
+            const [billingConfig, gymBilling, targetBranchUsage] = await Promise.all([
+                getBillingConfig(),
+                getGymBillingSnapshot(pool, req.user.gym_id),
+                getBranchUsageSnapshot(pool, req.user.gym_id, nextBranchScope.branchId),
+            ]);
+
+            if (!gymBilling) {
+                return res.status(404).json({ error: 'Gym not found.' });
+            }
+
+            const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+            const projectedTargetStaff = Number(targetBranchUsage.staff || 0) + 1;
+            if (effectiveLimits.staff_per_branch !== null && projectedTargetStaff > effectiveLimits.staff_per_branch) {
+                const totalCapacityHint = buildScaledLimitHint(effectiveLimits, 'staff');
+                return res.status(409).json({
+                    error: `This move would exceed the ${effectiveLimits.staff_per_branch}-staff limit for the target branch${totalCapacityHint}. Move or remove another staff user first, or add more staff capacity.`,
+                    allowed_staff: effectiveLimits.staff_per_branch,
+                    current_staff: Number(targetBranchUsage.staff || 0),
+                    branch_id: nextBranchScope.branchId,
+                });
+            }
+        }
 
         const updated = await pool.query(
             `UPDATE users

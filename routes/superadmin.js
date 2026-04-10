@@ -8,7 +8,13 @@ const { pool } = require('../config/db');
 const webpush = require('web-push');
 const { setUserAuthCookie } = require('../utils/authCookies');
 const {
+    computeEffectiveBillingLimits,
+    ensureGymBillingAddonSchema,
     ensurePlatformSettingsBase,
+    getBillingConfig,
+    getGymBillingSnapshot,
+    getGymBranchUsageBreakdown,
+    getGymUsageSnapshot,
     normalizeBillingConfig,
     normalizeSupportProfile,
     serializeBillingConfig,
@@ -344,6 +350,7 @@ router.get('/gyms/:id', superAuth, async (req, res) => {
     if (!Number.isInteger(gymId)) return res.status(400).json({ error: 'Invalid gym id' });
 
     try {
+        await ensureGymBillingAddonSchema();
         const gym = await pool.query(
             `SELECT
                 g.id,
@@ -354,13 +361,19 @@ router.get('/gyms/:id', superAuth, async (req, res) => {
                 g.support_email,
                 COALESCE(g.current_plan, 'pro') AS plan,
                 COALESCE(g.gym_access_status, 'ACTIVE') AS status,
+                COALESCE(g.branches_count, 1) AS branches_count,
+                COALESCE(g.branch_directory, '[]'::jsonb) AS branch_directory,
+                COALESCE(g.addon_extra_whatsapp, 0) AS addon_extra_whatsapp,
+                COALESCE(g.addon_extra_staff, 0) AS addon_extra_staff,
+                COALESCE(g.addon_extra_members, 0) AS addon_extra_members,
+                COALESCE(g.addon_extra_branches, 0) AS addon_extra_branches,
+                COALESCE(g.addon_extra_hello, 0) AS addon_extra_hello,
                 g.created_at,
                 COALESCE(g.last_active_at, u.last_login_at, g.created_at) AS last_active,
                 u.id AS owner_id,
                 u.full_name AS owner_name,
                 u.email AS owner_email,
                 u.phone AS owner_phone,
-                (SELECT COUNT(*) FROM members m WHERE m.gym_id = g.id AND m.deleted_at IS NULL) AS total_members,
                 (SELECT COALESCE(SUM(p.amount_paid),0) FROM payments p WHERE p.gym_id = g.id AND p.deleted_at IS NULL) AS total_revenue,
                 (SELECT COUNT(*) FROM users su WHERE su.gym_id = g.id) AS total_users
              FROM gyms g
@@ -373,7 +386,22 @@ router.get('/gyms/:id', superAuth, async (req, res) => {
             return res.status(404).json({ error: 'Gym not found' });
         }
 
-        return res.json(gym.rows[0]);
+        const gymRow = gym.rows[0];
+        const [billingConfig, gymBilling, usageSnapshot, branchUsageBreakdown] = await Promise.all([
+            getBillingConfig(),
+            getGymBillingSnapshot(pool, gymId),
+            getGymUsageSnapshot(pool, gymId),
+            getGymBranchUsageBreakdown(pool, gymId, gymRow.branch_directory, Number(gymRow.branches_count || 1)),
+        ]);
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymRow.plan, gymBilling || gymRow);
+
+        return res.json({
+            ...gymRow,
+            total_members: Number(usageSnapshot?.members || 0),
+            total_staff: Number(usageSnapshot?.staff || 0),
+            effective_limits: effectiveLimits,
+            branch_usage_breakdown: branchUsageBreakdown,
+        });
     } catch (err) {
         console.error('SUPERADMIN GYM DETAIL ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
@@ -384,9 +412,22 @@ router.put('/gyms/:id', superAuth, async (req, res) => {
     const gymId = parseInt(req.params.id, 10);
     if (!Number.isInteger(gymId)) return res.status(400).json({ error: 'Invalid gym id' });
 
-    const { gym_name, phone, address, support_email, website, plan } = req.body;
+    const {
+        gym_name,
+        phone,
+        address,
+        support_email,
+        website,
+        plan,
+        addon_extra_whatsapp,
+        addon_extra_staff,
+        addon_extra_members,
+        addon_extra_branches,
+        addon_extra_hello,
+    } = req.body;
 
     try {
+        await ensureGymBillingAddonSchema();
         const updated = await pool.query(
             `UPDATE gyms
              SET name = COALESCE($1, name),
@@ -394,23 +435,73 @@ router.put('/gyms/:id', superAuth, async (req, res) => {
                  address = COALESCE($3, address),
                  support_email = COALESCE($4, support_email),
                  website = COALESCE($5, website),
-                 current_plan = COALESCE($6, current_plan)
-             WHERE id = $7
-             RETURNING id, name AS gym_name, phone, address, support_email, website, current_plan`,
-            [gym_name || null, phone || null, address || null, support_email || null, website || null, plan || null, gymId]
+                 current_plan = COALESCE($6, current_plan),
+                 addon_extra_whatsapp = COALESCE($7, addon_extra_whatsapp),
+                 addon_extra_staff = COALESCE($8, addon_extra_staff),
+                 addon_extra_members = COALESCE($9, addon_extra_members),
+                 addon_extra_branches = COALESCE($10, addon_extra_branches),
+                 addon_extra_hello = COALESCE($11, addon_extra_hello)
+             WHERE id = $12
+             RETURNING
+                id,
+                name AS gym_name,
+                phone,
+                address,
+                support_email,
+                website,
+                current_plan,
+                COALESCE(addon_extra_whatsapp, 0) AS addon_extra_whatsapp,
+                COALESCE(addon_extra_staff, 0) AS addon_extra_staff,
+                COALESCE(addon_extra_members, 0) AS addon_extra_members,
+                COALESCE(addon_extra_branches, 0) AS addon_extra_branches,
+                COALESCE(addon_extra_hello, 0) AS addon_extra_hello`,
+            [
+                gym_name || null,
+                phone || null,
+                address || null,
+                support_email || null,
+                website || null,
+                plan || null,
+                Number.isInteger(Number(addon_extra_whatsapp)) ? Number(addon_extra_whatsapp) : null,
+                Number.isInteger(Number(addon_extra_staff)) ? Number(addon_extra_staff) : null,
+                Number.isInteger(Number(addon_extra_members)) ? Number(addon_extra_members) : null,
+                Number.isInteger(Number(addon_extra_branches)) ? Number(addon_extra_branches) : null,
+                Number.isInteger(Number(addon_extra_hello)) ? Number(addon_extra_hello) : null,
+                gymId,
+            ]
         );
 
         if (updated.rows.length === 0) return res.status(404).json({ error: 'Gym not found' });
+
+        const billingConfig = await getBillingConfig();
+        const gymBilling = await getGymBillingSnapshot(pool, gymId);
+        const effectiveLimits = gymBilling
+            ? computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling)
+            : null;
 
         await logAudit({
             action: 'GYM_EDITED',
             targetType: 'GYM',
             targetId: gymId,
             targetLabel: updated.rows[0].gym_name,
-            details: { phone, address, support_email, website, plan },
+            details: {
+                phone,
+                address,
+                support_email,
+                website,
+                plan,
+                addon_extra_whatsapp,
+                addon_extra_staff,
+                addon_extra_members,
+                addon_extra_branches,
+                addon_extra_hello,
+            },
         });
 
-        return res.json(updated.rows[0]);
+        return res.json({
+            ...updated.rows[0],
+            effective_limits: effectiveLimits,
+        });
     } catch (err) {
         console.error('SUPERADMIN GYM EDIT ERROR:', err.message);
         return res.status(500).json({ error: 'Server Error' });
