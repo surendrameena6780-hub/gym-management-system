@@ -115,11 +115,11 @@ const defaultBillingConfig = {
             annual_price: 20,
             popular: true,
             features: [
-                'Up to 400 members / Branch',
-                'Multiple branches',
-                '1 owner + 5 staff users / Branch',
-                '1,000 WhatsApp messages per month / Branch',
-                'Hello inbound on 1 number / Branch',
+                'Up to 800 members total',
+                'Up to 2 branches',
+                '1 owner + 10 staff users total',
+                '1,000 WhatsApp messages per month',
+                'Hello inbound on 1 number',
                 '10 GB cloud storage',
                 'WhatsApp reply-to-lead capture',
                 'Custom WhatsApp templates',
@@ -145,11 +145,11 @@ const defaultBillingConfig = {
             annual_price: 30,
             popular: false,
             features: [
-                'Up to 1,000 members / Branch',
-                'Multiple branches',
-                '1 owner + 10 staff users / Branch',
-                '2,000 WhatsApp messages per month / Branch',
-                'Hello inbound on 1 number / Branch',
+                'Up to 3,000 members total',
+                'Up to 3 branches',
+                '1 owner + 30 staff users total',
+                '2,000 WhatsApp messages per month',
+                'Hello inbound on 1 number',
                 '20 GB cloud storage',
                 'Full reply-to-lead workflow',
                 'Custom WhatsApp templates',
@@ -183,7 +183,7 @@ const defaultBillingConfig = {
         extra_staff_1: {
             key: 'extra_staff_1',
             label: 'Extra Staff User',
-            description: 'Add 1 more staff login to your current plan.',
+            description: 'Add 1 more staff login to your gym-wide plan capacity.',
             price: 149,
             increment: 1,
             column: 'addon_extra_staff',
@@ -193,7 +193,7 @@ const defaultBillingConfig = {
         extra_members_100: {
             key: 'extra_members_100',
             label: 'Extra 100 Members',
-            description: 'Raises your member capacity by 100.',
+            description: 'Raises your gym-wide member capacity by 100.',
             price: 299,
             increment: 100,
             column: 'addon_extra_members',
@@ -213,7 +213,7 @@ const defaultBillingConfig = {
         extra_hello_1: {
             key: 'extra_hello_1',
             label: 'Extra Hello Number',
-            description: 'Enable inbound Hello on 1 additional WhatsApp number.',
+            description: 'Enable inbound Hello on 1 additional gym-wide WhatsApp number.',
             price: 699,
             increment: 1,
             column: 'addon_extra_hello',
@@ -231,7 +231,6 @@ const billingConfigSql = toSqlJson(defaultBillingConfig);
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
 const GYM_ADDON_COLUMNS = ['addon_extra_whatsapp', 'addon_extra_staff', 'addon_extra_members', 'addon_extra_branches', 'addon_extra_hello'];
-const BILLING_BRANCH_SCALED_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp', 'hello']);
 const DEFAULT_BRANCH_ID = 'branch-1';
 
 const readNumber = (value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER, allowNull = false } = {}) => {
@@ -276,11 +275,13 @@ const LEGACY_BILLING_PLAN_FEATURES = {
         ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
         ['Up to 400 active members', 'Up to 2 branches', '1 owner + 5 staff users', '1,000 WhatsApp messages per month', 'Hello inbound on 1 number', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
         ['Up to 400 Active Members', 'Up to 2 Branches', '1 Owner + 5 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+        ['Up to 400 members / Branch', 'Multiple branches', '1 owner + 5 staff users / Branch', '1,000 WhatsApp messages per month / Branch', 'Hello inbound on 1 number / Branch', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
     ],
     pro: [
         ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
         ['Up to 1,000 active members', 'Up to 3 branches', '1 owner + 10 staff users', '2,000 WhatsApp messages per month', 'Hello inbound on 1 number', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
         ['Up to 1,000 Active Members', 'Up to 3 Branches', '1 Owner + 10 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+        ['Up to 1,000 members / Branch', 'Multiple branches', '1 owner + 10 staff users / Branch', '2,000 WhatsApp messages per month / Branch', 'Hello inbound on 1 number / Branch', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
     ],
 };
 
@@ -548,77 +549,44 @@ const resolveAllowedBranchesCount = (plan, gymData = {}) => {
     return Math.max(1, rawAllowedBranches || 1);
 };
 
-const resolveScaledBranchCapacity = ({ configuredBranches, allowedBranches }) => {
-    if (allowedBranches === null) {
-        return {
-            pooledSingleBranch: false,
-            pooledBranchMultiplier: 1,
-            scaleBranches: configuredBranches,
-        };
+const resolvePlanTotalLimit = (plan, limitKey) => {
+    const baseValue = plan?.limits?.[limitKey];
+    if (baseValue === null || baseValue === undefined) return null;
+
+    if (limitKey === 'members' || limitKey === 'staff') {
+        const includedBranches = plan?.limits?.branches === null || plan?.limits?.branches === undefined
+            ? 1
+            : Math.max(1, Number(plan.limits.branches) || 1);
+        return Number(baseValue) * includedBranches;
     }
 
-    if (configuredBranches === 1) {
-        return {
-            pooledSingleBranch: allowedBranches > 1,
-            pooledBranchMultiplier: Math.max(1, allowedBranches),
-            scaleBranches: Math.max(1, allowedBranches),
-        };
-    }
-
-    return {
-        pooledSingleBranch: false,
-        pooledBranchMultiplier: 1,
-        scaleBranches: Math.max(1, Math.min(configuredBranches, allowedBranches)),
-    };
-};
-
-const computeBranchAwareLimit = (baseValue, addonValue, branchCapacity) => {
-    if (baseValue === null) {
-        return {
-            total: null,
-            perConfiguredBranch: null,
-            perIncludedBranch: null,
-        };
-    }
-
-    const perIncludedBranch = Number(baseValue) + Number(addonValue || 0);
-    return {
-        total: perIncludedBranch * branchCapacity.scaleBranches,
-        perConfiguredBranch: perIncludedBranch * branchCapacity.pooledBranchMultiplier,
-        perIncludedBranch,
-    };
+    return Number(baseValue);
 };
 
 const computeEffectiveBillingLimits = (billingConfig, planId, gymData = {}) => {
     const plan = getBillingPlan(billingConfig, planId);
     const configuredBranches = resolveConfiguredBranchesCount(gymData);
     const allowedBranches = resolveAllowedBranchesCount(plan, gymData);
-    const branchCapacity = resolveScaledBranchCapacity({ configuredBranches, allowedBranches });
-    const membersLimit = computeBranchAwareLimit(plan.limits.members, gymData?.addon_extra_members, branchCapacity);
-    const staffLimit = computeBranchAwareLimit(plan.limits.staff, gymData?.addon_extra_staff, branchCapacity);
-    const whatsAppLimit = computeBranchAwareLimit(plan.limits.whatsapp, gymData?.addon_extra_whatsapp, branchCapacity);
-    const helloLimit = computeBranchAwareLimit(plan.limits.hello, gymData?.addon_extra_hello, branchCapacity);
-
-    return {
-        members: membersLimit.total,
-        members_per_branch: membersLimit.perConfiguredBranch,
-        members_per_included_branch: membersLimit.perIncludedBranch,
-        staff: staffLimit.total,
-        staff_per_branch: staffLimit.perConfiguredBranch,
-        staff_per_included_branch: staffLimit.perIncludedBranch,
-        storage: plan.limits.storage === null ? null : plan.limits.storage,
-        branches: allowedBranches,
-        configured_branches: configuredBranches,
-        capacity_branches: branchCapacity.scaleBranches,
-        pooled_single_branch: branchCapacity.pooledSingleBranch,
-        pooled_branch_multiplier: branchCapacity.pooledBranchMultiplier,
-        whatsapp: whatsAppLimit.total,
-        whatsapp_per_branch: whatsAppLimit.perConfiguredBranch,
-        whatsapp_per_included_branch: whatsAppLimit.perIncludedBranch,
-        hello: helloLimit.total,
-        hello_per_branch: helloLimit.perConfiguredBranch,
-        hello_per_included_branch: helloLimit.perIncludedBranch,
+    const addonMap = {
+        members: Number(gymData?.addon_extra_members || 0),
+        staff: Number(gymData?.addon_extra_staff || 0),
+        branches: Number(gymData?.addon_extra_branches || 0),
+        whatsapp: Number(gymData?.addon_extra_whatsapp || 0),
+        hello: Number(gymData?.addon_extra_hello || 0),
     };
+
+    return BILLING_LIMIT_KEYS.reduce((accumulator, limitKey) => {
+        if (limitKey === 'branches') {
+            accumulator.branches = allowedBranches;
+            return accumulator;
+        }
+
+        const baseTotal = resolvePlanTotalLimit(plan, limitKey);
+        accumulator[limitKey] = baseTotal === null ? null : baseTotal + Number(addonMap[limitKey] || 0);
+        return accumulator;
+    }, {
+        configured_branches: configuredBranches,
+    });
 };
 
 const getBillingAddon = (billingConfig, addonKey) => {
@@ -779,7 +747,6 @@ const getGymBranchUsageBreakdown = async (db, gymId, branchDirectoryValue = null
 
 module.exports = {
     BILLING_ADDON_ORDER,
-    BILLING_BRANCH_SCALED_LIMIT_KEYS,
     BILLING_CAPABILITY_KEYS,
     BILLING_CORE_PLAN_IDS,
     BILLING_PLAN_ORDER,

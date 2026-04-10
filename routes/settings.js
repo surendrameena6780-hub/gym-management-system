@@ -45,7 +45,6 @@ const {
     ensureGymBillingAddonSchema,
     getBillingConfig,
     getBillingPlan,
-    getBranchUsageSnapshot,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
     hasBillingCapability,
@@ -89,45 +88,6 @@ const buildWhatsAppDeliveryCallbackUrl = (req) => {
         url.searchParams.set('token', token);
     }
     return url.toString();
-};
-
-const buildScaledLimitHint = (effectiveLimits, totalLimitKey) => {
-    const totalLimit = effectiveLimits?.[totalLimitKey];
-    if (totalLimit === null || totalLimit === undefined) return '';
-
-    const includedBranches = Number(effectiveLimits?.branches || 1);
-    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
-        return ` (pooled from ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'})`;
-    }
-
-    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
-    if (scaledBranches > 1) {
-        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
-        const scopeLabel = scaledBranches === configuredBranches
-            ? 'configured branch'
-            : 'active branch entitlement';
-        return ` (${totalLimit} total across ${scaledBranches} ${scopeLabel}${scaledBranches === 1 ? '' : 's'})`;
-    }
-
-    return '';
-};
-
-const describeScaledLimitScope = (effectiveLimits) => {
-    const includedBranches = Number(effectiveLimits?.branches || 1);
-    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
-        return `after pooling ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'} into your current branch`;
-    }
-
-    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
-    if (scaledBranches > 1) {
-        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
-        if (scaledBranches === configuredBranches) {
-            return `across ${scaledBranches} configured branch${scaledBranches === 1 ? '' : 'es'}`;
-        }
-        return `across ${scaledBranches} branch entitlement${scaledBranches === 1 ? '' : 's'} available under your current plan`;
-    }
-
-    return 'in your current branch';
 };
 
 const renderWhatsAppTemplatePreviewText = (templateText, member = {}, gymName = '') => {
@@ -2158,22 +2118,10 @@ router.post('/import/members', auth, async (req, res) => {
             }
 
             const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
-            const branchUsage = await getBranchUsageSnapshot(pool, req.user.gym_id, defaultBranchId);
-            const projectedBranchMembers = Number(branchUsage.members || 0) + validRows.length;
             const projectedMembers = Number(usageSnapshot.members || 0) + validRows.length;
-            if (effectiveLimits.members_per_branch !== null && projectedBranchMembers > effectiveLimits.members_per_branch) {
-                const totalCapacityHint = buildScaledLimitHint(effectiveLimits, 'members');
-                return res.status(409).json({
-                    error: `This import would exceed the ${effectiveLimits.members_per_branch}-member limit for ${getBranchName(branchDirectory, defaultBranchId) || 'the default branch'}${totalCapacityHint}. Delete expired or unpaid members there, or add more member capacity before importing more members.`,
-                    allowed_members: effectiveLimits.members_per_branch,
-                    current_members: Number(branchUsage.members || 0),
-                    requested_import: validRows.length,
-                    branch_id: defaultBranchId,
-                });
-            }
             if (effectiveLimits.members !== null && projectedMembers > effectiveLimits.members) {
                 return res.status(409).json({
-                    error: `This import would exceed your ${effectiveLimits.members}-member capacity ${describeScaledLimitScope(effectiveLimits)}. Delete expired or unpaid members, or add more member capacity before importing more members.`,
+                    error: `This import would exceed your ${effectiveLimits.members}-member capacity across the gym. Delete expired or unpaid members, or add more member capacity before importing more members.`,
                     allowed_members: effectiveLimits.members,
                     current_members: Number(usageSnapshot.members || 0),
                     requested_import: validRows.length,

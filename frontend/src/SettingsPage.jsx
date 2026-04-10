@@ -47,14 +47,14 @@ const SAAS_PLANS = {
   monthly: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
     { id: 'basic',  name: 'Basic',      price: 1, billed: 1,  features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 400 Members / Branch', 'Up to 2 Branches', '1 Owner + 5 Staff Users / Branch', '1,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 1,000 Members / Branch', 'Up to 3 Branches', '1 Owner + 10 Staff Users / Branch', '2,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
   annual: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
     { id: 'basic',  name: 'Basic',      price: 1, billed: 10, features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 400 Members / Branch', 'Up to 2 Branches', '1 Owner + 5 Staff Users / Branch', '1,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 1,000 Members / Branch', 'Up to 3 Branches', '1 Owner + 10 Staff Users / Branch', '2,000 WhatsApp Messages/mo / Branch', 'Hello Inbound on 1 Number / Branch', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
 };
 
@@ -174,8 +174,8 @@ const getBillingQuotePreview = ({
 const PLAN_LIMITS = {
   test:   { members: 'Unlimited', staff: 'Unlimited', storage: 2,  branches: 'Unlimited', whatsapp: 'Unlimited', hello: 'Unlimited' },
   basic:  { members: 150,         staff: 2,           storage: 5,  branches: 1,           whatsapp: 500,          hello: 0 },
-  growth: { members: 400,         staff: 5,           storage: 10, branches: 2,           whatsapp: 1000,         hello: 1 },
-  pro:    { members: 1000,        staff: 10,          storage: 20, branches: 3,           whatsapp: 2000,         hello: 1 },
+  growth: { members: 800,         staff: 10,          storage: 10, branches: 2,           whatsapp: 1000,         hello: 1 },
+  pro:    { members: 3000,        staff: 30,          storage: 20, branches: 3,           whatsapp: 2000,         hello: 1 },
 };
 
 // Compute effective limits by adding addon purchases on top of base plan limits
@@ -193,10 +193,10 @@ const getEffectiveLimits = (planId, gymData) => {
 
 const ADDON_PACKS = [
   { key: 'extra_whatsapp_250', label: 'Extra 250 WhatsApp Messages', price: 249, icon: MessageSquare, desc: 'Adds 250 more outbound WhatsApp messages to your monthly quota.' },
-  { key: 'extra_staff_1',      label: 'Extra Staff User',            price: 149, icon: Users,         desc: 'Add 1 more staff login to your current plan.' },
-  { key: 'extra_members_100',  label: 'Extra 100 Members',           price: 299, icon: User,          desc: 'Raises your member capacity by 100.' },
+  { key: 'extra_staff_1',      label: 'Extra Staff User',            price: 149, icon: Users,         desc: 'Add 1 more staff login to your gym-wide plan capacity.' },
+  { key: 'extra_members_100',  label: 'Extra 100 Members',           price: 299, icon: User,          desc: 'Raises your gym-wide member capacity by 100.' },
   { key: 'extra_branch_1',     label: 'Extra Branch',                price: 599, icon: Building2,     desc: 'Add 1 more branch to your gym setup.' },
-  { key: 'extra_hello_1',      label: 'Extra Hello Number',          price: 699, icon: Phone,         desc: 'Enable inbound Hello on 1 additional WhatsApp number.', requiresPlan: ['growth', 'pro'] },
+  { key: 'extra_hello_1',      label: 'Extra Hello Number',          price: 699, icon: Phone,         desc: 'Enable inbound Hello on 1 additional gym-wide WhatsApp number.', requiresPlan: ['growth', 'pro'] },
 ];
 
 const BILLING_PLAN_THEME = {
@@ -781,23 +781,12 @@ const loadRazorpayScript = () => {
 
     setEffectiveLimits({
       members: limits.members ?? null,
-      members_per_branch: limits.members_per_branch ?? null,
-      members_per_included_branch: limits.members_per_included_branch ?? null,
       staff: limits.staff ?? null,
-      staff_per_branch: limits.staff_per_branch ?? null,
-      staff_per_included_branch: limits.staff_per_included_branch ?? null,
       storage: limits.storage ?? null,
       branches: limits.branches ?? null,
       configured_branches: limits.configured_branches ?? null,
-      capacity_branches: limits.capacity_branches ?? null,
-      pooled_single_branch: Boolean(limits.pooled_single_branch),
-      pooled_branch_multiplier: limits.pooled_branch_multiplier ?? 1,
       whatsapp: limits.whatsapp ?? null,
-      whatsapp_per_branch: limits.whatsapp_per_branch ?? null,
-      whatsapp_per_included_branch: limits.whatsapp_per_included_branch ?? null,
       hello: limits.hello ?? null,
-      hello_per_branch: limits.hello_per_branch ?? null,
-      hello_per_included_branch: limits.hello_per_included_branch ?? null,
     });
 
     setIntegrationData((prev) => {
@@ -2606,18 +2595,14 @@ const loadRazorpayScript = () => {
               {/* Usage & Limits Dashboard */}
               {(() => {
                 const eLimits = usageLimits;
-                const scaledBranchSummary = eLimits.pooled_single_branch
-                  ? `Your ${currentPlanName} plan is using 1 configured branch, so GymVault pools ${eLimits.branches || 1} included branch entitlements into that branch. This raises the single-branch caps to ${eLimits.members_per_branch ?? 'Unlimited'} members, ${eLimits.staff_per_branch ?? 'Unlimited'} staff users, and ${eLimits.whatsapp_per_branch ?? 'Unlimited'} WhatsApp messages per month.`
-                  : Number(eLimits.capacity_branches || 1) > 1
-                    ? `This gym is using ${platformData.branches_count} configured branches. Each branch can use up to ${eLimits.members_per_included_branch ?? eLimits.members_per_branch ?? 'Unlimited'} members, ${eLimits.staff_per_included_branch ?? eLimits.staff_per_branch ?? 'Unlimited'} staff users, and ${eLimits.whatsapp_per_included_branch ?? eLimits.whatsapp_per_branch ?? 'Unlimited'} WhatsApp messages per month.`
-                    : `This gym is currently operating on a single branch entitlement. The totals below match the current branch caps.`;
+                const sharedCapacitySummary = `Members and staff on ${currentPlanName} are shared across the whole gym, so you can distribute them across branches in any mix. WhatsApp messages and Hello numbers stay fixed gym-wide totals, while branch count is tracked separately.`;
                 return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
                           <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
-                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Growth and Pro plans keep their included branch capacity: with one configured branch the capacity is pooled into that branch, and with multiple configured branches it splits branch-wise.</p>
+                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Members and staff are shared across the whole gym, while branches, WhatsApp messages, and Hello numbers are tracked as separate plan totals.</p>
                       </div>
                   </div>
                   
@@ -2661,7 +2646,7 @@ const loadRazorpayScript = () => {
                       />
                   </div>
                   <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600 leading-6">
-                    {scaledBranchSummary}
+                    {sharedCapacitySummary}
                   </div>
               </div>
                 );

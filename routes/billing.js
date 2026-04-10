@@ -10,7 +10,6 @@ const {
     ensureGymBillingAddonSchema,
     getBillingAddon,
     getBillingConfig,
-    getGymBranchUsageBreakdown,
     getBillingPlanPrice,
     getGymBillingSnapshot,
     getGymUsageSnapshot,
@@ -238,14 +237,8 @@ const buildBillingPreviewPayload = (quote, currentValidUntil = null) => ({
 
 const BILLING_GUARD_LIMIT_KEYS = [
     'members',
-    'members_per_branch',
     'staff',
-    'staff_per_branch',
     'branches',
-    'whatsapp',
-    'whatsapp_per_branch',
-    'hello',
-    'hello_per_branch',
 ];
 
 const isLowerLimit = (currentValue, targetValue) => {
@@ -262,25 +255,7 @@ const isRestrictivePlanChange = (currentLimits, targetLimits) => (
     BILLING_GUARD_LIMIT_KEYS.some((limitKey) => isLowerLimit(currentLimits?.[limitKey], targetLimits?.[limitKey]))
 );
 
-const describeScaledLimitScope = (effectiveLimits) => {
-    const includedBranches = Number(effectiveLimits?.branches || 1);
-    if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
-        return `after pooling ${includedBranches} included branch${includedBranches === 1 ? '' : 'es'} into the current branch`;
-    }
-
-    const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
-    if (scaledBranches > 1) {
-        const configuredBranches = Number(effectiveLimits?.configured_branches || 1);
-        if (scaledBranches === configuredBranches) {
-            return `across ${scaledBranches} configured branch${scaledBranches === 1 ? '' : 'es'}`;
-        }
-        return `across ${scaledBranches} branch entitlement${scaledBranches === 1 ? '' : 's'} available under the target plan`;
-    }
-
-    return 'in the current branch';
-};
-
-const buildPlanChangeViolations = ({ gymBilling, usageSnapshot, branchUsageBreakdown, targetLimits }) => {
+const buildPlanChangeViolations = ({ gymBilling, usageSnapshot, targetLimits }) => {
     const violations = [];
     const configuredBranches = Number(gymBilling?.branches_count || 1);
 
@@ -289,27 +264,11 @@ const buildPlanChangeViolations = ({ gymBilling, usageSnapshot, branchUsageBreak
     }
 
     if (targetLimits.members !== null && Number(usageSnapshot?.members || 0) > targetLimits.members) {
-        violations.push(`This gym currently has ${Number(usageSnapshot.members || 0)} members, but the target plan allows ${targetLimits.members} ${describeScaledLimitScope(targetLimits)}.`);
+        violations.push(`This gym currently has ${Number(usageSnapshot.members || 0)} members, but the target plan allows ${targetLimits.members} across the gym.`);
     }
 
     if (targetLimits.staff !== null && Number(usageSnapshot?.staff || 0) > targetLimits.staff) {
-        violations.push(`This gym currently has ${Number(usageSnapshot.staff || 0)} staff users, but the target plan allows ${targetLimits.staff} ${describeScaledLimitScope(targetLimits)}.`);
-    }
-
-    if (!Boolean(targetLimits?.pooled_single_branch)) {
-        if (targetLimits.members_per_branch !== null) {
-            const violatingMemberBranch = branchUsageBreakdown.find((branchUsage) => Number(branchUsage.members || 0) > targetLimits.members_per_branch);
-            if (violatingMemberBranch) {
-                violations.push(`${violatingMemberBranch.branch_name} currently has ${violatingMemberBranch.members} members, which exceeds the target branch limit of ${targetLimits.members_per_branch}.`);
-            }
-        }
-
-        if (targetLimits.staff_per_branch !== null) {
-            const violatingStaffBranch = branchUsageBreakdown.find((branchUsage) => Number(branchUsage.staff || 0) > targetLimits.staff_per_branch);
-            if (violatingStaffBranch) {
-                violations.push(`${violatingStaffBranch.branch_name} currently has ${violatingStaffBranch.staff} staff users, which exceeds the target branch limit of ${targetLimits.staff_per_branch}.`);
-            }
-        }
+        violations.push(`This gym currently has ${Number(usageSnapshot.staff || 0)} staff users, but the target plan allows ${targetLimits.staff} across the gym.`);
     }
 
     return violations;
@@ -323,17 +282,13 @@ const validatePlanChangeCompatibility = async ({ db, gymId, billingConfig, gymBi
         return { targetLimits, violations: [] };
     }
 
-    const [usageSnapshot, branchUsageBreakdown] = await Promise.all([
-        getGymUsageSnapshot(db, gymId),
-        getGymBranchUsageBreakdown(db, gymId, gymBilling?.branch_directory, Number(gymBilling?.branches_count || 1)),
-    ]);
+    const usageSnapshot = await getGymUsageSnapshot(db, gymId);
 
     return {
         targetLimits,
         violations: buildPlanChangeViolations({
             gymBilling,
             usageSnapshot,
-            branchUsageBreakdown,
             targetLimits,
         }),
     };

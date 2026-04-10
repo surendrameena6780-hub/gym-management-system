@@ -219,17 +219,10 @@ const formatLimitDisplay = (value) => {
 const formatUsageDisplay = (current, limit) => `${Number(current || 0).toLocaleString()} / ${formatLimitDisplay(limit)}`;
 
 const describeEffectiveLimitMode = (effectiveLimits = {}) => {
-  const includedBranches = Number(effectiveLimits?.branches || 1);
-  if (Boolean(effectiveLimits?.pooled_single_branch) && includedBranches > 1) {
-    return `This gym has one configured branch, so GymVault pools ${includedBranches} included branch entitlements into that branch.`;
-  }
-
-  const scaledBranches = Number(effectiveLimits?.capacity_branches || 1);
-  if (scaledBranches > 1) {
-    return `Branch-scaled limits are currently split across ${scaledBranches} active branch entitlements.`;
-  }
-
-  return 'Branch-scaled limits currently resolve to a single active branch entitlement.';
+  const memberLimit = formatLimitDisplay(effectiveLimits?.members);
+  const staffLimit = formatLimitDisplay(effectiveLimits?.staff);
+  const branchLimit = formatLimitDisplay(effectiveLimits?.branches);
+  return `Members and staff are pooled across the entire gym. This plan currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons.`;
 };
 
 function SuperAdminDashboard({ token, onLogout }) {
@@ -1565,7 +1558,7 @@ function SuperAdminDashboard({ token, onLogout }) {
                 Edit plan names, monthly and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
               </p>
               <p className="text-xs text-slate-500 max-w-3xl">
-                Members, staff, WhatsApp, and Hello limits are stored per included branch entitlement. If a Growth or Pro gym runs only one configured branch, its included branch capacity is pooled into that branch instead of being discarded.
+                Members and staff limits are gym-wide totals. WhatsApp and Hello are fixed gym-wide quotas, while branch count remains a separate entitlement.
               </p>
 
               <div className="space-y-4">
@@ -2072,8 +2065,8 @@ function SuperAdminDashboard({ token, onLogout }) {
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Owner</p><p className="font-black text-white">{selectedGym.owner_name || '-'}</p><p className="text-slate-400 mt-0.5">{selectedGym.owner_email || '-'}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Plan / Status</p><p className="font-black text-white uppercase">{selectedGym.plan} · {selectedGym.status}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Configured / Allowed Branches</p><p className="font-black text-white">{selectedGym.branches_count} / {formatLimitDisplay(selectedGym.effective_limits?.branches)}</p></div>
-                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Members</p><p className="font-black text-white">{formatUsageDisplay(selectedGym.total_members, selectedGym.effective_limits?.members)}</p><p className="text-slate-400 mt-0.5">{formatLimitDisplay(selectedGym.effective_limits?.members_per_branch)} per active branch</p></div>
-                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Staff Users</p><p className="font-black text-white">{formatUsageDisplay(selectedGym.total_staff, selectedGym.effective_limits?.staff)}</p><p className="text-slate-400 mt-0.5">{formatLimitDisplay(selectedGym.effective_limits?.staff_per_branch)} per active branch</p></div>
+                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Members</p><p className="font-black text-white">{formatUsageDisplay(selectedGym.total_members, selectedGym.effective_limits?.members)}</p><p className="text-slate-400 mt-0.5">Gym-wide pooled member capacity</p></div>
+                <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Staff Users</p><p className="font-black text-white">{formatUsageDisplay(selectedGym.total_staff, selectedGym.effective_limits?.staff)}</p><p className="text-slate-400 mt-0.5">Gym-wide pooled staff capacity</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Phone</p><p className="font-black text-white">{selectedGym.phone || '-'}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Revenue</p><p className="font-black text-white">₹{Number(selectedGym.total_revenue || 0).toLocaleString()}</p></div>
                 <div className="bg-black/30 rounded-xl p-3 border border-white/10"><p className="text-slate-500">Last Activity</p><p className="font-black text-white">{selectedGym.last_active ? new Date(selectedGym.last_active).toLocaleString('en-GB') : '-'}</p></div>
@@ -2116,7 +2109,7 @@ function SuperAdminDashboard({ token, onLogout }) {
               <div className="rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
                 <div>
                   <p className="text-xs uppercase tracking-widest font-black text-slate-400">Branch Breakdown</p>
-                  <p className="text-sm text-slate-500 mt-1">Live members and staff per branch.</p>
+                  <p className="text-sm text-slate-500 mt-1">Live members and staff per branch for operations only. Billing capacity is enforced at the gym total level.</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {(selectedGym.branch_usage_breakdown || []).map((branch) => (
