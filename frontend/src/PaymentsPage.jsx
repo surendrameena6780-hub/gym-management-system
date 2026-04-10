@@ -13,7 +13,6 @@ import { reportClientError } from './utils/clientErrorReporter';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildPayrollPayoutReference, buildPayrollUpiUri, copyPayrollText, openPayrollUpiIntent } from './utils/payrollPayouts';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
-import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import PaginationControls from './components/PaginationControls';
 import { getBranchLabel, getBranchRequestValue, getDefaultBranchId, normalizeBranchDirectory } from './utils/branchScope';
 
@@ -1904,19 +1903,9 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
       <div className="space-y-3">
         <div className="relative sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
-          <div className="min-w-0 pr-[9rem] sm:pr-1">
+          <div className="min-w-0 sm:pr-1">
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Finance Hub</h1>
           </div>
-          <OperationsBranchScopeBar
-            branchDirectory={branchDirectory}
-            branchId={operationsBranchId}
-            onChange={appRuntime.setOperationsBranchId}
-            currentUser={currentUser}
-            loading={appRuntime.branchScopeLoading}
-            title="Finance scope"
-            description="Switch the branch lens for collections, expenses, payroll, and POS flows."
-            className="absolute right-0 top-0 justify-self-end self-start shrink-0 sm:static"
-          />
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-end">
           <div className="flex gap-1 bg-slate-100 rounded-xl p-0.5 w-fit overflow-x-auto whitespace-nowrap">

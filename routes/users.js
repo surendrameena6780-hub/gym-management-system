@@ -10,6 +10,7 @@ const {
     branchSchemaMiddleware,
     getBranchName,
     getGymBranchDirectory,
+    resolveBranchReadScope,
     resolveBranchWriteScope,
 } = require('../utils/branchAccess');
 const {
@@ -20,6 +21,7 @@ const {
 } = require('../utils/platformSettings');
 
 const saasMiddleware = require('../middleware/saasMiddleware');
+const DEFAULT_BRANCH_SQL = `'${DEFAULT_BRANCH_ID}'`;
 
 router.use(branchSchemaMiddleware);
 
@@ -61,13 +63,23 @@ router.get('/', auth, async (req, res) => {
 // GET /api/users/staff — Owner-only staff list
 router.get('/staff', auth, requireOwner, async (req, res) => {
     try {
+        const scope = await resolveBranchReadScope(pool, req);
         const branchDirectory = await getGymBranchDirectory(pool, req.user.gym_id);
+        const params = [req.user.gym_id];
+        const scopedBranchFilter = scope.branchId
+            ? ` AND (UPPER(COALESCE(role, 'STAFF')) = 'OWNER' OR COALESCE(branch_id, ${DEFAULT_BRANCH_SQL}) = $2)`
+            : '';
+
+        if (scope.branchId) {
+            params.push(scope.branchId);
+        }
+
         const result = await pool.query(
             `SELECT id, full_name, email, role, staff_role, branch_id, is_active, permissions, created_at, last_login_at
              FROM users
-             WHERE gym_id = $1
+             WHERE gym_id = $1${scopedBranchFilter}
              ORDER BY CASE WHEN role = 'OWNER' THEN 0 ELSE 1 END, full_name ASC`,
-            [req.user.gym_id]
+            params
         );
 
         return res.json(result.rows.map((row) => ({
@@ -77,6 +89,9 @@ router.get('/staff', auth, requireOwner, async (req, res) => {
         })));
     } catch (err) {
         console.error('STAFF LIST ERROR:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
         return res.status(500).json({ error: 'Server Error' });
     }
 });

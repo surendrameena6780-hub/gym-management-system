@@ -484,7 +484,7 @@ const loadRazorpayScript = () => {
 
 // FIX: Added defaultTab to the props here!
   const SettingsPage = ({ appRuntime, defaultTab, isActive = false }) => { 
-    const { toast, token, currentUser = null } = appRuntime;
+    const { toast, token, currentUser = null, branchScopeValue, defaultBranchId = 'branch-1' } = appRuntime;
   const [razorpayKey, setRazorpayKey] = useState('');
   const isOwner = String(currentUser?.role || '').toUpperCase() === 'OWNER';
   
@@ -747,14 +747,27 @@ const loadRazorpayScript = () => {
     () => computeCatalogEffectiveLimits(normalizedBillingCatalog, gymData.current_plan, gymData, effectiveLimits),
     [effectiveLimits, gymData, normalizedBillingCatalog]
   );
+  const defaultStaffBranchId = branchScopeValue || defaultBranchId || branchOptions[0]?.id || 'branch-1';
 
   useEffect(() => {
-    const fallbackBranchId = branchOptions[0]?.id || 'branch-1';
+    const fallbackBranchId = defaultStaffBranchId;
     setStaffForm((prev) => {
       const hasSelectedBranch = branchOptions.some((branch) => branch.id === prev.branch_id);
-      return hasSelectedBranch ? prev : { ...prev, branch_id: fallbackBranchId };
+      const canAutoSyncBranch = !String(prev.full_name || '').trim()
+        && !String(prev.email || '').trim()
+        && !String(prev.password || '').trim();
+
+      if (!hasSelectedBranch) {
+        return { ...prev, branch_id: fallbackBranchId };
+      }
+
+      if (canAutoSyncBranch && prev.branch_id !== fallbackBranchId) {
+        return { ...prev, branch_id: fallbackBranchId };
+      }
+
+      return prev;
     });
-  }, [branchOptions]);
+  }, [branchOptions, defaultStaffBranchId]);
 
   useEffect(() => {
     setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
@@ -856,21 +869,24 @@ const loadRazorpayScript = () => {
     if (!token) return;
     setLoadingStaff(true);
     try {
-      const res = await axios.get('/api/users/staff', headers);
+      const res = await axios.get('/api/users/staff', {
+        ...headers,
+        params: branchScopeValue ? { branch_id: branchScopeValue } : undefined,
+      });
       setStaffMembers(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to load staff members.', 'error');
     } finally {
       setLoadingStaff(false);
     }
-  }, [headers, toast, token]);
+  }, [branchScopeValue, headers, toast, token]);
 
   useEffect(() => {
     if (!isActive || !isOwner) return;
     if (activeTab === 'staff') {
       fetchStaff();
     }
-  }, [activeTab, fetchStaff, isActive, isOwner]);
+  }, [activeTab, fetchStaff, isActive, isOwner, branchScopeValue]);
 
   const loadIntegrations = useCallback(async () => {
     if (!token) return;
@@ -1424,7 +1440,7 @@ const loadRazorpayScript = () => {
     try {
       await axios.post('/api/users/staff', staffForm, headers);
       toast('Staff member created successfully.', 'success');
-      setStaffForm({ full_name: '', email: '', password: '', staff_role: 'TRAINER', branch_id: branchOptions[0]?.id || 'branch-1' });
+      setStaffForm({ full_name: '', email: '', password: '', staff_role: 'TRAINER', branch_id: defaultStaffBranchId });
       fetchStaff();
       setUsageData((prev) => ({ ...prev, staff: Number(prev.staff || 0) + 1 }));
     } catch (err) {
@@ -1440,7 +1456,7 @@ const loadRazorpayScript = () => {
       await axios.put(`/api/users/staff/${staff.id}`, {
         full_name: staff.full_name,
         staff_role: overrides.staff_role ?? staff.staff_role ?? 'STAFF',
-        branch_id: overrides.branch_id ?? staff.branch_id ?? branchOptions[0]?.id ?? 'branch-1',
+        branch_id: overrides.branch_id ?? staff.branch_id ?? defaultStaffBranchId,
         is_active: overrides.is_active ?? staff.is_active,
         permissions: Array.isArray(overrides.permissions) ? overrides.permissions : (staff.permissions || []),
       }, headers);
@@ -2036,26 +2052,6 @@ const loadRazorpayScript = () => {
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">System Role</label><div className="relative"><ShieldCheck size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-500" /><input disabled type="text" value="Super Administrator" className="w-full pl-11 pr-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-sm font-bold text-indigo-600 cursor-not-allowed" /></div></div>
                   </div>
                 </div>
-
-                {/* Active Branch Switcher */}
-                {appRuntime.canSelectOperationsBranch && (
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-black text-violet-600 uppercase tracking-widest flex items-center gap-2 border-b border-violet-50 pb-3"><Building2 size={14} /> Active Branch</h3>
-                    <p className="text-xs font-medium text-slate-500">Switch your active branch. All pages will immediately show data for the selected branch.</p>
-                    <div className="max-w-xs">
-                      <select
-                        value={appRuntime.operationsBranchId}
-                        onChange={(e) => appRuntime.setOperationsBranchId(e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-violet-500/10 focus:border-violet-400 transition-all cursor-pointer"
-                      >
-                        {appRuntime.branchDirectory.map((branch) => (
-                          <option key={branch.id} value={branch.id}>{branch.name}</option>
-                        ))}
-                        <option value="all">All Branches</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
 
                 <div className="space-y-5">
                   <h3 className="text-xs font-black text-rose-500 uppercase tracking-widest flex items-center gap-2 border-b border-rose-50 pb-3"><Fingerprint size={14} /> Security Updates</h3>

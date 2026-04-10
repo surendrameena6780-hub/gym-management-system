@@ -8,10 +8,9 @@ import {
   TrendingUp, Users, Activity, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Download,
   UserMinus, UserCheck, Clock, Target, ShieldCheck,
-  MessageSquare, Phone, Award, RefreshCw,
+  MessageSquare, Phone, Award, RefreshCw, Building2,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
-import OperationsBranchScopeBar from './components/OperationsBranchScopeBar';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
 import useCountUp from './utils/useCountUp';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
@@ -42,6 +41,29 @@ const EMPTY_ANALYTICS = {
     heatmap: [],
     topMembers: [],
   },
+};
+
+const EMPTY_FRANCHISE_ANALYTICS = {
+  totals: {
+    branchCount: 0,
+    totalMembers: 0,
+    activeMembers: 0,
+    expiredMembers: 0,
+    unpaidMembers: 0,
+    inactiveMembers: 0,
+    membershipRevenue: 0,
+    posRevenue: 0,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    totalPayroll: 0,
+    totalCheckins: 0,
+    profit: 0,
+    averageRevenuePerActiveMember: 0,
+    expectedNextMonth: 0,
+  },
+  revenueTrend: [],
+  topPlans: [],
+  branches: [],
 };
 
 const Card = ({ children, className = '' }) => (
@@ -113,15 +135,72 @@ const normalizeInsightsPayload = (payload) => ({
   },
 });
 
+const normalizeFranchisePayload = (payload) => ({
+  totals: {
+    branchCount: Number(payload?.totals?.branchCount || 0),
+    totalMembers: Number(payload?.totals?.totalMembers || 0),
+    activeMembers: Number(payload?.totals?.activeMembers || 0),
+    expiredMembers: Number(payload?.totals?.expiredMembers || 0),
+    unpaidMembers: Number(payload?.totals?.unpaidMembers || 0),
+    inactiveMembers: Number(payload?.totals?.inactiveMembers || 0),
+    membershipRevenue: Number(payload?.totals?.membershipRevenue || 0),
+    posRevenue: Number(payload?.totals?.posRevenue || 0),
+    totalRevenue: Number(payload?.totals?.totalRevenue || 0),
+    totalExpenses: Number(payload?.totals?.totalExpenses || 0),
+    totalPayroll: Number(payload?.totals?.totalPayroll || 0),
+    totalCheckins: Number(payload?.totals?.totalCheckins || 0),
+    profit: Number(payload?.totals?.profit || 0),
+    averageRevenuePerActiveMember: Number(payload?.totals?.averageRevenuePerActiveMember || 0),
+    expectedNextMonth: Number(payload?.totals?.expectedNextMonth || 0),
+  },
+  revenueTrend: Array.isArray(payload?.revenueTrend)
+    ? payload.revenueTrend.map((row) => ({
+        name: row.name,
+        membership_revenue: Number(row.membership_revenue || 0),
+        pos_revenue: Number(row.pos_revenue || 0),
+        total_revenue: Number(row.total_revenue || 0),
+      }))
+    : [],
+  topPlans: Array.isArray(payload?.topPlans)
+    ? payload.topPlans.map((row) => ({
+        name: row.name,
+        revenue: Number(row.revenue || 0),
+        buyers: Number(row.buyers || 0),
+      }))
+    : [],
+  branches: Array.isArray(payload?.branches)
+    ? payload.branches.map((row) => ({
+        branchId: row.branchId,
+        branchName: row.branchName,
+        totalMembers: Number(row.totalMembers || 0),
+        activeMembers: Number(row.activeMembers || 0),
+        expiredMembers: Number(row.expiredMembers || 0),
+        unpaidMembers: Number(row.unpaidMembers || 0),
+        inactiveMembers: Number(row.inactiveMembers || 0),
+        membershipRevenue: Number(row.membershipRevenue || 0),
+        posRevenue: Number(row.posRevenue || 0),
+        totalRevenue: Number(row.totalRevenue || 0),
+        totalExpenses: Number(row.totalExpenses || 0),
+        totalPayroll: Number(row.totalPayroll || 0),
+        totalCheckins: Number(row.totalCheckins || 0),
+        profit: Number(row.profit || 0),
+      }))
+    : [],
+});
+
 const InsightsPage = ({ appRuntime, isActive = true }) => {
   const { token, toast, showConfirm, currentUser = null } = appRuntime;
   const branchDirectory = normalizeBranchDirectory(appRuntime.branchDirectory);
   const defaultBranchId = getDefaultBranchId(branchDirectory);
   const operationsBranchId = appRuntime.operationsBranchId || currentUser?.branch_id || defaultBranchId;
   const branchScopeValue = getBranchRequestValue(operationsBranchId);
+  const currentPlanId = String(currentUser?.saas_plan || currentUser?.current_plan || '').trim().toLowerCase();
+  const canViewFranchiseInsights = String(currentUser?.role || '').trim().toUpperCase() === 'OWNER' && ['growth', 'pro'].includes(currentPlanId);
   const [activeTab, setActiveTab] = useState('revenue');
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
+  const [franchiseAnalytics, setFranchiseAnalytics] = useState(EMPTY_FRANCHISE_ANALYTICS);
   const [loading, setLoading] = useState(true);
+  const [franchiseLoading, setFranchiseLoading] = useState(false);
   const [dateRange, setDateRange] = useState('6M');
   const [insightsPeakDays, setInsightsPeakDays] = useState('7');
   const [insightsPeakHours, setInsightsPeakHours] = useState([]);
@@ -229,10 +308,48 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
     }
   }, [branchScopeValue, token, toast]);
 
+  const fetchFranchiseInsights = useCallback(async (range, allowCache = true) => {
+    if (!token || !canViewFranchiseInsights) return;
+
+    const cacheKey = `franchise:${range}`;
+
+    if (allowCache && cacheRef.current.has(cacheKey)) {
+      setFranchiseAnalytics(cacheRef.current.get(cacheKey));
+      return;
+    }
+
+    setFranchiseLoading(true);
+    try {
+      const res = await axios.get('/api/insights/franchise', {
+        headers: { 'x-auth-token': token },
+        params: { range },
+      });
+      const normalized = normalizeFranchisePayload(res.data || {});
+      cacheRef.current.set(cacheKey, normalized);
+      setFranchiseAnalytics(normalized);
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Failed to load franchise insights.', 'error');
+      setFranchiseAnalytics(EMPTY_FRANCHISE_ANALYTICS);
+    } finally {
+      setFranchiseLoading(false);
+    }
+  }, [canViewFranchiseInsights, token, toast]);
+
   useEffect(() => {
     if (!token || !isActive) return;
     fetchInsights(dateRange, true);
   }, [token, dateRange, branchScopeValue, isActive, fetchInsights]);
+
+  useEffect(() => {
+    if (!canViewFranchiseInsights && activeTab === 'franchise') {
+      setActiveTab('revenue');
+    }
+  }, [activeTab, canViewFranchiseInsights]);
+
+  useEffect(() => {
+    if (!token || !isActive || activeTab !== 'franchise' || !canViewFranchiseInsights) return;
+    fetchFranchiseInsights(dateRange, true);
+  }, [activeTab, canViewFranchiseInsights, dateRange, fetchFranchiseInsights, isActive, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -254,6 +371,8 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
 
   const hasRevenueGraph = analytics.revenue.graphData.some((item) => Number(item.revenue || 0) > 0);
   const hasPeakHourData = insightsPeakHours.some((item) => Number(item.count || 0) > 0);
+  const hasFranchiseTrend = franchiseAnalytics.revenueTrend.some((item) => Number(item.total_revenue || 0) > 0);
+  const franchiseTotals = franchiseAnalytics.totals;
 
   if (loading) return <PageLoader className="min-h-[56vh]" />;
 
@@ -261,19 +380,9 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
     <div className="min-h-full p-0 space-y-8 font-inter text-slate-900">
       <div className="space-y-3">
         <div className="relative sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-4">
-          <div className="min-w-0 pr-[9rem] sm:pr-1">
+          <div className="min-w-0 sm:pr-1">
             <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
           </div>
-          <OperationsBranchScopeBar
-            branchDirectory={branchDirectory}
-            branchId={operationsBranchId}
-            onChange={appRuntime.setOperationsBranchId}
-            currentUser={currentUser}
-            loading={appRuntime.branchScopeLoading}
-            title="Insights scope"
-            description="Filter insights and attendance trends by branch without leaving the page."
-            className="absolute right-0 top-0 justify-self-end self-start shrink-0 sm:static"
-          />
           <p className="mt-2 text-slate-500 font-medium sm:col-span-2 sm:mt-0">Simple numbers from real payments, memberships, and attendance.</p>
         </div>
         <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm w-fit">
@@ -297,52 +406,90 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Average Per Member" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
-        <KPICard title="Renewals Due Soon" value={analytics.risk.expiringCount} change={analytics.risk.expiringCount > 0 ? 'urgent' : null} trend="down" icon={Clock} color="bg-amber-500" className="gv-fade-up gv-fade-up-1" />
-        <KPICard title="Members Staying" value={`${analytics.health.retention}%`} change={`${analytics.health.expired} expired`} trend={Number(analytics.health.churn || 0) > 0 ? 'down' : 'up'} icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
-        <KPICard title="Money At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={analytics.risk.inactiveCount > 0 ? `${analytics.risk.inactiveCount} not visiting` : null} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
-      </div>
+      {activeTab === 'franchise' && canViewFranchiseInsights ? (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPICard title="Total Revenue" value={`₹${franchiseTotals.totalRevenue.toLocaleString()}`} icon={TrendingUp} color="bg-emerald-500" className="gv-fade-up" />
+            <KPICard title="Profit" value={`₹${franchiseTotals.profit.toLocaleString()}`} icon={ShieldCheck} color="bg-indigo-500" className="gv-fade-up gv-fade-up-1" />
+            <KPICard title="Total Members" value={franchiseTotals.totalMembers} icon={Users} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
+            <KPICard title="Active Branches" value={franchiseTotals.branchCount} icon={Building2} color="bg-amber-500" className="gv-fade-up gv-fade-up-3" />
+          </div>
 
-      {/* ── Plain Summary ── */}
-      <div className="bg-white backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
-        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Quick Summary</p>
-        <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
-          <div className="space-y-2">
-            <p>
-              <span className="font-bold text-slate-900">Money:</span>{' '}
-              {analytics.revenue.arpu > 0
-                ? `You are earning about ₹${analytics.revenue.arpu.toLocaleString()} per active member, and ₹${analytics.revenue.lostRevenue.toLocaleString()} was lost from expired plans. `
-                : 'No payment data is available yet for this period. '}
-              {analytics.health.active > 0 && `If current members stay active, that is about ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()} for the month.`}
-            </p>
-            <p>
-              <span className="font-bold text-slate-900">Members staying:</span>{' '}
-              {Number(analytics.health.retention) >= 80
-                ? `${analytics.health.retention}% of members are staying active. `
-                : Number(analytics.health.retention) >= 50
-                  ? `${analytics.health.retention}% of members are staying active, but this needs attention. `
-                  : `Only ${analytics.health.retention}% of members are staying active. Follow-up is needed. `}
-              {analytics.health.expired > 0 && `${analytics.health.expired} memberships expired in this window.`}
-            </p>
+          <div className="bg-white backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
+            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Franchise Summary</p>
+            <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
+              <div className="space-y-2">
+                <p>
+                  <span className="font-bold text-slate-900">Whole business:</span>{' '}
+                  This tab ignores the branch selector and combines all branches for the selected range. Revenue is ₹{franchiseTotals.totalRevenue.toLocaleString()}, expenses are ₹{franchiseTotals.totalExpenses.toLocaleString()}, payroll is ₹{franchiseTotals.totalPayroll.toLocaleString()}, and net profit is ₹{franchiseTotals.profit.toLocaleString()}.
+                </p>
+                <p>
+                  <span className="font-bold text-slate-900">Member base:</span>{' '}
+                  {franchiseTotals.activeMembers} active members, {franchiseTotals.expiredMembers} expired, {franchiseTotals.unpaidMembers} unpaid, and {franchiseTotals.inactiveMembers} active members who have stopped visiting.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <p>
+                  <span className="font-bold text-slate-900">Operational pulse:</span>{' '}
+                  {franchiseTotals.totalCheckins.toLocaleString()} total check-ins were recorded across {franchiseTotals.branchCount} branches in this range.
+                </p>
+                <p>
+                  <span className="font-bold text-slate-900">Projection:</span>{' '}
+                  Average revenue per active member is ₹{franchiseTotals.averageRevenuePerActiveMember.toLocaleString()}, which puts the current next-month run rate near ₹{franchiseTotals.expectedNextMonth.toLocaleString()} if active members stay engaged.
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="space-y-2">
-            <p>
-              <span className="font-bold text-slate-900">Attention needed:</span>{' '}
-              {analytics.risk.expiringCount > 0
-                ? `${analytics.risk.expiringCount} renewals are due soon and ₹${analytics.risk.revenueAtRisk.toLocaleString()} could be lost. `
-                : 'No urgent renewal risk right now. '}
-              {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members are not visiting and may stop coming.`}
-            </p>
-            <p>
-              <span className="font-bold text-slate-900">Visits:</span>{' '}
-              {hasPeakHourData
-                ? `Attendance data now shows the busiest hours. Open the Attendance tab below to see them.`
-                : 'Attendance data is still building. Check again after a few more check-ins.'}
-            </p>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPICard title="Average Per Member" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
+            <KPICard title="Renewals Due Soon" value={analytics.risk.expiringCount} change={analytics.risk.expiringCount > 0 ? 'urgent' : null} trend="down" icon={Clock} color="bg-amber-500" className="gv-fade-up gv-fade-up-1" />
+            <KPICard title="Members Staying" value={`${analytics.health.retention}%`} change={`${analytics.health.expired} expired`} trend={Number(analytics.health.churn || 0) > 0 ? 'down' : 'up'} icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
+            <KPICard title="Money At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={analytics.risk.inactiveCount > 0 ? `${analytics.risk.inactiveCount} not visiting` : null} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
           </div>
-        </div>
-      </div>
+
+          <div className="bg-white backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
+            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Quick Summary</p>
+            <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
+              <div className="space-y-2">
+                <p>
+                  <span className="font-bold text-slate-900">Money:</span>{' '}
+                  {analytics.revenue.arpu > 0
+                    ? `You are earning about ₹${analytics.revenue.arpu.toLocaleString()} per active member, and ₹${analytics.revenue.lostRevenue.toLocaleString()} was lost from expired plans. `
+                    : 'No payment data is available yet for this period. '}
+                  {analytics.health.active > 0 && `If current members stay active, that is about ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()} for the month.`}
+                </p>
+                <p>
+                  <span className="font-bold text-slate-900">Members staying:</span>{' '}
+                  {Number(analytics.health.retention) >= 80
+                    ? `${analytics.health.retention}% of members are staying active. `
+                    : Number(analytics.health.retention) >= 50
+                      ? `${analytics.health.retention}% of members are staying active, but this needs attention. `
+                      : `Only ${analytics.health.retention}% of members are staying active. Follow-up is needed. `}
+                  {analytics.health.expired > 0 && `${analytics.health.expired} memberships expired in this window.`}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <p>
+                  <span className="font-bold text-slate-900">Attention needed:</span>{' '}
+                  {analytics.risk.expiringCount > 0
+                    ? `${analytics.risk.expiringCount} renewals are due soon and ₹${analytics.risk.revenueAtRisk.toLocaleString()} could be lost. `
+                    : 'No urgent renewal risk right now. '}
+                  {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members are not visiting and may stop coming.`}
+                </p>
+                <p>
+                  <span className="font-bold text-slate-900">Visits:</span>{' '}
+                  {hasPeakHourData
+                    ? `Attendance data now shows the busiest hours. Open the Attendance tab below to see them.`
+                    : 'Attendance data is still building. Check again after a few more check-ins.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="border-b border-slate-200 flex gap-8 overflow-x-auto">
         {[
@@ -350,6 +497,7 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
           { id: 'attendance', label: 'Attendance', icon: Users },
           { id: 'retention', label: 'Member Health', icon: UserCheck },
           { id: 'risk', label: 'Attention Needed', icon: AlertTriangle },
+          ...(canViewFranchiseInsights ? [{ id: 'franchise', label: 'Franchise', icon: Building2 }] : []),
         ].map((tab) => (
           <button
             key={tab.id}
@@ -679,6 +827,129 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
                 </div>
               </div>
             </Card>
+          </div>
+        )}
+
+        {activeTab === 'franchise' && canViewFranchiseInsights && (
+          <div className="space-y-6">
+            {franchiseLoading ? (
+              <PageLoader className="min-h-[32vh]" />
+            ) : (
+              <>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <Card className="lg:col-span-2 p-6">
+                    <div className="flex justify-between items-center mb-6">
+                      <div>
+                        <h3 className="font-bold text-lg text-slate-900">Franchise Revenue Trend</h3>
+                        <p className="text-xs text-slate-400 font-medium mt-1">Membership revenue plus POS revenue across every branch.</p>
+                      </div>
+                    </div>
+                    <div className="h-[260px] w-full">
+                      {hasFranchiseTrend ? (
+                        <SafeResponsiveContainer
+                          isActive={isActive}
+                          fallback={<div className="h-full rounded-2xl bg-slate-50 border border-slate-100" />}
+                        >
+                          <AreaChart data={franchiseAnalytics.revenueTrend}>
+                            <defs>
+                              <linearGradient id="colorFranchiseRevenue" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} tickFormatter={(val) => `₹${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`} />
+                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} formatter={(val) => [`₹${val}`, 'Revenue']} />
+                            <Area type="monotone" dataKey="total_revenue" stroke="#4f46e5" strokeWidth={4} fillOpacity={1} fill="url(#colorFranchiseRevenue)" />
+                          </AreaChart>
+                        </SafeResponsiveContainer>
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-slate-400 font-bold">No franchise revenue recorded yet for this range.</div>
+                      )}
+                    </div>
+                  </Card>
+
+                  <Card className="p-0 overflow-hidden flex flex-col">
+                    <div className="p-6 border-b border-slate-50 bg-slate-900 text-white">
+                      <h3 className="font-bold text-lg">Top Plans</h3>
+                      <p className="text-xs text-slate-400 font-medium mt-1">Plans ranked across the full franchise.</p>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2">
+                      {franchiseAnalytics.topPlans.length > 0 ? (
+                        <div className="space-y-1">
+                          {franchiseAnalytics.topPlans.map((plan, idx) => (
+                            <div key={`${plan.name}-${idx}`} className="p-4 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0">
+                              <div className="flex justify-between items-center mb-2 gap-3">
+                                <span className="font-bold text-sm text-slate-800 truncate">{plan.name}</span>
+                                <span className="font-black text-sm text-emerald-600 shrink-0">₹{plan.revenue.toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs gap-3">
+                                <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                                  <Users size={12} />
+                                  <span>{plan.buyers} Buyers</span>
+                                </div>
+                                <span className="text-slate-400 font-bold uppercase text-[10px]">Rank #{idx + 1}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-10 text-center text-slate-400 text-sm font-bold">No franchise plan revenue recorded yet.</div>
+                      )}
+                    </div>
+                  </Card>
+                </div>
+
+                <Card className="p-0 overflow-hidden">
+                  <div className="p-6 border-b border-slate-100 bg-white">
+                    <h3 className="font-bold text-lg text-slate-900">Branch Performance</h3>
+                    <p className="text-sm text-slate-500 mt-1">Every branch in the franchise, ranked by total revenue for the selected period.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[1040px] text-left text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <tr>
+                          <th className="px-6 py-4">Branch</th>
+                          <th className="px-6 py-4">Members</th>
+                          <th className="px-6 py-4">Revenue</th>
+                          <th className="px-6 py-4">Expenses</th>
+                          <th className="px-6 py-4">Payroll</th>
+                          <th className="px-6 py-4">Profit</th>
+                          <th className="px-6 py-4">Check-ins</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {franchiseAnalytics.branches.map((branch) => (
+                          <tr key={branch.branchId} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="font-bold text-slate-800">{branch.branchName}</div>
+                              <div className="text-xs text-slate-400 mt-1">{branch.activeMembers} active • {branch.inactiveMembers} inactive • {branch.expiredMembers} expired</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="font-bold text-slate-800">{branch.totalMembers}</div>
+                              <div className="text-xs text-slate-400 mt-1">{branch.unpaidMembers} unpaid</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="font-bold text-emerald-600">₹{branch.totalRevenue.toLocaleString()}</div>
+                              <div className="text-xs text-slate-400 mt-1">Membership ₹{branch.membershipRevenue.toLocaleString()} • POS ₹{branch.posRevenue.toLocaleString()}</div>
+                            </td>
+                            <td className="px-6 py-4 font-bold text-slate-700">₹{branch.totalExpenses.toLocaleString()}</td>
+                            <td className="px-6 py-4 font-bold text-slate-700">₹{branch.totalPayroll.toLocaleString()}</td>
+                            <td className="px-6 py-4">
+                              <span className={`font-black ${branch.profit >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
+                                ₹{branch.profit.toLocaleString()}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 font-bold text-slate-700">{branch.totalCheckins.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </>
+            )}
           </div>
         )}
       </div>

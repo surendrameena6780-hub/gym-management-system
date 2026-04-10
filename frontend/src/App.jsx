@@ -9,7 +9,7 @@ import PageLoader from './PageLoader';
 import SuspensionOverlay from './SuspensionOverlay'; 
 import { applyInterfacePreferences, saveInterfacePreferencesLocal } from './utils/interfacePreferences';
 import { clearSessionToken, getSessionToken, setSessionToken } from './utils/authSession';
-import { ALL_BRANCHES_VALUE, DEFAULT_BRANCH_ID, getBranchLabel, getBranchRequestValue, getDefaultBranchId, buildBranchOptions, normalizeBranchDirectory } from './utils/branchScope';
+import { DEFAULT_BRANCH_ID, getBranchLabel, getBranchRequestValue, getDefaultBranchId, buildBranchOptions, normalizeBranchDirectory } from './utils/branchScope';
 import { reportClientError } from './utils/clientErrorReporter';
 import { lazyWithRecovery } from './utils/lazyWithRecovery';
 import {
@@ -755,19 +755,21 @@ function App() {
 
         setBranchDirectory(nextDirectory);
         setOperationsBranchId((previous) => {
+          const assignedBranchId = String(currentUser?.branch_id || '').trim().toLowerCase();
+
           if (!isOwnerUser) {
-            return String(currentUser?.branch_id || nextDefaultBranchId || DEFAULT_BRANCH_ID);
+            return String(assignedBranchId || nextDefaultBranchId || DEFAULT_BRANCH_ID);
           }
 
-          if (nextDirectory.length <= 1) {
-            return nextDefaultBranchId;
+          if (previous && nextDirectory.some((branch) => branch.id === previous)) {
+            return previous;
           }
 
-          if (previous === ALL_BRANCHES_VALUE || nextDirectory.some((branch) => branch.id === previous)) {
-            return previous || ALL_BRANCHES_VALUE;
+          if (assignedBranchId && nextDirectory.some((branch) => branch.id === assignedBranchId)) {
+            return assignedBranchId;
           }
 
-          return ALL_BRANCHES_VALUE;
+          return String(nextDefaultBranchId || DEFAULT_BRANCH_ID);
         });
       })
       .catch(() => {
@@ -1100,6 +1102,12 @@ function App() {
   const defaultBranchId = getDefaultBranchId(normalizedBranchDirectory);
   const branchScopeValue = getBranchRequestValue(operationsBranchId);
   const canSelectOperationsBranch = String(currentUser?.role || '').toUpperCase() === 'OWNER' && normalizedBranchDirectory.length > 1;
+  const activeOperationsBranchLabel = getBranchLabel(normalizedBranchDirectory, operationsBranchId, {
+    allLabel: normalizedBranchDirectory[0]?.name || 'Branch',
+  });
+  const handleOperationsBranchChange = useCallback((nextBranchId) => {
+    setOperationsBranchId(String(nextBranchId || defaultBranchId || DEFAULT_BRANCH_ID));
+  }, [defaultBranchId]);
 
   const appRuntime = useMemo(() => ({
     token,
@@ -1114,7 +1122,7 @@ function App() {
     branchScopeValue,
     branchScopeLoading,
     canSelectOperationsBranch,
-    setOperationsBranchId,
+    setOperationsBranchId: handleOperationsBranchChange,
   }), [
     token,
     toast,
@@ -1128,6 +1136,7 @@ function App() {
     branchScopeValue,
     branchScopeLoading,
     canSelectOperationsBranch,
+    handleOperationsBranchChange,
   ]);
 
   const renderPageLoader = (label) => (
@@ -1595,18 +1604,18 @@ function App() {
 
                 {/* BRANCH SWITCHER — visible when owner has multiple branches */}
                 {canSelectOperationsBranch && (
-                  <div className="relative hidden sm:block">
+                  <div className="relative block max-w-[12rem] shrink-0">
                     <label className="relative inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all">
                       <Building2 size={14} className="text-indigo-500 shrink-0" />
-                      <span className="max-w-[120px] truncate">{getBranchLabel(normalizedBranchDirectory, operationsBranchId, { allLabel: 'All Branches' })}</span>
+                      <span className="max-w-[120px] truncate">{activeOperationsBranchLabel}</span>
                       <ChevronDown size={13} className="text-slate-400 shrink-0" />
                       <select
                         value={operationsBranchId}
-                        onChange={(e) => setOperationsBranchId(e.target.value)}
+                        onChange={(e) => handleOperationsBranchChange(e.target.value)}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         aria-label="Switch branch"
                       >
-                        {buildBranchOptions(normalizedBranchDirectory, { allLabel: 'All Branches' }).map((opt) => (
+                        {buildBranchOptions(normalizedBranchDirectory, { includeAll: false }).map((opt) => (
                           <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
                       </select>
@@ -1632,29 +1641,6 @@ function App() {
                         <p className="text-sm font-black text-slate-800">{currentUser?.full_name || 'Gym User'}</p>
                         <p className="text-xs font-semibold text-slate-500 mt-0.5 truncate">{currentUser?.email || 'user@gymvault.com'}</p>
                       </div>
-                      
-                      {/* Branch switcher inside profile dropdown */}
-                      {canSelectOperationsBranch && (
-                        <div className="px-3 py-2.5 border-b border-slate-100">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Active Branch</p>
-                          <label className="relative flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 cursor-pointer hover:border-indigo-300 transition-colors">
-                            <Building2 size={14} className="text-indigo-500 shrink-0" />
-                            <span className="text-xs font-bold text-slate-700 flex-1 truncate">{getBranchLabel(normalizedBranchDirectory, operationsBranchId, { allLabel: 'All Branches' })}</span>
-                            <ChevronDown size={13} className="text-slate-400 shrink-0" />
-                            <select
-                              value={operationsBranchId}
-                              onChange={(e) => setOperationsBranchId(e.target.value)}
-                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                              aria-label="Switch branch"
-                            >
-                              {buildBranchOptions(normalizedBranchDirectory, { allLabel: 'All Branches' }).map((opt) => (
-                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-                      )}
-
                       <div className="p-2">
                         {canAccessPage('Settings') && (
                           <>
