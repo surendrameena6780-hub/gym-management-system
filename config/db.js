@@ -310,16 +310,18 @@ const runSchemaMigrations = async () => {
     }
 };
 
+const isLoadTest = process.env.LOAD_TEST_MODE === 'true';
+
 const pool = new Pool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     database: process.env.DB_NAME,
-    max: parsePositiveInt(process.env.DB_POOL_MAX, 60),
-    min: parsePositiveInt(process.env.DB_POOL_MIN, 5),
+    max: isLoadTest ? 200 : parsePositiveInt(process.env.DB_POOL_MAX, 60),
+    min: isLoadTest ? 20 : parsePositiveInt(process.env.DB_POOL_MIN, 5),
     idleTimeoutMillis: parsePositiveInt(process.env.DB_IDLE_TIMEOUT_MS, 60000),
-    connectionTimeoutMillis: parsePositiveInt(process.env.DB_CONNECTION_TIMEOUT_MS, 5000),
+    connectionTimeoutMillis: isLoadTest ? 30000 : parsePositiveInt(process.env.DB_CONNECTION_TIMEOUT_MS, 5000),
     query_timeout: parsePositiveInt(process.env.DB_QUERY_TIMEOUT_MS, 30000),
     statement_timeout: parsePositiveInt(process.env.DB_STATEMENT_TIMEOUT_MS, 30000),
     keepAliveInitialDelayMillis: parsePositiveInt(process.env.DB_KEEPALIVE_INITIAL_DELAY_MS, 10000),
