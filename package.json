@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:render": "pm2-runtime ecosystem.config.js",
     "start:cluster": "pm2 start ecosystem.config.js",
     "stop:cluster": "pm2 stop gym-api",
     "reload:cluster": "pm2 reload gym-api",
@@ -40,6 +41,7 @@
     "nodemailer": "^8.0.4",
     "passport-google-oauth20": "^2.0.0",
     "pg": "^8.18.0",
+    "pm2": "^5.4.3",
     "razorpay": "^2.9.6",
     "twilio": "^5.13.0",
     "web-push": "^3.6.7"
