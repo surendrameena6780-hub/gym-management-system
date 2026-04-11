@@ -1526,15 +1526,41 @@ function App() {
         <div className="flex-1 flex flex-col app-shell-height overflow-hidden">
           <header className="relative z-50 shrink-0 border-b border-white/60 app-header-safe">
             <div className="app-header-row flex items-center justify-between px-4 desktop:px-8">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-slate-400">Home</span>
+              {/* Left: page name */}
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="hidden desktop:inline text-sm font-semibold text-slate-400">Home</span>
                 {currentPage !== 'Dashboard' && (
                   <>
-                    <span className="text-slate-300 text-xs mx-0.5">/</span>
-                    <span className="text-sm font-bold text-slate-800">{currentPage}</span>
+                    <span className="hidden desktop:inline text-slate-300 text-xs mx-0.5">/</span>
+                    <span className="text-sm font-bold text-slate-800 truncate">{currentPage}</span>
                   </>
                 )}
+                {currentPage === 'Dashboard' && (
+                  <span className="desktop:hidden text-sm font-bold text-slate-800">Dashboard</span>
+                )}
               </div>
+
+              {/* Center: branch switcher on mobile */}
+              {canSelectOperationsBranch && (
+                <div className="desktop:hidden absolute left-1/2 -translate-x-1/2">
+                  <label className="relative inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 shadow-sm cursor-pointer">
+                    <Building2 size={14} className="text-indigo-500 shrink-0" />
+                    <span className="max-w-[100px] truncate">{activeOperationsBranchLabel}</span>
+                    <ChevronDown size={13} className="text-slate-400 shrink-0" />
+                    <select
+                      value={operationsBranchId}
+                      onChange={(e) => handleOperationsBranchChange(e.target.value)}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      aria-label="Switch branch"
+                    >
+                      {buildBranchOptions(normalizedBranchDirectory, { includeAll: false }).map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+
               <div className="flex items-center gap-2 sm:gap-5">
               {token && !isStandaloneMode && canInstallApp && (
                 <button
@@ -1608,9 +1634,9 @@ function App() {
                 )}
                 </div>
 
-                {/* BRANCH SWITCHER — visible when owner has multiple branches */}
+                {/* BRANCH SWITCHER — desktop only (mobile version is centered above) */}
                 {canSelectOperationsBranch && (
-                  <div className="relative block max-w-[12rem] shrink-0">
+                  <div className="relative hidden desktop:block max-w-[12rem] shrink-0">
                     <label className="relative inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all">
                       <Building2 size={14} className="text-indigo-500 shrink-0" />
                       <span className="max-w-[120px] truncate">{activeOperationsBranchLabel}</span>

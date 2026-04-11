@@ -814,6 +814,7 @@ const getGymUsageSnapshot = async (db, gymId) => {
                 FROM users u
                 WHERE u.gym_id = $1
                   AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
+                  AND COALESCE(u.is_active, TRUE) = TRUE
             ), 0) AS staff,
             COALESCE((
                 SELECT branches_count::INTEGER
@@ -842,6 +843,7 @@ const getBranchUsageSnapshot = async (db, gymId, branchId) => {
                 FROM users u
                 WHERE u.gym_id = $1
                   AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
+                  AND COALESCE(u.is_active, TRUE) = TRUE
                   AND COALESCE(u.branch_id, $2) = $2
             ), 0) AS staff,
             $2::TEXT AS branch_id`,
@@ -870,6 +872,7 @@ const getGymBranchUsageBreakdown = async (db, gymId, branchDirectoryValue = null
             FROM users
             WHERE gym_id = $1
               AND COALESCE(UPPER(role), 'STAFF') <> 'OWNER'
+              AND COALESCE(is_active, TRUE) = TRUE
             GROUP BY COALESCE(branch_id, $2)
         ),
         branch_ids AS (

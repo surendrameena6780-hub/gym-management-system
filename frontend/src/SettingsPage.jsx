@@ -2221,6 +2221,114 @@ const loadRazorpayScript = () => {
                   </button>
                 </div>
               </form>
+
+              {/* ── Branch & Location Management ── */}
+              <div className="mt-10 space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl"><Building2 size={18} /></div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 leading-tight">Branch & Location Setup</h3>
+                    <p className="text-sm font-medium text-slate-500">Configure your branches, front-desk contacts, and location details.</p>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-[24px] shadow-sm overflow-hidden">
+                  <div className="p-5 sm:p-6 border-b border-slate-100 bg-slate-50/50">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">City</label>
+                        <div className="relative">
+                          <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            value={platformData.city}
+                            onChange={(e) => setPlatformData((prev) => ({ ...prev, city: e.target.value }))}
+                            placeholder="Jaipur"
+                            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Active Branches</label>
+                        <div className="relative">
+                          <Building2 size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="number"
+                            min="1"
+                            max={usageLimits.branches || 25}
+                            value={platformData.branches_count}
+                            onChange={(e) => updateBranchCount(e.target.value)}
+                            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+                          />
+                        </div>
+                        {usageLimits.branches !== null && (
+                          <p className="text-[10px] font-bold mt-1.5 text-indigo-500">
+                            Plan allows up to {usageLimits.branches} branch{usageLimits.branches === 1 ? '' : 'es'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-5 sm:p-6 space-y-4">
+                    {platformData.branch_directory.map((branch, index) => (
+                      <div key={branch.id} className="rounded-[20px] border border-slate-200 bg-slate-50/50 p-4 sm:p-5 transition-all hover:border-indigo-200 hover:shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 text-xs font-black">{index + 1}</div>
+                            <p className="text-sm font-black text-slate-900">{branch.name || `Branch ${index + 1}`}</p>
+                          </div>
+                          {platformData.branch_directory.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => deleteBranch(index)}
+                              className="p-2 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
+                              title="Remove branch"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Branch Name</label>
+                            <input
+                              value={branch.name}
+                              onChange={(e) => updateBranchField(index, 'name', e.target.value)}
+                              placeholder="Main Branch"
+                              className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Phone</label>
+                            <input
+                              value={branch.phone}
+                              onChange={(e) => updateBranchField(index, 'phone', e.target.value)}
+                              placeholder="+91 00000 00000"
+                              className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Address</label>
+                            <textarea
+                              value={branch.address}
+                              onChange={(e) => updateBranchField(index, 'address', e.target.value)}
+                              placeholder="Full branch address"
+                              rows={2}
+                              className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold text-slate-800 resize-none focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="px-5 sm:px-6 pb-5 sm:pb-6">
+                    <button type="button" onClick={saveBranchControls} disabled={platformSaving} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-indigo-700 transition-all disabled:opacity-60 active:scale-95 shadow-lg shadow-indigo-500/30">
+                      <Save size={15} /> {platformSaving ? 'Saving...' : 'Save Branches'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2446,9 +2554,10 @@ const loadRazorpayScript = () => {
                   </div>
               )}
 
-              {/* PREMIUM ACTIVE BANNER */}
+              {/* PREMIUM ACTIVE BANNER — Desktop */}
               {realStatus === 'ACTIVE' && (
-                  <div className="mb-8 p-8 bg-slate-900 rounded-[32px] shadow-2xl flex flex-col desktop:flex-row items-center justify-between gap-6 relative overflow-hidden border border-slate-800">
+                <>
+                  <div className="hidden desktop:flex mb-8 p-8 bg-slate-900 rounded-[32px] shadow-2xl flex-row items-center justify-between gap-6 relative overflow-hidden border border-slate-800">
                       <div className="absolute right-0 top-0 w-96 h-96 bg-emerald-500/10 blur-[100px] pointer-events-none"></div>
                       
                       <div className="relative z-10 flex items-center gap-5">
@@ -2475,13 +2584,46 @@ const loadRazorpayScript = () => {
                           </div>
                       </div>
 
-                      <div className="relative z-10 text-left md:text-right w-full md:w-auto bg-white/5 border border-white/10 p-5 rounded-2xl backdrop-blur-md">
+                      <div className="relative z-10 text-right w-auto bg-white/5 border border-white/10 p-5 rounded-2xl backdrop-blur-md">
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Access Valid Until</p>
                           <p className="font-black text-2xl text-emerald-400 tracking-wide">
                               {formatExpiry(gymData.saas_valid_until)}
                           </p>
                       </div>
                   </div>
+
+                  {/* PREMIUM ACTIVE BANNER — Mobile */}
+                  <div className="desktop:hidden mb-6 rounded-[24px] overflow-hidden border border-slate-200 shadow-lg">
+                    <div className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 p-5">
+                      <div className="absolute right-0 top-0 w-40 h-40 bg-emerald-400/10 blur-[60px] pointer-events-none" />
+                      <div className="relative z-10 flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
+                          <CheckCircle size={20} className="text-emerald-400" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xl font-black text-white leading-tight">Vault Active</p>
+                          <p className="text-[11px] text-slate-400 font-semibold mt-0.5 truncate">Running on {currentPlanMeta?.name || 'Pro Vault'}</p>
+                        </div>
+                      </div>
+                      <div className="relative z-10 flex items-center gap-2 flex-wrap">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                            gymData.current_plan === 'test'
+                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                              : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        }`}>
+                            {gymData.current_plan === 'test' ? 'Dev Test' : 'Enterprise License'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                            {gymData.saas_billing_cycle === 'annual' ? 'Annual' : 'Monthly'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bg-white px-5 py-3 flex items-center justify-between">
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Valid Until</p>
+                      <p className="font-black text-sm text-emerald-600">{formatExpiry(gymData.saas_valid_until)}</p>
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* ── Billing cycle toggle ── */}
@@ -2508,12 +2650,12 @@ const loadRazorpayScript = () => {
               {/* ── Plan carousel (swipeable on mobile, grid on desktop) ── */}
               <div className="relative mb-10">
                 {/* scroll hint arrows — mobile only */}
-                <div className="gv-carousel-fade-l absolute left-0 top-9 bottom-4 w-6 bg-gradient-to-r from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
-                <div className="gv-carousel-fade-r absolute right-0 top-9 bottom-4 w-6 bg-gradient-to-l from-white/60 to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="absolute left-0 top-9 bottom-4 w-8 bg-gradient-to-r from-white to-transparent pointer-events-none z-10 lg:hidden" />
+                <div className="absolute right-0 top-9 bottom-4 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none z-10 lg:hidden" />
 
                 {/* the scroll container becomes a grid on lg+ */}
                 <div
-                  className="flex gap-4 overflow-x-auto snap-x snap-mandatory pt-6 pb-4 scroll-smooth lg:grid lg:[grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] lg:overflow-visible lg:snap-none lg:pt-6"
+                  className="flex gap-5 overflow-x-auto snap-x snap-mandatory pt-6 pb-4 px-1 scroll-smooth lg:grid lg:[grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] lg:overflow-visible lg:snap-none lg:pt-6 lg:px-0"
                   style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
                 >
                   {planCards.map((plan) => {
@@ -2550,16 +2692,18 @@ const loadRazorpayScript = () => {
                         key={plan.id}
                         className={`
                           relative flex flex-col
-                          min-w-[82vw] max-w-[340px]
+                          min-w-[85vw] max-w-[340px]
                           lg:min-w-0 lg:max-w-none
                           flex-shrink-0 snap-center
                           p-5 rounded-[24px] transition-all duration-300
                           ${plan.test
                             ? 'gv-test-plan-card bg-amber-50 border-2 border-amber-300 border-dashed'
                             : isTrial
-                            ? 'bg-indigo-50 border-2 border-indigo-400 border-dashed shadow-lg'
+                            ? 'bg-gradient-to-b from-indigo-50 to-white border-2 border-indigo-400 border-dashed shadow-lg shadow-indigo-500/10'
                             : isActive
-                            ? 'bg-indigo-50 border-2 border-indigo-500 shadow-xl'
+                            ? 'bg-gradient-to-b from-indigo-50 to-white border-2 border-indigo-500 shadow-xl shadow-indigo-500/10'
+                            : plan.popular
+                            ? 'bg-gradient-to-b from-slate-50 to-white border border-slate-200 hover:border-indigo-300 shadow-md hover:shadow-xl'
                             : 'bg-white border border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-xl'
                           }
                         `}
@@ -2645,9 +2789,9 @@ const loadRazorpayScript = () => {
                 </div>
 
                 {/* dot indicators — mobile only */}
-                <div className="flex justify-center gap-1.5 mt-1 lg:hidden">
+                <div className="flex justify-center gap-2 mt-3 lg:hidden">
                   {planCards.map((plan) => (
-                    <div key={plan.id} className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                    <div key={plan.id} className={`w-2 h-2 rounded-full transition-colors ${gymData.current_plan === plan.id ? 'bg-indigo-500 shadow-sm shadow-indigo-500/50' : 'bg-slate-300'}`} />
                   ))}
                 </div>
               </div>
@@ -3470,91 +3614,12 @@ const loadRazorpayScript = () => {
                   )}
 
                   {integSubTab === 'platform' && (
-                    <div id="settings-integration-panel-platform" role="tabpanel" aria-labelledby="settings-integration-tab-platform" className="settings-owner-contrast space-y-4 animate-in fade-in duration-200">
+                    <div id="settings-integration-panel-platform" role="tabpanel" aria-labelledby="settings-integration-tab-platform" className="space-y-4 animate-in fade-in duration-200">
                       {platformLoading ? (
                         <div className="p-10 bg-white border border-slate-100 rounded-2xl text-center text-slate-400 font-bold animate-pulse">Loading platform settings...</div>
                       ) : (
                         <>
-                          <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
-                            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
-                              <div>
-                                <h4 className="font-black text-slate-900 text-sm">Branch Controls</h4>
-                                <p className="text-xs text-slate-500 mt-0.5">Manage city, branch count, and front-desk contact details per location.</p>
-                              </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">City</label>
-                                  <input
-                                    value={platformData.city}
-                                    onChange={(e) => setPlatformData((prev) => ({ ...prev, city: e.target.value }))}
-                                    placeholder="Jaipur"
-                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-slate-300 focus:ring-2 focus:ring-slate-100 outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Branch Count</label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max={usageLimits.branches || 25}
-                                    value={platformData.branches_count}
-                                    onChange={(e) => updateBranchCount(e.target.value)}
-                                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-slate-300 focus:ring-2 focus:ring-slate-100 outline-none"
-                                  />
-                                  {usageLimits.branches !== null && (
-                                    <p className="text-[10px] font-bold mt-1.5 text-slate-400">
-                                      Your plan allows up to {usageLimits.branches} branch{usageLimits.branches === 1 ? '' : 'es'}.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="space-y-3">
-                                {platformData.branch_directory.map((branch, index) => (
-                                  <div key={branch.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <div className="flex items-center justify-between mb-3">
-                                      <p className="text-xs font-black uppercase tracking-widest text-slate-400">Branch {index + 1}</p>
-                                      {platformData.branch_directory.length > 1 && (
-                                        <button
-                                          type="button"
-                                          onClick={() => deleteBranch(index)}
-                                          className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-all"
-                                          title="Delete branch"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      )}
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                      <input
-                                        value={branch.name}
-                                        onChange={(e) => updateBranchField(index, 'name', e.target.value)}
-                                        placeholder="Branch name"
-                                        className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold outline-none"
-                                      />
-                                      <input
-                                        value={branch.phone}
-                                        onChange={(e) => updateBranchField(index, 'phone', e.target.value)}
-                                        placeholder="Branch phone"
-                                        className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold outline-none"
-                                      />
-                                      <textarea
-                                        value={branch.address}
-                                        onChange={(e) => updateBranchField(index, 'address', e.target.value)}
-                                        placeholder="Branch address"
-                                        rows={2}
-                                        className="sm:col-span-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-semibold resize-none outline-none"
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex justify-end">
-                                <button type="button" onClick={saveBranchControls} disabled={platformSaving} className="px-6 py-3 rounded-xl bg-slate-900 text-white font-black text-sm hover:bg-slate-800 transition-all disabled:opacity-60 flex items-center gap-2">
-                                  <Save size={15} /> {platformSaving ? 'Saving...' : 'Save Branch Controls'}
-                                </button>
-                              </div>
-                            </div>
-
+                          <div className="space-y-4">
                             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4">
                               <div>
                                 <h4 className="font-black text-slate-900 text-sm">API Keys</h4>
@@ -4020,7 +4085,7 @@ const loadRazorpayScript = () => {
       {billingCheckout.open && billingCheckoutPlanCard && (
         <div className="app-modal-shell z-[88] bg-slate-950/70 backdrop-blur-sm">
           <div className="app-modal-panel app-modal-panel--xl">
-            <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
+            <div className="flex flex-col min-h-0 overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
               <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.12),_transparent_42%),linear-gradient(135deg,_#f8fafc,_#eef2ff)] p-5 sm:p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="flex items-start gap-4 min-w-0">
@@ -4095,7 +4160,7 @@ const loadRazorpayScript = () => {
                         </div>
                       </div>
 
-                      <p className="mt-4 text-sm font-medium text-slate-600">If you keep only 1 branch active, the live plan limits collapse to one branch share. Adding more active branches scales the total back up for this subscription.</p>
+                      <p className="mt-4 text-sm font-medium text-slate-600">Your plan's total capacity stays fixed at the HQ-configured limits. Changing the active branch count decides how your team operates across locations, not how many members or messages you get.</p>
                     </div>
 
                     <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
