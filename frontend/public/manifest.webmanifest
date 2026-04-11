@@ -11,6 +11,11 @@
   "theme_color": "#161d4f",
   "description": "GymVault management software",
   "categories": ["business", "productivity", "health"],
+  "serviceworker": {
+    "src": "/sw.js?v=20260411-1",
+    "scope": "/",
+    "use_cache": false
+  },
   "icons": [
     {
       "src": "/gymvault-app-icon-192.png",

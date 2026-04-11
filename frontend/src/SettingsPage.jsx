@@ -255,9 +255,21 @@ const DELIVERY_LOG_FILTERS = [
   { value: 'READ', label: 'Read' },
 ];
 
+const PRIVATE_CHECKOUT_HOSTNAME_PATTERN = /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})$/i;
+
+const isPrivateCheckoutHostname = (hostname) => PRIVATE_CHECKOUT_HOSTNAME_PATTERN.test(String(hostname || '').trim());
+
 const getRazorpayCheckoutImageUrl = () => {
   if (typeof window === 'undefined') return '';
-  return new URL('/gymvault-app-icon-192.png', window.location.origin).toString();
+  try {
+    const imageUrl = new URL('/gymvault-app-icon-192.png', window.location.origin);
+    if (imageUrl.protocol !== 'https:' || isPrivateCheckoutHostname(imageUrl.hostname)) {
+      return '';
+    }
+    return imageUrl.toString();
+  } catch (_err) {
+    return '';
+  }
 };
 
 const DEFAULT_WHATSAPP_ONBOARDING = {
@@ -1742,7 +1754,7 @@ const loadRazorpayScript = () => {
               currency: order.currency,
               name: `GymVault Add-on`,
               description: addonPack.label,
-              image: checkoutImageUrl,
+              ...(checkoutImageUrl ? { image: checkoutImageUrl } : {}),
               order_id: order.id,
               handler: async function (response) {
                   try {
@@ -1864,7 +1876,7 @@ const loadRazorpayScript = () => {
                 : previewCreditPaise > 0
                   ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCreditPaise)} credit applied`
                   : `${checkoutCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
-              image: checkoutImageUrl,
+              ...(checkoutImageUrl ? { image: checkoutImageUrl } : {}),
               order_id: order.id,
               handler: async function (response) {
                   try {

@@ -23,6 +23,15 @@
   ],
   "headers": [
     {
+      "source": "/((?!api/|uploads/).*)",
+      "headers": [
+        {
+          "key": "Permissions-Policy",
+          "value": "accelerometer=(self \"https://api.razorpay.com\"), gyroscope=(self \"https://api.razorpay.com\"), magnetometer=(self \"https://api.razorpay.com\"), payment=(self \"https://api.razorpay.com\")"
+        }
+      ]
+    },
+    {
       "source": "/",
       "headers": [
         {

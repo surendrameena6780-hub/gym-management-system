@@ -170,7 +170,15 @@ const corsOptionsDelegate = (req, callback) => {
 
 // Middleware
 app.use(helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' }
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    permissionsPolicy: {
+        features: {
+            accelerometer: ['self', 'https://api.razorpay.com'],
+            gyroscope: ['self', 'https://api.razorpay.com'],
+            magnetometer: ['self', 'https://api.razorpay.com'],
+            payment: ['self', 'https://api.razorpay.com'],
+        },
+    },
 }));
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
