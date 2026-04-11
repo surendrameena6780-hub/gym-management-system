@@ -367,9 +367,9 @@ const buildPlanSetupPreview = ({ targetLimits, planSetup }) => {
                     : null,
         })),
         notes: branchesCount === 1
-            ? ['One active branch selected, so the live plan limits collapse to a single branch share.']
+            ? ['One active branch selected, so the full plan totals are available from that single branch.']
             : equalSplit
-                ? ['Balanced mode shows an equal recommended split per branch while the total plan remains tied to the active branch count.']
+                ? ['Balanced mode shows an equal recommended split per branch while the total plan stays fixed at the HQ-configured limit.']
                 : ['Flexible mode keeps one shared gym-wide pool across the selected branches, so one branch can consume more than another.'],
     };
 };

@@ -247,7 +247,7 @@ const describeEffectiveLimitMode = (effectiveLimits = {}) => {
   const memberLimit = formatLimitDisplay(effectiveLimits?.members);
   const staffLimit = formatLimitDisplay(effectiveLimits?.staff);
   const branchLimit = formatLimitDisplay(effectiveLimits?.branches);
-  return `Live limits now scale pooled members, staff users, and WhatsApp with the gym's active branch count. This setup currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons, while Hello stays capped at one connected number per gym in this release.`;
+  return `Live limits now follow the exact HQ-configured totals for this plan. This setup currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons, and those totals do not auto-scale when a gym changes its active branch count.`;
 };
 
 function SuperAdminDashboard({ token, onLogout }) {
@@ -1695,7 +1695,7 @@ function SuperAdminDashboard({ token, onLogout }) {
                 Edit plan names, monthly and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
               </p>
               <p className="text-xs text-slate-500 max-w-3xl">
-                Members, staff, WhatsApp, and Hello now scale with the owner's active branch count. Balanced vs flexible branch setup is chosen in owner checkout, while HQ still controls the per-branch base values here.
+                Runtime limits are the exact enforced totals for each plan. Core capacity bullets shown to owners stay aligned with these values automatically, while the remaining feature bullets stay editable here.
               </p>
 
               <div className="space-y-4">

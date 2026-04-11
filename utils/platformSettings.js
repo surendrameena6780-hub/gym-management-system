@@ -38,7 +38,7 @@ const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_membe
 const BILLING_CAPABILITY_KEYS = ['custom_templates'];
 const BILLING_CYCLE_KEYS = ['monthly', 'annual'];
 const BILLING_COUPON_TYPES = ['PERCENT', 'AMOUNT'];
-const BRANCH_SCALING_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp']);
+const BRANCH_SCALING_LIMIT_KEYS = new Set();
 
 const defaultBillingCapabilities = {
     test: {
@@ -133,11 +133,11 @@ const defaultBillingConfig = {
             ],
             capabilities: { ...defaultBillingCapabilities.growth },
             limits: {
-                members: 400,
-                staff: 5,
+                members: 800,
+                staff: 10,
                 storage: 10,
                 branches: 2,
-                whatsapp: 1000,
+                whatsapp: 2000,
                 hello: 1,
             },
         },
@@ -163,11 +163,11 @@ const defaultBillingConfig = {
             ],
             capabilities: { ...defaultBillingCapabilities.pro },
             limits: {
-                members: 1000,
-                staff: 10,
+                members: 3000,
+                staff: 30,
                 storage: 20,
                 branches: 3,
-                whatsapp: 2000,
+                whatsapp: 6000,
                 hello: 1,
             },
         },
@@ -256,6 +256,97 @@ const arraysMatch = (left = [], right = []) => (
     left.length === right.length && left.every((value, index) => value === right[index])
 );
 
+const formatLimitFeatureValue = (value) => Number(value || 0).toLocaleString('en-IN');
+
+const buildHelloFeatureText = (helloLimit, { testMode = false } = {}) => {
+    if (helloLimit === null || helloLimit === undefined) {
+        return testMode
+            ? 'Hello inbound available on connected numbers during the test window'
+            : 'Hello inbound included on this plan';
+    }
+
+    const normalizedHello = Number(helloLimit || 0);
+    if (normalizedHello <= 0) {
+        return 'Hello inbound not included on this plan';
+    }
+    if (normalizedHello === 1) {
+        return testMode
+            ? 'Hello inbound available on 1 connected number during the test window'
+            : 'Hello inbound on 1 connected number';
+    }
+    return `Hello inbound on ${formatLimitFeatureValue(normalizedHello)} connected numbers`;
+};
+
+const buildPlanCapacityFeatures = (planId, limits = {}) => {
+    if (planId === 'test') {
+        return [
+            'Unlimited members, staff users, branches, and outbound WhatsApp for testing',
+            buildHelloFeatureText(limits.hello, { testMode: true }),
+            `${formatLimitFeatureValue(limits.storage || 2)} GB cloud storage for QA data and trial media`,
+        ];
+    }
+
+    const memberLimit = limits.members;
+    const branchLimit = limits.branches;
+    const staffLimit = Number(limits.staff || 0);
+    const whatsappLimit = limits.whatsapp;
+    const storageLimit = Number(limits.storage || 0);
+
+    const memberLine = memberLimit === null || memberLimit === undefined
+        ? 'Unlimited members'
+        : planId === 'basic'
+            ? `Up to ${formatLimitFeatureValue(memberLimit)} members`
+            : `Up to ${formatLimitFeatureValue(memberLimit)} members total`;
+    const branchLine = branchLimit === null || branchLimit === undefined
+        ? 'Unlimited branches'
+        : Number(branchLimit) === 1
+            ? '1 branch included'
+            : planId === 'basic'
+                ? `${formatLimitFeatureValue(branchLimit)} branches included`
+                : `Up to ${formatLimitFeatureValue(branchLimit)} branches`;
+    const staffLine = `${planId === 'basic' ? '1 owner' : '1 owner'} + ${formatLimitFeatureValue(staffLimit)} staff user${staffLimit === 1 ? '' : 's'}${planId === 'basic' ? '' : ' total'}`;
+    const whatsappLine = whatsappLimit === null || whatsappLimit === undefined
+        ? 'Unlimited WhatsApp messages per month'
+        : `${formatLimitFeatureValue(whatsappLimit)} WhatsApp messages per month`;
+    const storageLine = `${formatLimitFeatureValue(storageLimit)} GB cloud storage`;
+
+    return [
+        memberLine,
+        branchLine,
+        staffLine,
+        whatsappLine,
+        buildHelloFeatureText(limits.hello),
+        storageLine,
+    ];
+};
+
+const PLAN_CAPACITY_FEATURE_PATTERNS = [
+    /^unlimited members, staff users, branches, and outbound whatsapp/i,
+    /^(up to\s+)?[\d,]+.*members?\b/i,
+    /^(up to\s+)?[\d,]+.*branches?\b/i,
+    /^\d+\s+branches?\s+included\b/i,
+    /^1 owner\s*\+\s*[\d,]+.*staff users?\b/i,
+    /whatsapp messages? per month/i,
+    /hello inbound/i,
+    /^[\d,]+(?:\.\d+)?\s*gb\b.*cloud storage/i,
+];
+
+const isPlanCapacityFeature = (feature) => PLAN_CAPACITY_FEATURE_PATTERNS.some((pattern) => pattern.test(String(feature || '').trim()));
+
+const mergeUniqueFeatures = (...featureLists) => {
+    const seen = new Set();
+    const output = [];
+    for (const featureList of featureLists) {
+        for (const feature of featureList || []) {
+            const normalized = String(feature || '').trim();
+            if (!normalized || seen.has(normalized)) continue;
+            seen.add(normalized);
+            output.push(normalized);
+        }
+    }
+    return output;
+};
+
 const LEGACY_BILLING_PLAN_FEATURES = {
     test: [
         ['Full Feature Access', 'For Testing Only', 'Rs 1 Payment Test', 'Expires in 1 Day'],
@@ -279,13 +370,18 @@ const LEGACY_BILLING_PLAN_FEATURES = {
     ],
 };
 
-const normalizePlanFeatures = (planId, value, fallback = []) => {
+const normalizePlanFeatures = (planId, value, fallback = [], limits = {}) => {
     const normalized = normalizeFeatureList(value, fallback);
     const legacySets = LEGACY_BILLING_PLAN_FEATURES[planId] || [];
-    if (legacySets.some((legacy) => arraysMatch(normalized, legacy))) {
-        return [...fallback];
-    }
-    return normalized;
+    const source = legacySets.some((legacy) => arraysMatch(normalized, legacy))
+        ? normalizeFeatureList(fallback, fallback)
+        : normalized;
+    const fallbackNonCapacity = normalizeFeatureList(fallback, fallback).filter((feature) => !isPlanCapacityFeature(feature));
+    const sourceNonCapacity = source.filter((feature) => !isPlanCapacityFeature(feature));
+    return mergeUniqueFeatures(
+        buildPlanCapacityFeatures(planId, limits),
+        sourceNonCapacity.length > 0 ? sourceNonCapacity : fallbackNonCapacity
+    );
 };
 
 const normalizeRequiresPlans = (value, fallback = []) => {
@@ -392,15 +488,16 @@ const normalizePlanCapabilities = (capabilities, fallback = {}) => Object.fromEn
 const normalizeBillingPlan = (planId, value) => {
     const defaults = defaultBillingConfig.plans[planId] || defaultBillingConfig.plans.basic;
     const raw = value && typeof value === 'object' ? value : {};
+    const normalizedLimits = normalizePlanLimits(raw.limits, defaults.limits);
     return {
         id: planId,
         name: readText(raw.name) || defaults.name,
         monthly_price: readNumber(raw.monthly_price, defaults.monthly_price, { min: 0, max: 100000 }),
         annual_price: readNumber(raw.annual_price, defaults.annual_price, { min: 0, max: 100000 }),
         popular: raw.popular === undefined ? defaults.popular : Boolean(raw.popular),
-        features: normalizePlanFeatures(planId, raw.features, defaults.features),
+        features: normalizePlanFeatures(planId, raw.features, defaults.features, normalizedLimits),
         capabilities: normalizePlanCapabilities(raw.capabilities, defaults.capabilities),
-        limits: normalizePlanLimits(raw.limits, defaults.limits),
+        limits: normalizedLimits,
     };
 };
 

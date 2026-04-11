@@ -1796,13 +1796,13 @@ router.put('/platform/branches', auth, async (req, res) => {
         const usageSnapshot = await getGymUsageSnapshot(pool, req.user.gym_id);
         if (effectiveLimits.members !== null && Number(usageSnapshot?.members || 0) > effectiveLimits.members) {
             return res.status(409).json({
-                error: `This branch setup would allow ${effectiveLimits.members} members, but the gym already has ${Number(usageSnapshot?.members || 0)} active members. Remove members, increase active branches, or upgrade the plan first.`,
+                error: `This plan allows ${effectiveLimits.members} members, but the gym already has ${Number(usageSnapshot?.members || 0)} active members. Remove members, buy more member capacity, or upgrade the plan first.`,
                 effective_limits: effectiveLimits,
             });
         }
         if (effectiveLimits.staff !== null && Number(usageSnapshot?.staff || 0) > effectiveLimits.staff) {
             return res.status(409).json({
-                error: `This branch setup would allow ${effectiveLimits.staff} staff users, but the gym already has ${Number(usageSnapshot?.staff || 0)} staff users. Reduce staff, increase active branches, or upgrade the plan first.`,
+                error: `This plan allows ${effectiveLimits.staff} staff users, but the gym already has ${Number(usageSnapshot?.staff || 0)} staff users. Reduce staff, buy more staff capacity, or upgrade the plan first.`,
                 effective_limits: effectiveLimits,
             });
         }

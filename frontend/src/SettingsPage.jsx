@@ -2655,14 +2655,14 @@ const loadRazorpayScript = () => {
               {/* Usage & Limits Dashboard */}
               {(() => {
                 const eLimits = usageLimits;
-                const sharedCapacitySummary = `Live limits on ${currentPlanName} scale pooled members, staff, and WhatsApp with your active branch count. Hello currently supports one connected number per gym in this release, while balanced mode and flexible mode decide how branch capacity is operated across locations.`;
+                const sharedCapacitySummary = `Live limits on ${currentPlanName} now follow the exact totals configured in HQ pricing, plus any purchased add-ons. Branch setup changes how your team operates those totals across locations, but it does not auto-multiply plan capacity.`;
                 return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
                           <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
-                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Members, staff, and WhatsApp scale with your active branch count, while Hello currently stays limited to one connected number per gym in this release.</p>
+                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Every limit shown here comes from HQ pricing plus purchased add-ons, without any hidden branch-based multiplication.</p>
                       </div>
                   </div>
                   
