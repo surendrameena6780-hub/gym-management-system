@@ -47,14 +47,14 @@ const SAAS_PLANS = {
   monthly: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
     { id: 'basic',  name: 'Basic',      price: 1, billed: 1,  features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', 'Up to 2,000 WhatsApp Messages/mo', 'Hello Inbound on 2 Numbers', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', 'Up to 6,000 WhatsApp Messages/mo', 'Hello Inbound on 3 Numbers', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
   annual: [
     { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
     { id: 'basic',  name: 'Basic',      price: 1, billed: 10, features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
+    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', 'Up to 2,000 WhatsApp Messages/mo', 'Hello Inbound on 2 Numbers', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', 'Up to 6,000 WhatsApp Messages/mo', 'Hello Inbound on 3 Numbers', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
   ],
 };
 
@@ -170,12 +170,12 @@ const getBillingQuotePreview = ({
   };
 };
 
-// Per-plan base limits
+// Max included plan totals at full branch capacity.
 const PLAN_LIMITS = {
   test:   { members: 'Unlimited', staff: 'Unlimited', storage: 2,  branches: 'Unlimited', whatsapp: 'Unlimited', hello: 'Unlimited' },
   basic:  { members: 150,         staff: 2,           storage: 5,  branches: 1,           whatsapp: 500,          hello: 0 },
-  growth: { members: 800,         staff: 10,          storage: 10, branches: 2,           whatsapp: 1000,         hello: 1 },
-  pro:    { members: 3000,        staff: 30,          storage: 20, branches: 3,           whatsapp: 2000,         hello: 1 },
+  growth: { members: 800,         staff: 10,          storage: 10, branches: 2,           whatsapp: 2000,         hello: 2 },
+  pro:    { members: 3000,        staff: 30,          storage: 20, branches: 3,           whatsapp: 6000,         hello: 3 },
 };
 
 // Compute effective limits by adding addon purchases on top of base plan limits
@@ -255,6 +255,27 @@ const buildBranchDirectoryState = (count = 1, existing = []) => {
   });
   return next;
 };
+
+const normalizeCheckoutCouponCode = (value) => String(value || '')
+  .trim()
+  .toUpperCase()
+  .replace(/[^A-Z0-9_-]/g, '')
+  .slice(0, 32);
+
+const createBillingCheckoutState = (overrides = {}) => ({
+  open: false,
+  planId: '',
+  cycle: 'monthly',
+  branchesCount: 1,
+  distributionMode: 'flexible',
+  couponInput: '',
+  appliedCouponCode: '',
+  preview: null,
+  previewError: '',
+  previewLoading: false,
+  submitting: false,
+  ...overrides,
+});
 
 const createWebhookDraft = () => ({
   id: null,
@@ -515,6 +536,8 @@ const loadRazorpayScript = () => {
     try { const s = localStorage.getItem(invoiceStorageKey); return s ? JSON.parse(s) : null; } catch { return null; }
   });
   const setLocalInvoice = (inv) => { setLocalInvoiceState(inv); try { if (inv) localStorage.setItem(invoiceStorageKey, JSON.stringify(inv)); else localStorage.removeItem(invoiceStorageKey); } catch (_err) { return null; } };
+  const billingPreviewRequestRef = useRef(0);
+  const [billingCheckout, setBillingCheckout] = useState(() => createBillingCheckoutState());
 
   const downloadExport = useCallback(async (path, fileName) => {
     try {
@@ -776,6 +799,37 @@ const loadRazorpayScript = () => {
     ),
     [billingPreviewGymData, canUseServerEffectiveLimits, effectiveLimits, gymData.current_plan, normalizedBillingCatalog]
   );
+  const billingCheckoutPlan = useMemo(
+    () => normalizedBillingCatalog.plans[billingCheckout.planId] || null,
+    [billingCheckout.planId, normalizedBillingCatalog]
+  );
+  const billingCheckoutPlanCard = useMemo(
+    () => planCards.find((plan) => plan.id === billingCheckout.planId) || null,
+    [billingCheckout.planId, planCards]
+  );
+  const billingCheckoutBranchCap = useMemo(() => {
+    if (!billingCheckout.planId) return 1;
+    const limits = computeCatalogEffectiveLimits(normalizedBillingCatalog, billingCheckout.planId, {
+      ...gymData,
+      branches_count: billingCheckout.branchesCount || platformData.branches_count || 1,
+    });
+    return limits.branches ?? 25;
+  }, [billingCheckout.branchesCount, billingCheckout.planId, gymData, normalizedBillingCatalog, platformData.branches_count]);
+  const billingCheckoutBranchDirectory = useMemo(
+    () => buildBranchDirectoryState(billingCheckout.branchesCount || 1, platformData.branch_directory),
+    [billingCheckout.branchesCount, platformData.branch_directory]
+  );
+  const billingCheckoutLocalLimits = useMemo(() => {
+    if (!billingCheckout.planId) return null;
+    return computeCatalogEffectiveLimits(normalizedBillingCatalog, billingCheckout.planId, {
+      ...gymData,
+      branches_count: billingCheckout.branchesCount || platformData.branches_count || 1,
+    });
+  }, [billingCheckout.branchesCount, billingCheckout.planId, gymData, normalizedBillingCatalog, platformData.branches_count]);
+  const billingCheckoutPreview = billingCheckout.preview?.billing_preview || null;
+  const billingCheckoutPlanSetupPreview = billingCheckout.preview?.plan_setup_preview || null;
+  const billingCheckoutEffectiveLimits = billingCheckout.preview?.effective_limits || billingCheckoutLocalLimits;
+  const CheckoutPlanIcon = billingCheckoutPlanCard?.icon || CreditCard;
   const applyEffectiveLimitsPayload = useCallback((limits) => {
     if (!limits || typeof limits !== 'object') return;
 
@@ -823,6 +877,16 @@ const loadRazorpayScript = () => {
   useEffect(() => {
     setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
   }, [isWhatsAppConnected]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const hasModalOpen = Boolean(billingCheckout.open || whatsappOnboardingOpen);
+    root.classList.toggle('app-modal-open', hasModalOpen);
+
+    return () => {
+      root.classList.remove('app-modal-open');
+    };
+  }, [billingCheckout.open, whatsappOnboardingOpen]);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -1094,6 +1158,7 @@ const loadRazorpayScript = () => {
         ...prev,
         branches_count: Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || prev.branches_count || 1)),
       }));
+      applyEffectiveLimitsPayload(payload.effective_limits);
       toast(payload.message || 'Branch controls saved successfully.', 'success');
       await fetchSettings();
     } catch (err) {
@@ -1699,6 +1764,118 @@ const loadRazorpayScript = () => {
       }
   };
 
+  const closeBillingCheckout = useCallback(() => {
+    billingPreviewRequestRef.current += 1;
+    setBillingCheckout(createBillingCheckoutState());
+  }, []);
+
+  const openBillingCheckout = (selectedPlan) => {
+    const preview = getCatalogBillingQuotePreview({
+      billingCatalog: normalizedBillingCatalog,
+      currentPlan: gymData.current_plan,
+      currentCycle: gymData.saas_billing_cycle,
+      currentStatus: realStatus,
+      currentValidUntil: gymData.saas_valid_until,
+      targetPlan: selectedPlan.id,
+      targetCycle: billingCycle,
+    });
+
+    if (preview.error) {
+      toast(preview.error, 'warning');
+      return;
+    }
+
+    const branchCap = computeCatalogEffectiveLimits(normalizedBillingCatalog, selectedPlan.id, {
+      ...gymData,
+      branches_count: platformData.branches_count || gymData.branches_count || 1,
+    }).branches ?? 25;
+    const currentBranches = Math.max(1, Number.parseInt(platformData.branches_count ?? gymData.branches_count ?? 1, 10) || 1);
+    const nextBranchesCount = Math.max(1, Math.min(branchCap, currentBranches));
+
+    setBillingCheckout(createBillingCheckoutState({
+      open: true,
+      planId: selectedPlan.id,
+      cycle: billingCycle,
+      branchesCount: nextBranchesCount,
+      distributionMode: nextBranchesCount > 1 ? 'balanced' : 'flexible',
+      previewLoading: true,
+    }));
+  };
+
+  const updateBillingCheckoutBranches = (value) => {
+    const nextCount = Math.max(1, Math.min(billingCheckoutBranchCap || 25, Number.parseInt(value, 10) || 1));
+    setBillingCheckout((prev) => ({
+      ...prev,
+      branchesCount: nextCount,
+      distributionMode: nextCount > 1 ? prev.distributionMode : 'flexible',
+    }));
+  };
+
+  const applyBillingCheckoutCoupon = () => {
+    const normalizedCode = normalizeCheckoutCouponCode(billingCheckout.couponInput);
+    setBillingCheckout((prev) => ({
+      ...prev,
+      appliedCouponCode: normalizedCode,
+      previewError: '',
+    }));
+  };
+
+  const clearBillingCheckoutCoupon = () => {
+    setBillingCheckout((prev) => ({
+      ...prev,
+      couponInput: '',
+      appliedCouponCode: '',
+      previewError: '',
+    }));
+  };
+
+  useEffect(() => {
+    if (!billingCheckout.open || !billingCheckout.planId) return;
+
+    const requestId = billingPreviewRequestRef.current + 1;
+    billingPreviewRequestRef.current = requestId;
+    setBillingCheckout((prev) => ({ ...prev, previewLoading: true, previewError: '' }));
+
+    axios.post('/api/billing/preview', {
+      plan_tier: billingCheckout.planId,
+      cycle: billingCheckout.cycle,
+      coupon_code: billingCheckout.appliedCouponCode,
+      plan_setup: {
+        branches_count: billingCheckout.branchesCount,
+        distribution_mode: billingCheckout.distributionMode,
+      },
+    }, headers).then((res) => {
+      if (billingPreviewRequestRef.current !== requestId) return;
+      setBillingCheckout((prev) => ({
+        ...prev,
+        preview: res.data,
+        previewError: '',
+        previewLoading: false,
+      }));
+    }).catch((err) => {
+      if (billingPreviewRequestRef.current !== requestId) return;
+      const payload = err?.response?.data || {};
+      setBillingCheckout((prev) => ({
+        ...prev,
+        preview: {
+          billing_preview: payload.billing_preview || prev.preview?.billing_preview || null,
+          effective_limits: payload.effective_limits || prev.preview?.effective_limits || null,
+          plan_setup_preview: payload.plan_setup_preview || prev.preview?.plan_setup_preview || null,
+        },
+        previewError: payload.error || 'Failed to load billing preview.',
+        previewLoading: false,
+      }));
+    });
+  }, [
+    billingCheckout.appliedCouponCode,
+    billingCheckout.branchesCount,
+    billingCheckout.cycle,
+    billingCheckout.distributionMode,
+    billingCheckout.open,
+    billingCheckout.planId,
+    headers,
+  ]);
+
   const handleAddonPurchase = async (addonPack) => {
       const requiredPlans = Array.isArray(addonPack.requires_plans) ? addonPack.requires_plans : addonPack.requiresPlan;
       if (requiredPlans && requiredPlans.length > 0 && !requiredPlans.includes(gymData.current_plan)) {
@@ -1779,40 +1956,54 @@ const loadRazorpayScript = () => {
       }
   };
 
-  const handleSubscribe = async (selectedPlan) => {
-      const preview = getCatalogBillingQuotePreview({
-        billingCatalog: normalizedBillingCatalog,
-        currentPlan: gymData.current_plan,
-        currentCycle: gymData.saas_billing_cycle,
-        currentStatus: realStatus,
-        currentValidUntil: gymData.saas_valid_until,
-        targetPlan: selectedPlan.id,
-        targetCycle: billingCycle,
-      });
+  const handleSubscribe = async () => {
+      if (!billingCheckoutPlanCard) return;
 
-      if (preview.error) {
-        toast(preview.error, 'warning');
+      if (billingCheckoutPreview?.error) {
+        toast(billingCheckoutPreview.error, 'warning');
         return;
       }
 
+      if (billingCheckoutPreview?.coupon_status === 'invalid') {
+        toast(billingCheckoutPreview.coupon_error || 'Enter a valid coupon before checkout.', 'warning');
+        return;
+      }
+
+      setBillingCheckout((prev) => ({ ...prev, submitting: true }));
       setIsProcessingPayment(true);
+
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
-          toast("Razorpay script failed to load. Are you online?", "error");
+          toast('Razorpay script failed to load. Are you online?', 'error');
           setIsProcessingPayment(false);
+          setBillingCheckout((prev) => ({ ...prev, submitting: false }));
           return;
       }
+
+      const selectedPlan = billingCheckoutPlanCard;
+      const checkoutCycle = billingCheckout.cycle;
+      const checkoutBranchesCount = billingCheckout.branchesCount;
+      const checkoutDistributionMode = checkoutBranchesCount > 1 ? billingCheckout.distributionMode : 'flexible';
+      const checkoutCouponCode = billingCheckout.appliedCouponCode;
+      const optimisticLimits = billingCheckoutEffectiveLimits;
+      const optimisticPlanSetupDirectory = buildBranchDirectoryState(checkoutBranchesCount, platformData.branch_directory);
 
       try {
             const orderRes = await axios.post('/api/billing/create-order', {
               plan_tier: selectedPlan.id,
-              cycle: billingCycle,
+              cycle: checkoutCycle,
+              coupon_code: checkoutCouponCode,
+              plan_setup: {
+                branches_count: checkoutBranchesCount,
+                distribution_mode: checkoutDistributionMode,
+              },
             }, headers);
-          
+
           const order = orderRes.data;
-          const orderPreview = order?.billing_preview || preview;
+          const orderPreview = order?.billing_preview || billingCheckoutPreview;
           const previewCreditPaise = Number(orderPreview?.credit_paise ?? orderPreview?.creditPaise ?? 0);
           const previewPreserveExpiry = Boolean(orderPreview?.preserve_current_expiry ?? orderPreview?.preserveCurrentExpiry);
+          const previewCouponDiscountPaise = Number(orderPreview?.coupon_discount_paise || 0);
           const checkoutImageUrl = getRazorpayCheckoutImageUrl();
 
           const options = {
@@ -1820,32 +2011,39 @@ const loadRazorpayScript = () => {
               amount: order.amount,
               currency: order.currency,
               name: `GymVault ${selectedPlan.name}`,
-              description: previewCreditPaise > 0
-                ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCreditPaise)} credit applied`
-                : `${billingCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
+              description: previewCouponDiscountPaise > 0
+                ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCouponDiscountPaise)} coupon discount applied`
+                : previewCreditPaise > 0
+                  ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCreditPaise)} credit applied`
+                  : `${checkoutCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
               image: checkoutImageUrl,
               order_id: order.id,
               handler: async function (response) {
                   try {
-                      // 1. Optimistic UI Update
-                      const optDays = selectedPlan.id === 'test' ? 1 : billingCycle === 'annual' ? 365 : 30;
+                      const optDays = selectedPlan.id === 'test' ? 1 : checkoutCycle === 'annual' ? 365 : 30;
                       setGymData(prev => ({
                           ...prev,
                           saas_status: 'ACTIVE',
                           current_plan: selectedPlan.id,
-                          saas_billing_cycle: billingCycle,
+                          saas_billing_cycle: checkoutCycle,
+                          branches_count: checkoutBranchesCount,
                           saas_valid_until: previewPreserveExpiry && prev.saas_valid_until
                             ? prev.saas_valid_until
                             : new Date(Date.now() + optDays * 24 * 60 * 60 * 1000).toISOString()
                       }));
-                      applyEffectiveLimitsPayload(computeCatalogEffectiveLimits(
+                      setPlatformData((prev) => ({
+                        ...prev,
+                        branches_count: checkoutBranchesCount,
+                        branch_directory: optimisticPlanSetupDirectory,
+                      }));
+                      applyEffectiveLimitsPayload(order?.effective_limits || optimisticLimits || computeCatalogEffectiveLimits(
                         normalizedBillingCatalog,
                         selectedPlan.id,
                         {
                           ...gymData,
                           current_plan: selectedPlan.id,
-                          saas_billing_cycle: billingCycle,
-                          branches_count: Math.max(1, Number.parseInt(platformData.branches_count ?? gymData.branches_count ?? 1, 10) || 1),
+                          saas_billing_cycle: checkoutCycle,
+                          branches_count: checkoutBranchesCount,
                         },
                         null
                       ));
@@ -1854,31 +2052,33 @@ const loadRazorpayScript = () => {
                           id: response.razorpay_payment_id,
                           date: new Date().toISOString(),
                           amount: Number(order?.amount || 0) / 100 || selectedPlan.billed,
-                          plan: `GymVault ${selectedPlan.name} (${billingCycle})`
+                          plan: `GymVault ${selectedPlan.name} (${checkoutCycle})`
                       });
 
                       toast(
-                        orderPreview?.kind === 'prorated_upgrade'
-                          ? `Upgraded to ${selectedPlan.name}. Prorated credit applied.`
-                          : `Successfully updated to ${selectedPlan.name}!`,
-                        "success"
+                        previewCouponDiscountPaise > 0
+                          ? `${selectedPlan.name} activated with coupon savings.`
+                          : orderPreview?.kind === 'prorated_upgrade'
+                            ? `Upgraded to ${selectedPlan.name}. Prorated credit applied.`
+                            : `Successfully updated to ${selectedPlan.name}!`,
+                        'success'
                       );
 
-                      // 2. Save officially to DB
-                      await axios.post('/api/billing/verify', {
+                      const verifyRes = await axios.post('/api/billing/verify', {
                           razorpay_order_id: response.razorpay_order_id,
                           razorpay_payment_id: response.razorpay_payment_id,
                           razorpay_signature: response.razorpay_signature,
                           plan_tier: selectedPlan.id,
-                          cycle: billingCycle
+                          cycle: checkoutCycle
                       }, headers);
 
-                        await fetchSettings();
-                      
+                      applyEffectiveLimitsPayload(verifyRes.data?.effective_limits || order?.effective_limits);
+                      await fetchSettings();
+
                   } catch (err) {
                       reportClientError('Settings billing sync', err);
-                      toast("Payment received. System is syncing...", "warning");
-                        await fetchSettings();
+                      toast(err?.response?.data?.error || 'Payment received. System is syncing...', 'warning');
+                      await fetchSettings();
                   } finally {
                       setIsProcessingPayment(false);
                   }
@@ -1888,37 +2088,54 @@ const loadRazorpayScript = () => {
                   email: accountData.email,
                   contact: accountData.phone || gymData.phone
               },
-              theme: { color: "#4f46e5" },
+              theme: { color: '#4f46e5' },
               modal: { ondismiss: () => setIsProcessingPayment(false) }
           };
 
-              if (!options.key) {
-                toast("Payment gateway is not configured yet. Add Razorpay billing keys on the server.", "error");
-                setIsProcessingPayment(false);
-                return;
-              }
+          if (!options.key) {
+            toast('Payment gateway is not configured yet. Add Razorpay billing keys on the server.', 'error');
+            setIsProcessingPayment(false);
+            setBillingCheckout((prev) => ({ ...prev, submitting: false }));
+            return;
+          }
 
-            const paymentObject = new window.Razorpay(options);
-            paymentObject.on('payment.failed', function (response){
-              const checkoutError = response?.error || {};
-              const description = checkoutError.description || checkoutError.reason || 'Payment cancelled or failed.';
-              reportClientError('Settings billing checkout failed', new Error(description), {
-                razorpay: checkoutError,
-                order_id: order.id,
-                plan_tier: selectedPlan.id,
-                cycle: billingCycle,
-              });
-              toast(description, "error");
-              setIsProcessingPayment(false);
+          closeBillingCheckout();
+          const paymentObject = new window.Razorpay(options);
+          paymentObject.on('payment.failed', function (response){
+            const checkoutError = response?.error || {};
+            const description = checkoutError.description || checkoutError.reason || 'Payment cancelled or failed.';
+            reportClientError('Settings billing checkout failed', new Error(description), {
+              razorpay: checkoutError,
+              order_id: order.id,
+              plan_tier: selectedPlan.id,
+              cycle: checkoutCycle,
+            });
+            toast(description, 'error');
+            setIsProcessingPayment(false);
           });
           paymentObject.open();
 
           } catch (_err) {
+          const payload = _err?.response?.data || {};
           reportClientError('Settings billing create-order', _err, {
             plan_tier: selectedPlan.id,
-            cycle: billingCycle,
+            cycle: checkoutCycle,
           });
-          toast("Server error while initiating payment.", "error");
+          if (payload.billing_preview || payload.plan_setup_preview) {
+            setBillingCheckout((prev) => ({
+              ...prev,
+              preview: {
+                billing_preview: payload.billing_preview || prev.preview?.billing_preview || null,
+                effective_limits: payload.effective_limits || prev.preview?.effective_limits || null,
+                plan_setup_preview: payload.plan_setup_preview || prev.preview?.plan_setup_preview || null,
+              },
+              previewError: payload.error || 'Server error while initiating payment.',
+              submitting: false,
+            }));
+          } else {
+            setBillingCheckout((prev) => ({ ...prev, submitting: false }));
+          }
+          toast(payload.error || 'Server error while initiating payment.', 'error');
           setIsProcessingPayment(false);
       }
   };
@@ -2557,7 +2774,7 @@ const loadRazorpayScript = () => {
 
                         {/* CTA button */}
                         <button
-                          onClick={() => handleSubscribe(plan)}
+                          onClick={() => openBillingCheckout(plan)}
                           disabled={isProcessingPayment || isActive || isBlockedMidCycleSwitch}
                           className={`w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 active:scale-95 ${
                             isActive
@@ -2595,14 +2812,14 @@ const loadRazorpayScript = () => {
               {/* Usage & Limits Dashboard */}
               {(() => {
                 const eLimits = usageLimits;
-                const sharedCapacitySummary = `Members and staff on ${currentPlanName} are shared across the whole gym, so you can distribute them across branches in any mix. WhatsApp messages and Hello numbers stay fixed gym-wide totals, while branch count is tracked separately.`;
+                const sharedCapacitySummary = `Live limits on ${currentPlanName} scale with your active branch count. Members, staff, WhatsApp, and Hello grow or shrink with the number of branches you keep active, while balanced mode and flexible mode decide how that total is operated across locations.`;
                 return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
                           <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
-                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Members and staff are shared across the whole gym, while branches, WhatsApp messages, and Hello numbers are tracked as separate plan totals.</p>
+                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Members, staff, WhatsApp, and Hello scale with your active branch count, while balanced and flexible branch modes change how you operate that total.</p>
                       </div>
                   </div>
                   
@@ -3956,6 +4173,269 @@ const loadRazorpayScript = () => {
           )}
         </div>
       </div>
+
+      {billingCheckout.open && billingCheckoutPlanCard && (
+        <div className="app-modal-shell z-[88] bg-slate-950/70 backdrop-blur-sm">
+          <div className="app-modal-panel app-modal-panel--xl">
+            <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
+              <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.12),_transparent_42%),linear-gradient(135deg,_#f8fafc,_#eef2ff)] p-5 sm:p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex items-start gap-4 min-w-0">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm ${billingCheckoutPlanCard.bg} ${billingCheckoutPlanCard.color}`}>
+                      <CheckoutPlanIcon size={22} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">Checkout Setup</p>
+                      <h3 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">{billingCheckoutPlanCard.name} before Razorpay</h3>
+                      <p className="text-sm font-medium text-slate-600 mt-2 max-w-2xl">Set the active branch count, pick balanced or flexible usage, and apply any HQ discount coupon before the payment window opens.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeBillingCheckout}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <ArrowLeft size={15} /> Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="app-modal-scroll">
+                <div className="grid grid-cols-1 gap-6 p-5 sm:p-6 xl:grid-cols-[1.06fr,0.94fr]">
+                  <div className="space-y-5">
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Active Branches</p>
+                          <h4 className="text-lg font-black text-slate-900 mt-1">How many branches should stay active?</h4>
+                        </div>
+                        <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-right">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Plan Cap</p>
+                          <p className="text-sm font-black text-indigo-900">{billingCheckoutBranchCap === null ? 'Unlimited' : `${billingCheckoutBranchCap} branch${billingCheckoutBranchCap === 1 ? '' : 'es'}`}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center">
+                        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                          <button
+                            type="button"
+                            onClick={() => updateBillingCheckoutBranches(Math.max(1, billingCheckout.branchesCount - 1))}
+                            disabled={billingCheckout.branchesCount <= 1}
+                            className="h-9 w-9 rounded-xl border border-slate-200 text-lg font-black text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            -
+                          </button>
+                          <div className="text-center min-w-[92px]">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Selected</p>
+                            <p className="text-2xl font-black text-slate-900">{billingCheckout.branchesCount}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => updateBillingCheckoutBranches(Math.min(billingCheckoutBranchCap || 25, billingCheckout.branchesCount + 1))}
+                            disabled={billingCheckout.branchesCount >= (billingCheckoutBranchCap || 25)}
+                            className="h-9 w-9 rounded-xl border border-slate-200 text-lg font-black text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {Array.from({ length: Math.max(1, Math.min(billingCheckoutBranchCap || 4, 4)) }, (_item, index) => index + 1).map((count) => (
+                            <button
+                              key={`billing-branch-count-${count}`}
+                              type="button"
+                              onClick={() => updateBillingCheckoutBranches(count)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-colors ${billingCheckout.branchesCount === count ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                            >
+                              {count} branch{count === 1 ? '' : 'es'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <p className="mt-4 text-sm font-medium text-slate-600">If you keep only 1 branch active, the live plan limits collapse to one branch share. Adding more active branches scales the total back up for this subscription.</p>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Usage Mode</p>
+                      <h4 className="text-lg font-black text-slate-900 mt-1">Balanced split or uneven pool?</h4>
+                      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => setBillingCheckout((prev) => ({ ...prev, distributionMode: 'balanced' }))}
+                          disabled={billingCheckout.branchesCount === 1}
+                          className={`rounded-[24px] border p-4 text-left transition-all ${billingCheckout.distributionMode === 'balanced' && billingCheckout.branchesCount > 1 ? 'border-indigo-400 bg-indigo-50 shadow-sm' : 'border-slate-200 bg-slate-50'} disabled:opacity-45`}
+                        >
+                          <p className="text-sm font-black text-slate-900">Balanced</p>
+                          <p className="mt-2 text-sm font-medium text-slate-600">Start every branch with the same recommended share so the operation stays symmetrical.</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBillingCheckout((prev) => ({ ...prev, distributionMode: 'flexible' }))}
+                          className={`rounded-[24px] border p-4 text-left transition-all ${billingCheckout.distributionMode === 'flexible' ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-slate-50'}`}
+                        >
+                          <p className={`text-sm font-black ${billingCheckout.distributionMode === 'flexible' ? 'text-white' : 'text-slate-900'}`}>Flexible</p>
+                          <p className={`mt-2 text-sm font-medium ${billingCheckout.distributionMode === 'flexible' ? 'text-white/80' : 'text-slate-600'}`}>Keep one pooled total so a stronger branch can use more than the others whenever needed.</p>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Discount Coupon</p>
+                          <h4 className="text-lg font-black text-slate-900 mt-1">Apply an HQ coupon</h4>
+                        </div>
+                        {billingCheckout.appliedCouponCode && (
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-wider text-emerald-700">{billingCheckout.appliedCouponCode}</span>
+                        )}
+                      </div>
+                      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                        <input
+                          type="text"
+                          value={billingCheckout.couponInput}
+                          onChange={(e) => setBillingCheckout((prev) => ({ ...prev, couponInput: normalizeCheckoutCouponCode(e.target.value) }))}
+                          placeholder="Enter coupon code"
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black uppercase tracking-wider text-slate-900 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                        />
+                        <div className="flex gap-2">
+                          <button type="button" onClick={applyBillingCheckoutCoupon} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800">Apply</button>
+                          {billingCheckout.appliedCouponCode && (
+                            <button type="button" onClick={clearBillingCheckoutCoupon} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50">Clear</button>
+                          )}
+                        </div>
+                      </div>
+                      {billingCheckoutPreview?.coupon_status === 'applied' && Number(billingCheckoutPreview?.coupon_discount_paise || 0) > 0 && (
+                        <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                          Coupon saved you ₹{formatBillingPaise(billingCheckoutPreview.coupon_discount_paise)} on this checkout.
+                        </div>
+                      )}
+                      {billingCheckoutPreview?.coupon_status === 'invalid' && billingCheckoutPreview?.coupon_error && (
+                        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                          {billingCheckoutPreview.coupon_error}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-900 p-5 text-white shadow-xl shadow-slate-900/10">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/50">Checkout Summary</p>
+                      <div className="mt-3 flex items-end justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-white/70">Pay now</p>
+                          <p className="text-4xl font-black">₹{formatBillingPaise(billingCheckoutPreview?.payable_paise || 0)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-right">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Cycle</p>
+                          <p className="text-sm font-black">{billingCheckout.cycle === 'annual' ? 'Annual' : 'Monthly'}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 space-y-3 text-sm">
+                        <div className="flex items-center justify-between gap-3 text-white/70">
+                          <span>Plan price</span>
+                          <span className="font-black text-white">₹{formatBillingPaise(billingCheckoutPreview?.payable_before_coupon_paise ?? billingCheckoutPreview?.payable_paise ?? 0)}</span>
+                        </div>
+                        {Number(billingCheckoutPreview?.credit_paise || 0) > 0 && (
+                          <div className="flex items-center justify-between gap-3 text-emerald-300">
+                            <span>Unused plan credit</span>
+                            <span className="font-black">-₹{formatBillingPaise(billingCheckoutPreview.credit_paise)}</span>
+                          </div>
+                        )}
+                        {Number(billingCheckoutPreview?.coupon_discount_paise || 0) > 0 && (
+                          <div className="flex items-center justify-between gap-3 text-emerald-300">
+                            <span>Coupon discount</span>
+                            <span className="font-black">-₹{formatBillingPaise(billingCheckoutPreview.coupon_discount_paise)}</span>
+                          </div>
+                        )}
+                        <div className="h-px bg-white/10" />
+                        <div className="flex items-center justify-between gap-3 text-white">
+                          <span className="font-semibold">Active branches after checkout</span>
+                          <span className="font-black">{billingCheckout.branchesCount}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-2 gap-3">
+                        {[
+                          { label: 'Members', value: billingCheckoutEffectiveLimits?.members },
+                          { label: 'Staff', value: billingCheckoutEffectiveLimits?.staff },
+                          { label: 'WhatsApp', value: billingCheckoutEffectiveLimits?.whatsapp },
+                          { label: 'Hello', value: billingCheckoutEffectiveLimits?.hello },
+                        ].map((metric) => (
+                          <div key={metric.label} className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-white/45">{metric.label}</p>
+                            <p className="mt-1 text-lg font-black text-white">{metric.value === null || metric.value === undefined ? 'Unlimited' : Number(metric.value).toLocaleString()}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Branch Preview</p>
+                          <h4 className="text-lg font-black text-slate-900 mt-1">How this setup operates</h4>
+                        </div>
+                        {billingCheckout.previewLoading && <RefreshCw size={16} className="animate-spin text-slate-400" />}
+                      </div>
+
+                      {billingCheckout.previewError && (
+                        <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                          {billingCheckout.previewError}
+                        </div>
+                      )}
+
+                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {(billingCheckoutPlanSetupPreview?.branch_preview || billingCheckoutBranchDirectory.map((branch) => ({ id: branch.id, name: branch.name }))).map((branch, index) => (
+                          <div key={branch.id || `checkout-branch-${index}`} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-black text-slate-900">{branch.name}</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{branch.id}</p>
+                              </div>
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-500">#{index + 1}</span>
+                            </div>
+                            <div className="mt-4 space-y-2 text-sm font-semibold text-slate-600">
+                              <div className="flex items-center justify-between gap-3"><span>Members</span><span className="font-black text-slate-900">{branch.members === null || branch.members === undefined ? (billingCheckout.branchesCount > 1 && billingCheckout.distributionMode === 'flexible' ? 'Flexible pool' : 'Unlimited') : Number(branch.members).toLocaleString()}</span></div>
+                              <div className="flex items-center justify-between gap-3"><span>Staff</span><span className="font-black text-slate-900">{branch.staff === null || branch.staff === undefined ? (billingCheckout.branchesCount > 1 && billingCheckout.distributionMode === 'flexible' ? 'Flexible pool' : 'Unlimited') : Number(branch.staff).toLocaleString()}</span></div>
+                              <div className="flex items-center justify-between gap-3"><span>WhatsApp</span><span className="font-black text-slate-900">{branch.whatsapp === null || branch.whatsapp === undefined ? (billingCheckout.branchesCount > 1 && billingCheckout.distributionMode === 'flexible' ? 'Flexible pool' : 'Unlimited') : Number(branch.whatsapp).toLocaleString()}</span></div>
+                              <div className="flex items-center justify-between gap-3"><span>Hello</span><span className="font-black text-slate-900">{branch.hello === null || branch.hello === undefined ? (billingCheckout.branchesCount > 1 && billingCheckout.distributionMode === 'flexible' ? 'Flexible pool' : 'Unlimited') : Number(branch.hello).toLocaleString()}</span></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {(billingCheckoutPlanSetupPreview?.notes || []).length > 0 && (
+                        <div className="mt-4 space-y-2">
+                          {billingCheckoutPlanSetupPreview.notes.map((note) => (
+                            <div key={note} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+                              {note}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 bg-white px-5 py-4 sm:px-6">
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm font-medium text-slate-500">{billingCheckout.branchesCount > 1 && billingCheckout.distributionMode === 'flexible' ? 'Flexible mode keeps one pooled total across your selected branches.' : 'Balanced mode shows an equal branch-by-branch recommendation before you pay.'}</p>
+                  <button
+                    type="button"
+                    onClick={handleSubscribe}
+                    disabled={billingCheckout.previewLoading || billingCheckout.submitting || Boolean(billingCheckout.previewError) || billingCheckoutPreview?.coupon_status === 'invalid'}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {billingCheckout.submitting || isProcessingPayment ? <><RefreshCw size={15} className="animate-spin" /> Preparing checkout...</> : <>Continue to Razorpay</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {whatsappOnboardingOpen && (
         <div className="fixed inset-0 z-[90] bg-slate-950/70 backdrop-blur-sm p-3 sm:p-6 animate-in fade-in duration-200">

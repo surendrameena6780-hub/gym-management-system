@@ -2,6 +2,9 @@ export const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
 export const BILLING_CORE_PLAN_IDS = ['basic', 'growth', 'pro'];
 export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
 export const BILLING_CAPABILITY_KEYS = ['custom_templates'];
+const BILLING_CYCLE_KEYS = ['monthly', 'annual'];
+const BILLING_COUPON_TYPES = ['PERCENT', 'AMOUNT'];
+const BRANCH_SCALING_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp', 'hello']);
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
 const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
@@ -61,8 +64,8 @@ export const defaultBillingCatalog = {
         'Up to 800 members total',
         'Up to 2 branches',
         '1 owner + 10 staff users total',
-        '1,000 WhatsApp messages per month',
-        'Hello inbound on 1 number',
+        'Up to 2,000 WhatsApp messages per month',
+        'Hello inbound on up to 2 numbers',
         '10 GB cloud storage',
         'WhatsApp reply-to-lead capture',
         'Custom WhatsApp templates',
@@ -84,8 +87,8 @@ export const defaultBillingCatalog = {
         'Up to 3,000 members total',
         'Up to 3 branches',
         '1 owner + 30 staff users total',
-        '2,000 WhatsApp messages per month',
-        'Hello inbound on 1 number',
+        'Up to 6,000 WhatsApp messages per month',
+        'Hello inbound on up to 3 numbers',
         '20 GB cloud storage',
         'Full reply-to-lead workflow',
         'Custom WhatsApp templates',
@@ -98,6 +101,7 @@ export const defaultBillingCatalog = {
       limits: { members: 1000, staff: 10, storage: 20, branches: 3, whatsapp: 2000, hello: 1 },
     },
   },
+  coupons: [],
   addons: {
     extra_whatsapp_250: {
       key: 'extra_whatsapp_250',
@@ -185,14 +189,14 @@ const LEGACY_BILLING_PLAN_FEATURES = {
   ],
   growth: [
     ['WhatsApp Reply to Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
-    ['Up to 800 active members', 'Up to 2 branches', '1 owner + 10 staff users', '1,000 WhatsApp messages per month', 'Hello inbound on 1 number', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
-    ['Up to 800 Active Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', '1,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
+    ['Up to 800 active members', 'Up to 2 branches', '1 owner + 10 staff users', 'Up to 2,000 WhatsApp messages per month', 'Hello inbound on up to 2 numbers', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
+    ['Up to 800 Active Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', 'Up to 2,000 WhatsApp Messages/mo', 'Hello Inbound on 2 Numbers', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'],
     ['Up to 400 members / Branch', 'Multiple branches', '1 owner + 5 staff users / Branch', '1,000 WhatsApp messages per month / Branch', 'Hello inbound on 1 number / Branch', '10 GB cloud storage', 'WhatsApp reply-to-lead capture', 'Custom WhatsApp templates', 'Advanced insights, reports, and branch-wise reporting', 'Class and staff operations', '14-day free trial', 'Priority support'],
   ],
   pro: [
     ['Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
-    ['Up to 3,000 active members', 'Up to 3 branches', '1 owner + 30 staff users', '2,000 WhatsApp messages per month', 'Hello inbound on 1 number', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
-    ['Up to 3,000 Active Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', '2,000 WhatsApp Messages/mo', 'Hello Inbound on 1 Number', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
+    ['Up to 3,000 active members', 'Up to 3 branches', '1 owner + 30 staff users', 'Up to 6,000 WhatsApp messages per month', 'Hello inbound on up to 3 numbers', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
+    ['Up to 3,000 Active Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', 'Up to 6,000 WhatsApp Messages/mo', 'Hello Inbound on 3 Numbers', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'],
     ['Up to 1,000 members / Branch', 'Multiple branches', '1 owner + 10 staff users / Branch', '2,000 WhatsApp messages per month / Branch', 'Hello inbound on 1 number / Branch', '20 GB cloud storage', 'Full reply-to-lead workflow', 'Custom WhatsApp templates', 'Advanced insights and performance analytics', 'Staff, payroll, and RFID-ready operations', '14-day free trial', 'Fastest support response'],
   ],
 };
@@ -211,6 +215,55 @@ const normalizeRequiresPlans = (value, fallback = []) => {
   const allowed = new Set(BILLING_PLAN_ORDER);
   const normalized = source.map((item) => String(item || '').trim().toLowerCase()).filter((item) => allowed.has(item));
   return Array.from(new Set(normalized.length > 0 ? normalized : fallback));
+};
+
+const normalizeCouponCode = (value, fallback = '') => {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 32);
+  return normalized || fallback;
+};
+
+const normalizeCouponCycles = (value, fallback = []) => {
+  const source = Array.isArray(value) ? value : [];
+  const allowed = new Set(BILLING_CYCLE_KEYS);
+  const normalized = source.map((item) => String(item || '').trim().toLowerCase()).filter((item) => allowed.has(item));
+  return Array.from(new Set(normalized.length > 0 ? normalized : fallback));
+};
+
+const normalizeOptionalTimestamp = (value) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const timestamp = Date.parse(text);
+  if (!Number.isFinite(timestamp)) return '';
+  return new Date(timestamp).toISOString();
+};
+
+const normalizeBillingCoupon = (value, index = 0) => {
+  const raw = value && typeof value === 'object' ? value : {};
+  const discountType = BILLING_COUPON_TYPES.includes(String(raw.discount_type || '').trim().toUpperCase())
+    ? String(raw.discount_type).trim().toUpperCase()
+    : 'PERCENT';
+
+  return {
+    code: normalizeCouponCode(raw.code, `SAVE${index + 1}`),
+    label: readText(raw.label).slice(0, 120),
+    description: readText(raw.description).slice(0, 240),
+    active: raw.active === undefined ? true : Boolean(raw.active),
+    discount_type: discountType,
+    discount_value: readNumber(raw.discount_value, discountType === 'PERCENT' ? 10 : 100, {
+      min: 1,
+      max: discountType === 'PERCENT' ? 100 : 100000,
+    }),
+    minimum_amount: readNumber(raw.minimum_amount, 0, { min: 0, max: 100000 }),
+    max_redemptions: readNumber(raw.max_redemptions, null, { min: 1, max: 100000, allowNull: true }),
+    applies_to_plans: normalizeRequiresPlans(raw.applies_to_plans, []),
+    applies_to_cycles: normalizeCouponCycles(raw.applies_to_cycles, []),
+    valid_from: normalizeOptionalTimestamp(raw.valid_from),
+    valid_until: normalizeOptionalTimestamp(raw.valid_until),
+  };
 };
 
 const normalizePlanOrder = (value, fallback = BILLING_PLAN_ORDER, { includeTest = true } = {}) => {
@@ -291,10 +344,20 @@ export const normalizeBillingCatalog = (value, { includeTest = true } = {}) => {
       .filter((planId) => BILLING_PLAN_ORDER.includes(planId))
   );
   const normalizedPlanIds = BILLING_PLAN_ORDER.filter((planId) => visiblePlanOrder.includes(planId) || rawPlanKeys.has(planId));
+  const seenCouponCodes = new Set();
+  const coupons = (Array.isArray(raw.coupons) ? raw.coupons : [])
+    .map((coupon, index) => normalizeBillingCoupon(coupon, index))
+    .filter((coupon) => {
+      if (!coupon.code || seenCouponCodes.has(coupon.code)) return false;
+      seenCouponCodes.add(coupon.code);
+      return true;
+    })
+    .slice(0, 50);
   return {
     plan_order: visiblePlanOrder,
     addon_order: [...BILLING_ADDON_ORDER],
     plans: Object.fromEntries(normalizedPlanIds.map((planId) => [planId, normalizePlan(planId, raw.plans?.[planId])])),
+    coupons,
     addons: Object.fromEntries(BILLING_ADDON_ORDER.map((addonKey) => [addonKey, normalizeAddon(addonKey, raw.addons?.[addonKey])])),
   };
 };
@@ -459,6 +522,9 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
   const allowedBranches = plan.limits?.branches === null || plan.limits?.branches === undefined
     ? null
     : Number(plan.limits.branches) + Number(gymData?.addon_extra_branches || 0);
+  const activeBranchMultiplier = allowedBranches === null || allowedBranches === undefined
+    ? configuredBranches
+    : Math.max(1, Math.min(configuredBranches, Number(allowedBranches) || 1));
   const addonMap = {
     members: Number(gymData?.addon_extra_members || 0),
     staff: Number(gymData?.addon_extra_staff || 0),
@@ -470,11 +536,8 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
   const resolvePlanTotalLimit = (limitKey) => {
     const baseValue = plan.limits?.[limitKey] ?? null;
     if (baseValue === null || baseValue === undefined) return null;
-    if (limitKey === 'members' || limitKey === 'staff') {
-      const includedBranches = plan.limits?.branches === null || plan.limits?.branches === undefined
-        ? 1
-        : Math.max(1, Number(plan.limits.branches) || 1);
-      return Number(baseValue) * includedBranches;
+    if (BRANCH_SCALING_LIMIT_KEYS.has(limitKey)) {
+      return Number(baseValue) * activeBranchMultiplier;
     }
     return Number(baseValue);
   };

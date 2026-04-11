@@ -163,6 +163,32 @@ const BILLING_PLAN_TINTS = {
   pro: 'border-rose-500/20 bg-rose-500/10',
 };
 
+const BILLING_COUPON_CYCLES = ['monthly', 'annual'];
+
+const normalizeCouponEditorCode = (value) => String(value || '')
+  .trim()
+  .toUpperCase()
+  .replace(/[^A-Z0-9_-]/g, '')
+  .slice(0, 32);
+
+const createBillingCouponDraft = (count = 0) => {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(-5);
+  return {
+    code: normalizeCouponEditorCode(`SAVE${count + 1}${suffix}`),
+    label: `Promo ${count + 1}`,
+    description: '',
+    active: true,
+    discount_type: 'PERCENT',
+    discount_value: 10,
+    minimum_amount: 0,
+    max_redemptions: null,
+    applies_to_plans: [],
+    applies_to_cycles: [],
+    valid_from: '',
+    valid_until: '',
+  };
+};
+
 const mergeAutomationSettings = (value) => {
   const raw = value && typeof value === 'object' ? value : {};
   return {
@@ -222,7 +248,7 @@ const describeEffectiveLimitMode = (effectiveLimits = {}) => {
   const memberLimit = formatLimitDisplay(effectiveLimits?.members);
   const staffLimit = formatLimitDisplay(effectiveLimits?.staff);
   const branchLimit = formatLimitDisplay(effectiveLimits?.branches);
-  return `Members and staff are pooled across the entire gym. This plan currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons.`;
+  return `Live limits now scale with the gym's active branch count. This setup currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons.`;
 };
 
 function SuperAdminDashboard({ token, onLogout }) {
@@ -914,6 +940,110 @@ function SuperAdminDashboard({ token, onLogout }) {
     });
   };
 
+  const addBillingCoupon = () => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          coupons: [...(billingConfig.coupons || []), createBillingCouponDraft(billingConfig.coupons?.length || 0)],
+        },
+      };
+    });
+  };
+
+  const updateBillingCouponField = (couponIndex, field, value) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      const coupons = Array.isArray(billingConfig.coupons) ? billingConfig.coupons : [];
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          coupons: coupons.map((coupon, index) => {
+            if (index !== couponIndex) return coupon;
+            if (field === 'code') {
+              return { ...coupon, code: normalizeCouponEditorCode(value) };
+            }
+            if (field === 'active') {
+              return { ...coupon, active: Boolean(value) };
+            }
+            if (['discount_value', 'minimum_amount'].includes(field)) {
+              return { ...coupon, [field]: value === '' ? 0 : (Number.parseInt(value, 10) || 0) };
+            }
+            if (field === 'max_redemptions') {
+              return { ...coupon, max_redemptions: value === '' ? null : (Number.parseInt(value, 10) || null) };
+            }
+            if (field === 'discount_type') {
+              return { ...coupon, discount_type: String(value || 'PERCENT').trim().toUpperCase() === 'AMOUNT' ? 'AMOUNT' : 'PERCENT' };
+            }
+            return { ...coupon, [field]: value };
+          }),
+        },
+      };
+    });
+  };
+
+  const toggleBillingCouponPlan = (couponIndex, planId) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      const coupons = Array.isArray(billingConfig.coupons) ? billingConfig.coupons : [];
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          coupons: coupons.map((coupon, index) => {
+            if (index !== couponIndex) return coupon;
+            const plans = Array.isArray(coupon.applies_to_plans) ? coupon.applies_to_plans : [];
+            return {
+              ...coupon,
+              applies_to_plans: plans.includes(planId)
+                ? plans.filter((entry) => entry !== planId)
+                : [...plans, planId],
+            };
+          }),
+        },
+      };
+    });
+  };
+
+  const toggleBillingCouponCycle = (couponIndex, cycleKey) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      const coupons = Array.isArray(billingConfig.coupons) ? billingConfig.coupons : [];
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          coupons: coupons.map((coupon, index) => {
+            if (index !== couponIndex) return coupon;
+            const cycles = Array.isArray(coupon.applies_to_cycles) ? coupon.applies_to_cycles : [];
+            return {
+              ...coupon,
+              applies_to_cycles: cycles.includes(cycleKey)
+                ? cycles.filter((entry) => entry !== cycleKey)
+                : [...cycles, cycleKey],
+            };
+          }),
+        },
+      };
+    });
+  };
+
+  const removeBillingCoupon = (couponIndex) => {
+    setSystem((prev) => {
+      const billingConfig = normalizeFrontendBillingCatalog(prev.billing_config);
+      return {
+        ...prev,
+        billing_config: {
+          ...billingConfig,
+          coupons: (billingConfig.coupons || []).filter((_, index) => index !== couponIndex),
+        },
+      };
+    });
+  };
+
   const sendBroadcast = async () => {
     if (!broadcast.title.trim() || !broadcast.message.trim()) return;
     try {
@@ -1558,7 +1688,7 @@ function SuperAdminDashboard({ token, onLogout }) {
                 Edit plan names, monthly and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
               </p>
               <p className="text-xs text-slate-500 max-w-3xl">
-                Members and staff limits are gym-wide totals. WhatsApp and Hello are fixed gym-wide quotas, while branch count remains a separate entitlement.
+                Members, staff, WhatsApp, and Hello now scale with the owner's active branch count. Balanced vs flexible branch setup is chosen in owner checkout, while HQ still controls the per-branch base values here.
               </p>
 
               <div className="space-y-4">
@@ -1763,6 +1893,195 @@ function SuperAdminDashboard({ token, onLogout }) {
                       );
                     })}
                   </div>
+                </div>
+
+                <div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest font-black text-slate-500">Discount Coupons</p>
+                      <p className="text-sm text-slate-500 mt-1">Generate coupon codes here for owner checkout. Coupons can target specific plans, billing cycles, minimum order values, and expiry windows.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addBillingCoupon}
+                      className="inline-flex items-center gap-2 rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-4 py-2 text-xs font-black uppercase tracking-wider text-indigo-200 hover:bg-indigo-500/20 transition-colors"
+                    >
+                      <KeyRound size={14} /> Add Coupon
+                    </button>
+                  </div>
+
+                  {(billingConfig.coupons || []).length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 px-4 py-5 text-sm font-semibold text-slate-500">
+                      No billing coupons yet. Create one here and it becomes available in the owner checkout modal immediately after saving the catalog.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(billingConfig.coupons || []).map((coupon, couponIndex) => (
+                        <div key={`${coupon.code}-${couponIndex}`} className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <p className="text-sm font-black text-white">{coupon.label || coupon.code}</p>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mt-1">Owner checkout coupon</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(coupon.active)}
+                                  onChange={(e) => updateBillingCouponField(couponIndex, 'active', e.target.checked)}
+                                />
+                                Active
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => removeBillingCoupon(couponIndex)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-rose-200 hover:bg-rose-500/20 transition-colors"
+                              >
+                                <Trash2 size={12} /> Delete
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Code</p>
+                              <input
+                                type="text"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm font-black uppercase tracking-wider"
+                                value={coupon.code}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'code', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Label</p>
+                              <input
+                                type="text"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={coupon.label}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'label', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Discount Type</p>
+                              <select
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={coupon.discount_type}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'discount_type', e.target.value)}
+                              >
+                                <option value="PERCENT">Percent</option>
+                                <option value="AMOUNT">Flat amount</option>
+                              </select>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Discount Value</p>
+                              <input
+                                type="number"
+                                min="1"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={coupon.discount_value}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'discount_value', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Min Order</p>
+                              <input
+                                type="number"
+                                min="0"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={coupon.minimum_amount ?? 0}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'minimum_amount', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Max Redemptions</p>
+                              <input
+                                type="number"
+                                min="1"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={coupon.max_redemptions ?? ''}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'max_redemptions', e.target.value)}
+                                placeholder="Unlimited"
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Valid From</p>
+                              <input
+                                type="date"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={String(coupon.valid_from || '').slice(0, 10)}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'valid_from', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Valid Until</p>
+                              <input
+                                type="date"
+                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                value={String(coupon.valid_until || '').slice(0, 10)}
+                                onChange={(e) => updateBillingCouponField(couponIndex, 'valid_until', e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Description</p>
+                            <textarea
+                              rows={3}
+                              className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm resize-y"
+                              value={coupon.description || ''}
+                              onChange={(e) => updateBillingCouponField(couponIndex, 'description', e.target.value)}
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-2">Allowed Plans</p>
+                              <div className="flex flex-wrap gap-2">
+                                {billingConfig.plan_order.filter((planId) => planId !== 'test').map((planId) => {
+                                  const active = (coupon.applies_to_plans || []).includes(planId);
+                                  return (
+                                    <button
+                                      key={`${coupon.code}-${planId}`}
+                                      type="button"
+                                      onClick={() => toggleBillingCouponPlan(couponIndex, planId)}
+                                      className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${active ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'}`}
+                                    >
+                                      {planId}
+                                    </button>
+                                  );
+                                })}
+                                {(coupon.applies_to_plans || []).length === 0 && (
+                                  <span className="text-[11px] font-bold text-slate-500">Applies to every paid plan.</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-2">Allowed Cycles</p>
+                              <div className="flex flex-wrap gap-2">
+                                {BILLING_COUPON_CYCLES.map((cycleKey) => {
+                                  const active = (coupon.applies_to_cycles || []).includes(cycleKey);
+                                  return (
+                                    <button
+                                      key={`${coupon.code}-${cycleKey}`}
+                                      type="button"
+                                      onClick={() => toggleBillingCouponCycle(couponIndex, cycleKey)}
+                                      className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${active ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40' : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'}`}
+                                    >
+                                      {cycleKey}
+                                    </button>
+                                  );
+                                })}
+                                {(coupon.applies_to_cycles || []).length === 0 && (
+                                  <span className="text-[11px] font-bold text-slate-500">Applies to monthly and annual checkout.</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

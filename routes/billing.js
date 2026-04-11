@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const { requireOwner } = require('../middleware/rbac');
+const { getOutOfDirectoryBranchUsage, normalizeBranchDirectory } = require('../utils/branchAccess');
 const {
     computeEffectiveBillingLimits,
     ensureGymBillingAddonSchema,
@@ -77,10 +78,43 @@ const logBillingRazorpayError = (req, stage, error, metadata = {}) => {
 
 const ensureBillingAddonSchema = ensureGymBillingAddonSchema;
 
+let ensureBillingCouponRedemptionSchemaPromise = null;
+const ensureBillingCouponRedemptionSchema = async () => {
+    if (!ensureBillingCouponRedemptionSchemaPromise) {
+        ensureBillingCouponRedemptionSchemaPromise = pool.query(`
+            CREATE TABLE IF NOT EXISTS billing_coupon_redemptions (
+                id SERIAL PRIMARY KEY,
+                coupon_code VARCHAR(32) NOT NULL,
+                gym_id INTEGER NOT NULL REFERENCES gyms(id) ON DELETE CASCADE,
+                plan_tier VARCHAR(24) NOT NULL,
+                billing_cycle VARCHAR(16) NOT NULL,
+                razorpay_order_id VARCHAR(80),
+                razorpay_payment_id VARCHAR(80) NOT NULL,
+                discount_paise INTEGER NOT NULL DEFAULT 0,
+                coupon_label VARCHAR(120),
+                metadata JSONB DEFAULT '{}'::jsonb,
+                redeemed_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (razorpay_payment_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_billing_coupon_redemptions_code
+                ON billing_coupon_redemptions(coupon_code, redeemed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_billing_coupon_redemptions_gym
+                ON billing_coupon_redemptions(gym_id, redeemed_at DESC);
+        `).catch((error) => {
+            ensureBillingCouponRedemptionSchemaPromise = null;
+            throw error;
+        });
+    }
+
+    await ensureBillingCouponRedemptionSchemaPromise;
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CYCLE_DAYS = { monthly: 30, annual: 365 };
 const ACTIVE_CREDIT_STATUSES = new Set(['ACTIVE']);
 const MIN_RAZORPAY_AMOUNT_PAISE = 100;
+const PLAN_SETUP_MODES = new Set(['balanced', 'flexible']);
 
 const normalizeCycle = (value) => String(value || 'monthly').trim().toLowerCase();
 const normalizePlanTier = (value) => normalizePlanId(value, 'pro');
@@ -91,6 +125,15 @@ const parseTimestampMs = (value) => {
     const timestamp = Date.parse(value);
     return Number.isFinite(timestamp) ? timestamp : null;
 };
+const toPositiveInt = (value, fallback = 1) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+const normalizeCouponCode = (value) => String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 32);
 const getCycleDays = (cycle, planTier) => {
     if (normalizePlanTier(planTier) === 'test') return 1;
     return CYCLE_DAYS[normalizeCycle(cycle)] || 30;
@@ -224,6 +267,8 @@ const buildBillingPreviewPayload = (quote, currentValidUntil = null) => ({
     kind: quote.kind,
     full_price_paise: quote.fullPricePaise,
     full_price_inr: quote.fullPricePaise / 100,
+    payable_before_coupon_paise: quote.payableBeforeCouponPaise ?? quote.payablePaise,
+    payable_before_coupon_inr: (quote.payableBeforeCouponPaise ?? quote.payablePaise) / 100,
     payable_paise: quote.payablePaise,
     payable_inr: quote.payablePaise / 100,
     credit_paise: quote.creditPaise,
@@ -233,7 +278,100 @@ const buildBillingPreviewPayload = (quote, currentValidUntil = null) => ({
     renewal_days: quote.renewalDays,
     remaining_ratio: quote.remainingRatio,
     error: quote.error,
+    coupon_code: quote.couponCode || null,
+    coupon_label: quote.couponLabel || null,
+    coupon_discount_paise: Number(quote.couponDiscountPaise || 0),
+    coupon_discount_inr: Number(quote.couponDiscountPaise || 0) / 100,
+    coupon_status: quote.couponStatus || 'none',
+    coupon_error: quote.couponError || null,
   });
+
+const normalizePlanSetupInput = (value, gymBilling = {}, targetLimits = {}) => {
+    const currentBranches = Math.max(1, toPositiveInt(gymBilling?.branches_count, 1));
+    const rawRequestedBranches = Number.parseInt(value?.branches_count, 10);
+    const requestedBranches = Number.isInteger(rawRequestedBranches) && rawRequestedBranches > 0
+        ? rawRequestedBranches
+        : currentBranches;
+    const distributionMode = PLAN_SETUP_MODES.has(String(value?.distribution_mode || '').trim().toLowerCase())
+        ? String(value.distribution_mode).trim().toLowerCase()
+        : requestedBranches > 1
+            ? 'balanced'
+            : 'flexible';
+
+    return {
+        branchesCount: Math.max(1, Math.min(25, requestedBranches)),
+        distributionMode,
+        branchDirectory: normalizeBranchDirectory(gymBilling?.branch_directory, Math.max(1, Math.min(25, requestedBranches))),
+        branchCap: targetLimits?.branches ?? null,
+    };
+};
+
+const distributeEvenly = (total, count) => {
+    if (total === null || total === undefined) {
+        return Array.from({ length: count }, () => null);
+    }
+
+    const normalizedTotal = Math.max(0, Number(total) || 0);
+    const normalizedCount = Math.max(1, Number(count) || 1);
+    const baseShare = Math.floor(normalizedTotal / normalizedCount);
+    const remainder = normalizedTotal % normalizedCount;
+
+    return Array.from({ length: normalizedCount }, (_item, index) => baseShare + (index < remainder ? 1 : 0));
+};
+
+const buildPlanSetupPreview = ({ targetLimits, planSetup }) => {
+    const branchesCount = Math.max(1, Number(planSetup?.branchesCount || 1));
+    const branchDirectory = normalizeBranchDirectory(planSetup?.branchDirectory, branchesCount);
+    const distributionMode = String(planSetup?.distributionMode || 'flexible').toLowerCase();
+    const totals = {
+        members: targetLimits?.members ?? null,
+        staff: targetLimits?.staff ?? null,
+        whatsapp: targetLimits?.whatsapp ?? null,
+        hello: targetLimits?.hello ?? null,
+        storage: targetLimits?.storage ?? null,
+    };
+    const equalSplit = distributionMode === 'balanced' && branchesCount > 1;
+    const memberShares = equalSplit ? distributeEvenly(totals.members, branchesCount) : [];
+    const staffShares = equalSplit ? distributeEvenly(totals.staff, branchesCount) : [];
+    const whatsappShares = equalSplit ? distributeEvenly(totals.whatsapp, branchesCount) : [];
+    const helloShares = equalSplit ? distributeEvenly(totals.hello, branchesCount) : [];
+
+    return {
+        branches_count: branchesCount,
+        distribution_mode: distributionMode,
+        mode_label: equalSplit ? 'Equal split' : 'Uneven / flexible pool',
+        total_limits: totals,
+        branch_preview: branchDirectory.map((branch, index) => ({
+            id: branch.id,
+            name: branch.name,
+            members: branchesCount === 1
+                ? totals.members
+                : equalSplit
+                    ? memberShares[index]
+                    : null,
+            staff: branchesCount === 1
+                ? totals.staff
+                : equalSplit
+                    ? staffShares[index]
+                    : null,
+            whatsapp: branchesCount === 1
+                ? totals.whatsapp
+                : equalSplit
+                    ? whatsappShares[index]
+                    : null,
+            hello: branchesCount === 1
+                ? totals.hello
+                : equalSplit
+                    ? helloShares[index]
+                    : null,
+        })),
+        notes: branchesCount === 1
+            ? ['One active branch selected, so the live plan limits collapse to a single branch share.']
+            : equalSplit
+                ? ['Balanced mode shows an equal recommended split per branch while the total plan remains tied to the active branch count.']
+                : ['Flexible mode keeps one shared gym-wide pool across the selected branches, so one branch can consume more than another.'],
+    };
+};
 
 const BILLING_GUARD_LIMIT_KEYS = [
     'members',
@@ -255,9 +393,8 @@ const isRestrictivePlanChange = (currentLimits, targetLimits) => (
     BILLING_GUARD_LIMIT_KEYS.some((limitKey) => isLowerLimit(currentLimits?.[limitKey], targetLimits?.[limitKey]))
 );
 
-const buildPlanChangeViolations = ({ gymBilling, usageSnapshot, targetLimits }) => {
-    const violations = [];
-    const configuredBranches = Number(gymBilling?.branches_count || 1);
+const buildPlanChangeViolations = ({ configuredBranches, usageSnapshot, targetLimits, branchReductionViolations = [] }) => {
+    const violations = [...branchReductionViolations];
 
     if (targetLimits.branches !== null && configuredBranches > targetLimits.branches) {
         violations.push(`This gym already has ${configuredBranches} configured branch${configuredBranches === 1 ? '' : 'es'}, but the target plan allows ${targetLimits.branches}. Reduce branches before switching plans.`);
@@ -274,22 +411,237 @@ const buildPlanChangeViolations = ({ gymBilling, usageSnapshot, targetLimits }) 
     return violations;
 };
 
-const validatePlanChangeCompatibility = async ({ db, gymId, billingConfig, gymBilling, targetPlan }) => {
+const validatePlanChangeCompatibility = async ({ db, gymId, billingConfig, gymBilling, targetPlan, planSetup = null }) => {
     const currentLimits = computeEffectiveBillingLimits(billingConfig, gymBilling?.current_plan, gymBilling || {});
-    const targetLimits = computeEffectiveBillingLimits(billingConfig, targetPlan, gymBilling || {});
+    const baseTargetLimits = computeEffectiveBillingLimits(billingConfig, targetPlan, gymBilling || {});
+    const normalizedPlanSetup = normalizePlanSetupInput(planSetup, gymBilling || {}, baseTargetLimits);
+    const projectedGymBilling = {
+        ...(gymBilling || {}),
+        branches_count: normalizedPlanSetup.branchesCount,
+    };
+    const targetLimits = computeEffectiveBillingLimits(billingConfig, targetPlan, projectedGymBilling);
+    const branchReductionViolations = [];
+    const currentConfiguredBranches = Number(gymBilling?.branches_count || 1);
 
-    if (!isRestrictivePlanChange(currentLimits, targetLimits)) {
-        return { targetLimits, violations: [] };
+    if (normalizedPlanSetup.branchesCount < currentConfiguredBranches) {
+        const activeBranchIds = normalizedPlanSetup.branchDirectory.map((branch) => branch.id);
+        const outOfDirectoryBranchUsage = await getOutOfDirectoryBranchUsage(db, gymId, activeBranchIds);
+
+        if (outOfDirectoryBranchUsage.length > 0) {
+            branchReductionViolations.push(`Branch reduction blocked. Move records out of ${outOfDirectoryBranchUsage.join(', ')} before switching to ${normalizedPlanSetup.branchesCount} branch${normalizedPlanSetup.branchesCount === 1 ? '' : 'es'}.`);
+        }
+    }
+
+    if (!isRestrictivePlanChange(currentLimits, targetLimits) && branchReductionViolations.length === 0) {
+        return { targetLimits, planSetup: normalizedPlanSetup, violations: [] };
     }
 
     const usageSnapshot = await getGymUsageSnapshot(db, gymId);
 
     return {
         targetLimits,
+        planSetup: normalizedPlanSetup,
         violations: buildPlanChangeViolations({
-            gymBilling,
+            configuredBranches: normalizedPlanSetup.branchesCount,
             usageSnapshot,
             targetLimits,
+            branchReductionViolations,
+        }),
+    };
+};
+
+const countCouponRedemptions = async (db, couponCode) => {
+    await ensureBillingCouponRedemptionSchema();
+    const result = await db.query(
+        `SELECT COUNT(*)::INTEGER AS count
+         FROM billing_coupon_redemptions
+         WHERE coupon_code = $1`,
+        [couponCode]
+    );
+    return Number(result.rows[0]?.count || 0);
+};
+
+const resolveBillingCoupon = async ({ db, billingConfig, couponCode, targetPlan, targetCycle, payablePaise }) => {
+    const normalizedCode = normalizeCouponCode(couponCode);
+    if (!normalizedCode) {
+        return {
+            normalizedCode: '',
+            coupon: null,
+            error: null,
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    const coupons = Array.isArray(billingConfig?.coupons) ? billingConfig.coupons : [];
+    const coupon = coupons.find((item) => normalizeCouponCode(item?.code) === normalizedCode) || null;
+    if (!coupon) {
+        return {
+            normalizedCode,
+            coupon: null,
+            error: 'Coupon code not found.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    if (coupon.active === false) {
+        return {
+            normalizedCode,
+            coupon,
+            error: 'This coupon is inactive.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    if (Array.isArray(coupon.applies_to_plans) && coupon.applies_to_plans.length > 0 && !coupon.applies_to_plans.includes(targetPlan)) {
+        return {
+            normalizedCode,
+            coupon,
+            error: 'This coupon does not apply to the selected plan.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    if (Array.isArray(coupon.applies_to_cycles) && coupon.applies_to_cycles.length > 0 && !coupon.applies_to_cycles.includes(targetCycle)) {
+        return {
+            normalizedCode,
+            coupon,
+            error: 'This coupon does not apply to the selected billing cycle.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    const now = Date.now();
+    const validFromMs = parseTimestampMs(coupon.valid_from);
+    const validUntilMs = parseTimestampMs(coupon.valid_until);
+    if (validFromMs && now < validFromMs) {
+        return {
+            normalizedCode,
+            coupon,
+            error: 'This coupon is not active yet.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    if (validUntilMs && now > validUntilMs) {
+        return {
+            normalizedCode,
+            coupon,
+            error: 'This coupon has expired.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    const minimumAmountPaise = toPaise(coupon.minimum_amount || 0);
+    if (minimumAmountPaise > 0 && payablePaise < minimumAmountPaise) {
+        return {
+            normalizedCode,
+            coupon,
+            error: `This coupon requires a minimum order of ₹${coupon.minimum_amount}.`,
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    if (coupon.max_redemptions !== null && coupon.max_redemptions !== undefined) {
+        const redemptionCount = await countCouponRedemptions(db, normalizedCode);
+        if (redemptionCount >= Number(coupon.max_redemptions || 0)) {
+            return {
+                normalizedCode,
+                coupon,
+                error: 'This coupon has reached its redemption limit.',
+                discountPaise: 0,
+                payablePaise,
+            };
+        }
+    }
+
+    const requestedDiscountPaise = String(coupon.discount_type || '').toUpperCase() === 'AMOUNT'
+        ? toPaise(coupon.discount_value)
+        : Math.floor(payablePaise * (Number(coupon.discount_value || 0) / 100));
+    const nextPayablePaise = normalizePayablePaise(Math.max(0, payablePaise - requestedDiscountPaise));
+    const discountPaise = Math.max(0, payablePaise - nextPayablePaise);
+
+    if (discountPaise <= 0) {
+        return {
+            normalizedCode,
+            coupon,
+            error: 'This coupon does not reduce the current payable amount.',
+            discountPaise: 0,
+            payablePaise,
+        };
+    }
+
+    return {
+        normalizedCode,
+        coupon,
+        error: null,
+        discountPaise,
+        payablePaise: nextPayablePaise,
+    };
+};
+
+const applyCouponToQuote = (quote, couponContext) => ({
+    ...quote,
+    payableBeforeCouponPaise: quote.payablePaise,
+    payablePaise: couponContext?.error ? quote.payablePaise : Number(couponContext?.payablePaise ?? quote.payablePaise),
+    couponCode: couponContext?.coupon?.code || couponContext?.normalizedCode || '',
+    couponLabel: couponContext?.coupon?.label || '',
+    couponDiscountPaise: couponContext?.error ? 0 : Number(couponContext?.discountPaise || 0),
+    couponStatus: couponContext?.normalizedCode
+        ? couponContext?.error
+            ? 'invalid'
+            : 'applied'
+        : 'none',
+    couponError: couponContext?.error || null,
+});
+
+const buildCheckoutContext = async ({ db, gymId, billingConfig, gymBilling, targetPlan, targetCycle, couponCode, planSetup }) => {
+    const quote = buildBillingQuote({
+        billingConfig,
+        currentPlan: gymBilling?.current_plan,
+        currentCycle: gymBilling?.saas_billing_cycle,
+        currentStatus: gymBilling?.saas_status,
+        currentValidUntil: gymBilling?.saas_valid_until,
+        targetPlan,
+        targetCycle,
+    });
+
+    if (!quote) {
+        return { quote: null, compatibility: null, planSetupPreview: null };
+    }
+
+    const compatibility = await validatePlanChangeCompatibility({
+        db,
+        gymId,
+        billingConfig,
+        gymBilling,
+        targetPlan,
+        planSetup,
+    });
+    const couponContext = await resolveBillingCoupon({
+        db,
+        billingConfig,
+        couponCode,
+        targetPlan,
+        targetCycle,
+        payablePaise: quote.payablePaise,
+    });
+    const quoteWithCoupon = applyCouponToQuote(quote, couponContext);
+
+    return {
+        quote: quoteWithCoupon,
+        compatibility,
+        couponContext,
+        planSetupPreview: buildPlanSetupPreview({
+            targetLimits: compatibility?.targetLimits,
+            planSetup: compatibility?.planSetup,
         }),
     };
 };
@@ -299,6 +651,66 @@ router.get('/config', (req, res) => {
     const keyId = process.env.RAZORPAY_KEY_ID;
     if (!keyId) return res.status(503).json({ error: 'Payment gateway not configured.' });
     res.json({ razorpay_key_id: keyId });
+});
+
+router.post('/preview', async (req, res) => {
+    try {
+        const billingConfig = await getBillingConfig();
+        const resolved = resolveSaasPrice(billingConfig, req.body.plan_tier, req.body.cycle);
+        if (!resolved) {
+            return res.status(400).json({ error: 'Invalid plan_tier or cycle.' });
+        }
+        if (!isBillingPlanVisible(billingConfig, resolved.planTier)) {
+            return res.status(400).json({ error: 'This plan is no longer available for new purchases.' });
+        }
+
+        const gym = await getGymBillingSnapshot(pool, req.user.gym_id) || {};
+        const checkoutContext = await buildCheckoutContext({
+            db: pool,
+            gymId: req.user.gym_id,
+            billingConfig,
+            gymBilling: gym,
+            targetPlan: resolved.planTier,
+            targetCycle: resolved.cycle,
+            couponCode: req.body?.coupon_code,
+            planSetup: req.body?.plan_setup,
+        });
+
+        if (!checkoutContext.quote) {
+            return res.status(400).json({ error: 'Unable to build billing quote.' });
+        }
+
+        if (checkoutContext.compatibility?.violations?.length > 0) {
+            return res.status(409).json({
+                error: checkoutContext.compatibility.violations[0],
+                details: checkoutContext.compatibility.violations,
+                effective_limits: checkoutContext.compatibility.targetLimits,
+                billing_preview: buildBillingPreviewPayload(checkoutContext.quote, gym.saas_valid_until),
+                plan_setup_preview: checkoutContext.planSetupPreview,
+            });
+        }
+
+        if (checkoutContext.quote.error) {
+            return res.status(400).json({
+                error: checkoutContext.quote.error,
+                billing_preview: buildBillingPreviewPayload(checkoutContext.quote, gym.saas_valid_until),
+                plan_setup_preview: checkoutContext.planSetupPreview,
+            });
+        }
+
+        return res.json({
+            billing_preview: buildBillingPreviewPayload(checkoutContext.quote, gym.saas_valid_until),
+            effective_limits: checkoutContext.compatibility?.targetLimits,
+            plan_setup: {
+                branches_count: checkoutContext.compatibility?.planSetup?.branchesCount,
+                distribution_mode: checkoutContext.compatibility?.planSetup?.distributionMode,
+            },
+            plan_setup_preview: checkoutContext.planSetupPreview,
+        });
+    } catch (error) {
+        console.error('BILLING PREVIEW ERROR:', error);
+        return res.status(500).json({ error: 'Failed to load billing preview.' });
+    }
 });
 
 // --- 1. CREATE DYNAMIC SAAS ORDER ---
@@ -314,27 +726,23 @@ router.post('/create-order', async (req, res) => {
         }
 
         const gym = await getGymBillingSnapshot(pool, req.user.gym_id) || {};
-        const quote = buildBillingQuote({
-            billingConfig,
-            currentPlan: gym.current_plan,
-            currentCycle: gym.saas_billing_cycle,
-            currentStatus: gym.saas_status,
-            currentValidUntil: gym.saas_valid_until,
-            targetPlan: resolved.planTier,
-            targetCycle: resolved.cycle,
-        });
-
-        if (!quote) {
-            return res.status(400).json({ error: 'Unable to build billing quote.' });
-        }
-
-        const compatibility = await validatePlanChangeCompatibility({
+        const checkoutContext = await buildCheckoutContext({
             db: pool,
             gymId: req.user.gym_id,
             billingConfig,
             gymBilling: gym,
             targetPlan: resolved.planTier,
+            targetCycle: resolved.cycle,
+            couponCode: req.body?.coupon_code,
+            planSetup: req.body?.plan_setup,
         });
+        const quote = checkoutContext.quote;
+
+        if (!quote) {
+            return res.status(400).json({ error: 'Unable to build billing quote.' });
+        }
+
+        const compatibility = checkoutContext.compatibility;
 
         if (compatibility.violations.length > 0) {
             return res.status(409).json({
@@ -342,6 +750,7 @@ router.post('/create-order', async (req, res) => {
                 details: compatibility.violations,
                 effective_limits: compatibility.targetLimits,
                 billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+                plan_setup_preview: checkoutContext.planSetupPreview,
             });
         }
 
@@ -349,6 +758,15 @@ router.post('/create-order', async (req, res) => {
             return res.status(400).json({
                 error: quote.error,
                 billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+                plan_setup_preview: checkoutContext.planSetupPreview,
+            });
+        }
+
+        if (normalizeCouponCode(req.body?.coupon_code) && quote.couponError) {
+            return res.status(400).json({
+                error: quote.couponError,
+                billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+                plan_setup_preview: checkoutContext.planSetupPreview,
             });
         }
 
@@ -367,9 +785,15 @@ router.post('/create-order', async (req, res) => {
                 cycle: resolved.cycle,
                 quote_kind: quote.kind,
                 payable_paise: String(quote.payablePaise),
+                payable_before_coupon_paise: String(quote.payableBeforeCouponPaise ?? quote.payablePaise),
                 credit_paise: String(quote.creditPaise),
                 preserve_expiry: quote.preserveCurrentExpiry ? '1' : '0',
                 renewal_days: String(quote.renewalDays),
+                coupon_code: quote.couponCode || '',
+                coupon_discount_paise: String(quote.couponDiscountPaise || 0),
+                coupon_label: String(quote.couponLabel || '').slice(0, 120),
+                setup_branches: String(compatibility?.planSetup?.branchesCount || gym.branches_count || 1),
+                setup_mode: compatibility?.planSetup?.distributionMode || 'flexible',
             },
         };
 
@@ -377,6 +801,8 @@ router.post('/create-order', async (req, res) => {
         res.json({
             ...order,
             billing_preview: buildBillingPreviewPayload(quote, gym.saas_valid_until),
+            effective_limits: compatibility.targetLimits,
+            plan_setup_preview: checkoutContext.planSetupPreview,
         });
     } catch (error) {
         logBillingRazorpayError(req, 'create_order', error, {
@@ -406,6 +832,11 @@ router.post('/verify', async (req, res) => {
         let payablePaise;
         let preserveCurrentExpiry;
         let renewalDays;
+        let plannedBranchesCount;
+        let plannedDistributionMode;
+        let couponCode;
+        let couponDiscountPaise;
+        let couponLabel;
 
         try {
             order = await getRazorpay().orders.fetch(razorpay_order_id);
@@ -415,6 +846,11 @@ router.post('/verify', async (req, res) => {
             preserveCurrentExpiry = String(order?.notes?.preserve_expiry || '') === '1';
             renewalDays = Number.parseInt(order?.notes?.renewal_days, 10)
                 || getCycleDays(targetCycle, targetPlan);
+            plannedBranchesCount = Number.parseInt(order?.notes?.setup_branches, 10) || null;
+            plannedDistributionMode = String(order?.notes?.setup_mode || '').trim().toLowerCase() || 'flexible';
+            couponCode = normalizeCouponCode(order?.notes?.coupon_code || '');
+            couponDiscountPaise = Number.parseInt(order?.notes?.coupon_discount_paise, 10) || 0;
+            couponLabel = String(order?.notes?.coupon_label || '').trim() || null;
         } catch (err) {
             logBillingRazorpayError(req, 'fetch_order', err, {
                 razorpay_order_id,
@@ -435,6 +871,10 @@ router.post('/verify', async (req, res) => {
                 return res.status(400).json({ error: 'Order amount/currency mismatch.' });
             }
 
+            if (couponCode && couponDiscountPaise > 0) {
+                await ensureBillingCouponRedemptionSchema();
+            }
+
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
@@ -450,6 +890,10 @@ router.post('/verify', async (req, res) => {
                     billingConfig,
                     gymBilling,
                     targetPlan,
+                    planSetup: {
+                        branches_count: plannedBranchesCount,
+                        distribution_mode: plannedDistributionMode,
+                    },
                 });
                 if (compatibility.violations.length > 0) {
                     await client.query('ROLLBACK');
@@ -457,8 +901,17 @@ router.post('/verify', async (req, res) => {
                         error: compatibility.violations[0],
                         details: compatibility.violations,
                         effective_limits: compatibility.targetLimits,
+                        plan_setup_preview: buildPlanSetupPreview({
+                            targetLimits: compatibility.targetLimits,
+                            planSetup: compatibility.planSetup,
+                        }),
                     });
                 }
+
+                const nextBranchDirectory = normalizeBranchDirectory(
+                    gymBilling.branch_directory,
+                    compatibility.planSetup?.branchesCount || gymBilling.branches_count || 1
+                );
 
                 if (preserveCurrentExpiry) {
                     await client.query(
@@ -466,13 +919,22 @@ router.post('/verify', async (req, res) => {
                          SET saas_status = 'ACTIVE',
                              current_plan = $1,
                              saas_billing_cycle = $2,
+                             branches_count = $4,
+                             branch_directory = $5,
                              saas_valid_until = CASE
                                  WHEN saas_valid_until IS NULL OR saas_valid_until <= CURRENT_TIMESTAMP
                                      THEN CURRENT_TIMESTAMP + ($3 || ' days')::interval
                                  ELSE saas_valid_until
                              END
-                         WHERE id = $4`,
-                        [targetPlan, targetCycle, renewalDays, req.user.gym_id]
+                         WHERE id = $6`,
+                        [
+                            targetPlan,
+                            targetCycle,
+                            renewalDays,
+                            compatibility.planSetup?.branchesCount || gymBilling.branches_count || 1,
+                            JSON.stringify(nextBranchDirectory),
+                            req.user.gym_id,
+                        ]
                     );
                 } else {
                     await client.query(
@@ -480,9 +942,50 @@ router.post('/verify', async (req, res) => {
                          SET saas_status = 'ACTIVE',
                              current_plan = $1,
                              saas_billing_cycle = $2,
+                             branches_count = $4,
+                             branch_directory = $5,
                              saas_valid_until = CURRENT_TIMESTAMP + ($3 || ' days')::interval
-                         WHERE id = $4`,
-                        [targetPlan, targetCycle, renewalDays, req.user.gym_id]
+                         WHERE id = $6`,
+                        [
+                            targetPlan,
+                            targetCycle,
+                            renewalDays,
+                            compatibility.planSetup?.branchesCount || gymBilling.branches_count || 1,
+                            JSON.stringify(nextBranchDirectory),
+                            req.user.gym_id,
+                        ]
+                    );
+                }
+
+                if (couponCode && couponDiscountPaise > 0) {
+                    await client.query(
+                        `INSERT INTO billing_coupon_redemptions (
+                            coupon_code,
+                            gym_id,
+                            plan_tier,
+                            billing_cycle,
+                            razorpay_order_id,
+                            razorpay_payment_id,
+                            discount_paise,
+                            coupon_label,
+                            metadata
+                         )
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                         ON CONFLICT (razorpay_payment_id) DO NOTHING`,
+                        [
+                            couponCode,
+                            req.user.gym_id,
+                            targetPlan,
+                            targetCycle,
+                            razorpay_order_id,
+                            razorpay_payment_id,
+                            couponDiscountPaise,
+                            couponLabel,
+                            JSON.stringify({
+                                distribution_mode: plannedDistributionMode,
+                                branches_count: compatibility.planSetup?.branchesCount || gymBilling.branches_count || 1,
+                            }),
+                        ]
                     );
                 }
 
@@ -497,7 +1000,22 @@ router.post('/verify', async (req, res) => {
             } finally {
                 client.release();
             }
-            res.json({ message: "Subscription activated!" });
+            const updatedGym = await getGymBillingSnapshot(pool, req.user.gym_id);
+            const updatedLimits = updatedGym
+                ? computeEffectiveBillingLimits(billingConfig, updatedGym.current_plan, updatedGym)
+                : null;
+            res.json({
+                message: "Subscription activated!",
+                effective_limits: updatedLimits,
+                plan_setup_preview: buildPlanSetupPreview({
+                    targetLimits: updatedLimits,
+                    planSetup: {
+                        branchesCount: updatedGym?.branches_count || plannedBranchesCount || 1,
+                        distributionMode: plannedDistributionMode,
+                        branchDirectory: normalizeBranchDirectory(updatedGym?.branch_directory, updatedGym?.branches_count || plannedBranchesCount || 1),
+                    },
+                }),
+            });
         } catch (err) {
             res.status(500).json({ error: "DB Error" });
         }

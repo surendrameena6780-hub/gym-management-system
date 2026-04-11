@@ -1781,13 +1781,32 @@ router.put('/platform/branches', auth, async (req, res) => {
         if (!gymBilling) {
             return res.status(404).json({ error: 'Gym not found.' });
         }
-        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, gymBilling);
+        const projectedBilling = {
+            ...gymBilling,
+            branches_count: branchesCount,
+        };
+        const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymBilling.current_plan, projectedBilling);
         if (effectiveLimits.branches !== null && branchesCount > effectiveLimits.branches) {
             return res.status(409).json({
                 error: `Your current plan allows up to ${effectiveLimits.branches} branch${effectiveLimits.branches === 1 ? '' : 'es'} including add-ons. Increase the branch limit in HQ pricing or buy more branch capacity before saving this change.`,
                 allowed_branches: effectiveLimits.branches,
             });
         }
+
+        const usageSnapshot = await getGymUsageSnapshot(pool, req.user.gym_id);
+        if (effectiveLimits.members !== null && Number(usageSnapshot?.members || 0) > effectiveLimits.members) {
+            return res.status(409).json({
+                error: `This branch setup would allow ${effectiveLimits.members} members, but the gym already has ${Number(usageSnapshot?.members || 0)} active members. Remove members, increase active branches, or upgrade the plan first.`,
+                effective_limits: effectiveLimits,
+            });
+        }
+        if (effectiveLimits.staff !== null && Number(usageSnapshot?.staff || 0) > effectiveLimits.staff) {
+            return res.status(409).json({
+                error: `This branch setup would allow ${effectiveLimits.staff} staff users, but the gym already has ${Number(usageSnapshot?.staff || 0)} staff users. Reduce staff, increase active branches, or upgrade the plan first.`,
+                effective_limits: effectiveLimits,
+            });
+        }
+
         const branchDirectory = normalizeBranchDirectoryInput(req.body?.branch_directory, branchesCount);
         const activeBranchIds = branchDirectory.map((branch) => branch.id);
         const outOfDirectoryBranchUsage = await getOutOfDirectoryBranchUsage(pool, req.user.gym_id, activeBranchIds);
@@ -1813,6 +1832,7 @@ router.put('/platform/branches', auth, async (req, res) => {
             city,
             branches_count: branchesCount,
             branch_directory: branchDirectory,
+            effective_limits: effectiveLimits,
         });
     } catch (err) {
         if (isValidationError(err)) {

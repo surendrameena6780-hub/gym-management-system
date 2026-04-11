@@ -576,6 +576,8 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
             })]
         );
 
+        await client.query(`SELECT set_config('app.allow_gym_hard_delete', 'on', true)`);
+
         // Hard delete — CASCADE foreign keys handle child tables
         await client.query('DELETE FROM gyms WHERE id = $1', [gymId]);
 

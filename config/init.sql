@@ -882,6 +882,9 @@ ON CONFLICT (id) DO NOTHING;
 CREATE OR REPLACE FUNCTION prevent_gym_hard_delete()
 RETURNS trigger AS $$
 BEGIN
+    IF COALESCE(current_setting('app.allow_gym_hard_delete', true), '') = 'on' THEN
+        RETURN OLD;
+    END IF;
     RAISE EXCEPTION 'Hard delete of gyms is disabled. Archive or suspend the gym instead.';
 END;
 $$ LANGUAGE plpgsql;
