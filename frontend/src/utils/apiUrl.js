@@ -1,5 +1,4 @@
 const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
-const DEFAULT_DIRECT_API_ORIGIN = 'https://gym-management-system-4nfu.onrender.com';
 
 const normalizeConfiguredOrigin = (value) => String(value || '').trim().replace(/\/+$/, '');
 
@@ -13,8 +12,8 @@ export const getApiOrigin = () => {
       return configured || `${protocol}//${hostname}:5000`;
     }
 
-    if (forceDirectApi) {
-      return configured || DEFAULT_DIRECT_API_ORIGIN;
+    if (forceDirectApi && configured) {
+      return configured;
     }
 
     return '';

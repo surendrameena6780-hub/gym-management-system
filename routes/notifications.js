@@ -889,6 +889,23 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
             return fail(res, 400, 'WHATSAPP_TEMPLATE_REQUIRED', 'Select an approved WhatsApp template before launching the campaign.');
         }
 
+        const requestHashSource = [gymId, segment, templateKey, channel, dashboardActionKey,
+            dashboardAudienceHash, JSON.stringify(customMemberIds.sort())].join(':');
+        const requestHash = require('crypto').createHash('sha256').update(requestHashSource).digest('hex').slice(0, 64);
+
+        const recentDupe = await pool.query(
+            `SELECT id, status, sent_to_count, created_at
+             FROM broadcast_logs
+             WHERE gym_id = $1
+               AND request_hash = $2
+               AND created_at > NOW() - INTERVAL '2 minutes'
+             ORDER BY created_at DESC LIMIT 1`,
+            [gymId, requestHash]
+        );
+        if (recentDupe.rows.length > 0) {
+            return fail(res, 409, 'CAMPAIGN_DUPLICATE', 'This campaign was already submitted. Please wait before retrying.');
+        }
+
         const gymConfigRes = await pool.query(
             `SELECT
                 name,
@@ -1000,9 +1017,10 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
                 created_by,
                 dashboard_action_key,
                 dashboard_audience_hash,
-                dashboard_expected_count
+                dashboard_expected_count,
+                request_hash
              )
-             VALUES ($1, $2, $3, $4, 0, 'QUEUED', $5, $6, $7, $8)
+             VALUES ($1, $2, $3, $4, 0, 'QUEUED', $5, $6, $7, $8, $9)
              RETURNING id, created_at`,
             [
                 gymId,
@@ -1013,6 +1031,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
                 dashboardActionKey || null,
                 dashboardAudienceHash || null,
                 dashboardExpectedCount,
+                requestHash,
             ]
         );
 

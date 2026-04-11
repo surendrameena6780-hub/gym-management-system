@@ -47,6 +47,7 @@ const pushRoutes = require('./routes/push');
 const supportRoutes = require('./routes/support');
 const financeRoutes = require('./routes/finance');
 const exportRoutes = require('./routes/exports');
+const trainerRoutes = require('./routes/trainers');
 
 dotenv.config();
 const app = express();
@@ -365,6 +366,7 @@ app.use('/api/push', pushRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/exports', exportRoutes);
+app.use('/api/trainers', trainerRoutes);
 
 // Auth Status Check
 app.get('/api/auth/me', auth, async (req, res) => {

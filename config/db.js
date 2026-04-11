@@ -944,6 +944,114 @@ const connectDB = async () => {
               AND saas_valid_until <= (CURRENT_TIMESTAMP + INTERVAL '14 days' + INTERVAL '1 hour')
         `);
 
+        // ── Platform Expansion: new columns ──
+        await pool.query(`
+            ALTER TABLE payment_collections ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(120);
+            ALTER TABLE broadcast_logs ADD COLUMN IF NOT EXISTS request_hash VARCHAR(120);
+            ALTER TABLE broadcast_logs ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(120);
+            ALTER TABLE broadcast_logs ADD COLUMN IF NOT EXISTS dashboard_action_key VARCHAR(80) DEFAULT '';
+            ALTER TABLE broadcast_logs ADD COLUMN IF NOT EXISTS dashboard_audience_hash VARCHAR(120) DEFAULT '';
+            ALTER TABLE broadcast_logs ADD COLUMN IF NOT EXISTS dashboard_expected_count INTEGER DEFAULT 0;
+            ALTER TABLE password_reset_otps ADD COLUMN IF NOT EXISTS lockout_until TIMESTAMPTZ;
+            ALTER TABLE password_reset_otps ADD COLUMN IF NOT EXISTS daily_send_count INTEGER DEFAULT 0;
+            ALTER TABLE password_reset_otps ADD COLUMN IF NOT EXISTS daily_send_date DATE;
+            ALTER TABLE user_login_otps ADD COLUMN IF NOT EXISTS lockout_until TIMESTAMPTZ;
+            ALTER TABLE user_login_otps ADD COLUMN IF NOT EXISTS daily_send_count INTEGER DEFAULT 0;
+            ALTER TABLE user_login_otps ADD COLUMN IF NOT EXISTS daily_send_date DATE;
+            ALTER TABLE memberships ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT FALSE;
+            ALTER TABLE members ADD COLUMN IF NOT EXISTS family_group_id INTEGER;
+            ALTER TABLE leads ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '';
+            ALTER TABLE pos_products ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '';
+            ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS branch_id VARCHAR(60) DEFAULT '';
+            ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ;
+            ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS voided_by INTEGER;
+            ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS void_reason VARCHAR(500) DEFAULT '';
+        `);
+        // ── Platform Expansion: new tables ──
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trainer_assignments (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                trainer_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                member_id       INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                assigned_at     TIMESTAMPTZ DEFAULT NOW(),
+                notes           TEXT DEFAULT '',
+                is_active       BOOLEAN DEFAULT TRUE,
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(gym_id, trainer_user_id, member_id)
+            );
+            CREATE TABLE IF NOT EXISTS trainer_tasks (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                trainer_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                member_id       INTEGER REFERENCES members(id) ON DELETE SET NULL,
+                title           VARCHAR(200) NOT NULL,
+                description     TEXT DEFAULT '',
+                status          VARCHAR(20) DEFAULT 'PENDING',
+                due_date        DATE,
+                completed_at    TIMESTAMPTZ,
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS member_streaks (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id       INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                current_streak  INTEGER DEFAULT 0,
+                longest_streak  INTEGER DEFAULT 0,
+                last_checkin_date DATE,
+                updated_at      TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(gym_id, member_id)
+            );
+            CREATE TABLE IF NOT EXISTS member_badges (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                member_id       INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                badge_key       VARCHAR(60) NOT NULL,
+                unlocked_at     TIMESTAMPTZ DEFAULT NOW(),
+                notified        BOOLEAN DEFAULT FALSE,
+                UNIQUE(gym_id, member_id, badge_key)
+            );
+            CREATE TABLE IF NOT EXISTS family_groups (
+                id                SERIAL PRIMARY KEY,
+                gym_id            INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                name              VARCHAR(120) NOT NULL DEFAULT '',
+                primary_member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+                created_at        TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS payment_retry_schedule (
+                id              SERIAL PRIMARY KEY,
+                gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                payment_id      INTEGER REFERENCES payments(id) ON DELETE CASCADE,
+                retry_at        TIMESTAMPTZ NOT NULL,
+                attempt_count   INTEGER DEFAULT 0,
+                last_error      TEXT DEFAULT '',
+                status          VARCHAR(20) DEFAULT 'PENDING',
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_trainer_assignments_gym ON trainer_assignments(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_trainer_assignments_trainer ON trainer_assignments(trainer_user_id);
+            CREATE INDEX IF NOT EXISTS idx_trainer_assignments_member ON trainer_assignments(member_id);
+            CREATE INDEX IF NOT EXISTS idx_trainer_tasks_gym ON trainer_tasks(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_trainer_tasks_trainer ON trainer_tasks(trainer_user_id);
+            CREATE INDEX IF NOT EXISTS idx_trainer_tasks_member ON trainer_tasks(member_id);
+            CREATE INDEX IF NOT EXISTS idx_trainer_tasks_status ON trainer_tasks(status);
+            CREATE INDEX IF NOT EXISTS idx_member_streaks_gym ON member_streaks(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_member_streaks_member ON member_streaks(member_id);
+            CREATE INDEX IF NOT EXISTS idx_member_badges_gym ON member_badges(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_member_badges_member ON member_badges(member_id);
+            CREATE INDEX IF NOT EXISTS idx_family_groups_gym ON family_groups(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_family_groups_primary ON family_groups(primary_member_id);
+            CREATE INDEX IF NOT EXISTS idx_members_family_group ON members(family_group_id) WHERE family_group_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_payment_retry_schedule_gym ON payment_retry_schedule(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_payment_retry_schedule_retry ON payment_retry_schedule(retry_at, status);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_collections_idempotency
+                ON payment_collections(gym_id, idempotency_key)
+                WHERE idempotency_key IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_broadcast_logs_idempotency
+                ON broadcast_logs(gym_id, idempotency_key)
+                WHERE idempotency_key IS NOT NULL;
+        `);
+
         const isProduction = process.env.NODE_ENV === 'production';
         const runInitOnBoot = String(process.env.RUN_DB_INIT_ON_BOOT || '').toLowerCase() === 'true';
 

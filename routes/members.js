@@ -1206,4 +1206,117 @@ router.patch('/:id/onboarding', auth, saasMiddleware, requirePermission('members
     }
 });
 
+// --- FAMILY GROUPS ---
+router.get('/family-groups', auth, saasMiddleware, requirePermission('members:read'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const result = await pool.query(
+            `SELECT fg.*, pm.full_name AS primary_member_name,
+                    (SELECT json_agg(json_build_object('id', m.id, 'full_name', m.full_name, 'phone', m.phone, 'status', m.status))
+                     FROM members m WHERE m.family_group_id = fg.id AND m.gym_id = $1 AND m.deleted_at IS NULL
+                    ) AS members
+             FROM family_groups fg
+             LEFT JOIN members pm ON fg.primary_member_id = pm.id
+             WHERE fg.gym_id = $1
+             ORDER BY fg.created_at DESC`,
+            [gym_id]
+        );
+        return res.json({ familyGroups: result.rows });
+    } catch (err) {
+        console.error('FAMILY GROUPS LIST ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load family groups.' });
+    }
+});
+
+router.post('/family-groups', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const name = ensureTrimmedString(req.body?.name, { field: 'name', required: true, max: 120 });
+        const primaryMemberId = req.body?.primary_member_id ? ensureInteger(req.body.primary_member_id, { field: 'primary_member_id', min: 1 }) : null;
+        const memberIds = req.body?.member_ids;
+
+        if (primaryMemberId) {
+            const check = await pool.query('SELECT id FROM members WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL', [primaryMemberId, gym_id]);
+            if (check.rows.length === 0) return res.status(404).json({ error: 'Primary member not found.' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO family_groups (gym_id, name, primary_member_id) VALUES ($1, $2, $3) RETURNING *`,
+            [gym_id, name, primaryMemberId]
+        );
+
+        const familyGroup = result.rows[0];
+
+        // Link members if provided
+        if (Array.isArray(memberIds) && memberIds.length > 0) {
+            const ids = memberIds.map((id) => ensureInteger(id, { field: 'member_id', min: 1 }));
+            await pool.query(
+                `UPDATE members SET family_group_id = $1 WHERE id = ANY($2::int[]) AND gym_id = $3 AND deleted_at IS NULL`,
+                [familyGroup.id, ids, gym_id]
+            );
+        }
+
+        return res.json({ message: 'Family group created.', familyGroup });
+    } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
+        console.error('FAMILY GROUP CREATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to create family group.' });
+    }
+});
+
+router.put('/family-groups/:id', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const groupId = ensureInteger(req.params.id, { field: 'group_id', required: true, min: 1 });
+        const name = ensureTrimmedString(req.body?.name, { field: 'name', required: true, max: 120 });
+        const primaryMemberId = req.body?.primary_member_id ? ensureInteger(req.body.primary_member_id, { field: 'primary_member_id', min: 1 }) : null;
+        const memberIds = req.body?.member_ids;
+
+        const result = await pool.query(
+            `UPDATE family_groups SET name = $1, primary_member_id = $2 WHERE id = $3 AND gym_id = $4 RETURNING *`,
+            [name, primaryMemberId, groupId, gym_id]
+        );
+
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Family group not found.' });
+
+        // Clear old members then set new
+        await pool.query(`UPDATE members SET family_group_id = NULL WHERE family_group_id = $1 AND gym_id = $2`, [groupId, gym_id]);
+
+        if (Array.isArray(memberIds) && memberIds.length > 0) {
+            const ids = memberIds.map((id) => ensureInteger(id, { field: 'member_id', min: 1 }));
+            await pool.query(
+                `UPDATE members SET family_group_id = $1 WHERE id = ANY($2::int[]) AND gym_id = $3 AND deleted_at IS NULL`,
+                [groupId, ids, gym_id]
+            );
+        }
+
+        return res.json({ message: 'Family group updated.', familyGroup: result.rows[0] });
+    } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
+        console.error('FAMILY GROUP UPDATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to update family group.' });
+    }
+});
+
+router.delete('/family-groups/:id', auth, saasMiddleware, requirePermission('members:write'), async (req, res) => {
+    try {
+        const gym_id = req.user.gym_id;
+        const groupId = ensureInteger(req.params.id, { field: 'group_id', required: true, min: 1 });
+
+        // Unlink members first
+        await pool.query(`UPDATE members SET family_group_id = NULL WHERE family_group_id = $1 AND gym_id = $2`, [groupId, gym_id]);
+
+        const result = await pool.query(
+            `DELETE FROM family_groups WHERE id = $1 AND gym_id = $2 RETURNING id`,
+            [groupId, gym_id]
+        );
+
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Family group not found.' });
+        return res.json({ message: 'Family group deleted.' });
+    } catch (err) {
+        console.error('FAMILY GROUP DELETE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to delete family group.' });
+    }
+});
+
 module.exports = router;

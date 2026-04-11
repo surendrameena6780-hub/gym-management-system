@@ -581,6 +581,44 @@ const processAttendanceCheckin = async ({
             [member_id, gym_id]
         ).catch(() => {});
 
+        // Fire-and-forget: update member streak
+        pool.query(
+            `INSERT INTO member_streaks (gym_id, member_id, current_streak, longest_streak, last_checkin_date)
+             VALUES ($1, $2, 1, 1, CURRENT_DATE)
+             ON CONFLICT (gym_id, member_id) DO UPDATE SET
+               current_streak = CASE
+                 WHEN member_streaks.last_checkin_date = CURRENT_DATE THEN member_streaks.current_streak
+                 WHEN member_streaks.last_checkin_date = CURRENT_DATE - 1 THEN member_streaks.current_streak + 1
+                 ELSE 1
+               END,
+               longest_streak = GREATEST(
+                 member_streaks.longest_streak,
+                 CASE
+                   WHEN member_streaks.last_checkin_date = CURRENT_DATE THEN member_streaks.current_streak
+                   WHEN member_streaks.last_checkin_date = CURRENT_DATE - 1 THEN member_streaks.current_streak + 1
+                   ELSE 1
+                 END
+               ),
+               last_checkin_date = CURRENT_DATE,
+               updated_at = NOW()`,
+            [gym_id, member_id]
+        ).catch(() => {});
+
+        // Fire-and-forget: award streak badges (7, 30, 100 day milestones)
+        pool.query(
+            `INSERT INTO member_badges (gym_id, member_id, badge_key)
+             SELECT $1, $2, badge_key
+             FROM (
+               SELECT UNNEST(ARRAY['STREAK_7', 'STREAK_30', 'STREAK_100']) AS badge_key,
+                      UNNEST(ARRAY[7, 30, 100]) AS required_streak
+             ) milestones
+             WHERE required_streak <= (
+               SELECT current_streak FROM member_streaks WHERE gym_id = $1 AND member_id = $2
+             )
+             ON CONFLICT (gym_id, member_id, badge_key) DO NOTHING`,
+            [gym_id, member_id]
+        ).catch(() => {});
+
         return {
             message: checkinStatus === 'OVERRIDE' ? 'Check-in recorded with override.' : 'Check-in Successful!',
             details: newRecord.rows[0],

@@ -1481,4 +1481,28 @@ router.delete('/classes/bookings/:bookingId', async (req, res) => {
     }
 });
 
+// --- STREAKS & BADGES ---
+router.get('/streaks', memberAuth, async (req, res) => {
+    try {
+        const { gym_id, member_id } = req.memberUser;
+
+        const [streakResult, badgeResult] = await Promise.all([
+            pool.query(
+                `SELECT current_streak, longest_streak, last_checkin_date FROM member_streaks WHERE gym_id = $1 AND member_id = $2`,
+                [gym_id, member_id]
+            ),
+            pool.query(
+                `SELECT badge_key, unlocked_at FROM member_badges WHERE gym_id = $1 AND member_id = $2 ORDER BY unlocked_at ASC`,
+                [gym_id, member_id]
+            ),
+        ]);
+
+        const streak = streakResult.rows[0] || { current_streak: 0, longest_streak: 0, last_checkin_date: null };
+        return res.json({ streak, badges: badgeResult.rows });
+    } catch (err) {
+        console.error('MEMBER STREAKS ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load streaks.' });
+    }
+});
+
 module.exports = router;

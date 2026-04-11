@@ -1681,6 +1681,86 @@ router.post('/:id/cancel', auth, saasMiddleware, requirePermission('members:writ
     }
 });
 
+// --- BULK FREEZE ---
+router.post('/bulk-freeze', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
+    const gym_id = req.user.gym_id;
+    try {
+        const memberIds = req.body?.member_ids;
+        if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > 100) {
+            return res.status(400).json({ error: 'Provide 1–100 member IDs.' });
+        }
+        const ids = memberIds.map((id) => ensureInteger(id, { field: 'member_id', min: 1 }));
+        const freezeReason = normalizeMembershipReason(req.body?.freeze_reason, 'freeze_reason');
+
+        const result = await pool.query(
+            `UPDATE memberships
+             SET status = 'FROZEN', freeze_start_date = CURRENT_DATE, freeze_reason = $3, frozen_at = NOW()
+             WHERE gym_id = $1 AND member_id = ANY($2::int[]) AND status = 'ACTIVE' AND deleted_at IS NULL
+             RETURNING member_id`,
+            [gym_id, ids, freezeReason]
+        );
+
+        return res.json({ message: `${result.rowCount} membership(s) frozen.`, frozen_member_ids: result.rows.map((r) => r.member_id) });
+    } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
+        console.error('BULK FREEZE ERROR:', err.message);
+        return res.status(500).json({ error: 'Bulk freeze failed.' });
+    }
+});
+
+// --- BULK UNFREEZE ---
+router.post('/bulk-unfreeze', auth, saasMiddleware, requirePermission('payments:write'), async (req, res) => {
+    const gym_id = req.user.gym_id;
+    try {
+        const memberIds = req.body?.member_ids;
+        if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > 100) {
+            return res.status(400).json({ error: 'Provide 1–100 member IDs.' });
+        }
+        const ids = memberIds.map((id) => ensureInteger(id, { field: 'member_id', min: 1 }));
+
+        const frozenMs = await pool.query(
+            `SELECT id, member_id, end_date, freeze_start_date
+             FROM memberships
+             WHERE gym_id = $1 AND member_id = ANY($2::int[]) AND status = 'FROZEN' AND deleted_at IS NULL`,
+            [gym_id, ids]
+        );
+
+        if (frozenMs.rows.length === 0) {
+            return res.status(404).json({ error: 'No frozen memberships found.' });
+        }
+
+        const today = new Date();
+        const updates = frozenMs.rows.map((ms) => {
+            const freezeStart = ms.freeze_start_date ? new Date(ms.freeze_start_date) : today;
+            const extensionDays = Math.max(0, Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(freezeStart.getFullYear(), freezeStart.getMonth(), freezeStart.getDate())) / 86400000));
+            return { id: ms.id, member_id: ms.member_id, extensionDays };
+        });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const u of updates) {
+                await client.query(
+                    `UPDATE memberships SET status = 'ACTIVE', end_date = end_date + ($1 || ' day')::interval, freeze_end_date = CURRENT_DATE, unfrozen_at = NOW() WHERE id = $2 AND gym_id = $3`,
+                    [u.extensionDays, u.id, gym_id]
+                );
+            }
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK');
+            throw txErr;
+        } finally {
+            client.release();
+        }
+
+        return res.json({ message: `${updates.length} membership(s) unfrozen.`, unfrozen: updates.map((u) => ({ member_id: u.member_id, extended_by_days: u.extensionDays })) });
+    } catch (err) {
+        if (isValidationError(err)) return res.status(err.statusCode).json({ error: err.message });
+        console.error('BULK UNFREEZE ERROR:', err.message);
+        return res.status(500).json({ error: 'Bulk unfreeze failed.' });
+    }
+});
+
 module.exports = router;
 module.exports.ensureMemberPaymentsSchema = ensureMemberPaymentsSchema;
 module.exports.buildDeskCollectionReference = buildDeskCollectionReference;

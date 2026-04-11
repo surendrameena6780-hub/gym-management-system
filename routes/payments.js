@@ -840,7 +840,7 @@ const getGymGatewayConfig = async (gymId) => {
     };
 };
 
-const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, transactionId, notes, collectedBy }) => {
+const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, transactionId, notes, collectedBy, idempotencyKey }) => {
     await ensurePaymentCollectionsSchema();
 
     const normalizedPaymentId = ensureInteger(paymentId, { field: 'payment id', required: true, min: 1 });
@@ -848,6 +848,7 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
     const normalizedTransactionId = normalizePaymentReference(transactionId);
     const normalizedNotes = normalizePaymentNotes(notes);
     const normalizedCollectedBy = collectedBy ? ensureInteger(collectedBy, { field: 'collectedBy', min: 1 }) : null;
+    const normalizedIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim().slice(0, 120) : null;
     const requestedAmountInput = amount === undefined || amount === null || amount === ''
         ? amount
         : ensureNumber(amount, { field: 'amount', min: 0, max: 1000000 });
@@ -855,6 +856,30 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
+        if (normalizedIdempotencyKey) {
+            const existingCollection = await client.query(
+                `SELECT * FROM payment_collections WHERE gym_id = $1 AND idempotency_key = $2 LIMIT 1`,
+                [gymId, normalizedIdempotencyKey]
+            );
+            if (existingCollection.rows.length > 0) {
+                await client.query('ROLLBACK');
+                const existing = existingCollection.rows[0];
+                const updatedPayment = await pool.query(
+                    `SELECT * FROM payments WHERE id = $1 AND gym_id = $2`, [existing.payment_id, gymId]
+                );
+                return {
+                    ok: true,
+                    deduplicated: true,
+                    data: {
+                        message: 'This collection was already processed.',
+                        payment: updatedPayment.rows[0] || null,
+                        collection: existing,
+                        remaining_due: updatedPayment.rows[0] ? roundMoney(updatedPayment.rows[0].amount_due) : 0,
+                    },
+                };
+            }
+        }
 
         const payment = await getPendingPaymentById(client, gymId, normalizedPaymentId, { lock: true });
         if (!payment) {
@@ -887,8 +912,8 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
 
         const collectionResult = await client.query(
             `INSERT INTO payment_collections
-             (gym_id, branch_id, payment_id, collected_amount, payment_mode, transaction_id, notes, collected_by, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+             (gym_id, branch_id, payment_id, collected_amount, payment_mode, transaction_id, notes, collected_by, idempotency_key, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
              RETURNING *`,
             [
                 gymId,
@@ -899,6 +924,7 @@ const applyDueCollection = async ({ gymId, paymentId, amount, paymentMode, trans
                 collectionTransactionId || null,
                 normalizedNotes,
                 normalizedCollectedBy,
+                normalizedIdempotencyKey,
             ]
         );
 
@@ -1712,6 +1738,9 @@ router.post('/:id/due/collect', async (req, res) => {
             return res.status(404).json({ error: 'Payment record not found.' });
         }
         ensureBranchAccess(await resolveBranchReadScope(pool, req), scopedPayment.branch_id);
+        const idempotencyKey = req.headers['x-idempotency-key']
+            ? String(req.headers['x-idempotency-key']).trim().slice(0, 120)
+            : `collect:${gym_id}:${paymentId}:${Math.round(Number(req.body?.amount || 0) * 100)}:${String(req.body?.payment_mode || 'Cash').toLowerCase()}`;
         const result = await applyDueCollection({
             gymId: gym_id,
             paymentId,
@@ -1720,6 +1749,7 @@ router.post('/:id/due/collect', async (req, res) => {
             transactionId: req.body?.transaction_id,
             notes: req.body?.notes,
             collectedBy: req.user.id,
+            idempotencyKey,
         });
 
         if (!result.ok) {

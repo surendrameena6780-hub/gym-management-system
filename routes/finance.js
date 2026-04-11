@@ -1429,6 +1429,97 @@ router.post('/pos/sales', requirePermission('payments:write'), ensurePosPlanAcce
     }
 });
 
+// ── POS: Void Sale ──
+router.post('/pos/sales/:id/void', requirePermission('payments:write'), ensurePosPlanAccess, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const gid = gymId(req);
+        const saleId = posInt(req.params.id);
+        if (!saleId) return res.status(400).json({ error: 'Invalid sale ID.' });
+        const reason = String(req.body?.reason || '').trim().slice(0, 500);
+
+        await client.query('BEGIN');
+
+        const sale = await client.query(
+            `SELECT id, voided_at FROM pos_sales WHERE id = $1 AND gym_id = $2 FOR UPDATE`,
+            [saleId, gid]
+        );
+        if (sale.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Sale not found.' }); }
+        if (sale.rows[0].voided_at) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Sale already voided.' }); }
+
+        // Restore stock
+        const items = await client.query(`SELECT product_id, quantity FROM pos_sale_items WHERE sale_id = $1`, [saleId]);
+        for (const item of items.rows) {
+            await client.query(
+                `UPDATE pos_products SET stock_qty = stock_qty + $1 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
+                [item.quantity, item.product_id, gid]
+            );
+        }
+
+        await client.query(
+            `UPDATE pos_sales SET voided_at = NOW(), voided_by = $1, void_reason = $2 WHERE id = $3 AND gym_id = $4`,
+            [req.user.id, reason, saleId, gid]
+        );
+
+        await client.query('COMMIT');
+        return res.json({ message: 'Sale voided and stock restored.' });
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('POS VOID SALE:', err.message);
+        return res.status(500).json({ error: 'Failed to void sale.' });
+    } finally {
+        client.release();
+    }
+});
+
+// ── POS: Stock Adjustment ──
+router.post('/pos/products/:id/adjust-stock', requirePermission('payments:write'), ensurePosPlanAccess, async (req, res) => {
+    try {
+        const gid = gymId(req);
+        const productId = posInt(req.params.id);
+        if (!productId) return res.status(400).json({ error: 'Invalid product ID.' });
+
+        const adjustment = Number.parseInt(req.body?.adjustment, 10);
+        if (!Number.isInteger(adjustment) || adjustment === 0) {
+            return res.status(400).json({ error: 'adjustment must be a non-zero integer.' });
+        }
+
+        const reason = String(req.body?.reason || '').trim().slice(0, 500);
+
+        const result = await pool.query(
+            `UPDATE pos_products SET stock_qty = GREATEST(0, stock_qty + $1)
+             WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL
+             RETURNING id, name, stock_qty`,
+            [adjustment, productId, gid]
+        );
+
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Product not found.' });
+        return res.json({ message: `Stock adjusted by ${adjustment > 0 ? '+' : ''}${adjustment}.`, product: result.rows[0], reason });
+    } catch (err) {
+        console.error('POS STOCK ADJUST:', err.message);
+        return res.status(500).json({ error: 'Failed to adjust stock.' });
+    }
+});
+
+// ── POS: Low-Stock Products ──
+router.get('/pos/low-stock', requirePermission('payments:read'), ensurePosPlanAccess, async (req, res) => {
+    try {
+        const gid = gymId(req);
+        const result = await pool.query(
+            `SELECT id, name, category, stock_qty, low_stock_threshold, sku, branch_id
+             FROM pos_products
+             WHERE gym_id = $1 AND deleted_at IS NULL AND is_active = TRUE
+               AND stock_qty <= low_stock_threshold
+             ORDER BY stock_qty ASC`,
+            [gid]
+        );
+        return res.json({ lowStockProducts: result.rows });
+    } catch (err) {
+        console.error('POS LOW STOCK:', err.message);
+        return res.status(500).json({ error: 'Failed to load low-stock products.' });
+    }
+});
+
 // ═══════════════════════════════════════════════════════════
 //   ACCESS POLICIES
 // ═══════════════════════════════════════════════════════════

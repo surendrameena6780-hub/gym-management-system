@@ -111,6 +111,8 @@ const MEMBER_LOGIN_OTP_TTL_MINUTES = 10;
 const MEMBER_LOGIN_RESEND_COOLDOWN_SECONDS = 60;
 const MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS = 5;
 const SIGNUP_EMAIL_VERIFY_TOKEN_TTL = '30m';
+const OTP_LOCKOUT_MINUTES = 15;
+const OTP_DAILY_SEND_LIMIT = 10;
 
 const AUTH_CONTEXT_SELECT = `
     SELECT u.*, g.is_active AS gym_is_active, g.gym_access_status, g.saas_status, g.saas_valid_until, g.current_plan
@@ -644,8 +646,16 @@ const handleMemberSendOtp = async (req, res) => {
 
         await cleanupExpiredEmailOtps();
 
+        const lockout = await checkEmailOtpLockout(memberEmail, MEMBER_LOGIN_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+        if (await checkEmailDailySendLimit(memberEmail, MEMBER_LOGIN_PURPOSE)) {
+            return res.status(429).json({ message: 'Daily OTP limit reached. Please try again tomorrow.' });
+        }
+
         const activeOtp = await pool.query(
-            `SELECT created_at
+            `SELECT created_at, daily_send_count, daily_send_date
              FROM password_reset_otps
              WHERE email = $1
                AND purpose = $2
@@ -667,6 +677,7 @@ const handleMemberSendOtp = async (req, res) => {
             }
         }
 
+        const nextDailyCount = getNextDailySendCount(activeOtp.rows[0]);
         const otp = generatePasswordResetOtp();
         const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
 
@@ -680,9 +691,9 @@ const handleMemberSendOtp = async (req, res) => {
                 [memberEmail, MEMBER_LOGIN_PURPOSE]
             );
             await client.query(
-                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-                 VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
-                [memberEmail, MEMBER_LOGIN_PURPOSE, otpHash, MEMBER_LOGIN_OTP_TTL_MINUTES]
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at, daily_send_count, daily_send_date)
+                 VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval, $5, CURRENT_DATE)`,
+                [memberEmail, MEMBER_LOGIN_PURPOSE, otpHash, MEMBER_LOGIN_OTP_TTL_MINUTES, nextDailyCount]
             );
         });
 
@@ -727,6 +738,11 @@ const handleMemberVerifyOtp = async (req, res) => {
 
         await cleanupExpiredEmailOtps();
 
+        const lockout = await checkEmailOtpLockout(memberEmail, MEMBER_LOGIN_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+
         const activeOtp = await pool.query(
             `SELECT id, otp_hash, attempts
              FROM password_reset_otps
@@ -746,26 +762,32 @@ const handleMemberVerifyOtp = async (req, res) => {
 
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS) {
-            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
-            return res.status(400).json({ message: 'Too many invalid attempts. Request a new code.' });
+            await pool.query(
+                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                [otpRow.id, OTP_LOCKOUT_MINUTES]
+            );
+            return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
         }
 
         const isMatch = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
         if (!isMatch) {
             const nextAttempts = previousAttempts + 1;
+            const shouldLock = nextAttempts >= MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
                  SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
                  WHERE id = $3`,
-                [nextAttempts, MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id]
+                [nextAttempts, MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
             );
 
+            if (shouldLock) {
+                return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
+            }
             const attemptsLeft = Math.max(0, MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS - nextAttempts);
             return res.status(400).json({
-                message: attemptsLeft > 0
-                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
-                    : 'Too many invalid attempts. Request a new code.',
+                message: `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`,
             });
         }
 
@@ -794,6 +816,74 @@ const cleanupExpiredEmailOtps = async () => {
         WHERE expires_at < NOW()
            OR (consumed_at IS NOT NULL AND created_at < NOW() - INTERVAL '2 days')
     `);
+};
+
+const checkEmailOtpLockout = async (email, purpose) => {
+    const result = await pool.query(
+        `SELECT lockout_until FROM password_reset_otps
+         WHERE email = $1 AND purpose = $2 AND lockout_until > NOW()
+         ORDER BY lockout_until DESC LIMIT 1`,
+        [email, purpose]
+    );
+    if (result.rows[0]) {
+        const remaining = Math.ceil((new Date(result.rows[0].lockout_until) - Date.now()) / 1000);
+        return { locked: true, retry_after_seconds: Math.max(1, remaining) };
+    }
+    return { locked: false };
+};
+
+const checkPhoneOtpLockout = async (userId, purpose) => {
+    const result = await pool.query(
+        `SELECT lockout_until FROM user_login_otps
+         WHERE user_id = $1 AND purpose = $2 AND lockout_until > NOW()
+         ORDER BY lockout_until DESC LIMIT 1`,
+        [userId, purpose]
+    );
+    if (result.rows[0]) {
+        const remaining = Math.ceil((new Date(result.rows[0].lockout_until) - Date.now()) / 1000);
+        return { locked: true, retry_after_seconds: Math.max(1, remaining) };
+    }
+    return { locked: false };
+};
+
+const checkEmailDailySendLimit = async (email, purpose) => {
+    const result = await pool.query(
+        `SELECT daily_send_count, daily_send_date FROM password_reset_otps
+         WHERE email = $1 AND purpose = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [email, purpose]
+    );
+    const row = result.rows[0];
+    if (!row) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    if (String(row.daily_send_date || '').slice(0, 10) === today && Number(row.daily_send_count || 0) >= OTP_DAILY_SEND_LIMIT) {
+        return true;
+    }
+    return false;
+};
+
+const checkPhoneDailySendLimit = async (userId, purpose) => {
+    const result = await pool.query(
+        `SELECT daily_send_count, daily_send_date FROM user_login_otps
+         WHERE user_id = $1 AND purpose = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId, purpose]
+    );
+    const row = result.rows[0];
+    if (!row) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    if (String(row.daily_send_date || '').slice(0, 10) === today && Number(row.daily_send_count || 0) >= OTP_DAILY_SEND_LIMIT) {
+        return true;
+    }
+    return false;
+};
+
+const getNextDailySendCount = (prevRow) => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (prevRow && String(prevRow.daily_send_date || '').slice(0, 10) === today) {
+        return Number(prevRow.daily_send_count || 0) + 1;
+    }
+    return 1;
 };
 
 const isSignupEmailAvailable = async (email) => {
@@ -906,8 +996,16 @@ router.post('/signup/send-email-otp', async (req, res) => {
             return res.status(409).json({ message: 'An account with this email already exists.' });
         }
 
+        const lockout = await checkEmailOtpLockout(email, SIGNUP_EMAIL_VERIFY_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+        if (await checkEmailDailySendLimit(email, SIGNUP_EMAIL_VERIFY_PURPOSE)) {
+            return res.status(429).json({ message: 'Daily OTP limit reached. Please try again tomorrow.' });
+        }
+
         const activeOtp = await pool.query(
-            `SELECT created_at
+            `SELECT created_at, daily_send_count, daily_send_date
              FROM password_reset_otps
              WHERE email = $1
                AND purpose = $2
@@ -929,6 +1027,7 @@ router.post('/signup/send-email-otp', async (req, res) => {
             }
         }
 
+        const nextDailyCount = getNextDailySendCount(activeOtp.rows[0]);
         const otp = generatePasswordResetOtp();
         const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
 
@@ -942,9 +1041,9 @@ router.post('/signup/send-email-otp', async (req, res) => {
                 [email, SIGNUP_EMAIL_VERIFY_PURPOSE]
             );
             await client.query(
-                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-                 VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
-                [email, SIGNUP_EMAIL_VERIFY_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at, daily_send_count, daily_send_date)
+                 VALUES (NULL, $1, $2, $3, NOW() + ($4 || ' minutes')::interval, $5, CURRENT_DATE)`,
+                [email, SIGNUP_EMAIL_VERIFY_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES, nextDailyCount]
             );
         });
 
@@ -983,6 +1082,11 @@ router.post('/signup/verify-email-otp', async (req, res) => {
             return res.status(409).json({ message: 'An account with this email already exists.' });
         }
 
+        const lockout = await checkEmailOtpLockout(email, SIGNUP_EMAIL_VERIFY_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+
         const activeOtp = await pool.query(
             `SELECT id, otp_hash, attempts
              FROM password_reset_otps
@@ -1002,26 +1106,32 @@ router.post('/signup/verify-email-otp', async (req, res) => {
 
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS) {
-            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
-            return res.status(400).json({ message: 'Too many invalid attempts. Request a new code.' });
+            await pool.query(
+                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                [otpRow.id, OTP_LOCKOUT_MINUTES]
+            );
+            return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
         }
 
         const isMatch = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
         if (!isMatch) {
             const nextAttempts = previousAttempts + 1;
+            const shouldLock = nextAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
                  SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
                  WHERE id = $3`,
-                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, otpRow.id]
+                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
             );
 
+            if (shouldLock) {
+                return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
+            }
             const attemptsLeft = Math.max(0, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS - nextAttempts);
             return res.status(400).json({
-                message: attemptsLeft > 0
-                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
-                    : 'Too many invalid attempts. Request a new code.',
+                message: `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`,
             });
         }
 
@@ -1242,8 +1352,16 @@ router.post('/admin/send-otp', async (req, res) => {
             return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
         }
 
+        const lockout = await checkPhoneOtpLockout(user.id, ADMIN_LOGIN_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+        if (await checkPhoneDailySendLimit(user.id, ADMIN_LOGIN_PURPOSE)) {
+            return res.status(429).json({ message: 'Daily OTP limit reached. Please try again tomorrow.' });
+        }
+
         const activeOtp = await pool.query(
-            `SELECT created_at
+            `SELECT created_at, daily_send_count, daily_send_date
              FROM user_login_otps
              WHERE user_id = $1
                AND purpose = $2
@@ -1265,6 +1383,7 @@ router.post('/admin/send-otp', async (req, res) => {
             }
         }
 
+        const nextDailyCount = getNextDailySendCount(activeOtp.rows[0]);
         const deliveryMode = getMsg91OtpMode();
         const previewOtp = deliveryMode === OTP_MODES.PREVIEW ? generateAdminLoginOtp() : '';
         const otpHash = previewOtp ? await bcrypt.hash(previewOtp, await bcrypt.genSalt(10)) : null;
@@ -1290,9 +1409,9 @@ router.post('/admin/send-otp', async (req, res) => {
                 [user.id, ADMIN_LOGIN_PURPOSE]
             );
             await client.query(
-                `INSERT INTO user_login_otps (user_id, phone, purpose, otp_hash, delivery_mode, provider_request_id, expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, NOW() + ($7 || ' minutes')::interval)`,
-                [user.id, phone, ADMIN_LOGIN_PURPOSE, otpHash, deliveryMode, providerRequestId, ADMIN_LOGIN_OTP_TTL_MINUTES]
+                `INSERT INTO user_login_otps (user_id, phone, purpose, otp_hash, delivery_mode, provider_request_id, expires_at, daily_send_count, daily_send_date)
+                 VALUES ($1, $2, $3, $4, $5, $6, NOW() + ($7 || ' minutes')::interval, $8, CURRENT_DATE)`,
+                [user.id, phone, ADMIN_LOGIN_PURPOSE, otpHash, deliveryMode, providerRequestId, ADMIN_LOGIN_OTP_TTL_MINUTES, nextDailyCount]
             );
         });
 
@@ -1347,6 +1466,11 @@ router.post('/admin/verify-otp', async (req, res) => {
             return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
         }
 
+        const lockout = await checkPhoneOtpLockout(user.id, ADMIN_LOGIN_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+
         const activeOtp = await pool.query(
             `SELECT id, otp_hash, attempts, delivery_mode
              FROM user_login_otps
@@ -1367,8 +1491,11 @@ router.post('/admin/verify-otp', async (req, res) => {
 
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) {
-            await pool.query('UPDATE user_login_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
-            return res.status(400).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+            await pool.query(
+                `UPDATE user_login_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                [otpRow.id, OTP_LOCKOUT_MINUTES]
+            );
+            return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
         }
 
         let isValidOtp = false;
@@ -1394,23 +1521,27 @@ router.post('/admin/verify-otp', async (req, res) => {
 
         if (!isValidOtp) {
             const nextAttempts = previousAttempts + 1;
+            const shouldLock = nextAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE user_login_otps
                  SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 OR $3 THEN NOW() ELSE consumed_at END
+                     consumed_at = CASE WHEN $1 >= $2 OR $3 THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $5 THEN NOW() + ($6 || ' minutes')::interval ELSE lockout_until END
                  WHERE id = $4`,
-                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, shouldConsumeOtp, otpRow.id]
+                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, shouldConsumeOtp, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
             );
 
             if (shouldConsumeOtp) {
                 return res.status(400).json({ message: invalidMessage });
             }
 
+            if (shouldLock) {
+                return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
+            }
+
             const attemptsLeft = Math.max(0, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS - nextAttempts);
             return res.status(400).json({
-                message: attemptsLeft > 0
-                    ? `${invalidMessage} ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
-                    : 'Too many invalid attempts. Request a new OTP.',
+                message: `${invalidMessage} ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`,
             });
         }
 
@@ -1457,8 +1588,16 @@ router.post('/admin/send-email-otp', async (req, res) => {
             return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
         }
 
+        const lockout = await checkEmailOtpLockout(email, ADMIN_EMAIL_LOGIN_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+        if (await checkEmailDailySendLimit(email, ADMIN_EMAIL_LOGIN_PURPOSE)) {
+            return res.status(429).json({ message: 'Daily OTP limit reached. Please try again tomorrow.' });
+        }
+
         const activeOtp = await pool.query(
-            `SELECT created_at
+            `SELECT created_at, daily_send_count, daily_send_date
              FROM password_reset_otps
              WHERE user_id = $1
                AND purpose = $2
@@ -1480,6 +1619,7 @@ router.post('/admin/send-email-otp', async (req, res) => {
             }
         }
 
+        const nextDailyCount = getNextDailySendCount(activeOtp.rows[0]);
         const otp = generateAdminLoginOtp();
         const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
 
@@ -1493,9 +1633,9 @@ router.post('/admin/send-email-otp', async (req, res) => {
                 [user.id, ADMIN_EMAIL_LOGIN_PURPOSE]
             );
             await client.query(
-                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
-                [user.id, email, ADMIN_EMAIL_LOGIN_PURPOSE, otpHash, ADMIN_LOGIN_OTP_TTL_MINUTES]
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at, daily_send_count, daily_send_date)
+                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval, $6, CURRENT_DATE)`,
+                [user.id, email, ADMIN_EMAIL_LOGIN_PURPOSE, otpHash, ADMIN_LOGIN_OTP_TTL_MINUTES, nextDailyCount]
             );
         });
 
@@ -1545,6 +1685,11 @@ router.post('/admin/verify-email-otp', async (req, res) => {
             return res.status(403).json({ message: 'Staff account is inactive. Contact gym owner.' });
         }
 
+        const lockout = await checkEmailOtpLockout(email, ADMIN_EMAIL_LOGIN_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+
         const activeOtp = await pool.query(
             `SELECT id, otp_hash, attempts
              FROM password_reset_otps
@@ -1565,26 +1710,32 @@ router.post('/admin/verify-email-otp', async (req, res) => {
 
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) {
-            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [otpRow.id]);
-            return res.status(400).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+            await pool.query(
+                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                [otpRow.id, OTP_LOCKOUT_MINUTES]
+            );
+            return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
         }
 
         const isMatch = await bcrypt.compare(otp, String(otpRow.otp_hash || ''));
         if (!isMatch) {
             const nextAttempts = previousAttempts + 1;
+            const shouldLock = nextAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
                  SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
                  WHERE id = $3`,
-                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id]
+                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
             );
 
+            if (shouldLock) {
+                return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
+            }
             const attemptsLeft = Math.max(0, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS - nextAttempts);
             return res.status(400).json({
-                message: attemptsLeft > 0
-                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
-                    : 'Too many invalid attempts. Request a new OTP.',
+                message: `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`,
             });
         }
 
@@ -1647,8 +1798,16 @@ router.post('/password-reset/request', async (req, res) => {
             return res.status(400).json({ message: getPasswordlessProviderMessage(user) });
         }
 
+        const lockout = await checkEmailOtpLockout(email, PASSWORD_RESET_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+        if (await checkEmailDailySendLimit(email, PASSWORD_RESET_PURPOSE)) {
+            return res.status(429).json({ message: 'Daily OTP limit reached. Please try again tomorrow.' });
+        }
+
         const activeReset = await pool.query(
-            `SELECT id, created_at
+            `SELECT id, created_at, daily_send_count, daily_send_date
              FROM password_reset_otps
              WHERE user_id = $1
                AND purpose = $2
@@ -1670,6 +1829,7 @@ router.post('/password-reset/request', async (req, res) => {
             }
         }
 
+        const nextDailyCount = getNextDailySendCount(activeReset.rows[0]);
         const otp = generatePasswordResetOtp();
         const salt = await bcrypt.genSalt(10);
         const otpHash = await bcrypt.hash(otp, salt);
@@ -1684,9 +1844,9 @@ router.post('/password-reset/request', async (req, res) => {
                 [user.id, PASSWORD_RESET_PURPOSE]
             );
             await client.query(
-                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at)
-                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
-                [user.id, email, PASSWORD_RESET_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES]
+                `INSERT INTO password_reset_otps (user_id, email, purpose, otp_hash, expires_at, daily_send_count, daily_send_date)
+                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval, $6, CURRENT_DATE)`,
+                [user.id, email, PASSWORD_RESET_PURPOSE, otpHash, PASSWORD_RESET_OTP_TTL_MINUTES, nextDailyCount]
             );
         });
 
@@ -1741,6 +1901,11 @@ router.post('/password-reset/confirm', async (req, res) => {
             return res.status(400).json({ message: getPasswordlessProviderMessage(user) });
         }
 
+        const lockout = await checkEmailOtpLockout(email, PASSWORD_RESET_PURPOSE);
+        if (lockout.locked) {
+            return res.status(429).json({ message: `Too many attempts. Try again in ${Math.ceil(lockout.retry_after_seconds / 60)} minute(s).`, retry_after_seconds: lockout.retry_after_seconds });
+        }
+
         const activeReset = await pool.query(
             `SELECT id, otp_hash, attempts
              FROM password_reset_otps
@@ -1761,26 +1926,32 @@ router.post('/password-reset/confirm', async (req, res) => {
 
         const previousAttempts = Number(resetRow.attempts || 0);
         if (previousAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS) {
-            await pool.query('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = $1', [resetRow.id]);
-            return res.status(400).json({ message: 'Too many invalid attempts. Request a new code.' });
+            await pool.query(
+                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                [resetRow.id, OTP_LOCKOUT_MINUTES]
+            );
+            return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
         }
 
         const isMatch = await bcrypt.compare(otp, resetRow.otp_hash);
         if (!isMatch) {
             const nextAttempts = previousAttempts + 1;
+            const shouldLock = nextAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
                  SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END
+                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
                  WHERE id = $3`,
-                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, resetRow.id]
+                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, resetRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
             );
 
+            if (shouldLock) {
+                return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
+            }
             const attemptsLeft = Math.max(0, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS - nextAttempts);
             return res.status(400).json({
-                message: attemptsLeft > 0
-                    ? `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
-                    : 'Too many invalid attempts. Request a new code.',
+                message: `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`,
             });
         }
 

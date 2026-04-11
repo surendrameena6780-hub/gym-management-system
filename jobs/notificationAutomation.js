@@ -307,7 +307,15 @@ const getGymMetrics = async (gymId, timezone) => {
                 FROM members m
                 WHERE m.gym_id = $1
                   AND m.deleted_at IS NULL
-            ), 0) AS members_count`,
+            ), 0) AS members_count,
+            COALESCE((
+                SELECT COUNT(*)::INT
+                FROM leads l
+                WHERE l.gym_id = $1
+                  AND l.trial_date IS NOT NULL
+                  AND timezone($2, l.trial_date)::date = timezone($2, NOW())::date
+                  AND COALESCE(UPPER(l.status), 'NEW') NOT IN ('LOST', 'CONVERTED')
+            ), 0) AS trials_today_count`,
         [gymId, timezone]
     );
 
@@ -356,6 +364,37 @@ const buildLeadNudge = (metrics, settings) => {
 
     return {
         key: 'LEAD_SPRINT',
+        title: message.title,
+        body: message.body,
+        url: '/dashboard',
+    };
+};
+
+const buildTrialTodayNudge = (metrics, settings) => {
+    const count = toInt(metrics.trials_today_count);
+    if (count <= 0) return null;
+
+    const message = buildAutomationMessage({
+        settings,
+        key: 'TRIAL_TODAY',
+        variables: {
+            count,
+            lead_label: pluralize(count, 'lead'),
+            has_have: count === 1 ? 'has' : 'have',
+        },
+    });
+
+    if (!message) {
+        return {
+            key: 'TRIAL_TODAY',
+            title: `${count} trial${count > 1 ? 's' : ''} today`,
+            body: `${count} ${pluralize(count, 'lead')} ${count === 1 ? 'has a' : 'have'} trial booked today. Be ready!`,
+            url: '/dashboard',
+        };
+    }
+
+    return {
+        key: 'TRIAL_TODAY',
         title: message.title,
         body: message.body,
         url: '/dashboard',
@@ -478,6 +517,7 @@ const pickInternalNotificationCandidate = ({ slot, metrics, gym, settings }) => 
     if (slot.key === 'MORNING') {
         return (
             buildSetupNudge(metrics, settings) ||
+            buildTrialTodayNudge(metrics, settings) ||
             buildLeadNudge(metrics, settings) ||
             buildRenewalNudge(metrics.expiring_3d_count, 'FINAL_3_DAYS', settings) ||
             buildCollectionsNudge(metrics, gym.currency, settings) ||
@@ -642,7 +682,7 @@ const buildMemberRenewalCampaign = async ({ gym, timezone, localDate, limit, set
         timezone,
         localDate,
         limit,
-        criteria: `lm.status = 'ACTIVE' AND lm.end_date BETWEEN $2::date AND ($2::date + 3)`,
+        criteria: `lm.status = 'ACTIVE' AND (lm.end_date - $2::date) IN (0, 1, 3, 7, 30)`,
     });
 
     if (recipients.length === 0) return null;
