@@ -360,6 +360,12 @@ function SuperAdminDashboard({ token, onLogout }) {
     reportClientError('Superadmin API', err);
   }, [onLogout]);
 
+  const getApiErrorMessage = useCallback((err, fallback) => {
+    const message = err?.response?.data?.error || err?.response?.data?.message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+    return fallback;
+  }, []);
+
   const loadOverview = useCallback(async () => {
     try {
       const res = await axios.get('/api/superadmin/overview', headers);
@@ -668,7 +674,11 @@ function SuperAdminDashboard({ token, onLogout }) {
       closeGymActionModal();
     } catch (err) {
       handleApiError(err);
-      setGymActionModal((prev) => ({ ...prev, busy: false, error: 'Action failed. Please try again.' }));
+      setGymActionModal((prev) => ({
+        ...prev,
+        busy: false,
+        error: getApiErrorMessage(err, 'Action failed. Please try again.'),
+      }));
     }
   };
 

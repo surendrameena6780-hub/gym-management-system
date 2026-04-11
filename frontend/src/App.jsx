@@ -476,6 +476,12 @@ function App() {
   }, [currentPage]);
 
   useEffect(() => {
+    if (isHQ) {
+      setCanInstallApp(false);
+      setDeferredInstallPrompt(null);
+      return undefined;
+    }
+
     const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '');
     const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
     setIsIosDevice(isIos);
@@ -504,7 +510,7 @@ function App() {
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
       window.removeEventListener('appinstalled', onAppInstalled);
     };
-  }, []);
+  }, [isHQ]);
 
   useEffect(() => {
     if (isHQ) {

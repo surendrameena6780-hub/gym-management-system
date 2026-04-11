@@ -192,6 +192,153 @@ const logAudit = async ({ action, targetType, targetId, targetLabel, details = {
     }
 };
 
+const quoteIdentifier = (value) => `"${String(value || '').replace(/"/g, '""')}"`;
+
+const quoteQualifiedIdentifier = (schemaName, tableName) => {
+    return `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
+};
+
+const ensureOperationalArchiveInfrastructure = async (client) => {
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS operational_archives (
+            id SERIAL PRIMARY KEY,
+            source_table VARCHAR(80) NOT NULL,
+            record_id INTEGER NOT NULL,
+            archived_from_at TIMESTAMPTZ,
+            payload JSONB NOT NULL,
+            archived_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE (source_table, record_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_operational_archives_source_time
+            ON operational_archives(source_table, archived_from_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_operational_archives_archived_at
+            ON operational_archives(archived_at DESC);
+    `);
+};
+
+const listGymDependentTables = async (client) => {
+    const result = await client.query(`
+        SELECT
+            child_ns.nspname AS schema_name,
+            child_cls.relname AS table_name,
+            cols.column_names
+        FROM pg_constraint con
+        JOIN pg_class child_cls ON child_cls.oid = con.conrelid
+        JOIN pg_namespace child_ns ON child_ns.oid = child_cls.relnamespace
+        CROSS JOIN LATERAL (
+            SELECT ARRAY_AGG(att.attname ORDER BY keys.ord) AS column_names
+            FROM unnest(con.conkey) WITH ORDINALITY AS keys(attnum, ord)
+            JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = keys.attnum
+        ) cols
+        WHERE con.contype = 'f'
+          AND con.confrelid = 'public.gyms'::regclass
+          AND child_ns.nspname = 'public'
+        ORDER BY child_ns.nspname ASC, child_cls.relname ASC
+    `);
+
+    return result.rows
+        .filter((row) => Array.isArray(row.column_names) && row.column_names.length === 1)
+        .map((row) => ({
+            schemaName: row.schema_name,
+            tableName: row.table_name,
+            columnName: row.column_names[0],
+        }));
+};
+
+const sortGymDependentTables = async (client, dependents) => {
+    if (dependents.length <= 1) return dependents;
+
+    const byKey = new Map();
+    const outgoing = new Map();
+    const indegree = new Map();
+
+    for (const dependent of dependents) {
+        const key = `${dependent.schemaName}.${dependent.tableName}`;
+        byKey.set(key, dependent);
+        outgoing.set(key, new Set());
+        indegree.set(key, 0);
+    }
+
+    const result = await client.query(`
+        SELECT
+            child_ns.nspname AS child_schema,
+            child_cls.relname AS child_table,
+            parent_ns.nspname AS parent_schema,
+            parent_cls.relname AS parent_table
+        FROM pg_constraint con
+        JOIN pg_class child_cls ON child_cls.oid = con.conrelid
+        JOIN pg_namespace child_ns ON child_ns.oid = child_cls.relnamespace
+        JOIN pg_class parent_cls ON parent_cls.oid = con.confrelid
+        JOIN pg_namespace parent_ns ON parent_ns.oid = parent_cls.relnamespace
+        WHERE con.contype = 'f'
+          AND child_ns.nspname = 'public'
+          AND parent_ns.nspname = 'public'
+    `);
+
+    for (const row of result.rows) {
+        const childKey = `${row.child_schema}.${row.child_table}`;
+        const parentKey = `${row.parent_schema}.${row.parent_table}`;
+        if (!byKey.has(childKey) || !byKey.has(parentKey) || childKey === parentKey) continue;
+        const edges = outgoing.get(childKey);
+        if (edges.has(parentKey)) continue;
+        edges.add(parentKey);
+        indegree.set(parentKey, (indegree.get(parentKey) || 0) + 1);
+    }
+
+    const queue = Array.from(indegree.entries())
+        .filter(([, count]) => count === 0)
+        .map(([key]) => key)
+        .sort((a, b) => a.localeCompare(b));
+    const orderedKeys = [];
+
+    while (queue.length > 0) {
+        const key = queue.shift();
+        orderedKeys.push(key);
+
+        const edges = Array.from(outgoing.get(key) || []).sort((a, b) => a.localeCompare(b));
+        for (const nextKey of edges) {
+            const nextCount = (indegree.get(nextKey) || 0) - 1;
+            indegree.set(nextKey, nextCount);
+            if (nextCount === 0) {
+                queue.push(nextKey);
+                queue.sort((a, b) => a.localeCompare(b));
+            }
+        }
+    }
+
+    if (orderedKeys.length !== dependents.length) {
+        for (const key of Array.from(byKey.keys()).sort((a, b) => a.localeCompare(b))) {
+            if (!orderedKeys.includes(key)) orderedKeys.push(key);
+        }
+    }
+
+    return orderedKeys.map((key) => byKey.get(key)).filter(Boolean);
+};
+
+const deleteGymDependents = async (client, gymId) => {
+    const dependents = await listGymDependentTables(client);
+    const orderedDependents = await sortGymDependentTables(client, dependents);
+
+    for (const dependent of orderedDependents) {
+        const tableName = quoteQualifiedIdentifier(dependent.schemaName, dependent.tableName);
+        const columnName = quoteIdentifier(dependent.columnName);
+        await client.query(`DELETE FROM ${tableName} WHERE ${columnName} = $1`, [gymId]);
+    }
+};
+
+const hardDeleteGym = async (client, gymId) => {
+    await client.query(`SELECT set_config('app.allow_gym_hard_delete', 'on', true)`);
+
+    try {
+        await client.query('DELETE FROM gyms WHERE id = $1', [gymId]);
+    } catch (err) {
+        if (err.code !== '23503') throw err;
+        await deleteGymDependents(client, gymId);
+        await client.query('DELETE FROM gyms WHERE id = $1', [gymId]);
+    }
+};
+
 const superAuth = (req, res, next) => {
     if (!superadminEnabled) {
         return res.status(503).json({ message: disabledMessage });
@@ -556,6 +703,7 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        await ensureOperationalArchiveInfrastructure(client);
 
         const gym = await client.query('SELECT row_to_json(g) AS payload, g.name FROM gyms g WHERE g.id = $1', [gymId]);
         if (gym.rows.length === 0) {
@@ -576,10 +724,7 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
             })]
         );
 
-        await client.query(`SELECT set_config('app.allow_gym_hard_delete', 'on', true)`);
-
-        // Hard delete — CASCADE foreign keys handle child tables
-        await client.query('DELETE FROM gyms WHERE id = $1', [gymId]);
+        await hardDeleteGym(client, gymId);
 
         await client.query('COMMIT');
 
@@ -597,8 +742,8 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
         } catch (_rollbackError) {
             // Preserve the original failure.
         }
-        console.error('HQ DELETE ERROR:', err.message);
-        return res.status(500).json({ error: 'Server Error' });
+        console.error('HQ DELETE ERROR:', err);
+        return res.status(500).json({ error: 'Failed to permanently delete gym.' });
     } finally {
         client.release();
     }
