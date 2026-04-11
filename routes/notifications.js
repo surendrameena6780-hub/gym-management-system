@@ -932,7 +932,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         const monthlyUsed = Number(monthUsageRes.rows[0]?.monthly_used || 0);
         const remainingThisMonth = Math.max(0, monthlyLimit - monthlyUsed);
         if (remainingThisMonth <= 0) {
-            return fail(res, 429, 'MONTHLY_BULK_LIMIT_REACHED', 'Monthly bulk message limit reached. Increase limit in Integrations or wait for next month.');
+            return fail(res, 429, 'MONTHLY_BULK_LIMIT_REACHED', 'Monthly bulk message limit reached. Buy more WhatsApp capacity or wait for next month.');
         }
 
         let selectedTemplate = null;

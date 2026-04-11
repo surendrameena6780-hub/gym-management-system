@@ -1,10 +1,10 @@
 export const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
 export const BILLING_CORE_PLAN_IDS = ['basic', 'growth', 'pro'];
-export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1', 'extra_hello_1'];
+export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1'];
 export const BILLING_CAPABILITY_KEYS = ['custom_templates'];
 const BILLING_CYCLE_KEYS = ['monthly', 'annual'];
 const BILLING_COUPON_TYPES = ['PERCENT', 'AMOUNT'];
-const BRANCH_SCALING_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp', 'hello']);
+const BRANCH_SCALING_LIMIT_KEYS = new Set(['members', 'staff', 'whatsapp']);
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
 const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
@@ -24,14 +24,14 @@ export const defaultBillingCatalog = {
       popular: false,
       features: [
         'Unlimited members, staff users, branches, and outbound WhatsApp for testing',
-        'Hello inbound available on unlimited numbers during the test window',
+        'Hello inbound available on 1 connected number during the test window',
         '2 GB cloud storage for QA data and trial media',
         'All billing, automation, and integration flows unlocked for QA',
         '₹1 live payment test checkout',
         'Expires automatically in 1 day',
       ],
       capabilities: { custom_templates: true },
-      limits: { members: null, staff: null, storage: 2, branches: null, whatsapp: null, hello: null },
+      limits: { members: null, staff: null, storage: 2, branches: null, whatsapp: null, hello: 1 },
     },
     basic: {
       id: 'basic',
@@ -65,7 +65,7 @@ export const defaultBillingCatalog = {
         'Up to 2 branches',
         '1 owner + 10 staff users total',
         'Up to 2,000 WhatsApp messages per month',
-        'Hello inbound on up to 2 numbers',
+        'Hello inbound on 1 connected number',
         '10 GB cloud storage',
         'WhatsApp reply-to-lead capture',
         'Custom WhatsApp templates',
@@ -88,7 +88,7 @@ export const defaultBillingCatalog = {
         'Up to 3 branches',
         '1 owner + 30 staff users total',
         'Up to 6,000 WhatsApp messages per month',
-        'Hello inbound on up to 3 numbers',
+        'Hello inbound on 1 connected number',
         '20 GB cloud storage',
         'Full reply-to-lead workflow',
         'Custom WhatsApp templates',
@@ -138,15 +138,6 @@ export const defaultBillingCatalog = {
       increment: 1,
       limit_key: 'branches',
       requires_plans: [],
-    },
-    extra_hello_1: {
-      key: 'extra_hello_1',
-      label: 'Extra Hello Number',
-      description: 'Enable inbound Hello on 1 additional gym-wide WhatsApp number.',
-      price: 699,
-      increment: 1,
-      limit_key: 'hello',
-      requires_plans: ['growth', 'pro'],
     },
   },
 };
@@ -530,7 +521,7 @@ export const computeEffectiveLimits = (billingCatalog, planId, gymData = {}, ove
     staff: Number(gymData?.addon_extra_staff || 0),
     branches: Number(gymData?.addon_extra_branches || 0),
     whatsapp: Number(gymData?.addon_extra_whatsapp || 0),
-    hello: Number(gymData?.addon_extra_hello || 0),
+    hello: 0,
   };
 
   const resolvePlanTotalLimit = (limitKey) => {

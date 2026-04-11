@@ -573,6 +573,29 @@ router.put('/gyms/:id', superAuth, async (req, res) => {
         addon_extra_hello,
     } = req.body;
 
+    const parseOptionalAddonOverride = (value) => {
+        if (value === undefined || value === null || value === '') return null;
+        const parsed = Number(value);
+        if (!Number.isInteger(parsed) || parsed < 0) return Number.NaN;
+        return parsed;
+    };
+
+    const parsedAddonOverrides = {
+        addon_extra_whatsapp: parseOptionalAddonOverride(addon_extra_whatsapp),
+        addon_extra_staff: parseOptionalAddonOverride(addon_extra_staff),
+        addon_extra_members: parseOptionalAddonOverride(addon_extra_members),
+        addon_extra_branches: parseOptionalAddonOverride(addon_extra_branches),
+        addon_extra_hello: parseOptionalAddonOverride(addon_extra_hello),
+    };
+
+    if (Object.values(parsedAddonOverrides).some((value) => Number.isNaN(value))) {
+        return res.status(400).json({ error: 'Add-on overrides must be whole numbers greater than or equal to 0.' });
+    }
+
+    if ((parsedAddonOverrides.addon_extra_hello ?? 0) > 0) {
+        return res.status(409).json({ error: 'Additional Hello numbers are not supported in the current release.' });
+    }
+
     try {
         await ensureGymBillingAddonSchema();
         const updated = await pool.query(
@@ -609,11 +632,11 @@ router.put('/gyms/:id', superAuth, async (req, res) => {
                 support_email || null,
                 website || null,
                 plan || null,
-                Number.isInteger(Number(addon_extra_whatsapp)) ? Number(addon_extra_whatsapp) : null,
-                Number.isInteger(Number(addon_extra_staff)) ? Number(addon_extra_staff) : null,
-                Number.isInteger(Number(addon_extra_members)) ? Number(addon_extra_members) : null,
-                Number.isInteger(Number(addon_extra_branches)) ? Number(addon_extra_branches) : null,
-                Number.isInteger(Number(addon_extra_hello)) ? Number(addon_extra_hello) : null,
+                parsedAddonOverrides.addon_extra_whatsapp,
+                parsedAddonOverrides.addon_extra_staff,
+                parsedAddonOverrides.addon_extra_members,
+                parsedAddonOverrides.addon_extra_branches,
+                parsedAddonOverrides.addon_extra_hello,
                 gymId,
             ]
         );

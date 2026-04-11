@@ -115,6 +115,7 @@ const CYCLE_DAYS = { monthly: 30, annual: 365 };
 const ACTIVE_CREDIT_STATUSES = new Set(['ACTIVE']);
 const MIN_RAZORPAY_AMOUNT_PAISE = 100;
 const PLAN_SETUP_MODES = new Set(['balanced', 'flexible']);
+const UNSUPPORTED_HELLO_ADDON_ERROR = 'Additional Hello numbers are not supported in the current release.';
 
 const normalizeCycle = (value) => String(value || 'monthly').trim().toLowerCase();
 const normalizePlanTier = (value) => normalizePlanId(value, 'pro');
@@ -1071,8 +1072,12 @@ router.get('/addons', async (req, res) => {
 // --- 5. CREATE ADD-ON ORDER ---
 router.post('/create-addon-order', async (req, res) => {
     try {
-        const billingConfig = await getBillingConfig();
         const addonKey = String(req.body.addon_key || '').trim();
+        if (addonKey === 'extra_hello_1') {
+            return res.status(409).json({ error: UNSUPPORTED_HELLO_ADDON_ERROR });
+        }
+
+        const billingConfig = await getBillingConfig();
         const addon = getBillingAddon(billingConfig, addonKey);
         if (!addon) {
             return res.status(400).json({ error: 'Invalid add-on type.' });
@@ -1109,6 +1114,10 @@ router.post('/create-addon-order', async (req, res) => {
 router.post('/verify-addon', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, addon_key } = req.body;
     const addonKey = String(addon_key || '').trim();
+    if (addonKey === 'extra_hello_1') {
+        return res.status(409).json({ error: UNSUPPORTED_HELLO_ADDON_ERROR });
+    }
+
     const billingConfig = await getBillingConfig();
     const addon = getBillingAddon(billingConfig, addonKey);
     if (!addon) {

@@ -232,7 +232,6 @@ const createEmptyGymEditModal = () => ({
   addon_extra_staff: 0,
   addon_extra_members: 0,
   addon_extra_branches: 0,
-  addon_extra_hello: 0,
   saving: false,
   error: '',
 });
@@ -248,7 +247,7 @@ const describeEffectiveLimitMode = (effectiveLimits = {}) => {
   const memberLimit = formatLimitDisplay(effectiveLimits?.members);
   const staffLimit = formatLimitDisplay(effectiveLimits?.staff);
   const branchLimit = formatLimitDisplay(effectiveLimits?.branches);
-  return `Live limits now scale with the gym's active branch count. This setup currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons.`;
+  return `Live limits now scale pooled members, staff users, and WhatsApp with the gym's active branch count. This setup currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons, while Hello stays capped at one connected number per gym in this release.`;
 };
 
 function SuperAdminDashboard({ token, onLogout }) {
@@ -557,7 +556,6 @@ function SuperAdminDashboard({ token, onLogout }) {
         addon_extra_staff: Number(detail.addon_extra_staff || 0),
         addon_extra_members: Number(detail.addon_extra_members || 0),
         addon_extra_branches: Number(detail.addon_extra_branches || 0),
-        addon_extra_hello: Number(detail.addon_extra_hello || 0),
       });
     } catch (err) {
       handleApiError(err);
@@ -575,7 +573,6 @@ function SuperAdminDashboard({ token, onLogout }) {
       addon_extra_staff: Number(gymEditModal.addon_extra_staff || 0),
       addon_extra_members: Number(gymEditModal.addon_extra_members || 0),
       addon_extra_branches: Number(gymEditModal.addon_extra_branches || 0),
-      addon_extra_hello: Number(gymEditModal.addon_extra_hello || 0),
     };
 
     if (!payload.gym_name.trim()) {
@@ -2419,7 +2416,6 @@ function SuperAdminDashboard({ token, onLogout }) {
                     { label: 'Extra Staff', value: Number(selectedGym.addon_extra_staff || 0) },
                     { label: 'Extra Members', value: Number(selectedGym.addon_extra_members || 0) },
                     { label: 'Extra Branches', value: Number(selectedGym.addon_extra_branches || 0) },
-                    { label: 'Extra Hello', value: Number(selectedGym.addon_extra_hello || 0) },
                   ].filter((item) => item.value > 0).map((addon) => (
                     <span key={addon.label} className="px-2.5 py-1 rounded-full border border-indigo-400/20 bg-indigo-500/10 text-indigo-200 text-[11px] font-black uppercase tracking-wide">
                       {addon.label}: +{addon.value}
@@ -2428,8 +2424,7 @@ function SuperAdminDashboard({ token, onLogout }) {
                   {!Number(selectedGym.addon_extra_whatsapp || 0)
                     && !Number(selectedGym.addon_extra_staff || 0)
                     && !Number(selectedGym.addon_extra_members || 0)
-                    && !Number(selectedGym.addon_extra_branches || 0)
-                    && !Number(selectedGym.addon_extra_hello || 0) && (
+                    && !Number(selectedGym.addon_extra_branches || 0) && (
                     <span className="text-xs font-bold text-slate-500">No add-ons purchased.</span>
                   )}
                 </div>
@@ -2486,14 +2481,13 @@ function SuperAdminDashboard({ token, onLogout }) {
               <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
                 <div>
                   <p className="text-xs uppercase tracking-widest font-black text-slate-400">Per-Gym Capacity Overrides</p>
-                  <p className="text-sm text-slate-500 mt-1">Configured branches: {gymEditModal.branches_count}. These add-ons change the effective limits for this gym without editing branch topology.</p>
+                  <p className="text-sm text-slate-500 mt-1">Configured branches: {gymEditModal.branches_count}. These supported add-ons change the effective limits for this gym without editing branch topology. Hello stays capped at one connected number per gym in this release.</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra WhatsApp" value={gymEditModal.addon_extra_whatsapp} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_whatsapp: e.target.value }))} />
                   <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Staff" value={gymEditModal.addon_extra_staff} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_staff: e.target.value }))} />
                   <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Members" value={gymEditModal.addon_extra_members} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_members: e.target.value }))} />
                   <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Branches" value={gymEditModal.addon_extra_branches} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_branches: e.target.value }))} />
-                  <input className="px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm" type="number" min="0" placeholder="Extra Hello" value={gymEditModal.addon_extra_hello} onChange={(e) => setGymEditModal((prev) => ({ ...prev, addon_extra_hello: e.target.value }))} />
                 </div>
               </div>
 

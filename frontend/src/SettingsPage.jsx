@@ -43,162 +43,6 @@ const normalizeSettingsTab = (value) => {
   return TABS.some((tab) => tab.id === normalized) ? normalized : 'account';
 };
 
-const SAAS_PLANS = {
-  monthly: [
-    { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic',  name: 'Basic',      price: 1, billed: 1,  features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 2,  features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', 'Up to 2,000 WhatsApp Messages/mo', 'Hello Inbound on 2 Numbers', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 3,  features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', 'Up to 6,000 WhatsApp Messages/mo', 'Hello Inbound on 3 Numbers', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
-  ],
-  annual: [
-    { id: 'test',   name: 'Test Drive', price: 1,    billed: 1,     features: ['Full Feature Access', 'For Testing Only', '₹1 Payment Test', 'Expires in 1 Day'], icon: Zap, test: true, color: 'text-amber-500', bg: 'bg-amber-50' },
-    { id: 'basic',  name: 'Basic',      price: 1, billed: 10, features: ['Up to 150 Members', '1 Branch', '1 Owner + 2 Staff Users', '500 WhatsApp Messages/mo', 'Members & Attendance', 'Plans, Payments & Dues', 'Leads & Follow-up', 'Dashboard & Basic Insights', 'Fee & Renewal Reminders', '14-Day Free Trial', 'Email Support'], icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { id: 'growth', name: 'Growth',     price: 2, billed: 20, features: ['Up to 800 Members', 'Up to 2 Branches', '1 Owner + 10 Staff Users', 'Up to 2,000 WhatsApp Messages/mo', 'Hello Inbound on 2 Numbers', 'WhatsApp Reply → Lead Capture', 'Custom WhatsApp Templates', 'Advanced Insights & Reports', 'Branch-wise Reporting', 'Class & Staff Operations', '14-Day Free Trial', 'Priority Support'], icon: Zap, popular: true, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { id: 'pro',    name: 'Pro',        price: 3, billed: 30, features: ['Up to 3,000 Members', 'Up to 3 Branches', '1 Owner + 30 Staff Users', 'Up to 6,000 WhatsApp Messages/mo', 'Hello Inbound on 3 Numbers', 'Full Reply-to-Lead Workflow', 'Custom WhatsApp Templates', 'Advanced Insights & Performance', 'Staff & Payroll Operations', 'RFID-Ready Setup Support', '14-Day Free Trial', 'Fastest Support Response'], icon: Crown, color: 'text-rose-500', bg: 'bg-rose-50' },
-  ],
-};
-
-const BILLING_PRICING = {
-  monthly: { test: 1, basic: 1, growth: 2, pro: 3 },
-  annual: { test: 1, basic: 10, growth: 20, pro: 30 },
-};
-
-const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
-const BILLING_DAY_MS = 24 * 60 * 60 * 1000;
-const MIN_CHECKOUT_PAISE = 100;
-const ACTIVE_BILLING_CREDIT_STATUSES = new Set(['ACTIVE']);
-
-const getPlanChargeInr = (planId, cycle) => Number(BILLING_PRICING[String(cycle || 'monthly')]?.[String(planId || 'basic')] || 0);
-const clampBillingValue = (value, min, max) => Math.min(max, Math.max(min, value));
-const normalizePayablePaise = (value) => {
-  const normalized = Math.max(0, Math.round(Number(value) || 0));
-  if (normalized > 0 && normalized < MIN_CHECKOUT_PAISE) return MIN_CHECKOUT_PAISE;
-  return normalized;
-};
-const formatPaiseAmount = (value) => {
-  const amount = (Number(value) || 0) / 100;
-  return new Intl.NumberFormat('en-IN', {
-    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-};
-
-const getBillingQuotePreview = ({
-  currentPlan,
-  currentCycle,
-  currentStatus,
-  currentValidUntil,
-  targetPlan,
-  targetCycle,
-}) => {
-  const fullPricePaise = Math.round(getPlanChargeInr(targetPlan, targetCycle) * 100);
-  const currentPricePaise = Math.round(getPlanChargeInr(currentPlan, currentCycle) * 100);
-  const renewalDays = targetPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[targetCycle] || 30;
-  const preview = {
-    kind: 'fresh_purchase',
-    fullPricePaise,
-    payablePaise: fullPricePaise,
-    creditPaise: 0,
-    preserveCurrentExpiry: false,
-    renewalDays,
-    remainingRatio: 0,
-    error: null,
-  };
-
-  const expiryMs = Date.parse(currentValidUntil || '');
-  const hasActiveCredit = Boolean(
-    currentPricePaise > 0
-    && ACTIVE_BILLING_CREDIT_STATUSES.has(String(currentStatus || '').trim().toUpperCase())
-    && Number.isFinite(expiryMs)
-    && expiryMs > Date.now()
-  );
-
-  if (!hasActiveCredit) {
-    if (currentPlan === targetPlan && currentCycle === targetCycle) {
-      return { ...preview, kind: 'renewal' };
-    }
-    return preview;
-  }
-
-  const currentCycleDays = currentPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[currentCycle] || 30;
-  const remainingRatio = clampBillingValue((expiryMs - Date.now()) / (currentCycleDays * BILLING_DAY_MS), 0, 1);
-  const currentRemainingCreditPaise = Math.floor(currentPricePaise * remainingRatio);
-
-  if (currentPlan === targetPlan && currentCycle === targetCycle) {
-    return { ...preview, kind: 'renewal', remainingRatio };
-  }
-
-  if (currentCycle === targetCycle) {
-    if (fullPricePaise <= currentPricePaise) {
-      return {
-        ...preview,
-        kind: 'downgrade_requires_renewal',
-        payablePaise: 0,
-        creditPaise: currentRemainingCreditPaise,
-        remainingRatio,
-        error: 'Lower-value plan changes should happen at renewal.',
-      };
-    }
-
-    return {
-      ...preview,
-      kind: 'prorated_upgrade',
-      payablePaise: normalizePayablePaise(Math.ceil(fullPricePaise * remainingRatio) - currentRemainingCreditPaise),
-      creditPaise: currentRemainingCreditPaise,
-      preserveCurrentExpiry: true,
-      remainingRatio,
-    };
-  }
-
-  if (fullPricePaise <= currentRemainingCreditPaise) {
-    return {
-      ...preview,
-      kind: 'downgrade_requires_renewal',
-      payablePaise: 0,
-      creditPaise: currentRemainingCreditPaise,
-      remainingRatio,
-      error: 'This lower-value switch should be scheduled at renewal.',
-    };
-  }
-
-  return {
-    ...preview,
-    kind: 'cycle_switch_with_credit',
-    payablePaise: normalizePayablePaise(fullPricePaise - currentRemainingCreditPaise),
-    creditPaise: currentRemainingCreditPaise,
-    remainingRatio,
-  };
-};
-
-// Max included plan totals at full branch capacity.
-const PLAN_LIMITS = {
-  test:   { members: 'Unlimited', staff: 'Unlimited', storage: 2,  branches: 'Unlimited', whatsapp: 'Unlimited', hello: 'Unlimited' },
-  basic:  { members: 150,         staff: 2,           storage: 5,  branches: 1,           whatsapp: 500,          hello: 0 },
-  growth: { members: 800,         staff: 10,          storage: 10, branches: 2,           whatsapp: 2000,         hello: 2 },
-  pro:    { members: 3000,        staff: 30,          storage: 20, branches: 3,           whatsapp: 6000,         hello: 3 },
-};
-
-// Compute effective limits by adding addon purchases on top of base plan limits
-const getEffectiveLimits = (planId, gymData) => {
-  const base = PLAN_LIMITS[planId] || PLAN_LIMITS.basic;
-  return {
-    members:  base.members  === 'Unlimited' ? 'Unlimited' : base.members  + (Number(gymData?.addon_extra_members)  || 0),
-    staff:    base.staff    === 'Unlimited' ? 'Unlimited' : base.staff    + (Number(gymData?.addon_extra_staff)    || 0),
-    storage:  base.storage,
-    branches: base.branches === 'Unlimited' ? 'Unlimited' : base.branches + (Number(gymData?.addon_extra_branches) || 0),
-    whatsapp: base.whatsapp === 'Unlimited' ? 'Unlimited' : base.whatsapp + (Number(gymData?.addon_extra_whatsapp) || 0),
-    hello:    base.hello    === 'Unlimited' ? 'Unlimited' : base.hello    + (Number(gymData?.addon_extra_hello)    || 0),
-  };
-};
-
-const ADDON_PACKS = [
-  { key: 'extra_whatsapp_250', label: 'Extra 250 WhatsApp Messages', price: 249, icon: MessageSquare, desc: 'Adds 250 more outbound WhatsApp messages to your monthly quota.' },
-  { key: 'extra_staff_1',      label: 'Extra Staff User',            price: 149, icon: Users,         desc: 'Add 1 more staff login to your gym-wide plan capacity.' },
-  { key: 'extra_members_100',  label: 'Extra 100 Members',           price: 299, icon: User,          desc: 'Raises your gym-wide member capacity by 100.' },
-  { key: 'extra_branch_1',     label: 'Extra Branch',                price: 599, icon: Building2,     desc: 'Add 1 more branch to your gym setup.' },
-  { key: 'extra_hello_1',      label: 'Extra Hello Number',          price: 699, icon: Phone,         desc: 'Enable inbound Hello on 1 additional gym-wide WhatsApp number.', requiresPlan: ['growth', 'pro'] },
-];
-
 const BILLING_PLAN_THEME = {
   test: { icon: Zap, color: 'text-amber-500', bg: 'bg-amber-50' },
   basic: { icon: Star, color: 'text-blue-500', bg: 'bg-blue-50' },
@@ -211,7 +55,6 @@ const BILLING_ADDON_ICONS = {
   extra_staff_1: Users,
   extra_members_100: User,
   extra_branch_1: Building2,
-  extra_hello_1: Phone,
 };
 
 const STAFF_ROLE_OPTIONS = [
@@ -2812,14 +2655,14 @@ const loadRazorpayScript = () => {
               {/* Usage & Limits Dashboard */}
               {(() => {
                 const eLimits = usageLimits;
-                const sharedCapacitySummary = `Live limits on ${currentPlanName} scale with your active branch count. Members, staff, WhatsApp, and Hello grow or shrink with the number of branches you keep active, while balanced mode and flexible mode decide how that total is operated across locations.`;
+                const sharedCapacitySummary = `Live limits on ${currentPlanName} scale pooled members, staff, and WhatsApp with your active branch count. Hello currently supports one connected number per gym in this release, while balanced mode and flexible mode decide how branch capacity is operated across locations.`;
                 return (
               <div className="p-6 md:p-8 bg-white border border-slate-200 rounded-[28px] shadow-sm mb-10">
                   <div className="flex items-center gap-3 mb-6">
                       <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Database size={20} /></div>
                       <div>
                           <h3 className="font-black text-slate-900 text-lg leading-tight">Usage & Plan Limits</h3>
-                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Members, staff, WhatsApp, and Hello scale with your active branch count, while balanced and flexible branch modes change how you operate that total.</p>
+                        <p className="text-xs font-bold text-slate-500">Tracked against your current plan{gymData.addon_extra_members || gymData.addon_extra_staff || gymData.addon_extra_whatsapp || gymData.addon_extra_branches || gymData.addon_extra_hello ? ' + add-ons' : ''}. Members, staff, and WhatsApp scale with your active branch count, while Hello currently stays limited to one connected number per gym in this release.</p>
                       </div>
                   </div>
                   
@@ -2856,7 +2699,7 @@ const loadRazorpayScript = () => {
                           icon={HardDrive} 
                       />
                       <ProgressBar 
-                          label="Connected Hello Numbers" 
+                          label="Connected Hello Number" 
                           current={isWhatsAppConnected ? 1 : 0} 
                           max={eLimits.hello ?? 'Unlimited'} 
                           icon={Phone} 
