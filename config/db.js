@@ -301,6 +301,7 @@ const runSchemaMigrations = async () => {
         await runNamedMigration(client, '2026-04-06-timestamptz-normalization', normalizeLegacyTimestampColumns);
         await runNamedMigration(client, '2026-04-06-operational-archives', createOperationalArchiveInfrastructure);
         await runNamedMigration(client, '2026-04-06-protect-gym-hard-deletes', protectGymHardDeletes);
+        await runNamedMigration(client, '2026-04-11-refresh-gym-hard-delete-trigger', protectGymHardDeletes);
         await runNamedMigration(client, '2026-04-06-members-phone-required', enforceMembersPhonePresence);
         await runNamedMigration(client, '2026-04-07-member-uniqueness-repair', repairMemberUniqueness);
         await runNamedMigration(client, '2026-04-06-rfid-event-snapshots', addRfidEventSnapshots);

@@ -217,6 +217,27 @@ const ensureOperationalArchiveInfrastructure = async (client) => {
     `);
 };
 
+const ensureGymHardDeleteProtection = async (client) => {
+    await client.query(`
+        CREATE OR REPLACE FUNCTION prevent_gym_hard_delete()
+        RETURNS trigger AS $$
+        BEGIN
+            IF COALESCE(current_setting('app.allow_gym_hard_delete', true), '') = 'on' THEN
+                RETURN OLD;
+            END IF;
+            RAISE EXCEPTION 'Hard delete of gyms is disabled. Archive or suspend the gym instead.';
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_prevent_gym_hard_delete ON gyms;
+
+        CREATE TRIGGER trg_prevent_gym_hard_delete
+        BEFORE DELETE ON gyms
+        FOR EACH ROW
+        EXECUTE FUNCTION prevent_gym_hard_delete();
+    `);
+};
+
 const listGymDependentTables = async (client) => {
     const result = await client.query(`
         SELECT
@@ -727,6 +748,7 @@ router.delete('/gyms/:id', superAuth, async (req, res) => {
     try {
         await client.query('BEGIN');
         await ensureOperationalArchiveInfrastructure(client);
+        await ensureGymHardDeleteProtection(client);
 
         const gym = await client.query('SELECT row_to_json(g) AS payload, g.name FROM gyms g WHERE g.id = $1', [gymId]);
         if (gym.rows.length === 0) {
