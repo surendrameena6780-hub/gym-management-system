@@ -568,6 +568,7 @@ const loadRazorpayScript = () => {
     raw_text: '',
   });
   const [customTemplateCreating, setCustomTemplateCreating] = useState(false);
+  const [deletingTemplateKey, setDeletingTemplateKey] = useState('');
   const [whatsappOnboarding, setWhatsAppOnboarding] = useState(DEFAULT_WHATSAPP_ONBOARDING);
   const [whatsappOnboardingOpen, setWhatsAppOnboardingOpen] = useState(false);
   const [whatsappOnboardingView, setWhatsAppOnboardingView] = useState('msg91');
@@ -1316,6 +1317,31 @@ const loadRazorpayScript = () => {
       toast(err?.response?.data?.error || 'Failed to create custom template.', 'error');
     } finally {
       setCustomTemplateCreating(false);
+    }
+  };
+
+  const handleDeleteCustomTemplate = async (template) => {
+    const templateKey = String(template?.template_key || '').trim();
+    const templateTitle = String(template?.title || templateKey || 'this template').trim();
+    if (!templateKey) {
+      return;
+    }
+    if (!window.confirm(`Delete ${templateTitle} from GymVault${template?.whatsapp_template_name ? ' and MSG91' : ''}?`)) {
+      return;
+    }
+
+    setDeletingTemplateKey(templateKey);
+    try {
+      const res = await axios.delete(`/api/settings/integrations/templates/${encodeURIComponent(templateKey)}`, headers);
+      if (expandedTemplate === templateKey) {
+        setExpandedTemplate(null);
+      }
+      await refreshMessagingTemplateState({ showLoader: false });
+      toast(res.data?.message || 'Template deleted.', 'success');
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to delete template.', 'error');
+    } finally {
+      setDeletingTemplateKey('');
     }
   };
 
@@ -3664,6 +3690,16 @@ const loadRazorpayScript = () => {
                                         className={`relative w-9 h-5 rounded-full transition-colors ${template.is_active !== false ? 'bg-emerald-500' : 'bg-slate-300'} ${customTemplateLocked ? 'opacity-60 cursor-not-allowed' : ''}`}>
                                         <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${template.is_active !== false ? 'translate-x-4' : ''}`} />
                                       </button>
+                                      {isCustomMessageTemplate(template) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteCustomTemplate(template)}
+                                          disabled={deletingTemplateKey === template.template_key}
+                                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black uppercase tracking-wider hover:bg-rose-100 transition-all disabled:opacity-60"
+                                        >
+                                          <Trash2 size={13} /> {deletingTemplateKey === template.template_key ? 'Deleting...' : 'Delete'}
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3692,7 +3728,7 @@ const loadRazorpayScript = () => {
                                           {customTemplateLocked
                                             ? `${currentPlanName} currently locks custom template editing. Upgrade the gym or enable the custom template capability in Billing Catalog to change this template again.`
                                             : isCustomMessageTemplate(template)
-                                            ? 'Custom templates can be edited here too. GymVault keeps the copy placeholder-aware and resubmits any changed version to MSG91 for review.'
+                                            ? 'Custom templates can be edited or deleted here. GymVault keeps the copy placeholder-aware, adds MSG91-safe boundary text when required, and resubmits changed versions for review.'
                                             : 'Use placeholders like {{name}}, {{plan}}, {{days_left}}, and {{gym_name}}. Changing the copy creates a new provider template version for approval.'}
                                         </p>
                                       </div>

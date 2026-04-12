@@ -83,6 +83,18 @@ const insertSuffixBeforeTerminalPunctuation = (text, suffix) => {
     return `${normalizedText.slice(0, -punctuationMatch[1].length)}${normalizedSuffix}${punctuationMatch[1]}`;
 };
 
+const makeMsg91TemplateBoundarySafe = (rawText) => {
+    let text = toTrimmedString(rawText);
+    if (!text) {
+        return '';
+    }
+
+    text = text.replace(/^({{\s*[a-zA-Z0-9_]+\s*}})/, 'Hi $1');
+    text = text.replace(/({{\s*[a-zA-Z0-9_]+\s*}})([.!?]*)$/, '$1 today$2');
+
+    return text;
+};
+
 const operationalizeTemplateCopy = (rawText) => {
     let text = toTrimmedString(rawText)
         .replace(/\s+/g, ' ')
@@ -151,7 +163,7 @@ const operationalizeTemplateCopy = (rawText) => {
         text = `${text}.`;
     }
 
-    return text;
+    return makeMsg91TemplateBoundarySafe(text);
 };
 
 const inferTemplateCategoryFromText = (templateKey, whatsappText = '') => {
@@ -285,7 +297,10 @@ const collectPayloadMessages = (value, messages = [], seen = new Set()) => {
 };
 
 const extractMsg91ErrorMessage = (payload, fallback = '') => {
-    const messages = Array.from(new Set(collectPayloadMessages(payload)));
+    const messages = Array.from(new Set(collectPayloadMessages(payload)))
+        .map((message) => String(message || '').trim())
+        .filter(Boolean)
+        .filter((message) => !['fail', 'failed', 'error', 'errors', 'success', 'ok'].includes(message.toLowerCase()));
     return messages[0] || fallback || 'MSG91 request failed.';
 };
 
@@ -544,12 +559,13 @@ const convertNamedPlaceholdersToPositional = (text) => {
 };
 
 const buildTemplateNameFragment = (templateKey, whatsappText) => {
+    const normalizedTemplateText = makeMsg91TemplateBoundarySafe(whatsappText);
     const sanitizedKey = toTrimmedString(templateKey)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '')
         .slice(0, 30) || 'template';
-    const signature = crypto.createHash('sha1').update(String(whatsappText || '')).digest('hex').slice(0, 8);
+    const signature = crypto.createHash('sha1').update(String(normalizedTemplateText || '')).digest('hex').slice(0, 8);
     return `${sanitizedKey}_${signature}`;
 };
 
@@ -565,11 +581,12 @@ const buildTemplateName = (namespace, templateKey, whatsappText) => {
 const pickTemplateCategory = (templateKey, whatsappText = '') => inferTemplateCategoryFromText(templateKey, whatsappText);
 
 const buildTemplateDefinition = ({ gymId, templateKey, title, whatsappText, integratedNumber }) => {
-    const placeholderKeys = extractTemplatePlaceholderKeys(whatsappText);
+    const normalizedTemplateText = makeMsg91TemplateBoundarySafe(whatsappText);
+    const placeholderKeys = extractTemplatePlaceholderKeys(normalizedTemplateText);
     const exampleValues = placeholderKeys.map((key) => TEMPLATE_PLACEHOLDER_DEFAULTS[key] || key.replace(/_/g, ' '));
     const bodyComponent = {
         type: 'BODY',
-        text: convertNamedPlaceholdersToPositional(whatsappText),
+        text: convertNamedPlaceholdersToPositional(normalizedTemplateText),
     };
 
     if (exampleValues.length > 0) {
@@ -578,10 +595,10 @@ const buildTemplateDefinition = ({ gymId, templateKey, title, whatsappText, inte
 
     return {
         integrated_number: normalizeCountryCodePhone(integratedNumber),
-        template_name: buildTemplateName(gymId, templateKey, whatsappText),
+        template_name: buildTemplateName(gymId, templateKey, normalizedTemplateText),
         template_title: toTrimmedString(title),
         language: 'en_US',
-        category: pickTemplateCategory(templateKey, whatsappText),
+        category: pickTemplateCategory(templateKey, normalizedTemplateText),
         components: [bodyComponent],
     };
 };
@@ -597,11 +614,12 @@ const createWhatsAppTemplate = async ({ integratedNumber, templateName, language
         throw new Error('MSG91 WhatsApp is not configured.');
     }
 
-    const placeholderKeys = extractTemplatePlaceholderKeys(whatsappText);
+    const normalizedTemplateText = makeMsg91TemplateBoundarySafe(whatsappText);
+    const placeholderKeys = extractTemplatePlaceholderKeys(normalizedTemplateText);
     const exampleValues = placeholderKeys.map((key) => TEMPLATE_PLACEHOLDER_DEFAULTS[key] || key.replace(/_/g, ' '));
     const bodyComponent = {
         type: 'BODY',
-        text: convertNamedPlaceholdersToPositional(whatsappText),
+        text: convertNamedPlaceholdersToPositional(normalizedTemplateText),
     };
     if (exampleValues.length > 0) {
         bodyComponent.example = { body_text: [exampleValues] };
@@ -618,6 +636,26 @@ const createWhatsAppTemplate = async ({ integratedNumber, templateName, language
             language,
             category: toTrimmedString(category || 'UTILITY').toUpperCase(),
             components: [bodyComponent],
+        },
+    });
+};
+
+const deleteWhatsAppTemplate = async ({ integratedNumber, templateName }) => {
+    const authKey = getMsg91WhatsAppAuthKey();
+    const normalizedNumber = normalizeCountryCodePhone(integratedNumber);
+    const normalizedTemplateName = toTrimmedString(templateName);
+
+    if (!authKey || !normalizedNumber || !normalizedTemplateName) {
+        throw new Error('MSG91 WhatsApp is not configured for template deletion.');
+    }
+
+    return msg91Request({
+        path: '/api/v5/whatsapp/client-panel-template/',
+        method: 'DELETE',
+        authKey,
+        query: {
+            integrated_number: normalizedNumber,
+            template_name: normalizedTemplateName,
         },
     });
 };
@@ -678,6 +716,7 @@ module.exports = {
     buildTemplateNameFragment,
     convertNamedPlaceholdersToPositional,
     createWhatsAppTemplate,
+    deleteWhatsAppTemplate,
     extractTemplatePlaceholderKeys,
     findIntegratedWhatsAppNumber,
     getMsg91OtpMode,
@@ -687,6 +726,7 @@ module.exports = {
     listIntegratedWhatsAppNumbers,
     listWhatsAppTemplates,
     looksLikeMsg91TemplateDuplicate,
+    makeMsg91TemplateBoundarySafe,
     maskPhone,
     normalizeCountryCodePhone,
     normalizeE164Phone,

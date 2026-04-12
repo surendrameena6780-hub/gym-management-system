@@ -11,6 +11,7 @@ const {
     buildTemplateName,
     buildTemplateNameFragment,
     createWhatsAppTemplate,
+    deleteWhatsAppTemplate,
     findIntegratedWhatsAppNumber,
     getMsg91OtpMode,
     getMsg91WhatsAppOnboardingConfig,
@@ -18,6 +19,7 @@ const {
     listIntegratedWhatsAppNumbers,
     listWhatsAppTemplates,
     looksLikeMsg91TemplateDuplicate,
+    makeMsg91TemplateBoundarySafe,
     normalizeE164Phone,
     normalizeLocalIndianPhone,
     operationalizeTemplateCopy,
@@ -191,7 +193,7 @@ const MESSAGE_TEMPLATE_DEFAULTS = [
     {
         template_key: 'RENEWAL_REMINDER',
         title: 'Renewal Reminder',
-        whatsapp_text: 'Friendly reminder, {{name}}: your current plan is due for renewal. Confirm today to continue uninterrupted access at {{gym_name}}.',
+        whatsapp_text: 'Friendly reminder, {{name}}: your current plan is due for renewal. Confirm today to continue uninterrupted access at {{gym_name}} today.',
         sms_text: 'Reminder: {{name}}, your plan is due for renewal. Renew today for uninterrupted access.',
     },
     {
@@ -418,7 +420,9 @@ const normalizeIntegrationTemplatesInput = (value) => {
             min: 10,
             max: 4000,
         });
-        const whatsappText = isCustomTemplate ? operationalizeTemplateCopy(rawWhatsAppText) : rawWhatsAppText;
+        const whatsappText = makeMsg91TemplateBoundarySafe(
+            isCustomTemplate ? operationalizeTemplateCopy(rawWhatsAppText) : rawWhatsAppText
+        );
         const rawSmsText = ensureTrimmedString(template.sms_text || fallback?.sms_text || whatsappText, {
             field: `templates[${index}].sms_text`,
             required: true,
@@ -568,6 +572,12 @@ const findMatchingProviderTemplate = (providerTemplates, { gymId, whatsappNumber
             const leftPreferred = String(left?.template_name || '').trim().toLowerCase() === preferredNameLower ? 1 : 0;
             return rightPreferred - leftPreferred;
         })[0] || null;
+};
+
+const shouldIgnoreMsg91TemplateDeleteError = (error) => {
+    const status = Number(error?.status || error?.response?.status || 0);
+    const message = String(error?.message || '').trim().toLowerCase();
+    return status === 404 || /not found|does not exist|already deleted|template.+missing|missing template/.test(message);
 };
 
 const areTemplateDefinitionsEquivalent = (currentTemplate, nextTemplate) => {
@@ -1422,6 +1432,88 @@ router.post('/integrations/templates/custom', auth, async (req, res) => {
             return res.status(err.statusCode || 400).json({ error: err.message });
         }
         return res.status(500).json({ error: 'Failed to create template.' });
+    }
+});
+
+router.delete('/integrations/templates/:templateKey', auth, async (req, res) => {
+    try {
+        await ensureMessagingSchema();
+
+        const gymId = req.user.gym_id;
+        const templateKey = normalizeTemplateKey(req.params.templateKey, 'templateKey');
+
+        if (isBuiltInTemplateKey(templateKey)) {
+            return res.status(400).json({
+                error: 'Core GymVault templates cannot be deleted. Disable them instead.',
+            });
+        }
+
+        const templateRes = await pool.query(
+            `SELECT
+                t.template_key,
+                t.title,
+                t.whatsapp_template_name,
+                g.messaging_whatsapp_number
+             FROM gym_message_templates t
+             INNER JOIN gyms g ON g.id = t.gym_id
+             WHERE t.gym_id = $1 AND t.template_key = $2
+             LIMIT 1`,
+            [gymId, templateKey]
+        );
+
+        if (templateRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Template not found.' });
+        }
+
+        const template = templateRes.rows[0];
+        const providerTemplateName = String(template.whatsapp_template_name || '').trim();
+        const providerNumber = normalizeWhatsAppNumber(template.messaging_whatsapp_number);
+        let providerDeleted = false;
+
+        if (providerTemplateName && providerNumber && isMsg91WhatsAppConfigured()) {
+            try {
+                await deleteWhatsAppTemplate({
+                    integratedNumber: providerNumber,
+                    templateName: providerTemplateName,
+                });
+                providerDeleted = true;
+            } catch (providerErr) {
+                if (!shouldIgnoreMsg91TemplateDeleteError(providerErr)) {
+                    throw providerErr;
+                }
+            }
+        }
+
+        await pool.query(
+            `DELETE FROM gym_message_templates
+             WHERE gym_id = $1 AND template_key = $2`,
+            [gymId, templateKey]
+        );
+
+        const refreshedState = await loadMessagingState(gymId);
+        const templatesStatus = summarizeTemplateSyncStatus(refreshedState.templates);
+
+        await pool.query(
+            `UPDATE gyms
+             SET messaging_whatsapp_templates_status = $1,
+                 messaging_whatsapp_templates_last_synced_at = NOW(),
+                 messaging_whatsapp_last_checked_at = NOW(),
+                 messaging_whatsapp_last_error = NULL
+             WHERE id = $2`,
+            [templatesStatus, gymId]
+        );
+
+        return res.json({
+            message: providerDeleted
+                ? 'Template deleted from GymVault and MSG91.'
+                : 'Template deleted from GymVault.',
+            integration: refreshedState,
+        });
+    } catch (err) {
+        console.error('CUSTOM TEMPLATE DELETE ERROR:', err.message);
+        return res.status(500).json({
+            error: err.message || 'Failed to delete template.',
+        });
     }
 });
 
