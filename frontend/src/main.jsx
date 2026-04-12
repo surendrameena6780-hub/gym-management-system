@@ -161,26 +161,26 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
     const inferredKeyboardInset = Math.max(0, layoutViewportHeight - visibleViewportHeight - viewportOffsetTop)
     const isKeyboardOpen = isEditableElement(document.activeElement) && inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
 
-    if (!isKeyboardOpen && layoutViewportHeight > 0) {
-      // Only ever GROW the stable height — on iOS standalone PWA, any reading
-      // smaller than the current stable value is a transient glitch (boot
-      // timing, app resume, or a third-party overlay like Razorpay briefly
-      // shifting the viewport). Taking the maximum anchors the shell to the
-      // largest (correct) height seen this session and prevents layout jumps.
-      if (layoutViewportHeight > stableViewportHeight) {
+    if (isKeyboardOpen) {
+      // Keyboard is open: lock --app-viewport-height to a stable px so the
+      // shell doesn't reflow when the virtual keyboard shifts the viewport.
+      if (!isKeyboardOpen && layoutViewportHeight > 0) {
+        stableViewportHeight = layoutViewportHeight
+      } else if (stableViewportHeight <= 0 && layoutViewportHeight > 0) {
         stableViewportHeight = layoutViewportHeight
       }
-    } else if (stableViewportHeight <= 0 && layoutViewportHeight > 0) {
+      const lockedHeight = Math.max(stableViewportHeight, layoutViewportHeight)
+      if (lockedHeight > 0) {
+        document.documentElement.style.setProperty('--app-viewport-height', `${lockedHeight}px`)
+      }
+    } else {
+      // Keyboard is NOT open: remove the JS override and let CSS 100dvh be
+      // the source of truth. On iOS standalone PWA, 100dvh is computed by
+      // WebKit's layout engine and is always correct. window.innerHeight is
+      // NOT — it reports a transient wrong value during app resume / after
+      // Razorpay, which is the root cause of the layout shift bugs.
+      document.documentElement.style.removeProperty('--app-viewport-height')
       stableViewportHeight = layoutViewportHeight
-    }
-
-    // Always write a px value — never rely on CSS 100dvh whose computed value
-    // can differ between PWA launches on iOS/WebKit (a known WebKit quirk).
-    const resolvedViewportHeight = isKeyboardOpen
-      ? (stableViewportHeight || layoutViewportHeight)
-      : (stableViewportHeight || layoutViewportHeight)
-    if (resolvedViewportHeight > 0) {
-      document.documentElement.style.setProperty('--app-viewport-height', `${resolvedViewportHeight}px`)
     }
 
     document.documentElement.style.setProperty('--app-keyboard-inset', `${isKeyboardOpen ? inferredKeyboardInset : 0}px`)
@@ -206,6 +206,12 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
 
   let resumeLateTimeoutId = 0
   const notifyAppResumed = (source) => {
+    // Reset document scroll to 0 immediately — the document must not be
+    // scrolled in a position:fixed shell app. Razorpay and iOS resume can
+    // leave a non-zero scroll position that shifts all fixed elements.
+    window.scrollTo(0, 0)
+    document.documentElement.scrollTop = 0
+    document.body.scrollTop = 0
     queueViewportSync()
     if (resumeSyncTimeoutId) {
       window.clearTimeout(resumeSyncTimeoutId)

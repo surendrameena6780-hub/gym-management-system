@@ -61,7 +61,10 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: var(--app-viewport-height);
+  /* NO min-height here — the app shell is position:fixed;inset:0 so the
+     document body must have zero intrinsic height. Any min-height makes
+     the document scrollable, allowing iOS / Razorpay to shift the scroll
+     position and make the entire app appear pushed up or down. */
   background: #eef0ff;
   overflow-x: hidden;
   color: #0f172a;
@@ -81,7 +84,8 @@ textarea {
 }
 
 #root {
-  min-height: var(--app-viewport-height);
+  /* No min-height — see body comment above. height:100% comes from
+     html,body,#root{height:100%} at the top of this file. */
   background:
     radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.12) 0%, transparent 48%),
     radial-gradient(circle at 82% 20%, rgba(168, 85, 247, 0.09) 0%, transparent 42%),
