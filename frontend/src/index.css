@@ -202,7 +202,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .mobile-floating-offset {
-  bottom: calc(var(--mobile-nav-offset) + 0.5rem);
+  bottom: calc(var(--mobile-nav-offset) + 0.75rem);
 }
 
 .app-mobile-nav,
