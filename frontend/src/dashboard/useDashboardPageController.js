@@ -1684,7 +1684,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         if (rankDiff !== 0) return rankDiff;
         return Number(b.score || 0) - Number(a.score || 0);
       });
-    const setupFillCandidates = actionCandidates.length > 0
+    const setupFillCandidates = setupActionRows.length > 0
       ? setupActionRows.map((row, index) => buildRecommendation({
         id: row.id,
         title: row.title,
@@ -1769,7 +1769,10 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     pushUniqueRows(actionRequiredRows);
     pushUniqueRows(setupFillCandidates);
     pushUniqueRows(actionCandidates.filter((item) => item.priority !== 'P0' && item.priority !== 'P1'));
-    pushUniqueRows(fillerActionRows);
+    // Only show generic filler rows when onboarding setup is fully done
+    if (setupActionRows.length === 0) {
+      pushUniqueRows(fillerActionRows);
+    }
     const urgentCount = actionRequiredRows.length;
 
     return {
