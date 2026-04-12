@@ -339,7 +339,7 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
             ref={el => { buttonRefs.current[idx] = el; }}
             onClick={() => onNav(name)}
             disabled={isBlocked}
-            className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 px-1 transition-colors duration-200 ${
+            className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-colors duration-200 ${
               isActive ? 'text-white' : 'text-slate-500 hover:text-slate-700'
             } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
@@ -353,7 +353,7 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
       {moreItems.length > 0 && (
         <button
           onClick={onMoreToggle}
-          className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 px-1 transition-colors duration-200 ${
+          className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-colors duration-200 ${
             isMoreActive || showMobileMoreNav ? 'text-indigo-700 bg-indigo-50' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
@@ -1908,8 +1908,8 @@ function App() {
           </>
         )}
 
-        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-0">
-          <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
+        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-1">
+          <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
             {/* iOS-style sliding indicator nav */}
             <MobileNav
               items={mobilePrimaryNavItems}
