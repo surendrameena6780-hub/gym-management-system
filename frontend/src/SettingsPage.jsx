@@ -1885,6 +1885,12 @@ const loadRazorpayScript = () => {
                     await fetchSettings();
                   } finally {
                       setProcessingAddonKey(null);
+                      // Re-sync iOS viewport after payment modal completes
+                      window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+                      setTimeout(() => {
+                        document.querySelector('.app-scroll-shell')?.scrollTo({ top: 0, behavior: 'smooth' });
+                        window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+                      }, 300);
                   }
               },
               prefill: {
@@ -1893,7 +1899,19 @@ const loadRazorpayScript = () => {
                   contact: accountData.phone || gymData.phone,
               },
               theme: { color: '#4f46e5' },
-              modal: { ondismiss: () => setProcessingAddonKey(null) },
+              modal: {
+                ondismiss: () => {
+                  setProcessingAddonKey(null);
+                  // Re-sync iOS viewport after Razorpay modal closes — the overlay
+                  // can leave the iOS Safari/PWA viewport in a shifted state
+                  window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+                  // Reset scroll so the page doesn't look "pushed down"
+                  setTimeout(() => {
+                    document.querySelector('.app-scroll-shell')?.scrollTo({ top: 0, behavior: 'smooth' });
+                    window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+                  }, 200);
+                },
+              },
           };
           if (!options.key) {
               toast('Payment gateway not configured.', 'error');
