@@ -156,6 +156,9 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const dashboardRefreshTimerRef = useRef(null);
   const dashboardFetchInFlightRef = useRef(false);
   const dashboardQueuedRefreshRef = useRef(false);
+  const dashboardPendingRefreshRef = useRef(false);
+  const dashboardLastSyncAtRef = useRef(0);
+  const isDashboardActiveRef = useRef(Boolean(isActive));
   const checkinBusyIdsRef = useRef(new Set());
   const broadcastComposerRequestRef = useRef(null);
   const broadcastComposerLoadedRef = useRef(false);
@@ -195,6 +198,25 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
 
   const isAnyDashboardModalOpen = showAddModal || showPaymentModal || showBroadcastModal || showCheckinModal;
   const authHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+
+  const getLatestGlobalDataChangeAt = useCallback(() => {
+    if (typeof window === 'undefined') return 0;
+
+    const memoryValue = Number(window.__gymvaultLastDataChangeAt || 0);
+    let storedValue = 0;
+
+    try {
+      storedValue = Number(window.sessionStorage.getItem('gymvault:data-change-at') || 0);
+    } catch {
+      storedValue = 0;
+    }
+
+    return Math.max(memoryValue, storedValue, 0);
+  }, []);
+
+  useEffect(() => {
+    isDashboardActiveRef.current = Boolean(isActive);
+  }, [isActive]);
 
   useEffect(() => {
     if (!showBroadcastModal) {
@@ -345,6 +367,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     } catch (err) {
       reportClientError('Dashboard fetch', err);
     } finally {
+      dashboardLastSyncAtRef.current = Date.now();
       dashboardFetchInFlightRef.current = false;
       setLoading(false);
       if (dashboardQueuedRefreshRef.current) {
@@ -481,13 +504,28 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   }, [isActive, isAnyDashboardModalOpen]);
 
   useEffect(() => {
-    if (!token || !isActive) return undefined;
+    if (!token) return undefined;
 
-    fetchData();
+    const handleExternalRefresh = (event) => {
+      const eventAt = Number(event?.detail?.at || 0);
+      const latestChangeAt = Math.max(eventAt, getLatestGlobalDataChangeAt(), Date.now());
 
-    const handleExternalRefresh = () => {
-      fetchData();
+      if (latestChangeAt > dashboardLastSyncAtRef.current) {
+        dashboardPendingRefreshRef.current = true;
+      }
+
+      if (dashboardRefreshTimerRef.current) {
+        window.clearTimeout(dashboardRefreshTimerRef.current);
+      }
+
+      dashboardRefreshTimerRef.current = window.setTimeout(() => {
+        dashboardRefreshTimerRef.current = null;
+        if (!dashboardPendingRefreshRef.current) return;
+        dashboardPendingRefreshRef.current = false;
+        fetchData();
+      }, isDashboardActiveRef.current ? 80 : 220);
     };
+
     window.addEventListener('gymvault:data-changed', handleExternalRefresh);
     window.addEventListener('gymvault:app-resumed', handleExternalRefresh);
 
@@ -495,7 +533,23 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       window.removeEventListener('gymvault:data-changed', handleExternalRefresh);
       window.removeEventListener('gymvault:app-resumed', handleExternalRefresh);
     };
-  }, [fetchData, isActive, token]);
+  }, [fetchData, getLatestGlobalDataChangeAt, token]);
+
+  useEffect(() => {
+    if (!token || !isActive) return undefined;
+
+    const latestChangeAt = getLatestGlobalDataChangeAt();
+    const shouldRefresh = dashboardLastSyncAtRef.current === 0
+      || dashboardPendingRefreshRef.current
+      || latestChangeAt > dashboardLastSyncAtRef.current;
+
+    if (shouldRefresh) {
+      dashboardPendingRefreshRef.current = false;
+      fetchData();
+    }
+
+    return undefined;
+  }, [fetchData, getLatestGlobalDataChangeAt, isActive, token]);
 
   const handleStartTour = useCallback(() => {
     localStorage.setItem('gymvault_tour_completed', 'true');
@@ -1707,8 +1761,11 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         action: row.action,
       }))
       : [];
+    const hasMeaningfulCollections = monthlyRevenue > 0 || Number(payStats.today_revenue || 0) > 0 || pendingDuePayments.length > 0;
+    const hasMeaningfulAttendance = active.length >= 5 || todayCheckins > 0;
+    const hasRenewalPipeline = active.length >= 5 || expiringIn7Days.length > 0;
     const fillerActionRows = [
-      buildRecommendation({
+      hasMeaningfulCollections && buildRecommendation({
         id: 'DAILY_COLLECTIONS_REVIEW',
         title: 'Review today\'s collections desk',
         reason: Number(payStats.pending_dues || 0) > 0
@@ -1723,7 +1780,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Daily revenue review',
         action: () => navigateTo('Payments'),
       }),
-      buildRecommendation({
+      hasMeaningfulAttendance && buildRecommendation({
         id: 'ATTENDANCE_DESK_REVIEW',
         title: 'Review today\'s attendance desk',
         reason: Number(todayCheckins || 0) === 0
@@ -1738,7 +1795,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Front desk watch',
         action: () => navigateTo('Attendance'),
       }),
-      buildRecommendation({
+      hasRenewalPipeline && buildRecommendation({
         id: 'RENEWAL_PIPELINE_REVIEW',
         title: 'Review the renewal pipeline',
         reason: expiringIn7Days.length > 0
@@ -1753,7 +1810,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Renewal pipeline review',
         action: () => navigateTo('Members'),
       }),
-    ];
+    ].filter(Boolean);
     const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
     const mergedActionRows = [];
     const seenActionIds = new Set();
@@ -1821,6 +1878,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     navigateTo,
     openBroadcastDraft,
     payStats.pending_dues,
+    payStats.today_revenue,
     plans,
     setup,
     todayCheckins,

@@ -31,6 +31,8 @@ const apiBaseUrl = getApiOrigin()
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = true
 
+const GLOBAL_DATA_CHANGE_STORAGE_KEY = 'gymvault:data-change-at'
+
 const emitGlobalApiError = (message, details = {}) => {
   if (typeof window === 'undefined') {
     return
@@ -40,6 +42,28 @@ const emitGlobalApiError = (message, details = {}) => {
     detail: {
       message,
       ...details,
+    },
+  }))
+}
+
+const broadcastGlobalDataChange = (detail = {}) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const at = Number(detail.at || Date.now())
+  window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at)
+
+  try {
+    window.sessionStorage.setItem(GLOBAL_DATA_CHANGE_STORAGE_KEY, String(at))
+  } catch {
+    // Ignore storage write failures; the CustomEvent still propagates in-memory.
+  }
+
+  window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+    detail: {
+      ...detail,
+      at,
     },
   }))
 }
@@ -67,13 +91,10 @@ axios.interceptors.response.use((response) => {
     && !requestUrl.includes('/api/push/subscribe')
 
   if (typeof window !== 'undefined' && shouldBroadcastDataChange) {
-    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
-      detail: {
-        source: `axios:${method}`,
-        url: requestUrl,
-        at: Date.now(),
-      },
-    }))
+    broadcastGlobalDataChange({
+      source: `axios:${method}`,
+      url: requestUrl,
+    })
   }
 
   return response
