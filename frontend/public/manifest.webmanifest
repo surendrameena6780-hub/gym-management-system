@@ -7,8 +7,8 @@
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#161d4f",
-  "theme_color": "#161d4f",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
   "description": "GymVault management software",
   "categories": ["business", "productivity", "health"],
   "serviceworker": {
