@@ -168,6 +168,7 @@ const normalizeTemplateSyncStatus = (value) => {
   const status = String(value || '').trim().toUpperCase();
   if (!status) return 'NOT_SYNCED';
   if (status.includes('APPROVED') || status === 'ACTIVE' || status.includes('ENABLE') || status === 'LIVE') return 'APPROVED';
+  if (status.includes('SUBMITTED') || status.includes('ACCEPTED')) return 'SUBMITTED';
   if (status.includes('PENDING') || status.includes('PROCESS') || status.includes('QUEUE') || status.includes('REVIEW') || status.includes('REQUESTED')) return 'PENDING';
   if (status.includes('REJECT')) return 'REJECTED';
   if (status.includes('DISABLE') || status.includes('INACTIVE')) return 'DISABLED';
@@ -223,6 +224,7 @@ const getTemplateSyncMeta = (status) => {
     READY: { label: 'Templates Ready', pill: 'bg-emerald-100 text-emerald-700' },
     PARTIAL: { label: 'Partially Ready', pill: 'bg-amber-100 text-amber-700' },
     PENDING_APPROVAL: { label: 'Pending Approval', pill: 'bg-amber-100 text-amber-700' },
+    SUBMITTED: { label: 'Submitted To MSG91', pill: 'bg-amber-100 text-amber-700' },
     ERROR: { label: 'Needs Attention', pill: 'bg-rose-100 text-rose-700' },
     NOT_SYNCED: { label: 'Not Synced', pill: 'bg-slate-100 text-slate-600' },
   };
@@ -3654,6 +3656,16 @@ const loadRazorpayScript = () => {
                         <div className="divide-y divide-slate-100">
                           {(integrationData.templates || []).map((template, index) => {
                             const customTemplateLocked = isCustomMessageTemplate(template) && !canManageCustomTemplates;
+                            const templateSyncStatus = normalizeTemplateSyncStatus(template.whatsapp_template_status);
+                            const templateSyncMetaKey = templateSyncStatus === 'APPROVED'
+                              ? 'READY'
+                              : templateSyncStatus === 'PENDING'
+                                ? 'PENDING_APPROVAL'
+                                : templateSyncStatus === 'SUBMITTED'
+                                  ? 'SUBMITTED'
+                                  : templateSyncStatus === 'REJECTED' || templateSyncStatus === 'FAILED'
+                                    ? 'ERROR'
+                                    : 'NOT_SYNCED';
                             return (
                             <div key={template.template_key}>
                               <button type="button"
@@ -3669,8 +3681,8 @@ const loadRazorpayScript = () => {
                                           Custom
                                         </span>
                                       )}
-                                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${getTemplateSyncMeta(normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'APPROVED' ? 'READY' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'PENDING' ? 'PENDING_APPROVAL' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'REJECTED' || normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'FAILED' ? 'ERROR' : normalizeTemplateSyncStatus(template.whatsapp_template_status) === 'DISABLED' ? 'NOT_SYNCED' : 'NOT_SYNCED').pill}`}>
-                                        {normalizeTemplateSyncStatus(template.whatsapp_template_status).replace(/_/g, ' ')}
+                                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${getTemplateSyncMeta(templateSyncMetaKey).pill}`}>
+                                        {templateSyncStatus.replace(/_/g, ' ')}
                                       </span>
                                     </div>
                                   </div>
@@ -3717,7 +3729,7 @@ const loadRazorpayScript = () => {
                                       </div>
                                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                                         <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Sync Status</p>
-                                        <p className="mt-1 text-xs font-bold text-slate-700">{normalizeTemplateSyncStatus(template.whatsapp_template_status).replace(/_/g, ' ')}</p>
+                                        <p className="mt-1 text-xs font-bold text-slate-700">{templateSyncStatus.replace(/_/g, ' ')}</p>
                                         {template.whatsapp_template_error && (
                                           <p className="mt-2 text-[11px] font-semibold text-rose-600 leading-relaxed">{template.whatsapp_template_error}</p>
                                         )}

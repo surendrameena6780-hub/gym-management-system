@@ -511,6 +511,7 @@ const normalizeTemplateStatus = (value) => {
     const status = String(value || '').trim().toUpperCase();
     if (!status) return 'NOT_SYNCED';
     if (status.includes('APPROVED') || status === 'ACTIVE' || status.includes('ENABLE') || status === 'LIVE') return 'APPROVED';
+    if (status.includes('SUBMITTED') || status.includes('ACCEPTED')) return 'SUBMITTED';
     if (status.includes('PENDING') || status.includes('PROCESS') || status.includes('QUEUE') || status.includes('REVIEW') || status.includes('REQUESTED')) return 'PENDING';
     if (status.includes('REJECT')) return 'REJECTED';
     if (status.includes('DISABLE') || status.includes('INACTIVE')) return 'DISABLED';
@@ -525,9 +526,9 @@ const summarizeTemplateSyncStatus = (templates) => {
     const statuses = activeTemplates.map((template) => normalizeTemplateStatus(template.whatsapp_template_status));
     if (statuses.every((status) => status === 'APPROVED')) return 'READY';
     if (statuses.some((status) => status === 'REJECTED' || status === 'FAILED')) {
-        return statuses.some((status) => status === 'APPROVED' || status === 'PENDING') ? 'PARTIAL' : 'ERROR';
+        return statuses.some((status) => status === 'APPROVED' || status === 'PENDING' || status === 'SUBMITTED') ? 'PARTIAL' : 'ERROR';
     }
-    if (statuses.some((status) => status === 'PENDING')) return 'PENDING_APPROVAL';
+    if (statuses.some((status) => status === 'PENDING' || status === 'SUBMITTED')) return 'PENDING_APPROVAL';
     if (statuses.some((status) => status === 'APPROVED')) return 'PARTIAL';
     return 'NOT_SYNCED';
 };
@@ -853,14 +854,14 @@ const syncGymWhatsAppState = async (gymId) => {
                 : providerTemplate
                     ? normalizeTemplateStatus(providerTemplate.template_status)
                     : submittedTemplateNames.has(desiredName.toLowerCase())
-                        ? 'PENDING'
+                        ? 'SUBMITTED'
                         : currentStatus;
             const nextError = template.is_active === false
                 ? null
                 : providerTemplate
                     ? null
                     : submittedTemplateNames.has(desiredName.toLowerCase())
-                        ? null
+                        ? 'MSG91 accepted the submission, but this template is not visible in the provider template list yet. Refresh again after a short delay or check the MSG91 pending filter.'
                         : template.whatsapp_template_error || null;
 
             await pool.query(
@@ -1413,6 +1414,8 @@ router.post('/integrations/templates/custom', auth, async (req, res) => {
                 message = 'Custom template created and approved on MSG91.';
             } else if (templateStatus === 'PENDING') {
                 message = 'Custom template created and submitted to MSG91 for approval.';
+            } else if (templateStatus === 'SUBMITTED') {
+                message = 'Custom template created and submitted to MSG91. The provider has not listed it yet.';
             } else if (templateStatus === 'FAILED' || templateStatus === 'REJECTED') {
                 message = 'Custom template created, but MSG91 sync needs attention.';
             } else {

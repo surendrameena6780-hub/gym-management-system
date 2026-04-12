@@ -474,11 +474,28 @@ const listWhatsAppTemplates = async (integratedNumber) => {
         throw new Error('MSG91 WhatsApp is not configured for template sync.');
     }
 
-    const payload = await msg91Request({
+    const loadTemplatePayload = async (templateStatus) => msg91Request({
         path: `/api/v5/whatsapp/get-template-client/${normalizedNumber}`,
         method: 'GET',
         authKey,
+        query: templateStatus ? { template_status: templateStatus } : undefined,
     });
+
+    const payloadResults = await Promise.allSettled([
+        loadTemplatePayload(),
+        loadTemplatePayload('approved'),
+        loadTemplatePayload('pending'),
+        loadTemplatePayload('rejected'),
+    ]);
+
+    const payloads = payloadResults
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value);
+
+    if (payloads.length === 0) {
+        const failedResult = payloadResults.find((result) => result.status === 'rejected');
+        throw failedResult?.reason || new Error('MSG91 template sync failed.');
+    }
 
     const templatesByKey = new Map();
     const upsertTemplate = (template) => {
@@ -503,31 +520,33 @@ const listWhatsAppTemplates = async (integratedNumber) => {
         }
     };
 
-    walkCollection(payload, (node) => {
-        if (!node || typeof node !== 'object' || Array.isArray(node)) return;
-        const templateName = toTrimmedString(node.template_name || node.name || node.templateName || node.element_name);
-        const templateCategory = toTrimmedString(node.category || node.template_category).toUpperCase();
+    payloads.forEach((payload) => {
+        walkCollection(payload, (node) => {
+            if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+            const templateName = toTrimmedString(node.template_name || node.name || node.templateName || node.element_name);
+            const templateCategory = toTrimmedString(node.category || node.template_category).toUpperCase();
 
-        if (templateName && Array.isArray(node.languages) && node.languages.length > 0) {
-            node.languages.forEach((languageNode) => {
-                const localizedName = toTrimmedString(languageNode?.template_name || languageNode?.name || templateName);
-                upsertTemplate({
-                    template_name: localizedName,
-                    template_status: toTrimmedString(languageNode?.template_status || languageNode?.status || languageNode?.templateStatus).toUpperCase(),
-                    template_language: toTrimmedString(languageNode?.template_language || languageNode?.language?.code || languageNode?.language || 'en_US'),
-                    template_category: toTrimmedString(languageNode?.category || languageNode?.template_category || templateCategory).toUpperCase(),
+            if (templateName && Array.isArray(node.languages) && node.languages.length > 0) {
+                node.languages.forEach((languageNode) => {
+                    const localizedName = toTrimmedString(languageNode?.template_name || languageNode?.name || templateName);
+                    upsertTemplate({
+                        template_name: localizedName,
+                        template_status: toTrimmedString(languageNode?.template_status || languageNode?.status || languageNode?.templateStatus).toUpperCase(),
+                        template_language: toTrimmedString(languageNode?.template_language || languageNode?.language?.code || languageNode?.language || 'en_US'),
+                        template_category: toTrimmedString(languageNode?.category || languageNode?.template_category || templateCategory).toUpperCase(),
+                    });
                 });
-            });
-            return;
-        }
+                return;
+            }
 
-        const templateStatus = toTrimmedString(node.template_status || node.status || node.templateStatus).toUpperCase();
-        const templateLanguage = toTrimmedString(node.template_language || node.language?.code || node.language || 'en_US');
-        upsertTemplate({
-            template_name: templateName,
-            template_status: templateStatus,
-            template_language: templateLanguage,
-            template_category: templateCategory,
+            const templateStatus = toTrimmedString(node.template_status || node.status || node.templateStatus).toUpperCase();
+            const templateLanguage = toTrimmedString(node.template_language || node.language?.code || node.language || 'en_US');
+            upsertTemplate({
+                template_name: templateName,
+                template_status: templateStatus,
+                template_language: templateLanguage,
+                template_category: templateCategory,
+            });
         });
     });
 
