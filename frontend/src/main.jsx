@@ -162,22 +162,25 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
     const isKeyboardOpen = isEditableElement(document.activeElement) && inferredKeyboardInset > KEYBOARD_OPEN_THRESHOLD_PX
 
     if (!isKeyboardOpen && layoutViewportHeight > 0) {
-      stableViewportHeight = layoutViewportHeight
+      // Only ever GROW the stable height — on iOS standalone PWA, any reading
+      // smaller than the current stable value is a transient glitch (boot
+      // timing, app resume, or a third-party overlay like Razorpay briefly
+      // shifting the viewport). Taking the maximum anchors the shell to the
+      // largest (correct) height seen this session and prevents layout jumps.
+      if (layoutViewportHeight > stableViewportHeight) {
+        stableViewportHeight = layoutViewportHeight
+      }
     } else if (stableViewportHeight <= 0 && layoutViewportHeight > 0) {
       stableViewportHeight = layoutViewportHeight
     }
 
-    if (isKeyboardOpen) {
-      // Lock shell to pre-keyboard height so the app doesn't reflow
-      const lockedHeight = Math.max(stableViewportHeight || 0, layoutViewportHeight || 0)
-      if (lockedHeight > 0) {
-        document.documentElement.style.setProperty('--app-viewport-height', `${lockedHeight}px`)
-      }
-    } else {
-      // Let CSS 100dvh handle height — avoids iOS Safari/standalone PWA
-      // bugs where innerHeight reports inconsistent values across app
-      // launches, third-party redirects (Razorpay), and resumes.
-      document.documentElement.style.removeProperty('--app-viewport-height')
+    // Always write a px value — never rely on CSS 100dvh whose computed value
+    // can differ between PWA launches on iOS/WebKit (a known WebKit quirk).
+    const resolvedViewportHeight = isKeyboardOpen
+      ? (stableViewportHeight || layoutViewportHeight)
+      : (stableViewportHeight || layoutViewportHeight)
+    if (resolvedViewportHeight > 0) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${resolvedViewportHeight}px`)
     }
 
     document.documentElement.style.setProperty('--app-keyboard-inset', `${isKeyboardOpen ? inferredKeyboardInset : 0}px`)

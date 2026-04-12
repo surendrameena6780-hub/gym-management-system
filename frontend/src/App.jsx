@@ -1523,7 +1523,7 @@ function App() {
           </div>
         </aside>
 
-        <div className="flex-1 flex flex-col app-shell-height overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden">
           <header className="relative z-50 shrink-0 border-b border-white/60 app-header-safe">
             <div className="app-header-row flex items-center justify-between px-4 desktop:px-8">
               {/* Left: page name */}

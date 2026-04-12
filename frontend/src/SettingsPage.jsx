@@ -765,6 +765,18 @@ const loadRazorpayScript = () => {
   const normalizeAfterExternalCheckoutReturn = useCallback(() => {
     if (typeof window === 'undefined') return;
 
+    // Razorpay JS checkout sets body { position:fixed; top:-Xpx; overflow:hidden }
+    // on iOS to prevent background scroll. If these styles linger after the modal
+    // closes (race condition, quick dismiss, etc.) the entire page appears shifted.
+    // Explicitly reset them before anything else.
+    document.body.style.removeProperty('position');
+    document.body.style.removeProperty('top');
+    document.body.style.removeProperty('overflow');
+    document.body.style.removeProperty('width');
+    document.documentElement.style.removeProperty('overflow');
+    document.body.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+
     document.documentElement.classList.remove('app-modal-open');
     document.activeElement?.blur?.();
     window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
@@ -1885,12 +1897,7 @@ const loadRazorpayScript = () => {
                     await fetchSettings();
                   } finally {
                       setProcessingAddonKey(null);
-                      // Re-sync iOS viewport after payment modal completes
-                      window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
-                      setTimeout(() => {
-                        document.querySelector('.app-scroll-shell')?.scrollTo({ top: 0, behavior: 'smooth' });
-                        window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
-                      }, 300);
+                      normalizeAfterExternalCheckoutReturn();
                   }
               },
               prefill: {
@@ -1902,14 +1909,7 @@ const loadRazorpayScript = () => {
               modal: {
                 ondismiss: () => {
                   setProcessingAddonKey(null);
-                  // Re-sync iOS viewport after Razorpay modal closes — the overlay
-                  // can leave the iOS Safari/PWA viewport in a shifted state
-                  window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
-                  // Reset scroll so the page doesn't look "pushed down"
-                  setTimeout(() => {
-                    document.querySelector('.app-scroll-shell')?.scrollTo({ top: 0, behavior: 'smooth' });
-                    window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
-                  }, 200);
+                  normalizeAfterExternalCheckoutReturn();
                 },
               },
           };
