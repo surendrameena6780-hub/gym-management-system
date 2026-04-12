@@ -89,6 +89,7 @@ const PlansPage = ({ appRuntime }) => {
   const [showModal, setShowModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [currentFeature, setCurrentFeature] = useState(""); 
   
   // ANALYTICS DATA STATE
@@ -212,16 +213,38 @@ const PlansPage = ({ appRuntime }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (savingPlan) return;
+
+    const trimmedName = String(formData.name || '').trim();
+    if (!trimmedName) {
+      toast?.('Plan name is required.', 'error');
+      return;
+    }
+
+    const payload = {
+      ...formData,
+      name: trimmedName,
+      discount_valid_until: formData.discount_valid_until || null,
+      features: Array.isArray(formData.features)
+        ? formData.features.map((feature) => String(feature || '').trim()).filter(Boolean)
+        : [],
+    };
+
     try {
+      setSavingPlan(true);
       if (isEditing) {
-        await axios.put(`/api/plans/${formData.id}`, formData, { headers: { 'x-auth-token': token } });
+        await axios.put(`/api/plans/${formData.id}`, payload, { headers: { 'x-auth-token': token } });
       } else {
-        await axios.post('/api/plans/add', formData, { headers: { 'x-auth-token': token } });
+        await axios.post('/api/plans/add', payload, { headers: { 'x-auth-token': token } });
       }
       setShowModal(false);
-      fetchPlans();
+      await fetchPlans();
       toast?.(isEditing ? "Plan updated successfully!" : "Plan created successfully!", "success");
-    } catch (_err) { toast?.("Error saving plan. Please try again.", "error"); }
+    } catch (err) {
+      toast?.(err?.response?.data?.error || "Error saving plan. Please try again.", "error");
+    } finally {
+      setSavingPlan(false);
+    }
   };
 
   const handleDelete = (id) => {
@@ -559,7 +582,7 @@ const PlansPage = ({ appRuntime }) => {
                              <button type="button" onClick={() => setFormData({...formData, is_popular: !formData.is_popular})} className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.is_popular ? 'bg-orange-500' : 'bg-slate-200'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${formData.is_popular ? 'translate-x-6' : 'translate-x-0'}`} /></button>
                         </div>
                     </div>
-                    <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-wider hover:bg-slate-800 shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-2"><Save size={18} /> {isEditing ? 'Update Plan' : 'Create Plan'}</button>
+                    <button type="submit" disabled={savingPlan} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-wider hover:bg-slate-800 shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"><Save size={18} /> {savingPlan ? 'Saving...' : isEditing ? 'Update Plan' : 'Create Plan'}</button>
                 </form>
             </div>
         </div>

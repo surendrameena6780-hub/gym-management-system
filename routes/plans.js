@@ -15,7 +15,7 @@ const {
 } = require('../utils/fieldValidation');
 
 const normalizePlanPayload = (body = {}) => ({
-    name: ensureTrimmedString(body.name, { field: 'name', required: true, min: 2, max: 120 }),
+    name: ensureTrimmedString(body.name, { field: 'name', required: true, min: 1, max: 120 }),
     price: ensureNumber(body.price, { field: 'price', min: 0, max: 1000000, defaultValue: 0 }),
     duration_days: ensureInteger(body.duration_days, { field: 'duration_days', min: 1, max: 3650, defaultValue: 30 }),
     features: ensureStringArray(body.features, { field: 'features', maxItems: 50, itemMax: 120 }),
