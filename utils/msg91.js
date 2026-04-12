@@ -441,6 +441,17 @@ const findIntegratedWhatsAppNumber = (numbers, candidate) => {
     return (Array.isArray(numbers) ? numbers : []).find((item) => normalizeCountryCodePhone(item?.integrated_number) === normalized) || null;
 };
 
+const getProviderTemplateStatusPriority = (status) => {
+    const normalizedStatus = toTrimmedString(status).toUpperCase();
+    if (!normalizedStatus) return 0;
+    if (normalizedStatus.includes('APPROVED') || normalizedStatus === 'ACTIVE' || normalizedStatus.includes('ENABLE') || normalizedStatus === 'LIVE') return 5;
+    if (normalizedStatus.includes('PENDING') || normalizedStatus.includes('PROCESS') || normalizedStatus.includes('QUEUE') || normalizedStatus.includes('REVIEW') || normalizedStatus.includes('REQUESTED')) return 4;
+    if (normalizedStatus.includes('DISABLE') || normalizedStatus.includes('INACTIVE')) return 3;
+    if (normalizedStatus.includes('REJECT')) return 2;
+    if (normalizedStatus.includes('FAIL') || normalizedStatus.includes('ERROR')) return 1;
+    return 0;
+};
+
 const listWhatsAppTemplates = async (integratedNumber) => {
     const authKey = getMsg91WhatsAppAuthKey();
     const normalizedNumber = normalizeCountryCodePhone(integratedNumber);
@@ -454,8 +465,29 @@ const listWhatsAppTemplates = async (integratedNumber) => {
         authKey,
     });
 
-    const templates = [];
-    const seen = new Set();
+    const templatesByKey = new Map();
+    const upsertTemplate = (template) => {
+        const templateName = toTrimmedString(template?.template_name);
+        const templateLanguage = toTrimmedString(template?.template_language || 'en_US') || 'en_US';
+        const templateStatus = toTrimmedString(template?.template_status).toUpperCase();
+
+        if (!templateName || !templateStatus || ['SUCCESS', 'OK'].includes(templateStatus)) {
+            return;
+        }
+
+        const mapKey = `${templateName.toLowerCase()}::${templateLanguage.toLowerCase()}`;
+        const existingTemplate = templatesByKey.get(mapKey);
+
+        if (!existingTemplate || getProviderTemplateStatusPriority(templateStatus) >= getProviderTemplateStatusPriority(existingTemplate.template_status)) {
+            templatesByKey.set(mapKey, {
+                template_name: templateName,
+                template_status: templateStatus,
+                template_language: templateLanguage,
+                template_category: toTrimmedString(template?.template_category).toUpperCase(),
+            });
+        }
+    };
+
     walkCollection(payload, (node) => {
         if (!node || typeof node !== 'object' || Array.isArray(node)) return;
         const templateName = toTrimmedString(node.template_name || node.name || node.templateName || node.element_name);
@@ -464,9 +496,7 @@ const listWhatsAppTemplates = async (integratedNumber) => {
         if (templateName && Array.isArray(node.languages) && node.languages.length > 0) {
             node.languages.forEach((languageNode) => {
                 const localizedName = toTrimmedString(languageNode?.template_name || languageNode?.name || templateName);
-                if (!localizedName || seen.has(localizedName.toLowerCase())) return;
-                seen.add(localizedName.toLowerCase());
-                templates.push({
+                upsertTemplate({
                     template_name: localizedName,
                     template_status: toTrimmedString(languageNode?.template_status || languageNode?.status || languageNode?.templateStatus).toUpperCase(),
                     template_language: toTrimmedString(languageNode?.template_language || languageNode?.language?.code || languageNode?.language || 'en_US'),
@@ -478,11 +508,7 @@ const listWhatsAppTemplates = async (integratedNumber) => {
 
         const templateStatus = toTrimmedString(node.template_status || node.status || node.templateStatus).toUpperCase();
         const templateLanguage = toTrimmedString(node.template_language || node.language?.code || node.language || 'en_US');
-        const hasUsefulTemplateState = templateStatus && !['SUCCESS', 'OK'].includes(templateStatus);
-        if (!templateName || !hasUsefulTemplateState || seen.has(templateName.toLowerCase())) return;
-
-        seen.add(templateName.toLowerCase());
-        templates.push({
+        upsertTemplate({
             template_name: templateName,
             template_status: templateStatus,
             template_language: templateLanguage,
@@ -490,7 +516,7 @@ const listWhatsAppTemplates = async (integratedNumber) => {
         });
     });
 
-    return templates;
+    return Array.from(templatesByKey.values());
 };
 
 const extractTemplatePlaceholderKeys = (text) => {
