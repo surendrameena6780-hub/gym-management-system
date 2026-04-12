@@ -202,7 +202,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .mobile-floating-offset {
-  bottom: calc(var(--mobile-nav-offset) + 0.1rem);
+  bottom: calc(var(--mobile-nav-offset) + 0.5rem);
 }
 
 .app-mobile-nav,
@@ -281,7 +281,7 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .dashboard-content-safe {
-  padding-bottom: calc(var(--mobile-nav-offset) + 4.5rem);
+  padding-bottom: calc(var(--mobile-nav-offset) + 4rem);
 }
 
 .payments-mobile-list-scroll,
