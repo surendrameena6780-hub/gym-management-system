@@ -147,8 +147,13 @@ router.get('/setup-status', async (req, res) => {
         const result = await pool.query(
             `SELECT
                 (
-                    COALESCE(LENGTH(BTRIM(address)), 0) > 5
-                    AND COALESCE(LENGTH(BTRIM(phone)), 0) > 0
+                    COALESCE(LENGTH(BTRIM(name)), 0) > 1
+                    AND COALESCE(LENGTH(BTRIM(address)), 0) > 5
+                    AND (
+                        COALESCE(LENGTH(BTRIM(phone)), 0) > 0
+                        OR COALESCE(LENGTH(BTRIM(support_email)), 0) > 0
+                        OR COALESCE(LENGTH(BTRIM(website)), 0) > 0
+                    )
                 ) AS step1_profile,
                 EXISTS (
                     SELECT 1

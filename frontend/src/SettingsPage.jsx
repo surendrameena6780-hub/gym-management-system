@@ -2168,6 +2168,13 @@ const loadRazorpayScript = () => {
         headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' }
       });
       await axios.put('/api/settings/gym', gymData, headers);
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+        detail: {
+          source: 'settings-profile-save',
+          scope: 'account-gym',
+          at: Date.now(),
+        },
+      }));
       if (accountRes.data?.profile_pic) {
         setPreviewUrl(normalizeProfileImageUrl(accountRes.data.profile_pic));
       } else if (removeProfileImage) {

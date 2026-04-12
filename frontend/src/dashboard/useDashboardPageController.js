@@ -1319,7 +1319,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       !setup.steps?.profile && {
         id: 'SETUP_PROFILE',
         title: 'Complete your business profile',
-        description: 'Add gym phone, address, and owner-facing details before you start collecting members and payments.',
+        description: 'Add your gym address and at least one member-facing contact detail before you start collecting members and payments.',
         cta: 'Open Settings',
         action: () => navigateTo('Settings', 'account'),
       },
