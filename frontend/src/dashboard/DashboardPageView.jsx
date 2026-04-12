@@ -366,7 +366,7 @@ const FloatingActionBar = ({ controller }) => {
   return (
     <div className="app-floating-action-bar fixed mobile-floating-offset left-1/2 -translate-x-1/2 z-[90] animate-in fade-in duration-500 w-[calc(100%-1.5rem)] max-w-[520px]">
       <div
-        className="gv-fab-shell rounded-[22px] border border-white/8 backdrop-blur-2xl p-1.5"
+        className="gv-fab-shell rounded-[22px] border border-white/8 backdrop-blur-2xl p-1"
         style={{
           background: 'rgba(10, 12, 30, 0.94)',
           boxShadow: '0 8px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.07)',
@@ -387,7 +387,7 @@ const FloatingActionBar = ({ controller }) => {
                 onClick={() => launchQuickAction(label, onClick)}
                 disabled={Boolean(quickActionLoading)}
                 aria-label={label}
-                className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] hover:bg-white/5 disabled:opacity-70 ${color}`}
+                className={`flex flex-col items-center justify-center gap-1 py-2 px-2 rounded-[16px] transition-all duration-150 active:scale-[0.93] hover:bg-white/5 disabled:opacity-70 ${color}`}
               >
                 {isLoading ? <RefreshCw size={15} strokeWidth={2.5} className="animate-spin" /> : icon}
                 <span className="text-[10px] font-bold leading-none tracking-wide">{label}</span>

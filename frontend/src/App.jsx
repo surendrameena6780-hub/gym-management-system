@@ -339,7 +339,7 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
             ref={el => { buttonRefs.current[idx] = el; }}
             onClick={() => onNav(name)}
             disabled={isBlocked}
-            className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-colors duration-200 ${
+            className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 px-1 transition-colors duration-200 ${
               isActive ? 'text-white' : 'text-slate-500 hover:text-slate-700'
             } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
@@ -353,7 +353,7 @@ function MobileNav({ items, moreItems, currentPage, isMoreActive, showMobileMore
       {moreItems.length > 0 && (
         <button
           onClick={onMoreToggle}
-          className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-2 px-1 transition-colors duration-200 ${
+          className={`relative z-10 flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 px-1 transition-colors duration-200 ${
             isMoreActive || showMobileMoreNav ? 'text-indigo-700 bg-indigo-50' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
