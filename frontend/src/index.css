@@ -61,7 +61,7 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: max(100vh, var(--app-viewport-height));
+  min-height: var(--app-viewport-height);
   background: #eef0ff;
   overflow-x: hidden;
   color: #0f172a;
@@ -81,7 +81,7 @@ textarea {
 }
 
 #root {
-  min-height: max(100vh, var(--app-viewport-height));
+  min-height: var(--app-viewport-height);
   background:
     radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.12) 0%, transparent 48%),
     radial-gradient(circle at 82% 20%, rgba(168, 85, 247, 0.09) 0%, transparent 42%),
@@ -122,31 +122,12 @@ html.gv-compact-ui main.app-scroll-shell > div {
 }
 
 .app-shell-height {
-  min-height: max(100vh, var(--app-viewport-height));
-  height: max(100vh, var(--app-viewport-height));
+  min-height: var(--app-viewport-height);
+  height: var(--app-viewport-height);
 }
 
 .app-min-shell-height {
-  min-height: max(100vh, var(--app-viewport-height));
-}
-
-@supports (height: 100dvh) {
-  body {
-    min-height: max(100dvh, var(--app-viewport-height));
-  }
-
-  #root {
-    min-height: max(100dvh, var(--app-viewport-height));
-  }
-
-  .app-shell-height {
-    min-height: max(100dvh, var(--app-viewport-height));
-    height: max(100dvh, var(--app-viewport-height));
-  }
-
-  .app-min-shell-height {
-    min-height: max(100dvh, var(--app-viewport-height));
-  }
+  min-height: var(--app-viewport-height);
 }
 
 .app-header-safe {

@@ -196,14 +196,23 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
     }, 180)
   }
 
+  let resumeLateTimeoutId = 0
   const notifyAppResumed = (source) => {
     queueViewportSync()
     if (resumeSyncTimeoutId) {
       window.clearTimeout(resumeSyncTimeoutId)
     }
+    if (resumeLateTimeoutId) {
+      window.clearTimeout(resumeLateTimeoutId)
+    }
     resumeSyncTimeoutId = window.setTimeout(() => {
       queueViewportSync()
-    }, 90)
+    }, 120)
+    // iOS Safari can take 300ms+ to stabilise the viewport after returning
+    // from a third-party app (e.g. Razorpay payment redirect)
+    resumeLateTimeoutId = window.setTimeout(() => {
+      queueViewportSync()
+    }, 380)
     window.dispatchEvent(new CustomEvent('gymvault:app-resumed', {
       detail: {
         source,
