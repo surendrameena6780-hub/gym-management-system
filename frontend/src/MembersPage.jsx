@@ -1032,9 +1032,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isActive) return;
     fetchPlans();
-  }, [fetchPlans, token]);
+  }, [fetchPlans, isActive, token]);
 
   useEffect(() => {
     if (!token || !isActive) return;
