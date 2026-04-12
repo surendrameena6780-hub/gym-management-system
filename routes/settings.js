@@ -527,6 +527,24 @@ const summarizeTemplateSyncStatus = (templates) => {
     return 'NOT_SYNCED';
 };
 
+const areTemplateDefinitionsEquivalent = (currentTemplate, nextTemplate, gymId) => {
+    if (!currentTemplate || !nextTemplate) {
+        return false;
+    }
+
+    const expectedTemplateName = buildTemplateName(gymId, nextTemplate.template_key, nextTemplate.whatsapp_text);
+    const expectedTemplateCategory = String(
+        nextTemplate.whatsapp_template_category || pickTemplateCategory(nextTemplate.template_key, nextTemplate.whatsapp_text) || 'UTILITY'
+    ).toUpperCase();
+
+    return String(currentTemplate.title || '') === String(nextTemplate.title || '')
+        && String(currentTemplate.whatsapp_text || '') === String(nextTemplate.whatsapp_text || '')
+        && String(currentTemplate.sms_text || '') === String(nextTemplate.sms_text || '')
+        && Boolean(currentTemplate.is_active !== false) === Boolean(nextTemplate.is_active)
+        && String(currentTemplate.whatsapp_template_name || '') === expectedTemplateName
+        && String(currentTemplate.whatsapp_template_category || '').toUpperCase() === expectedTemplateCategory;
+};
+
 const seedMessageTemplates = async (gymId, db = pool) => {
     for (const template of MESSAGE_TEMPLATE_DEFAULTS) {
         const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
@@ -1153,7 +1171,11 @@ router.get('/integrations', auth, async (req, res) => {
         await ensureMemberPaymentsSchema();
 
         const gymId = req.user.gym_id;
-        const messagingState = await syncGymWhatsAppState(gymId);
+        const refreshRequested = ['1', 'true', 'yes'].includes(String(req.query?.refresh || '').trim().toLowerCase());
+        await seedMessageTemplates(gymId);
+        const messagingState = refreshRequested
+            ? await syncGymWhatsAppState(gymId)
+            : await loadMessagingState(gymId);
 
         const usageRes = await pool.query(
             `SELECT COALESCE(SUM(sent_to_count), 0)::INT AS monthly_sent
@@ -1398,6 +1420,8 @@ router.put('/integrations', auth, async (req, res) => {
 
         const currentGym = currentGymRes.rows[0] || {};
         const currentWhatsAppNumber = normalizeWhatsAppNumber(currentGym.messaging_whatsapp_number);
+        let messagingSyncRequired = false;
+        let templateSyncRequired = false;
 
         if (shouldSaveMessaging) {
             const ownerMobileInput = ensureTrimmedString(req.body?.owner_mobile, { field: 'owner_mobile', max: 30 });
@@ -1426,6 +1450,7 @@ router.put('/integrations', auth, async (req, res) => {
             );
 
             if (normalizedWhatsAppNumber !== currentWhatsAppNumber) {
+                messagingSyncRequired = true;
                 await client.query(
                     `UPDATE gyms
                      SET messaging_whatsapp_display_name = NULL,
@@ -1467,6 +1492,23 @@ router.put('/integrations', auth, async (req, res) => {
 
             const templateEntries = normalizeIntegrationTemplatesInput(req.body?.templates);
             if (templateEntries.length > 0) {
+                const currentTemplatesRes = await client.query(
+                    `SELECT
+                        template_key,
+                        title,
+                        whatsapp_text,
+                        sms_text,
+                        whatsapp_template_name,
+                        whatsapp_template_category,
+                        is_active
+                     FROM gym_message_templates
+                     WHERE gym_id = $1`,
+                    [gymId]
+                );
+                const currentTemplatesByKey = new Map(
+                    (currentTemplatesRes.rows || []).map((template) => [String(template.template_key || '').trim().toUpperCase(), template])
+                );
+
                 const hasCustomTemplatesInPayload = templateEntries.some((template) => String(template.template_key || '').trim().toUpperCase().startsWith(CUSTOM_TEMPLATE_KEY_PREFIX));
                 if (hasCustomTemplatesInPayload) {
                     const billingConfig = await getBillingConfig(client);
@@ -1477,6 +1519,11 @@ router.put('/integrations', auth, async (req, res) => {
                 for (const template of templateEntries) {
                     const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
                     const templateCategory = template.whatsapp_template_category || pickTemplateCategory(template.template_key, template.whatsapp_text);
+                    const existingTemplate = currentTemplatesByKey.get(String(template.template_key || '').trim().toUpperCase());
+
+                    if (!areTemplateDefinitionsEquivalent(existingTemplate, { ...template, whatsapp_template_category: templateCategory }, gymId)) {
+                        templateSyncRequired = true;
+                    }
 
                     await client.query(
                         `INSERT INTO gym_message_templates (
@@ -1586,7 +1633,7 @@ router.put('/integrations', auth, async (req, res) => {
         await client.query('COMMIT');
         transactionOpen = false;
 
-        if (shouldSaveMessaging || shouldSaveCampaigns) {
+        if (messagingSyncRequired || templateSyncRequired) {
             await syncGymWhatsAppState(gymId);
         }
 

@@ -292,7 +292,7 @@ const PlansPage = ({ appRuntime }) => {
               {/* Analytics Button (Top Right) */}
               <button 
                 onClick={() => openAnalytics(plan.id)}
-                className="absolute top-5 right-5 sm:top-8 sm:right-8 text-slate-300 hover:text-slate-900 transition-colors p-2 hover:bg-slate-50 rounded-full"
+                className="absolute top-6 right-5 sm:top-7 sm:right-7 inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/90 p-2 text-slate-400 shadow-sm transition-colors hover:border-slate-300 hover:bg-white hover:text-slate-900"
                 title="View Analytics"
               >
                 <BarChart3 size={20} />
@@ -328,19 +328,20 @@ const PlansPage = ({ appRuntime }) => {
                   <span className="text-slate-400 font-bold text-sm whitespace-nowrap">/ period</span>
                 </div>
 
-                {isOfferActive ? (
-                    <div className="flex items-center gap-2 mt-2">
-                         <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                            <Clock size={10} /> Limited Time Deal
-                        </span>
-                    </div>
-                ) : (
-                    <div className="flex items-center gap-2 mt-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => openAnalytics(plan.id)}>
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                            <TrendingUp size={10} /> View Insights
-                        </span>
-                    </div>
-                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {isOfferActive && (
+                    <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                      <Clock size={10} /> Limited Time Deal
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openAnalytics(plan.id)}
+                    className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-bold text-emerald-700 transition-colors hover:bg-emerald-200"
+                  >
+                    <TrendingUp size={10} /> Get Analytics
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 space-y-4 mb-8">

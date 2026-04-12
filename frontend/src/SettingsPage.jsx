@@ -105,6 +105,11 @@ const normalizeCheckoutCouponCode = (value) => String(value || '')
   .replace(/[^A-Z0-9_-]/g, '')
   .slice(0, 32);
 
+const scrollSettingsShellToTop = () => {
+  if (typeof document === 'undefined') return;
+  document.querySelector('main.app-scroll-shell')?.scrollTo({ top: 0 });
+};
+
 const createBillingCheckoutState = (overrides = {}) => ({
   open: false,
   planId: '',
@@ -392,6 +397,7 @@ const loadRazorpayScript = () => {
   });
   const setLocalInvoice = (inv) => { setLocalInvoiceState(inv); try { if (inv) localStorage.setItem(invoiceStorageKey, JSON.stringify(inv)); else localStorage.removeItem(invoiceStorageKey); } catch (_err) { return null; } };
   const billingPreviewRequestRef = useRef(0);
+  const razorpayReturnPendingRef = useRef(false);
   const [billingCheckout, setBillingCheckout] = useState(() => createBillingCheckoutState());
 
   const downloadExport = useCallback(async (path, fileName) => {
@@ -743,6 +749,39 @@ const loadRazorpayScript = () => {
     };
   }, [billingCheckout.open, whatsappOnboardingOpen]);
 
+  const normalizeAfterExternalCheckoutReturn = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    document.documentElement.classList.remove('app-modal-open');
+    document.activeElement?.blur?.();
+    window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      scrollSettingsShellToTop();
+    });
+
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+      scrollSettingsShellToTop();
+    }, 220);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleCheckoutReturn = () => {
+      if (!razorpayReturnPendingRef.current) return;
+      razorpayReturnPendingRef.current = false;
+      normalizeAfterExternalCheckoutReturn();
+    };
+
+    window.addEventListener('gymvault:app-resumed', handleCheckoutReturn);
+    return () => {
+      window.removeEventListener('gymvault:app-resumed', handleCheckoutReturn);
+    };
+  }, [normalizeAfterExternalCheckoutReturn]);
+
   const fetchSettings = useCallback(async () => {
     try {
       const res = await axios.get('/api/settings', headers);
@@ -867,11 +906,19 @@ const loadRazorpayScript = () => {
     }
   }, [activeTab, fetchStaff, isActive, isOwner, effectiveStaffBranch]);
 
-  const loadIntegrations = useCallback(async () => {
+  const loadIntegrations = useCallback(async (options = {}) => {
     if (!token) return;
-    setIntegrationLoading(true);
+    const shouldRefresh = options.refresh === true;
+    const showLoader = options.showLoader !== false;
+
+    if (showLoader) {
+      setIntegrationLoading(true);
+    }
+
     try {
-      const res = await axios.get('/api/settings/integrations', headers);
+      const res = await axios.get('/api/settings/integrations', shouldRefresh
+        ? { ...headers, params: { refresh: '1' } }
+        : headers);
       const payload = res.data || {};
       const normalizedTemplates = mergeMessageTemplates(payload.templates || []);
 
@@ -922,7 +969,9 @@ const loadRazorpayScript = () => {
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to load integration settings.', 'error');
     } finally {
-      setIntegrationLoading(false);
+      if (showLoader) {
+        setIntegrationLoading(false);
+      }
     }
   }, [gymData.phone, headers, token, toast]);
 
@@ -964,9 +1013,15 @@ const loadRazorpayScript = () => {
     if (!isActive || !isOwner) return;
     if (activeTab === 'integrations') {
       loadIntegrations();
+    }
+  }, [activeTab, isActive, isOwner, loadIntegrations]);
+
+  useEffect(() => {
+    if (!isActive || !isOwner) return;
+    if (activeTab === 'integrations' && integSubTab === 'platform') {
       loadPlatform();
     }
-  }, [activeTab, isActive, isOwner, loadIntegrations, loadPlatform]);
+  }, [activeTab, integSubTab, isActive, isOwner, loadPlatform]);
 
   const updateBranchCount = (value) => {
     const maxAllowed = usageLimits.branches || 25;
@@ -1312,7 +1367,7 @@ const loadRazorpayScript = () => {
     const poll = window.setInterval(() => {
       if (!popup.closed) return;
       window.clearInterval(poll);
-      loadIntegrations();
+      loadIntegrations({ refresh: true });
     }, 700);
   };
 
@@ -1339,7 +1394,7 @@ const loadRazorpayScript = () => {
   const handleRefreshWhatsAppOnboarding = async () => {
     setWhatsAppOnboardingRefreshing(true);
     try {
-      await loadIntegrations();
+      await loadIntegrations({ refresh: true, showLoader: false });
     } finally {
       setWhatsAppOnboardingRefreshing(false);
     }
@@ -1837,6 +1892,7 @@ const loadRazorpayScript = () => {
           toast('Razorpay script failed to load. Are you online?', 'error');
           setIsProcessingPayment(false);
           setBillingCheckout((prev) => ({ ...prev, submitting: false }));
+          razorpayReturnPendingRef.current = false;
           return;
       }
 
@@ -1940,6 +1996,8 @@ const loadRazorpayScript = () => {
                       toast(err?.response?.data?.error || 'Payment received. System is syncing...', 'warning');
                       await fetchSettings();
                   } finally {
+                        razorpayReturnPendingRef.current = false;
+                        normalizeAfterExternalCheckoutReturn();
                       setIsProcessingPayment(false);
                   }
               },
@@ -1949,18 +2007,26 @@ const loadRazorpayScript = () => {
                   contact: accountData.phone || gymData.phone
               },
               theme: { color: '#4f46e5' },
-              modal: { ondismiss: () => setIsProcessingPayment(false) }
+              modal: {
+                ondismiss: () => {
+                  razorpayReturnPendingRef.current = false;
+                  normalizeAfterExternalCheckoutReturn();
+                  setIsProcessingPayment(false);
+                }
+              }
           };
 
           if (!options.key) {
             toast('Payment gateway is not configured yet. Add Razorpay billing keys on the server.', 'error');
             setIsProcessingPayment(false);
             setBillingCheckout((prev) => ({ ...prev, submitting: false }));
+            razorpayReturnPendingRef.current = false;
             return;
           }
 
           closeBillingCheckout();
           const paymentObject = new window.Razorpay(options);
+          razorpayReturnPendingRef.current = true;
           paymentObject.on('payment.failed', function (response){
             const checkoutError = response?.error || {};
             const description = checkoutError.description || checkoutError.reason || 'Payment cancelled or failed.';
@@ -1970,6 +2036,8 @@ const loadRazorpayScript = () => {
               plan_tier: selectedPlan.id,
               cycle: checkoutCycle,
             });
+            razorpayReturnPendingRef.current = false;
+            normalizeAfterExternalCheckoutReturn();
             toast(description, 'error');
             setIsProcessingPayment(false);
           });
@@ -1995,6 +2063,7 @@ const loadRazorpayScript = () => {
           } else {
             setBillingCheckout((prev) => ({ ...prev, submitting: false }));
           }
+          razorpayReturnPendingRef.current = false;
           toast(payload.error || 'Server error while initiating payment.', 'error');
           setIsProcessingPayment(false);
       }
@@ -3301,7 +3370,7 @@ const loadRazorpayScript = () => {
                             <h4 className="font-black text-slate-900 text-sm mb-1">Connection Details</h4>
                             <p className="text-xs text-slate-500 font-medium">Use refresh after completing verification in MSG91.</p>
                           </div>
-                          <button type="button" onClick={loadIntegrations}
+                          <button type="button" onClick={() => loadIntegrations({ refresh: true })}
                             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-black hover:bg-slate-50 transition-colors">
                             <RefreshCw size={14} /> Refresh Status
                           </button>
