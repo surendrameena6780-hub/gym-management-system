@@ -1441,7 +1441,7 @@ function App() {
         className="flex overflow-hidden font-['Inter'] antialiased text-slate-900"
         style={{
           /* position:fixed + inset:0 makes the shell ALWAYS fill the exact
-             viewport — no dependence on window.innerHeight measurements.
+             viewport ï¿½ no dependence on window.innerHeight measurements.
              This eliminates the iOS standalone PWA relaunch layout shift where
              innerHeight reports a transient smaller value, producing empty space
              below content or showing the manifest background_color strip near
@@ -1642,7 +1642,7 @@ function App() {
                 )}
                 </div>
 
-                {/* BRANCH SWITCHER — desktop only (mobile version is centered above) */}
+                {/* BRANCH SWITCHER ï¿½ desktop only (mobile version is centered above) */}
                 {canSelectOperationsBranch && (
                   <div className="relative hidden desktop:block max-w-[12rem] shrink-0">
                     <label className="relative inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 shadow-sm cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all">
@@ -1908,7 +1908,7 @@ function App() {
           </>
         )}
 
-        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-2">
+        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 desktop:hidden z-[120] px-3 pt-1">
           <div className="mx-auto max-w-[560px] rounded-[26px] border border-slate-200/80 bg-white/95 backdrop-blur-2xl p-1.5 shadow-[0_15px_40px_-18px_rgba(15,23,42,0.6)]">
             {/* iOS-style sliding indicator nav */}
             <MobileNav
