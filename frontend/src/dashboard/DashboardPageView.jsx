@@ -131,62 +131,24 @@ const SmartTipsPanel = ({ controller }) => {
 };
 
 const AttentionPanel = ({ controller }) => {
-  const { dashboardData, setup, isAutomating } = controller;
-  const setupActionRows = dashboardData.setupActionRows || [];
-  const showSetupChecklist = dashboardData.actionRows.length === 0 && setupActionRows.length > 0;
+  const { dashboardData, isAutomating, navigateTo, setShowAddModal, setup } = controller;
 
   return (
     <Card
       className="p-0 overflow-hidden h-full flex flex-col"
       style={{ opacity: 0, animation: 'cardCascade 0.6s ease-out 500ms forwards' }}
     >
-      <div className="px-5 py-4 border-b border-slate-100/80 flex justify-between items-center bg-slate-50/50">
+        <div className="px-5 py-4 border-b border-slate-100/80 flex justify-between items-center bg-slate-50/50">
         <h3 className="font-black text-slate-800 text-sm flex items-center gap-2">
           <ShieldAlert size={16} className="text-rose-500" /> Need Attention
         </h3>
         <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-          {showSetupChecklist ? `${setupActionRows.length} setup` : `${dashboardData.ai.urgentCount} urgent`}
+            {dashboardData.ai.urgentCount} urgent
         </span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
-        {showSetupChecklist ? (
-          <>
-            <div className="px-3 py-3 rounded-xl border border-indigo-200 bg-indigo-100">
-              <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">First-time Setup</p>
-              <p className="text-sm font-black text-slate-800 mt-1">Set up the essentials before you start running the gym from here.</p>
-              <p className="text-[10px] text-slate-500 font-semibold mt-1">
-                {setup.progress}% core setup complete. Finish these actions to unlock the full owner workflow.
-              </p>
-            </div>
-
-            {setupActionRows.map((row, index) => (
-              <div
-                key={row.id}
-                className="px-3 py-3 rounded-xl border border-slate-200 bg-white/90 hover:bg-slate-50 transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-slate-900 text-white text-[11px] font-black flex items-center justify-center shrink-0">
-                    {index + 1}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-black text-slate-900 leading-tight">{row.title}</p>
-                    <p className="text-[11px] text-slate-500 font-semibold mt-1 leading-relaxed">{row.description}</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={row.action}
-                    className="px-3.5 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 transition-colors"
-                  >
-                    {row.cta}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </>
-        ) : dashboardData.actionRows.length === 0 ? (
+        {dashboardData.actionRows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 gap-3 text-center">
             <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
               <CheckCircle size={20} className="text-emerald-500" />
@@ -194,11 +156,30 @@ const AttentionPanel = ({ controller }) => {
             <div>
               <p className="text-sm font-black text-slate-800">No urgent issues right now.</p>
               <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                {setup.is_complete
+                {setup.steps?.profile && setup.steps?.plans && setup.steps?.members
                   ? 'Keep an eye on renewals and check-ins.'
                   : 'Finish the remaining setup to unlock the full flow.'}
               </p>
             </div>
+            {(!setup.steps?.profile || !setup.steps?.plans || !setup.steps?.members) && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!setup.steps?.plans) {
+                    navigateTo('Plans');
+                    return;
+                  }
+                  if (!setup.steps?.members) {
+                    setShowAddModal(true);
+                    return;
+                  }
+                  navigateTo('Settings', 'account');
+                }}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-colors"
+              >
+                Finish Setup
+              </button>
+            )}
           </div>
         ) : (
           dashboardData.actionRows.map((row) => {
