@@ -49,6 +49,8 @@ const NAV_ITEMS = [
 
 const MOBILE_PRIMARY_NAV = ['Dashboard', 'Members', 'Plans', 'Payments'];
 const AUTH_USER_STORAGE_KEY = 'user';
+const GLOBAL_DATA_CHANGE_STORAGE_KEY = 'gymvault:data-change-at';
+const OPERATIONS_BRANCH_STORAGE_KEY = 'gymvault:operations-branch-id';
 
 const PAGE_PERMISSIONS = {
   Dashboard: null,
@@ -417,10 +419,93 @@ function App() {
   const mainRef = useRef(null);
   const [visitedPages, setVisitedPages] = useState(() => new Set(['Dashboard']));
   const animatedPagesRef = useRef(new Set());
+  const operationsBranchIdRef = useRef('');
+  const branchBroadcastStateRef = useRef({ initialized: false, lastBranchId: '' });
 
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
+
+  useEffect(() => {
+    operationsBranchIdRef.current = operationsBranchId;
+  }, [operationsBranchId]);
+
+  const readStoredOperationsBranchId = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+
+    try {
+      return String(window.sessionStorage.getItem(OPERATIONS_BRANCH_STORAGE_KEY) || '').trim().toLowerCase();
+    } catch {
+      return '';
+    }
+  }, []);
+
+  const emitGlobalDataChange = useCallback((detail = {}) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const at = Number(detail.at || Date.now());
+    window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at);
+
+    try {
+      window.sessionStorage.setItem(GLOBAL_DATA_CHANGE_STORAGE_KEY, String(at));
+    } catch {
+      // Ignore storage write failures; the in-memory event is enough.
+    }
+
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+      detail: {
+        ...detail,
+        at,
+      },
+    }));
+  }, []);
+
+  const resolveOperationsBranchId = useCallback((nextDirectoryInput, options = {}) => {
+    const nextDirectory = normalizeBranchDirectory(nextDirectoryInput);
+    const nextDefaultBranchId = getDefaultBranchId(nextDirectory);
+    const assignedBranchId = String(currentUser?.branch_id || '').trim().toLowerCase();
+    const preferredBranchId = String(options.preferredBranchId || '').trim().toLowerCase();
+    const previousBranchId = String(options.previousBranchId || '').trim().toLowerCase();
+    const isOwnerUser = String(currentUser?.role || '').toUpperCase() === 'OWNER';
+
+    if (!isOwnerUser) {
+      return String(assignedBranchId || nextDefaultBranchId || DEFAULT_BRANCH_ID);
+    }
+
+    if (preferredBranchId && nextDirectory.some((branch) => branch.id === preferredBranchId)) {
+      return preferredBranchId;
+    }
+
+    if (previousBranchId && nextDirectory.some((branch) => branch.id === previousBranchId)) {
+      return previousBranchId;
+    }
+
+    if (assignedBranchId && nextDirectory.some((branch) => branch.id === assignedBranchId)) {
+      return assignedBranchId;
+    }
+
+    return String(nextDefaultBranchId || DEFAULT_BRANCH_ID);
+  }, [currentUser?.branch_id, currentUser?.role]);
+
+  const applyBranchDirectoryState = useCallback((nextDirectoryInput, options = {}) => {
+    const nextDirectory = normalizeBranchDirectory(nextDirectoryInput);
+    const nextBranchId = resolveOperationsBranchId(nextDirectory, {
+      preferredBranchId: options.preferredBranchId,
+      previousBranchId: options.previousBranchId || operationsBranchIdRef.current,
+    });
+
+    setBranchDirectory(nextDirectory);
+    setOperationsBranchId(nextBranchId);
+
+    return {
+      nextDirectory,
+      nextBranchId,
+    };
+  }, [resolveOperationsBranchId]);
 
   const stabilizeViewportAfterAuth = useCallback(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -551,6 +636,11 @@ function App() {
     clearSessionToken();
     writeStoredUser(null);
     localStorage.removeItem('gv_saas_grace_dismissed');
+    try {
+      window.sessionStorage.removeItem(OPERATIONS_BRANCH_STORAGE_KEY);
+    } catch {
+      // Ignore storage cleanup failures during logout.
+    }
     
     // Wipe tour memory on logout
     localStorage.removeItem('gymvault_tour_completed');
@@ -568,6 +658,7 @@ function App() {
     setShowProfileMenu(false);
     setShowMobileMoreNav(false);
     setIsAuthChecking(false);
+    branchBroadcastStateRef.current = { initialized: false, lastBranchId: '' };
 
     if (redirectToLogin && !isHQ) {
       setShowSignup(false);
@@ -745,37 +836,20 @@ function App() {
       setBranchDirectory([]);
       setOperationsBranchId('');
       setBranchScopeLoading(false);
+      branchBroadcastStateRef.current = { initialized: false, lastBranchId: '' };
       return undefined;
     }
 
     let cancelled = false;
+    const preferredBranchId = readStoredOperationsBranchId();
     setBranchScopeLoading(true);
 
     axios.get('/api/settings/branches', { headers: { 'x-auth-token': token } })
       .then((res) => {
         if (cancelled) return;
 
-        const nextDirectory = normalizeBranchDirectory(res.data?.branch_directory);
-        const nextDefaultBranchId = getDefaultBranchId(nextDirectory);
-        const isOwnerUser = String(currentUser?.role || '').toUpperCase() === 'OWNER';
-
-        setBranchDirectory(nextDirectory);
-        setOperationsBranchId((previous) => {
-          const assignedBranchId = String(currentUser?.branch_id || '').trim().toLowerCase();
-
-          if (!isOwnerUser) {
-            return String(assignedBranchId || nextDefaultBranchId || DEFAULT_BRANCH_ID);
-          }
-
-          if (previous && nextDirectory.some((branch) => branch.id === previous)) {
-            return previous;
-          }
-
-          if (assignedBranchId && nextDirectory.some((branch) => branch.id === assignedBranchId)) {
-            return assignedBranchId;
-          }
-
-          return String(nextDefaultBranchId || DEFAULT_BRANCH_ID);
+        applyBranchDirectoryState(res.data?.branch_directory, {
+          preferredBranchId,
         });
       })
       .catch(() => {
@@ -786,10 +860,10 @@ function App() {
             ? [{ id: currentUser.branch_id, name: 'Assigned Branch' }]
             : [{ id: DEFAULT_BRANCH_ID, name: 'Main Branch' }]
         );
-        const fallbackBranchId = getDefaultBranchId(fallbackDirectory);
 
-        setBranchDirectory(fallbackDirectory);
-        setOperationsBranchId(String(currentUser?.branch_id || fallbackBranchId));
+        applyBranchDirectoryState(fallbackDirectory, {
+          preferredBranchId,
+        });
       })
       .finally(() => {
         if (!cancelled) {
@@ -800,7 +874,30 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [token, isHQ, currentUser]);
+  }, [token, isHQ, currentUser, readStoredOperationsBranchId, applyBranchDirectoryState]);
+
+  useEffect(() => {
+    if (isHQ || !token || !currentUser) {
+      return undefined;
+    }
+
+    const handleBranchesConfigured = (event) => {
+      const nextDirectory = event?.detail?.branch_directory;
+      if (!Array.isArray(nextDirectory)) {
+        return;
+      }
+
+      applyBranchDirectoryState(nextDirectory, {
+        preferredBranchId: event?.detail?.preferred_branch_id || readStoredOperationsBranchId(),
+      });
+    };
+
+    window.addEventListener('gymvault:branches-configured', handleBranchesConfigured);
+
+    return () => {
+      window.removeEventListener('gymvault:branches-configured', handleBranchesConfigured);
+    };
+  }, [token, isHQ, currentUser, applyBranchDirectoryState, readStoredOperationsBranchId]);
 
   useEffect(() => {
     if (isHQ) return;
@@ -1112,8 +1209,54 @@ function App() {
     allLabel: normalizedBranchDirectory[0]?.name || 'Branch',
   });
   const handleOperationsBranchChange = useCallback((nextBranchId) => {
-    setOperationsBranchId(String(nextBranchId || defaultBranchId || DEFAULT_BRANCH_ID));
+    const resolvedBranchId = String(nextBranchId || defaultBranchId || DEFAULT_BRANCH_ID);
+    if (resolvedBranchId === operationsBranchIdRef.current) {
+      return;
+    }
+
+    setOperationsBranchId(resolvedBranchId);
   }, [defaultBranchId]);
+
+  useEffect(() => {
+    if (isHQ || !token || !operationsBranchId) {
+      return;
+    }
+
+    try {
+      window.sessionStorage.setItem(OPERATIONS_BRANCH_STORAGE_KEY, operationsBranchId);
+    } catch {
+      // Ignore storage write failures; in-memory branch state still works.
+    }
+
+    const previousBranchId = branchBroadcastStateRef.current.lastBranchId;
+    branchBroadcastStateRef.current.lastBranchId = operationsBranchId;
+
+    if (!branchBroadcastStateRef.current.initialized) {
+      branchBroadcastStateRef.current.initialized = true;
+      return;
+    }
+
+    if (previousBranchId === operationsBranchId) {
+      return;
+    }
+
+    const at = Date.now();
+    window.dispatchEvent(new CustomEvent('gymvault:branch-scope-changed', {
+      detail: {
+        branch_id: operationsBranchId,
+        branch_scope_value: branchScopeValue,
+        at,
+      },
+    }));
+
+    emitGlobalDataChange({
+      source: 'branch-scope-change',
+      scope: 'branch-scope',
+      branch_id: operationsBranchId,
+      branch_scope_value: branchScopeValue,
+      at,
+    });
+  }, [branchScopeValue, emitGlobalDataChange, isHQ, operationsBranchId, token]);
 
   const appRuntime = useMemo(() => ({
     token,

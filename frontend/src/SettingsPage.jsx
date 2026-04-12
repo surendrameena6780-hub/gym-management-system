@@ -1088,17 +1088,28 @@ const loadRazorpayScript = () => {
       }, headers);
       const payload = res.data || {};
       const maxBranches = usageLimits.branches || 25;
+      const nextBranchesCount = Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || platformData.branches_count));
+      const nextBranchDirectory = buildBranchDirectoryState(nextBranchesCount, payload.branch_directory || platformData.branch_directory);
       setPlatformData((prev) => ({
         ...prev,
         city: String(payload.city || ''),
-        branches_count: Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || prev.branches_count)),
-        branch_directory: buildBranchDirectoryState(payload.branches_count || prev.branches_count, payload.branch_directory || prev.branch_directory),
+        branches_count: nextBranchesCount,
+        branch_directory: nextBranchDirectory,
       }));
       setGymData((prev) => ({
         ...prev,
-        branches_count: Math.max(1, Math.min(maxBranches, Number.parseInt(payload.branches_count, 10) || prev.branches_count || 1)),
+        branches_count: nextBranchesCount,
       }));
       applyEffectiveLimitsPayload(payload.effective_limits);
+      window.dispatchEvent(new CustomEvent('gymvault:branches-configured', {
+        detail: {
+          source: 'settings-branch-save',
+          at: Date.now(),
+          branches_count: nextBranchesCount,
+          branch_directory: nextBranchDirectory,
+          preferred_branch_id: appRuntime?.operationsBranchId || '',
+        },
+      }));
       toast(payload.message || 'Branch controls saved successfully.', 'success');
       await fetchSettings();
     } catch (err) {
