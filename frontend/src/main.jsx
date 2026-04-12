@@ -167,12 +167,17 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
       stableViewportHeight = layoutViewportHeight
     }
 
-    const resolvedViewportHeight = isKeyboardOpen
-      ? Math.max(stableViewportHeight || 0, layoutViewportHeight || 0)
-      : layoutViewportHeight
-
-    if (resolvedViewportHeight > 0) {
-      document.documentElement.style.setProperty('--app-viewport-height', `${resolvedViewportHeight}px`)
+    if (isKeyboardOpen) {
+      // Lock shell to pre-keyboard height so the app doesn't reflow
+      const lockedHeight = Math.max(stableViewportHeight || 0, layoutViewportHeight || 0)
+      if (lockedHeight > 0) {
+        document.documentElement.style.setProperty('--app-viewport-height', `${lockedHeight}px`)
+      }
+    } else {
+      // Let CSS 100dvh handle height — avoids iOS Safari/standalone PWA
+      // bugs where innerHeight reports inconsistent values across app
+      // launches, third-party redirects (Razorpay), and resumes.
+      document.documentElement.style.removeProperty('--app-viewport-height')
     }
 
     document.documentElement.style.setProperty('--app-keyboard-inset', `${isKeyboardOpen ? inferredKeyboardInset : 0}px`)
