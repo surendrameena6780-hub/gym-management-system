@@ -749,6 +749,16 @@ const loadRazorpayScript = () => {
     };
   }, [billingCheckout.open, whatsappOnboardingOpen]);
 
+  const announceMessagingTemplateStateChanged = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+      detail: {
+        source: 'settings-integrations',
+        scope: 'messaging-templates',
+      },
+    }));
+  }, []);
+
   const normalizeAfterExternalCheckoutReturn = useCallback(() => {
     if (typeof window === 'undefined') return;
 
@@ -1009,6 +1019,11 @@ const loadRazorpayScript = () => {
     }
   }, [headers, token, toast]);
 
+  const refreshMessagingTemplateState = useCallback(async ({ showLoader = true } = {}) => {
+    await loadIntegrations({ refresh: true, showLoader });
+    announceMessagingTemplateStateChanged();
+  }, [announceMessagingTemplateStateChanged, loadIntegrations]);
+
   useEffect(() => {
     if (!isActive || !isOwner) return;
     if (activeTab === 'integrations') {
@@ -1263,7 +1278,11 @@ const loadRazorpayScript = () => {
     try {
       const res = await saveIntegrationSection(integSubTab);
       toast(res.data?.message || 'Integration settings saved successfully.', 'success');
-      await loadIntegrations();
+      if (['messaging', 'campaigns', 'all'].includes(String(integSubTab || '').toLowerCase())) {
+        await refreshMessagingTemplateState({ showLoader: false });
+      } else {
+        await loadIntegrations();
+      }
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to save integration settings.', 'error');
     } finally {
@@ -1288,7 +1307,7 @@ const loadRazorpayScript = () => {
       const createdTemplateKey = String(res.data?.template?.template_key || '').trim();
       setCustomTemplateDraft({ title: '', raw_text: '' });
       setCustomTemplateComposerOpen(false);
-      await loadIntegrations();
+      await refreshMessagingTemplateState({ showLoader: false });
       if (createdTemplateKey) {
         setExpandedTemplate(createdTemplateKey);
       }
@@ -1367,7 +1386,7 @@ const loadRazorpayScript = () => {
     const poll = window.setInterval(() => {
       if (!popup.closed) return;
       window.clearInterval(poll);
-      loadIntegrations({ refresh: true });
+      refreshMessagingTemplateState().catch(() => {});
     }, 700);
   };
 
@@ -1380,7 +1399,7 @@ const loadRazorpayScript = () => {
     setWhatsAppOnboardingLaunching(true);
     try {
       const res = await saveIntegrationSection('messaging');
-      await loadIntegrations();
+      await refreshMessagingTemplateState({ showLoader: false });
       setWhatsAppOnboardingOpen(true);
       switchWhatsAppOnboardingView('msg91');
       toast(res.data?.message || 'Business number saved. Continue setup in the in-app WhatsApp workspace.', 'success');
@@ -1394,7 +1413,7 @@ const loadRazorpayScript = () => {
   const handleRefreshWhatsAppOnboarding = async () => {
     setWhatsAppOnboardingRefreshing(true);
     try {
-      await loadIntegrations({ refresh: true, showLoader: false });
+      await refreshMessagingTemplateState({ showLoader: false });
     } finally {
       setWhatsAppOnboardingRefreshing(false);
     }
@@ -3370,7 +3389,7 @@ const loadRazorpayScript = () => {
                             <h4 className="font-black text-slate-900 text-sm mb-1">Connection Details</h4>
                             <p className="text-xs text-slate-500 font-medium">Use refresh after completing verification in MSG91.</p>
                           </div>
-                          <button type="button" onClick={() => loadIntegrations({ refresh: true })}
+                          <button type="button" onClick={() => refreshMessagingTemplateState()}
                             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-black hover:bg-slate-50 transition-colors">
                             <RefreshCw size={14} /> Refresh Status
                           </button>

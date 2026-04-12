@@ -9,6 +9,7 @@ const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
 const {
     buildTemplateBodyVariables,
     buildTemplateName,
+    buildTemplateNameFragment,
     createWhatsAppTemplate,
     findIntegratedWhatsAppNumber,
     getMsg91OtpMode,
@@ -527,21 +528,60 @@ const summarizeTemplateSyncStatus = (templates) => {
     return 'NOT_SYNCED';
 };
 
-const areTemplateDefinitionsEquivalent = (currentTemplate, nextTemplate, gymId) => {
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const resolveTemplateNamespace = (whatsappNumber, gymId) => normalizeWhatsAppNumber(whatsappNumber) || String(gymId || '').trim() || 'default';
+
+const buildResolvedTemplateName = ({ gymId, whatsappNumber, templateKey, whatsappText }) => buildTemplateName(
+    resolveTemplateNamespace(whatsappNumber, gymId),
+    templateKey,
+    whatsappText
+);
+
+const getTemplateStatusPriority = (status) => {
+    const normalized = normalizeTemplateStatus(status);
+    if (normalized === 'APPROVED') return 5;
+    if (normalized === 'PENDING') return 4;
+    if (normalized === 'NOT_SYNCED') return 3;
+    if (normalized === 'DISABLED') return 2;
+    if (normalized === 'FAILED' || normalized === 'REJECTED') return 1;
+    return 0;
+};
+
+const findMatchingProviderTemplate = (providerTemplates, { gymId, whatsappNumber, templateKey, whatsappText }) => {
+    const preferredName = buildResolvedTemplateName({ gymId, whatsappNumber, templateKey, whatsappText });
+    const preferredNameLower = preferredName.toLowerCase();
+    const nameFragment = buildTemplateNameFragment(templateKey, whatsappText);
+    const legacyPattern = new RegExp(`^gv_[a-z0-9_]+_${escapeRegex(nameFragment)}$`, 'i');
+
+    return (Array.isArray(providerTemplates) ? providerTemplates : [])
+        .filter((template) => {
+            const providerName = String(template?.template_name || '').trim();
+            if (!providerName) return false;
+            return providerName.toLowerCase() === preferredNameLower || legacyPattern.test(providerName);
+        })
+        .sort((left, right) => {
+            const statusDelta = getTemplateStatusPriority(right?.template_status) - getTemplateStatusPriority(left?.template_status);
+            if (statusDelta !== 0) return statusDelta;
+
+            const rightPreferred = String(right?.template_name || '').trim().toLowerCase() === preferredNameLower ? 1 : 0;
+            const leftPreferred = String(left?.template_name || '').trim().toLowerCase() === preferredNameLower ? 1 : 0;
+            return rightPreferred - leftPreferred;
+        })[0] || null;
+};
+
+const areTemplateDefinitionsEquivalent = (currentTemplate, nextTemplate) => {
     if (!currentTemplate || !nextTemplate) {
         return false;
     }
 
-    const expectedTemplateName = buildTemplateName(gymId, nextTemplate.template_key, nextTemplate.whatsapp_text);
     const expectedTemplateCategory = String(
         nextTemplate.whatsapp_template_category || pickTemplateCategory(nextTemplate.template_key, nextTemplate.whatsapp_text) || 'UTILITY'
     ).toUpperCase();
 
-    return String(currentTemplate.title || '') === String(nextTemplate.title || '')
-        && String(currentTemplate.whatsapp_text || '') === String(nextTemplate.whatsapp_text || '')
+    return String(currentTemplate.whatsapp_text || '') === String(nextTemplate.whatsapp_text || '')
         && String(currentTemplate.sms_text || '') === String(nextTemplate.sms_text || '')
         && Boolean(currentTemplate.is_active !== false) === Boolean(nextTemplate.is_active)
-        && String(currentTemplate.whatsapp_template_name || '') === expectedTemplateName
         && String(currentTemplate.whatsapp_template_category || '').toUpperCase() === expectedTemplateCategory;
 };
 
@@ -706,12 +746,19 @@ const syncGymWhatsAppState = async (gymId) => {
         );
 
         let providerTemplates = await listWhatsAppTemplates(matchedNumber.integrated_number);
-        const providerTemplateMap = new Map(providerTemplates.map((template) => [String(template.template_name || '').toLowerCase(), template]));
         let shouldRefreshProviderTemplates = false;
         const submittedTemplateNames = new Set();
+        const templateNameContext = {
+            gymId,
+            whatsappNumber: matchedNumber.integrated_number || storedNumber,
+        };
 
         for (const template of initialState.templates) {
-            const desiredName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
+            const desiredName = buildResolvedTemplateName({
+                ...templateNameContext,
+                templateKey: template.template_key,
+                whatsappText: template.whatsapp_text,
+            });
             const desiredCategory = pickTemplateCategory(template.template_key, template.whatsapp_text);
             const isActive = template.is_active !== false;
 
@@ -730,7 +777,13 @@ const syncGymWhatsAppState = async (gymId) => {
                 continue;
             }
 
-            if (!providerTemplateMap.has(desiredName.toLowerCase())) {
+            const existingProviderTemplate = findMatchingProviderTemplate(providerTemplates, {
+                ...templateNameContext,
+                templateKey: template.template_key,
+                whatsappText: template.whatsapp_text,
+            });
+
+            if (!existingProviderTemplate) {
                 try {
                     await createWhatsAppTemplate({
                         integratedNumber: matchedNumber.integrated_number,
@@ -770,13 +823,20 @@ const syncGymWhatsAppState = async (gymId) => {
             providerTemplates = await listWhatsAppTemplates(matchedNumber.integrated_number);
         }
 
-        const refreshedProviderMap = new Map(providerTemplates.map((template) => [String(template.template_name || '').toLowerCase(), template]));
         const latestTemplatesState = await loadMessagingState(gymId);
 
         for (const template of latestTemplatesState.templates) {
-            const desiredName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
+            const desiredName = buildResolvedTemplateName({
+                ...templateNameContext,
+                templateKey: template.template_key,
+                whatsappText: template.whatsapp_text,
+            });
             const desiredCategory = pickTemplateCategory(template.template_key, template.whatsapp_text);
-            const providerTemplate = refreshedProviderMap.get(desiredName.toLowerCase());
+            const providerTemplate = findMatchingProviderTemplate(providerTemplates, {
+                ...templateNameContext,
+                templateKey: template.template_key,
+                whatsappText: template.whatsapp_text,
+            });
             const currentStatus = normalizeTemplateStatus(template.whatsapp_template_status || 'NOT_SYNCED');
             const nextStatus = template.is_active === false
                 ? 'DISABLED'
@@ -803,7 +863,7 @@ const syncGymWhatsAppState = async (gymId) => {
                      updated_at = NOW()
                  WHERE gym_id = $6 AND template_key = $7`,
                 [
-                    desiredName,
+                    providerTemplate?.template_name || desiredName,
                     providerTemplate?.template_language || 'en_US',
                     providerTemplate?.template_category || desiredCategory,
                     nextStatus,
@@ -1422,6 +1482,7 @@ router.put('/integrations', auth, async (req, res) => {
         const currentWhatsAppNumber = normalizeWhatsAppNumber(currentGym.messaging_whatsapp_number);
         let messagingSyncRequired = false;
         let templateSyncRequired = false;
+        let nextWhatsAppNumber = currentWhatsAppNumber;
 
         if (shouldSaveMessaging) {
             const ownerMobileInput = ensureTrimmedString(req.body?.owner_mobile, { field: 'owner_mobile', max: 30 });
@@ -1448,6 +1509,7 @@ router.put('/integrations', auth, async (req, res) => {
                  WHERE id = $3`,
                 [normalizedOwnerMobile || null, normalizedWhatsAppNumber, gymId]
             );
+            nextWhatsAppNumber = normalizedWhatsAppNumber;
 
             if (normalizedWhatsAppNumber !== currentWhatsAppNumber) {
                 messagingSyncRequired = true;
@@ -1517,11 +1579,16 @@ router.put('/integrations', auth, async (req, res) => {
                     }
                 }
                 for (const template of templateEntries) {
-                    const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
+                    const templateName = buildResolvedTemplateName({
+                        gymId,
+                        whatsappNumber: nextWhatsAppNumber,
+                        templateKey: template.template_key,
+                        whatsappText: template.whatsapp_text,
+                    });
                     const templateCategory = template.whatsapp_template_category || pickTemplateCategory(template.template_key, template.whatsapp_text);
                     const existingTemplate = currentTemplatesByKey.get(String(template.template_key || '').trim().toUpperCase());
 
-                    if (!areTemplateDefinitionsEquivalent(existingTemplate, { ...template, whatsapp_template_category: templateCategory }, gymId)) {
+                    if (!areTemplateDefinitionsEquivalent(existingTemplate, { ...template, whatsapp_template_category: templateCategory })) {
                         templateSyncRequired = true;
                     }
 
@@ -1546,18 +1613,35 @@ router.put('/integrations', auth, async (req, res) => {
                             title = EXCLUDED.title,
                             whatsapp_text = EXCLUDED.whatsapp_text,
                             sms_text = EXCLUDED.sms_text,
-                            whatsapp_template_name = EXCLUDED.whatsapp_template_name,
-                            whatsapp_template_language = EXCLUDED.whatsapp_template_language,
-                            whatsapp_template_category = EXCLUDED.whatsapp_template_category,
+                            whatsapp_template_name = CASE
+                                WHEN COALESCE(gym_message_templates.whatsapp_text, '') = COALESCE(EXCLUDED.whatsapp_text, '')
+                                    AND COALESCE(gym_message_templates.sms_text, '') = COALESCE(EXCLUDED.sms_text, '')
+                                    THEN COALESCE(gym_message_templates.whatsapp_template_name, EXCLUDED.whatsapp_template_name)
+                                ELSE EXCLUDED.whatsapp_template_name
+                            END,
+                            whatsapp_template_language = CASE
+                                WHEN COALESCE(gym_message_templates.whatsapp_text, '') = COALESCE(EXCLUDED.whatsapp_text, '')
+                                    AND COALESCE(gym_message_templates.sms_text, '') = COALESCE(EXCLUDED.sms_text, '')
+                                    THEN COALESCE(gym_message_templates.whatsapp_template_language, EXCLUDED.whatsapp_template_language)
+                                ELSE EXCLUDED.whatsapp_template_language
+                            END,
+                            whatsapp_template_category = CASE
+                                WHEN COALESCE(gym_message_templates.whatsapp_text, '') = COALESCE(EXCLUDED.whatsapp_text, '')
+                                    AND COALESCE(gym_message_templates.sms_text, '') = COALESCE(EXCLUDED.sms_text, '')
+                                    THEN COALESCE(gym_message_templates.whatsapp_template_category, EXCLUDED.whatsapp_template_category)
+                                ELSE EXCLUDED.whatsapp_template_category
+                            END,
                             whatsapp_template_status = CASE
                                 WHEN EXCLUDED.is_active = FALSE THEN 'DISABLED'
-                                WHEN COALESCE(gym_message_templates.whatsapp_template_name, '') = COALESCE(EXCLUDED.whatsapp_template_name, '')
+                                WHEN COALESCE(gym_message_templates.whatsapp_text, '') = COALESCE(EXCLUDED.whatsapp_text, '')
+                                    AND COALESCE(gym_message_templates.sms_text, '') = COALESCE(EXCLUDED.sms_text, '')
                                     THEN COALESCE(gym_message_templates.whatsapp_template_status, 'NOT_SYNCED')
                                 ELSE 'NOT_SYNCED'
                             END,
                             whatsapp_template_error = CASE
                                 WHEN EXCLUDED.is_active = FALSE THEN NULL
-                                WHEN COALESCE(gym_message_templates.whatsapp_template_name, '') = COALESCE(EXCLUDED.whatsapp_template_name, '')
+                                WHEN COALESCE(gym_message_templates.whatsapp_text, '') = COALESCE(EXCLUDED.whatsapp_text, '')
+                                    AND COALESCE(gym_message_templates.sms_text, '') = COALESCE(EXCLUDED.sms_text, '')
                                     THEN gym_message_templates.whatsapp_template_error
                                 ELSE NULL
                             END,

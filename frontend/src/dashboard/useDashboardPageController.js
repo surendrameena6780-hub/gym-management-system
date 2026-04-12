@@ -725,8 +725,31 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
 
   useEffect(() => {
     if (!showBroadcastModal) return;
-    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+    ensureBroadcastComposer({ preferCache: false }).catch(() => {});
   }, [ensureBroadcastComposer, showBroadcastModal]);
+
+  useEffect(() => {
+    if (!token || !isActive) return undefined;
+
+    const handleTemplateStateRefresh = (event) => {
+      if (event?.detail?.scope && event.detail.scope !== 'messaging-templates') {
+        return;
+      }
+
+      broadcastComposerLoadedRef.current = false;
+      broadcastComposerRequestRef.current = null;
+      setBroadcastTemplates([]);
+
+      if (showBroadcastModal) {
+        ensureBroadcastComposer({ preferCache: false }).catch(() => {});
+      }
+    };
+
+    window.addEventListener('gymvault:data-changed', handleTemplateStateRefresh);
+    return () => {
+      window.removeEventListener('gymvault:data-changed', handleTemplateStateRefresh);
+    };
+  }, [ensureBroadcastComposer, isActive, showBroadcastModal, token]);
 
   useEffect(() => {
     if (!showBroadcastModal || broadcastTemplates.length === 0) return;
@@ -813,7 +836,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     setBroadcastMessage('');
     setBroadcastActionMeta(actionMeta || null);
     setShowBroadcastModal(true);
-    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+    ensureBroadcastComposer({ preferCache: false }).catch(() => {});
   }, [ensureBroadcastComposer]);
 
   const openBroadcastDraftForMembers = useCallback(({ memberIds = [], audience = 'All', actionMeta = null }) => {
@@ -830,7 +853,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     setBroadcastMessage('');
     setBroadcastActionMeta(actionMeta || null);
     setShowBroadcastModal(true);
-    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+    ensureBroadcastComposer({ preferCache: false }).catch(() => {});
   }, [ensureBroadcastComposer]);
 
   const buildSmartMemberCta = useCallback(({

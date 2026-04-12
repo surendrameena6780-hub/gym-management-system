@@ -517,14 +517,23 @@ const convertNamedPlaceholdersToPositional = (text) => {
     });
 };
 
-const buildTemplateName = (gymId, templateKey, whatsappText) => {
+const buildTemplateNameFragment = (templateKey, whatsappText) => {
     const sanitizedKey = toTrimmedString(templateKey)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '')
         .slice(0, 30) || 'template';
     const signature = crypto.createHash('sha1').update(String(whatsappText || '')).digest('hex').slice(0, 8);
-    return `gv_${gymId}_${sanitizedKey}_${signature}`.slice(0, 60);
+    return `${sanitizedKey}_${signature}`;
+};
+
+const buildTemplateName = (namespace, templateKey, whatsappText) => {
+    const sanitizedNamespace = toTrimmedString(namespace)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 16) || 'default';
+    return `gv_${sanitizedNamespace}_${buildTemplateNameFragment(templateKey, whatsappText)}`.slice(0, 60);
 };
 
 const pickTemplateCategory = (templateKey, whatsappText = '') => inferTemplateCategoryFromText(templateKey, whatsappText);
@@ -640,6 +649,7 @@ module.exports = {
     buildTemplateBodyVariables,
     buildTemplateDefinition,
     buildTemplateName,
+    buildTemplateNameFragment,
     convertNamedPlaceholdersToPositional,
     createWhatsAppTemplate,
     extractTemplatePlaceholderKeys,

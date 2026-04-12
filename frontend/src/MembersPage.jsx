@@ -1535,8 +1535,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     setReminderPreviewLoading(false);
   }, []);
 
-  const loadReminderTemplates = useCallback(async () => {
-    if (reminderTemplates.length > 0) {
+  const loadReminderTemplates = useCallback(async ({ forceRefresh = false } = {}) => {
+    if (!forceRefresh && reminderTemplates.length > 0) {
       return reminderTemplates;
     }
 
@@ -1558,6 +1558,21 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return templates;
   }, [reminderTemplates, token]);
 
+  useEffect(() => {
+    if (!token) return;
+
+    const handleReminderTemplateInvalidation = (event) => {
+      if (event?.detail?.scope && event.detail.scope !== 'messaging-templates') {
+        return;
+      }
+
+      setReminderTemplates([]);
+    };
+
+    window.addEventListener('gymvault:data-changed', handleReminderTemplateInvalidation);
+    return () => window.removeEventListener('gymvault:data-changed', handleReminderTemplateInvalidation);
+  }, [token]);
+
   const openReminderComposer = async (member) => {
     if (!member?.id) {
       toast?.('Member details are incomplete for this reminder.', 'warning');
@@ -1570,7 +1585,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       setReminderLoadingKey(loadingKey);
       setReminderTemplatesLoading(true);
 
-      const templates = await loadReminderTemplates();
+      const templates = await loadReminderTemplates({ forceRefresh: true });
       if (templates.length === 0) {
         toast?.('No approved WhatsApp reminder templates are available right now.', 'warning');
         return;
