@@ -389,6 +389,7 @@ function App() {
   const [operationsBranchId, setOperationsBranchId] = useState('');
   const [branchScopeLoading, setBranchScopeLoading] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(!isHQ);
+  const [authUiErrorCode, setAuthUiErrorCode] = useState('');
   const [isSuspended, setIsSuspended] = useState(false); 
   const [saasGrace, setSaasGrace] = useState(false);
   const [saasGraceNoticeKey, setSaasGraceNoticeKey] = useState('');
@@ -670,6 +671,7 @@ function App() {
     setIsSuspended(false);
     setSaasGrace(false);
     setSaasGraceNoticeKey('');
+    setAuthUiErrorCode('');
     setVisitedPages(new Set(['Dashboard']));
     animatedPagesRef.current = new Set();
     setCurrentPage('Dashboard');
@@ -815,6 +817,7 @@ function App() {
           const nextAuthError = status === 403 ? 'account_suspended' : 'oauth_session_failed';
           clearAuthState({ redirectToLogin: false });
           setShowSignup(false);
+          setAuthUiErrorCode(nextAuthError);
           window.history.replaceState({}, '', `/login?auth_error=${nextAuthError}`);
           return;
         }
@@ -1500,6 +1503,7 @@ function App() {
       authTransitionRef.current = true;
       setTimeout(() => { authTransitionRef.current = false; }, 600);
       const nextToken = setSessionToken(t);
+      setAuthUiErrorCode('');
       setIsAuthChecking(false);
       setShowProfileMenu(false);
       setToken(nextToken);
@@ -1518,12 +1522,14 @@ function App() {
         localStorage.removeItem('gv_saas_grace_dismissed');
     };
     const showLoginPage = () => {
+      setAuthUiErrorCode('');
       setShowSignup(false);
       if (window.location.pathname !== '/login') {
         window.history.pushState({}, '', '/login');
       }
     };
     const showSignupPage = () => {
+      setAuthUiErrorCode('');
       setShowSignup(true);
       if (window.location.pathname !== '/signup') {
         window.history.pushState({}, '', '/signup');
@@ -1532,7 +1538,7 @@ function App() {
     if (showSignup) {
       return <SignupPage onShowLogin={showLoginPage} setToken={storeToken} />;
     }
-    return <LoginPage setToken={storeToken} onShowSignup={showSignupPage} />;
+    return <LoginPage setToken={storeToken} onShowSignup={showSignupPage} authErrorCode={authUiErrorCode} onAuthErrorConsumed={() => setAuthUiErrorCode('')} />;
   }
 
   if (isAuthChecking || !currentUser) {

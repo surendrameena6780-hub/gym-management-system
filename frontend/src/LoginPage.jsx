@@ -1240,7 +1240,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
 }
 
 // ─── Main LoginPage ───────────────────────────────────────────────────────────
-export default function LoginPage({ setToken, onShowSignup }) {
+export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', onAuthErrorConsumed = null }) {
   const [tab, setTab]               = useState('OWNER'); // 'OWNER' | 'MEMBER'
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
@@ -1292,11 +1292,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
     };
   }, []);
 
-  // Read auth_error from OAuth redirect URL param
-  useEffect(() => {
-    const params  = new URLSearchParams(window.location.search);
-    const errCode = params.get('auth_error');
-    if (!errCode) return;
+  const getOauthErrorMessage = (errCode) => {
     const msgs = {
       google_not_configured: 'Google Sign-In is not set up on this server. Use email & password.',
       google_cancelled:      'Google sign-in was cancelled.',
@@ -1308,9 +1304,25 @@ export default function LoginPage({ setToken, onShowSignup }) {
       account_suspended:     'Your account is suspended. Contact GymVault HQ.',
       server_error:          'A server error occurred. Please try again.',
     };
-    setError(msgs[errCode] || 'Sign-in failed. Please try again.');
+
+    return msgs[String(errCode || '').trim()] || 'Sign-in failed. Please try again.';
+  };
+
+  // Read auth_error from OAuth redirect URL param
+  useEffect(() => {
+    const params  = new URLSearchParams(window.location.search);
+    const errCode = params.get('auth_error');
+    if (!errCode) return;
+    setError(getOauthErrorMessage(errCode));
     window.history.replaceState({}, '', window.location.pathname);
   }, []);
+
+  useEffect(() => {
+    if (!authErrorCode) return;
+    setNotice('');
+    setError(getOauthErrorMessage(authErrorCode));
+    onAuthErrorConsumed?.();
+  }, [authErrorCode, onAuthErrorConsumed]);
 
   const resetPasswordRecoveryState = () => {
     setPasswordResetStep('request');
