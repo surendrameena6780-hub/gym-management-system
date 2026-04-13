@@ -429,11 +429,11 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 const statusLabel = String(lead.status || 'NEW').toUpperCase();
                 const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
                 return (
-                  <div key={lead.id} className={`rounded-2xl border p-4 space-y-3 ${due ? 'border-amber-200 bg-amber-50/40' : 'border-slate-100 bg-white'}`}>
+                  <div key={lead.id} className={`rounded-2xl border p-4 space-y-3 shadow-[0_10px_30px_rgba(15,23,42,0.18)] ${due ? 'border-amber-500/35 bg-amber-500/10' : 'border-slate-700 bg-slate-900/75'}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="font-black text-slate-900 truncate">{lead.full_name}</p>
-                        <p className="text-xs text-slate-500 truncate">{lead.phone}{lead.email ? ` • ${lead.email}` : ''}</p>
+                        <p className="font-black text-white truncate">{lead.full_name}</p>
+                        <p className="text-xs text-slate-300 truncate">{lead.phone}{lead.email ? ` • ${lead.email}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span>
@@ -442,33 +442,33 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Source</p>
-                        <p className="font-bold text-slate-700">{lead.source || 'Walk-in'}</p>
+                      <div className="rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Source</p>
+                        <p className="font-bold text-slate-100">{lead.source || 'Walk-in'}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Follow-Up</p>
-                        <p className={`font-bold ${due ? 'text-amber-700' : 'text-slate-700'}`}>{formatDateTimeLabel(lead.next_follow_up_at)}</p>
+                      <div className="rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Follow-Up</p>
+                        <p className={`font-bold ${due ? 'text-amber-300' : 'text-slate-100'}`}>{formatDateTimeLabel(lead.next_follow_up_at)}</p>
                       </div>
                     </div>
 
                     {(lead.notes || lead.lost_reason || lead.trial_date) && (
-                      <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 space-y-1">
-                        {lead.trial_date && <p className="text-xs font-semibold text-slate-600"><span className="text-slate-400">Trial:</span> {formatDateTimeLabel(lead.trial_date)}</p>}
-                        {lead.notes && <p className="text-xs text-slate-600 line-clamp-2">{lead.notes}</p>}
-                        {lead.lost_reason && <p className="text-xs text-rose-600 line-clamp-2">Lost reason: {lead.lost_reason}</p>}
+                      <div className="rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2.5 space-y-1">
+                        {lead.trial_date && <p className="text-xs font-semibold text-slate-200"><span className="text-slate-500">Trial:</span> {formatDateTimeLabel(lead.trial_date)}</p>}
+                        {lead.notes && <p className="text-xs text-slate-300 line-clamp-2">{lead.notes}</p>}
+                        {lead.lost_reason && <p className="text-xs text-rose-300 line-clamp-2">Lost reason: {lead.lost_reason}</p>}
                       </div>
                     )}
 
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => handleCall(lead.phone)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                      <button onClick={() => handleCall(lead.phone)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-blue-500/15 text-blue-200 border border-blue-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-blue-500 hover:text-white transition-all">
                         <Phone size={12} /> Call
                       </button>
-                      <button onClick={() => handleWhatsApp(lead)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                      <button onClick={() => handleWhatsApp(lead)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-emerald-500/15 text-emerald-200 border border-emerald-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-emerald-500 hover:text-white transition-all">
                         <MessageSquare size={12} /> WhatsApp
                       </button>
                       {lead.converted_member_id ? (
-                        <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-violet-50 text-violet-600 border border-violet-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                        <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-violet-500/15 text-violet-200 border border-violet-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-violet-500 hover:text-white transition-all">
                           <ArrowRight size={12} /> Open Member
                         </button>
                       ) : (
@@ -479,7 +479,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                         )
                       )}
                       {canManage && (
-                        <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="w-11 h-11 rounded-xl bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center">
+                        <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="w-11 h-11 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 flex items-center justify-center hover:bg-slate-700 transition-all">
                           <Pencil size={14} />
                         </button>
                       )}
@@ -499,22 +499,22 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 return (
                   <article
                     key={lead.id}
-                    className={`rounded-3xl border px-5 py-5 transition-colors ${due ? 'border-amber-200 bg-amber-50/50' : 'border-slate-100 bg-slate-50/60 hover:bg-slate-50'}`}
+                    className={`rounded-3xl border px-5 py-5 transition-colors shadow-[0_14px_40px_rgba(15,23,42,0.18)] ${due ? 'border-amber-500/35 bg-amber-500/10' : 'border-slate-700 bg-slate-900/75 hover:bg-slate-900/90'}`}
                   >
                     <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,1.2fr)_minmax(0,1.15fr)_minmax(0,1.05fr)_minmax(0,0.9fr)_minmax(0,1fr)_auto] gap-4 items-start">
                       <div className="min-w-0 space-y-2.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-black text-slate-900 break-words">{lead.full_name}</h3>
+                          <h3 className="text-base font-black text-white break-words">{lead.full_name}</h3>
                           {lead.converted_member_id && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-50 text-violet-700 border border-violet-100">Member Linked</span>}
                           {due && <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200">Due Today</span>}
                         </div>
                         <div className="space-y-1">
-                          <p className="text-sm font-semibold text-slate-600 break-all">{lead.phone}</p>
-                          {lead.email && <p className="text-sm font-medium text-slate-500 break-all">{lead.email}</p>}
+                          <p className="text-sm font-semibold text-slate-200 break-all">{lead.phone}</p>
+                          {lead.email && <p className="text-sm font-medium text-slate-400 break-all">{lead.email}</p>}
                         </div>
                         {noteText && (
-                          <div className={`rounded-2xl border px-3 py-2.5 ${lead.lost_reason ? 'border-rose-100 bg-rose-50/70' : 'border-slate-100 bg-white/70'}`}>
-                            <p className={`text-xs leading-relaxed break-words ${lead.lost_reason ? 'font-semibold text-rose-600' : 'font-medium text-slate-600'}`}>
+                          <div className={`rounded-2xl border px-3 py-2.5 ${lead.lost_reason ? 'border-rose-500/30 bg-rose-500/10' : 'border-slate-700 bg-slate-800/90'}`}>
+                            <p className={`text-xs leading-relaxed break-words ${lead.lost_reason ? 'font-semibold text-rose-300' : 'font-medium text-slate-300'}`}>
                               {noteText}
                             </p>
                           </div>
@@ -522,57 +522,57 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                       </div>
 
                       <div className="min-w-0 space-y-1.5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Source</p>
-                        <p className="text-sm font-bold text-slate-700 break-words">{lead.source || 'Walk-in'}</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Source</p>
+                        <p className="text-sm font-bold text-slate-100 break-words">{lead.source || 'Walk-in'}</p>
                       </div>
 
                       <div className="min-w-0 space-y-1.5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Follow-Up</p>
-                        <p className={`text-sm font-bold break-words ${due ? 'text-amber-700' : 'text-slate-700'}`}>{formatDateTimeLabel(lead.next_follow_up_at)}</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Follow-Up</p>
+                        <p className={`text-sm font-bold break-words ${due ? 'text-amber-300' : 'text-slate-100'}`}>{formatDateTimeLabel(lead.next_follow_up_at)}</p>
                       </div>
 
                       <div className="min-w-0 space-y-1.5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Trial</p>
-                        <p className="text-sm font-bold text-slate-700 break-words">{formatDateTimeLabel(lead.trial_date)}</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Trial</p>
+                        <p className="text-sm font-bold text-slate-100 break-words">{formatDateTimeLabel(lead.trial_date)}</p>
                       </div>
 
                       <div className="min-w-0 space-y-1.5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Priority</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Priority</p>
                         <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${PRIORITY_STYLES[priorityLabel] || PRIORITY_STYLES.MEDIUM}`}>{priorityLabel}</span>
                       </div>
 
                       <div className="min-w-0 space-y-1.5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Status</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Status</p>
                         <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${STATUS_STYLES[statusLabel] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>{statusLabel.replace('_', ' ')}</span>
                       </div>
 
                       <div className="min-w-[210px] space-y-2">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400 text-right">Actions</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 text-right">Actions</p>
                         <div className="flex justify-end items-center gap-2 flex-wrap">
-                          <button type="button" aria-label={`Call ${lead.full_name}`} onClick={() => handleCall(lead.phone)} className="p-2.5 text-blue-500 bg-blue-50 border border-blue-100 rounded-xl hover:bg-blue-500 hover:text-white transition-all">
+                          <button type="button" aria-label={`Call ${lead.full_name}`} onClick={() => handleCall(lead.phone)} className="p-2.5 text-blue-200 bg-blue-500/15 border border-blue-500/30 rounded-xl hover:bg-blue-500 hover:text-white transition-all">
                             <Phone size={14} />
                           </button>
-                          <button type="button" aria-label={`WhatsApp ${lead.full_name}`} onClick={() => handleWhatsApp(lead)} className="p-2.5 text-emerald-500 bg-emerald-50 border border-emerald-100 rounded-xl hover:bg-emerald-500 hover:text-white transition-all">
+                          <button type="button" aria-label={`WhatsApp ${lead.full_name}`} onClick={() => handleWhatsApp(lead)} className="p-2.5 text-emerald-200 bg-emerald-500/15 border border-emerald-500/30 rounded-xl hover:bg-emerald-500 hover:text-white transition-all">
                             <MessageSquare size={14} />
                           </button>
                           {lead.converted_member_id ? (
-                            <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="inline-flex items-center gap-1.5 bg-violet-50 text-violet-600 px-3 py-2 rounded-xl border border-violet-100 text-[10px] font-black uppercase hover:bg-violet-600 hover:text-white transition-all shadow-sm">
+                            <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="inline-flex items-center gap-1.5 bg-violet-500/15 text-violet-200 px-3 py-2 rounded-xl border border-violet-500/30 text-[10px] font-black uppercase hover:bg-violet-500 hover:text-white transition-all shadow-sm">
                               <ArrowRight size={12} /> Open Member
                             </button>
                           ) : (
                             canManage && (
-                              <button onClick={() => handleConvertLead(lead)} className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl border border-indigo-100 text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
+                              <button onClick={() => handleConvertLead(lead)} className="inline-flex items-center gap-1.5 bg-indigo-500/15 text-indigo-200 px-3 py-2 rounded-xl border border-indigo-500/30 text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
                                 <ArrowRight size={12} /> Convert
                               </button>
                             )
                           )}
                           {canManage && (
-                            <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="p-2.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all">
+                            <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="p-2.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-all">
                               <Pencil size={14} />
                             </button>
                           )}
                           {canManage && (
-                            <button type="button" aria-label={`Delete ${lead.full_name}`} onClick={() => handleDeleteLead(lead)} className="p-2.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
+                            <button type="button" aria-label={`Delete ${lead.full_name}`} onClick={() => handleDeleteLead(lead)} className="p-2.5 text-rose-300 hover:text-rose-100 hover:bg-rose-500/20 rounded-xl transition-all">
                               <Trash2 size={14} />
                             </button>
                           )}
