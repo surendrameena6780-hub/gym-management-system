@@ -2,7 +2,7 @@ const OWNER_AUTH_COOKIE = 'gv_auth';
 const MEMBER_AUTH_COOKIE = 'gv_member_auth';
 
 const OWNER_AUTH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const MEMBER_AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MEMBER_AUTH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const isProduction = process.env.NODE_ENV === 'production';
 

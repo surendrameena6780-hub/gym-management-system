@@ -586,23 +586,29 @@ const buildMemberAuthPayload = (member, message = 'Login successful.') => {
     const token = jwt.sign(
         { member: { id: member.id, gym_id: member.gym_id, role: 'MEMBER' } },
         process.env.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '30d' }
     );
+
+    const memberProfile = {
+        id: member.id,
+        gym_id: member.gym_id,
+        full_name: member.full_name,
+        email: member.email,
+        phone: member.phone,
+        profile_pic: member.profile_pic,
+        gym_name: member.gym_name,
+        plan_name: member.plan_name,
+        membership_start: member.start_date,
+        membership_end: member.end_date,
+        membership_status: member.membership_status,
+        status: member.status,
+        joining_date: member.joining_date,
+    };
 
     return {
         token,
         message,
-        member: {
-            id: member.id,
-            full_name: member.full_name,
-            email: member.email,
-            gym_name: member.gym_name,
-            plan_name: member.plan_name,
-            membership_start: member.start_date,
-            membership_end: member.end_date,
-            membership_status: member.membership_status,
-            status: member.status,
-        },
+        member: memberProfile,
     };
 };
 
@@ -2482,18 +2488,11 @@ router.get('/member/me', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).json({ message: 'Member not found.' });
 
         const m = result.rows[0];
+        const payload = buildMemberAuthPayload(m, 'Session restored.');
         return res.json({
-            id: m.id,
-            full_name: m.full_name,
-            email: m.email,
-            phone: m.phone,
-            profile_pic: m.profile_pic,
-            gym_name: m.gym_name,
-            plan_name: m.plan_name,
-            membership_end: m.end_date,
-            membership_status: m.membership_status,
-            status: m.status,
-            joining_date: m.joining_date,
+            token: payload.token,
+            member: payload.member,
+            ...payload.member,
         });
     } catch (err) {
         return res.status(401).json({ message: 'Token is not valid.' });

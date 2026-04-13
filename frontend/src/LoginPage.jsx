@@ -1272,6 +1272,17 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
   const [memberOtp, setMemberOtp]   = useState('');
   const [memberOtpDelivery, setMemberOtpDelivery] = useState(null);
 
+  const clearMemberPortalSession = useCallback(() => {
+    setMemberData(null);
+    setMemberToken(null);
+    setPhone('');
+    setMemberOtp('');
+    setMemberOtpStep('phone');
+    setMemberOtpDelivery(null);
+    setError('');
+    setNotice('');
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1323,6 +1334,44 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
     setError(getOauthErrorMessage(authErrorCode));
     onAuthErrorConsumed?.();
   }, [authErrorCode, onAuthErrorConsumed]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreMemberSession = async () => {
+      try {
+        const res = await axios.get('/api/auth/member/me');
+        const restoredToken = String(res.data?.token || '').trim();
+        const restoredMember = res.data?.member && typeof res.data.member === 'object'
+          ? res.data.member
+          : (res.data?.id ? res.data : null);
+
+        if (cancelled || !restoredMember?.id || !restoredToken) {
+          return;
+        }
+
+        setTab('MEMBER');
+        setError('');
+        setNotice('');
+        setMemberData(restoredMember);
+        setMemberToken(restoredToken);
+        setMemberOtp('');
+        setMemberOtpStep('phone');
+        setMemberOtpDelivery(null);
+      } catch (err) {
+        const status = err?.response?.status;
+        if (status === 401 || status === 404) {
+          axios.post('/api/auth/logout').catch(() => {});
+        }
+      }
+    };
+
+    restoreMemberSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const resetPasswordRecoveryState = () => {
     setPasswordResetStep('request');
@@ -1435,6 +1484,17 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
     finally { setMemberLoginLoading(false); }
   };
 
+  const handleMemberSignOut = async () => {
+    try {
+      await axios.post('/api/auth/logout');
+    } catch (_err) {
+      // Even if the request fails, clear local member state so the portal can close.
+    }
+
+    clearMemberPortalSession();
+    setTab('MEMBER');
+  };
+
   const handlePasswordResetRequest = async (e) => {
     e.preventDefault();
     const normalizedEmail = String(passwordResetEmail || '').trim().toLowerCase();
@@ -1516,11 +1576,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
 
   const switchTab = (t) => {
     setTab(t);
-    setError('');
-    setNotice('');
-    setMemberData(null);
-    setMemberToken(null);
-    setPhone('');
+    clearMemberPortalSession();
     setShowForgotEmailHint(false);
     setPasswordResetOpen(false);
     resetPasswordRecoveryState();
@@ -1533,7 +1589,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
         member={memberData}
         token={memberToken}
         onMemberChange={setMemberData}
-        onSignOut={() => { setMemberData(null); setMemberToken(null); setPhone(''); setMemberOtp(''); setMemberOtpStep('phone'); setMemberOtpDelivery(null); setError(''); }}
+        onSignOut={handleMemberSignOut}
       />
     );
   }
