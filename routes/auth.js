@@ -96,6 +96,7 @@ const buildFrontendAuthRedirect = ({ mode = 'login', error = '', source = '', ex
 };
 
 const GOOGLE_SIGNUP_TOKEN_TTL_SECONDS = 15 * 60;
+const OAUTH_BOOTSTRAP_TOKEN_TTL_SECONDS = 3 * 60;
 const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
 const SIGNUP_EMAIL_VERIFY_PURPOSE = 'SIGNUP_EMAIL_VERIFY';
 const MEMBER_LOGIN_PURPOSE = 'MEMBER_LOGIN';
@@ -430,12 +431,36 @@ const createGoogleSignupToken = ({ googleId, email, fullName, avatarUrl }) => jw
     { expiresIn: GOOGLE_SIGNUP_TOKEN_TTL_SECONDS }
 );
 
+const createOauthBootstrapToken = ({ userId, source = 'oauth' }) => jwt.sign(
+    {
+        type: 'oauth_bootstrap',
+        user_id: Number.parseInt(userId, 10),
+        source: String(source || '').trim().toLowerCase() || 'oauth',
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: OAUTH_BOOTSTRAP_TOKEN_TTL_SECONDS }
+);
+
 const verifyGoogleSignupToken = (signupToken) => {
     const decoded = jwt.verify(String(signupToken || ''), process.env.JWT_SECRET);
     if (!decoded || decoded.type !== 'google_signup' || !decoded.google_id || !decoded.email) {
         throw new Error('INVALID_GOOGLE_SIGNUP_TOKEN');
     }
     return decoded;
+};
+
+const verifyOauthBootstrapToken = (bootstrapToken) => {
+    const decoded = jwt.verify(String(bootstrapToken || '').trim(), process.env.JWT_SECRET);
+    const userId = Number.parseInt(decoded?.user_id, 10);
+
+    if (!decoded || decoded.type !== 'oauth_bootstrap' || !Number.isInteger(userId)) {
+        throw new Error('INVALID_OAUTH_BOOTSTRAP_TOKEN');
+    }
+
+    return {
+        userId,
+        source: String(decoded.source || '').trim().toLowerCase() || 'oauth',
+    };
 };
 
 const getOauthAccountError = (user) => {
@@ -2141,12 +2166,62 @@ router.get('/google/callback', async (req, res) => {
             staff_role: user.staff_role || 'OWNER',
             is_active: true,
         });
+        const oauthBootstrapToken = createOauthBootstrapToken({ userId: user.id, source: 'google' });
 
         setUserAuthCookie(res, token);
-        res.redirect(buildFrontendAuthRedirect({ mode, source: 'google' }));
+        res.redirect(buildFrontendAuthRedirect({
+            mode,
+            source: 'google',
+            extraParams: {
+                oauth_bootstrap_token: oauthBootstrapToken,
+            },
+        }));
     } catch (err) {
         console.error('GOOGLE OAUTH ERROR:', err);
         res.redirect(buildFrontendAuthRedirect({ mode, error: 'server_error' }));
+    }
+});
+
+router.post('/oauth/bootstrap', async (req, res) => {
+    const bootstrapToken = String(req.body?.bootstrap_token || '').trim();
+
+    if (!bootstrapToken) {
+        return res.status(400).json({
+            code: 'OAUTH_BOOTSTRAP_MISSING',
+            message: 'OAuth sign-in session is missing. Please continue with Google again.',
+        });
+    }
+
+    try {
+        const { userId } = verifyOauthBootstrapToken(bootstrapToken);
+        const user = await loadUserAuthContextById(userId);
+        const authError = getOauthAccountError(user);
+
+        if (authError === 'account_suspended') {
+            return res.status(403).json({
+                code: 'ACCOUNT_SUSPENDED',
+                message: 'Your account is suspended. Contact GymVault HQ.',
+            });
+        }
+
+        if (!user) {
+            return res.status(401).json({
+                code: 'OAUTH_BOOTSTRAP_INVALID',
+                message: 'OAuth sign-in session expired. Please continue with Google again.',
+            });
+        }
+
+        return sendUserAuthResponse(res, {
+            ...user,
+            role: user.role || 'OWNER',
+            staff_role: user.staff_role || 'OWNER',
+            is_active: true,
+        }, 'Login successful!');
+    } catch (err) {
+        return res.status(401).json({
+            code: 'OAUTH_BOOTSTRAP_INVALID',
+            message: 'OAuth sign-in session expired. Please continue with Google again.',
+        });
     }
 });
 

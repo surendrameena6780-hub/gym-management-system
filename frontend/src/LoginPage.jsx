@@ -1302,6 +1302,7 @@ export default function LoginPage({ setToken, onShowSignup }) {
       google_cancelled:      'Google sign-in was cancelled.',
       google_token_failed:   'Google sign-in failed. Please try again.',
       google_profile_failed: 'Google sign-in could not read your Google profile. Please try again.',
+      oauth_session_failed:  'Google sign-in could not finish securely. Please try again.',
       google_signup_required:'This Google account is not registered yet. Sign up with Google first.',
       google_use_email_login:'This email is registered with email and password. Use email sign-in instead.',
       account_suspended:     'Your account is suspended. Contact GymVault HQ.',

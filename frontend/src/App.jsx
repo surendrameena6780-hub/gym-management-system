@@ -538,15 +538,19 @@ function App() {
     });
   }, [currentPage]);
 
-  // Handle ?auth_source= from Google / Apple OAuth redirect (cookie-based auth)
+  // Handle OAuth redirects. Google login now uses a short-lived bootstrap token so
+  // the frontend can finish the session on the app origin even when the callback
+  // first lands on the backend domain.
   const oauthCookiePending = useRef(false);
+  const oauthBootstrapTokenRef = useRef('');
   const [authCheckBump, setAuthCheckBump] = useState(0);
   useEffect(() => {
     if (isHQ) return;
     const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
     const params   = new URLSearchParams(window.location.search);
     const authSource = params.get('auth_source');
-    if (!authSource) return;
+    const oauthBootstrapToken = String(params.get('oauth_bootstrap_token') || '').trim();
+    if (!authSource && !oauthBootstrapToken) return;
 
     // Google sign-up returns to /signup with a temporary signup token. That flow is
     // not a logged-in cookie bootstrap yet, so keep the user on the signup page.
@@ -555,6 +559,13 @@ function App() {
     }
 
     stabilizeViewportAfterAuth();
+    if (oauthBootstrapToken) {
+      oauthBootstrapTokenRef.current = oauthBootstrapToken;
+      setAuthCheckBump((n) => n + 1);
+      window.history.replaceState({}, '', currentPath);
+      return;
+    }
+
     // Token is in the HttpOnly cookie now, trigger a /me check
     oauthCookiePending.current = true;
     setAuthCheckBump((n) => n + 1);
@@ -730,7 +741,7 @@ function App() {
       return undefined;
     }
 
-    if (!token && !oauthCookiePending.current) {
+    if (!token && !oauthCookiePending.current && !oauthBootstrapTokenRef.current) {
       writeStoredUser(null);
       setCurrentUser(null);
       setBranchDirectory([]);
@@ -743,10 +754,16 @@ function App() {
     let cancelled = false;
     setIsAuthChecking(true);
     const pendingOAuth = oauthCookiePending.current;
+    const pendingOauthBootstrapToken = oauthBootstrapTokenRef.current;
     oauthCookiePending.current = false;
+    oauthBootstrapTokenRef.current = '';
 
     const headers = token ? { 'x-auth-token': token } : {};
-    axios.get('/api/auth/me', { headers })
+    const authRequest = pendingOauthBootstrapToken
+      ? axios.post('/api/auth/oauth/bootstrap', { bootstrap_token: pendingOauthBootstrapToken })
+      : axios.get('/api/auth/me', { headers });
+
+    authRequest
       .then((res) => {
         if (cancelled) return;
 
@@ -792,6 +809,15 @@ function App() {
       })
       .catch((err) => {
         if (cancelled) return;
+
+        if (pendingOauthBootstrapToken) {
+          const status = Number(err?.response?.status || 0);
+          const nextAuthError = status === 403 ? 'account_suspended' : 'oauth_session_failed';
+          clearAuthState({ redirectToLogin: false });
+          setShowSignup(false);
+          window.history.replaceState({}, '', `/login?auth_error=${nextAuthError}`);
+          return;
+        }
 
         const status = Number(err?.response?.status || 0);
         const code = String(err?.response?.data?.code || '').trim().toUpperCase();
