@@ -51,6 +51,7 @@ const MOBILE_PRIMARY_NAV = ['Dashboard', 'Members', 'Plans', 'Payments'];
 const AUTH_USER_STORAGE_KEY = 'user';
 const GLOBAL_DATA_CHANGE_STORAGE_KEY = 'gymvault:data-change-at';
 const OPERATIONS_BRANCH_STORAGE_KEY = 'gymvault:operations-branch-id';
+const OAUTH_BOOTSTRAP_STORAGE_KEY = 'gymvault:oauth-bootstrap-token';
 
 const PAGE_PERMISSIONS = {
   Dashboard: null,
@@ -82,6 +83,16 @@ const getAuthStorage = () => {
 
   try {
     return window.localStorage;
+  } catch (_err) {
+    return null;
+  }
+};
+
+const getSessionStorage = () => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    return window.sessionStorage;
   } catch (_err) {
     return null;
   }
@@ -124,6 +135,33 @@ const writeStoredUser = (user) => {
     storage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(user));
   } catch (_err) {
     // Ignore storage write failures and fall back to in-memory state.
+  }
+};
+
+const readPendingOauthBootstrapToken = () => {
+  const storage = getSessionStorage();
+  if (!storage) return '';
+
+  try {
+    return String(storage.getItem(OAUTH_BOOTSTRAP_STORAGE_KEY) || '').trim();
+  } catch (_err) {
+    return '';
+  }
+};
+
+const writePendingOauthBootstrapToken = (token) => {
+  const storage = getSessionStorage();
+  if (!storage) return;
+
+  try {
+    const normalizedToken = String(token || '').trim();
+    if (normalizedToken) {
+      storage.setItem(OAUTH_BOOTSTRAP_STORAGE_KEY, normalizedToken);
+    } else {
+      storage.removeItem(OAUTH_BOOTSTRAP_STORAGE_KEY);
+    }
+  } catch (_err) {
+    // Ignore session storage failures and rely on in-memory state instead.
   }
 };
 
@@ -550,7 +588,8 @@ function App() {
     const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
     const params   = new URLSearchParams(window.location.search);
     const authSource = params.get('auth_source');
-    const oauthBootstrapToken = String(params.get('oauth_bootstrap_token') || '').trim();
+    const oauthBootstrapTokenFromUrl = String(params.get('oauth_bootstrap_token') || '').trim();
+    const oauthBootstrapToken = oauthBootstrapTokenFromUrl || readPendingOauthBootstrapToken();
     if (!authSource && !oauthBootstrapToken) return;
 
     // Google sign-up returns to /signup with a temporary signup token. That flow is
@@ -562,8 +601,11 @@ function App() {
     stabilizeViewportAfterAuth();
     if (oauthBootstrapToken) {
       oauthBootstrapTokenRef.current = oauthBootstrapToken;
+      writePendingOauthBootstrapToken(oauthBootstrapToken);
       setAuthCheckBump((n) => n + 1);
-      window.history.replaceState({}, '', currentPath);
+      if (oauthBootstrapTokenFromUrl || authSource) {
+        window.history.replaceState({}, '', currentPath);
+      }
       return;
     }
 
@@ -655,6 +697,7 @@ function App() {
   const clearAuthState = useCallback(({ redirectToLogin = true } = {}) => {
     clearSessionToken();
     writeStoredUser(null);
+    writePendingOauthBootstrapToken('');
     localStorage.removeItem('gv_saas_grace_dismissed');
     try {
       window.sessionStorage.removeItem(OPERATIONS_BRANCH_STORAGE_KEY);
@@ -743,6 +786,11 @@ function App() {
       return undefined;
     }
 
+    const persistedOauthBootstrapToken = readPendingOauthBootstrapToken();
+    if (!token && !oauthCookiePending.current && !oauthBootstrapTokenRef.current && persistedOauthBootstrapToken) {
+      oauthBootstrapTokenRef.current = persistedOauthBootstrapToken;
+    }
+
     if (!token && !oauthCookiePending.current && !oauthBootstrapTokenRef.current) {
       writeStoredUser(null);
       setCurrentUser(null);
@@ -774,6 +822,7 @@ function App() {
 
         if (returnedToken) {
           setSessionToken(returnedToken);
+          writePendingOauthBootstrapToken('');
           if (returnedToken !== token) {
             setToken(returnedToken);
           }
@@ -815,6 +864,7 @@ function App() {
         if (pendingOauthBootstrapToken) {
           const status = Number(err?.response?.status || 0);
           const nextAuthError = status === 403 ? 'account_suspended' : 'oauth_session_failed';
+          writePendingOauthBootstrapToken('');
           clearAuthState({ redirectToLogin: false });
           setShowSignup(false);
           setAuthUiErrorCode(nextAuthError);
@@ -1503,6 +1553,7 @@ function App() {
       authTransitionRef.current = true;
       setTimeout(() => { authTransitionRef.current = false; }, 600);
       const nextToken = setSessionToken(t);
+      writePendingOauthBootstrapToken('');
       setAuthUiErrorCode('');
       setIsAuthChecking(false);
       setShowProfileMenu(false);

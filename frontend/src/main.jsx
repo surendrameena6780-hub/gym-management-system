@@ -276,7 +276,7 @@ if (typeof window !== 'undefined' && !window.__gymvaultViewportSyncInstalled) {
 }
 
 if ('serviceWorker' in navigator) {
-  const SERVICE_WORKER_URL = '/sw.js?v=20260411-1'
+  const SERVICE_WORKER_URL = '/sw.js?v=20260413-1'
   let isReloadingForServiceWorker = false
 
   const reloadForUpdatedServiceWorker = () => {
