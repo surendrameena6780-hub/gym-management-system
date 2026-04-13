@@ -9,13 +9,11 @@ import {
 import SafeResponsiveContainer from '../components/SafeResponsiveContainer';
 import {
   Activity,
-  Bot,
   CheckCircle,
   Clock,
   CreditCard,
   DollarSign,
   MessageSquare,
-  Play,
   RefreshCw,
   ShieldAlert,
   Sparkles,
@@ -388,15 +386,11 @@ const DashboardPageView = ({ controller, isActive = true }) => {
     dashboardData,
     displayChartData,
     gymName,
-    handleSkipSetup,
-    handleStartTour,
-    isSkipped,
     isWarmupRetrying,
     navigateTo,
     payStats,
     setChartDays,
     setup,
-    showTourBanner,
     todayCheckins,
   } = controller;
 
@@ -482,48 +476,7 @@ const DashboardPageView = ({ controller, isActive = true }) => {
         </div>
       )}
 
-      {showTourBanner && !setup.is_complete && !isSkipped && (
-        <div className="relative overflow-hidden bg-slate-900 rounded-[32px] shadow-2xl border border-slate-800 p-8 desktop:p-10 mb-8 animate-in fade-in slide-in-from-top-4 duration-700">
-          <div className="absolute -top-24 -right-24 w-96 h-96 bg-indigo-500/20 rounded-full blur-[100px] pointer-events-none" />
-          <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-purple-500/20 rounded-full blur-[100px] pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col desktop:flex-row items-center gap-10">
-            <div className="w-40 h-40 bg-indigo-500/20 rounded-full flex items-center justify-center border border-indigo-500/30 shadow-[0_0_40px_rgba(99,102,241,0.4)] shrink-0">
-              <Bot size={64} className="text-indigo-400 animate-bounce" />
-            </div>
-            <div className="flex-1 text-center desktop:text-left">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-black uppercase tracking-widest mb-4">
-                <Sparkles size={14} /> Auto-Pilot Initialized
-              </div>
-              <h2 className="text-3xl desktop:text-4xl font-black text-white mb-4 tracking-tight">
-                Let&apos;s build your Gym, <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">together.</span>
-              </h2>
-              <p className="text-slate-400 font-medium text-lg leading-relaxed mb-8 max-w-2xl mx-auto md:mx-0">
-                Skip the manual setup. Click start, and our AI Guide will take control of your screen to explain how to configure your business.
-              </p>
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <button
-                  type="button"
-                  onClick={handleStartTour}
-                  className="w-full sm:w-auto px-8 py-4 bg-white text-slate-900 rounded-xl font-black text-sm hover:bg-indigo-50 transition-all hover:scale-105 shadow-[0_0_30px_rgba(255,255,255,0.2)] flex items-center justify-center gap-2"
-                >
-                  <Play size={18} fill="currentColor" /> Start Automated Tour
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSkipSetup}
-                  className="w-full sm:w-auto px-6 py-4 text-slate-400 hover:text-white font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
-                >
-                  Skip Tour <X size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div
-        id="tour-dashboard-hero"
         className="gv-dashboard-hero relative overflow-hidden rounded-[24px] sm:rounded-[28px] p-5 sm:p-6 desktop:p-8 mb-5 sm:mb-6"
         style={{
           boxShadow: '0 20px 60px rgba(7,10,24,0.34)',

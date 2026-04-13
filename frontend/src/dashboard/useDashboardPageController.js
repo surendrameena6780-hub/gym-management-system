@@ -116,7 +116,7 @@ const buildDashboardAudienceHash = (memberIds = []) => {
   return `${normalizedIds.length}:${hashDashboardMemberIds(normalizedIds.join('|'))}`;
 };
 
-export default function useDashboardPageController({ appRuntime, setCurrentPage, startTour, isActive = true }) {
+export default function useDashboardPageController({ appRuntime, setCurrentPage, isActive = true }) {
   const { token, toast, navigateTo: navTo, branchScopeValue } = appRuntime;
   const navigateTo = useMemo(() => navTo || ((...args) => setCurrentPage?.(...args)), [navTo, setCurrentPage]);
 
@@ -137,8 +137,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     steps: { profile: false, plans: false, members: false },
     recommended: { whatsapp: false, payments: false },
   });
-  const [isSkipped, setIsSkipped] = useState(localStorage.getItem('gymvault_skip_setup') === 'true');
-  const [showTourBanner, setShowTourBanner] = useState(localStorage.getItem('gymvault_tour_completed') !== 'true');
   const [isWarmupRetrying, setIsWarmupRetrying] = useState(false);
   const warmupRetryTimerRef = useRef(null);
   const warmupRetryCountRef = useRef(0);
@@ -550,17 +548,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
 
     return undefined;
   }, [fetchData, getLatestGlobalDataChangeAt, isActive, token]);
-
-  const handleStartTour = useCallback(() => {
-    localStorage.setItem('gymvault_tour_completed', 'true');
-    setShowTourBanner(false);
-    startTour();
-  }, [startTour]);
-
-  const handleSkipSetup = useCallback(() => {
-    localStorage.setItem('gymvault_skip_setup', 'true');
-    setIsSkipped(true);
-  }, []);
 
   const launchQuickAction = useCallback((actionKey, action) => {
     if (quickActionLoading) return;
@@ -1994,10 +1981,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     handleCopyPaymentCollectionDetail,
     handlePayment,
     handleQuickCheckIn,
-    handleSkipSetup,
-    handleStartTour,
     isAutomating,
-    isSkipped,
     isWarmupRetrying,
     launchQuickAction,
     loading,
@@ -2049,7 +2033,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     showBroadcastModal,
     showCheckinModal,
     showPaymentModal,
-    showTourBanner,
     todayCheckins,
   };
 }

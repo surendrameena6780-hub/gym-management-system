@@ -17,7 +17,7 @@ import {
   LayoutDashboard, Users, Layers, CreditCard,
   ClipboardCheck, BarChart3, Settings, LogOut, Lock, Bell, User, LifeBuoy,
   Dumbbell,
-  Bot, ArrowRight, Target, Sparkles, Download, MoreHorizontal, CalendarDays, Building2, ChevronDown
+  Target, Download, MoreHorizontal, CalendarDays, Building2, ChevronDown
 } from 'lucide-react';
 
 const DashboardPage = lazyWithRecovery('dashboard', () => import('./DashboardPage'));
@@ -164,17 +164,6 @@ const writePendingOauthBootstrapToken = (token) => {
     // Ignore session storage failures and rely on in-memory state instead.
   }
 };
-
-const TOUR_STEPS = [
-  { targetId: null, page: 'Dashboard', position: 'center', title: 'Welcome to GymVault ?', desc: 'Let\'s set up your gym in a few steps. I will guide you through the exact workflow.' },
-  { targetId: 'tour-dashboard-hero', page: 'Dashboard', position: 'bottom', title: 'Dashboard Overview', desc: 'This is your central command. It tracks revenue, active members, and daily check-ins in real-time.' },
-  { targetId: 'nav-Members', page: 'Dashboard', position: 'right', title: 'Members Directory', desc: 'Manage your clients here. You can track their active memberships and contact details.' },
-  { targetId: 'btn-add-member', page: 'Dashboard', position: 'top', title: 'Quick Actions', desc: 'Use this button anytime to instantly register a new member, record a payment, or send a WhatsApp broadcast.' },
-  { targetId: 'nav-Plans', page: 'Plans', position: 'right', title: 'Membership Plans', desc: 'Before adding members, you will create Plans here (e.g., Monthly VIP for ?2000). They dictate pricing and duration.' },
-  { targetId: 'nav-Payments', page: 'Payments', position: 'right', title: 'Financial Ledger', desc: 'Every transaction is recorded safely here for your accounting.' },
-  { targetId: 'nav-Settings', page: 'Settings', position: 'right', title: 'Gym Configuration', desc: 'Upload your gym logo, update your address, and configure staff access here.' },
-  { targetId: null, page: 'Dashboard', position: 'center', title: 'You\'re All Set! ??', desc: 'Your gym setup is fully complete. You are ready to dominate. Let\'s get to work.' }
-];
 
 // ─── Toast System ─────────────────────────────────────────────────────────────
 
@@ -442,10 +431,6 @@ function App() {
   const authTransitionRef = useRef(false);
   const [showSignup, setShowSignup] = useState(normalizedPathname === '/signup');
 
-  // 🚨 MASTERCLASS TOUR STATE 🚨
-  const [tour, setTour] = useState({ isActive: false, step: 0, isWaitingForAction: false });
-  const [tourRect, setTourRect] = useState(null); // <-- NEW: Tracks element position
-
   const [showSplash, setShowSplash] = useState(true);
   const [splashExiting, setSplashExiting] = useState(false);
 
@@ -704,10 +689,6 @@ function App() {
     } catch {
       // Ignore storage cleanup failures during logout.
     }
-    
-    // Wipe tour memory on logout
-    localStorage.removeItem('gymvault_tour_completed');
-    localStorage.removeItem('gymvault_skip_setup');
 
     setToken(null);
     setCurrentUser(null);
@@ -1491,51 +1472,6 @@ function App() {
     return () => clearTimeout(fallbackTimer);
   }, [token, isHQ, isSuspended, currentUser, currentPage, stats]);
 
-  // ════════════════════════════════════════════════════════════════════════
-  // 🚀 THE MASTERCLASS TOUR ENGINE
-  // ════════════════════════════════════════════════════════════════════════
-
-  // The engine that finds the element on the screen and draws the spotlight over it
-  useEffect(() => {
-    if (!tour.isActive) return;
-    const step = TOUR_STEPS[tour.step];
-    if (step.targetId) {
-      const findElement = () => {
-        const el = document.getElementById(step.targetId);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          setTimeout(() => {
-            const r = el.getBoundingClientRect();
-            setTourRect({ top: r.top, left: r.left, width: r.width, height: r.height });
-          }, 300);
-        } else {
-          setTimeout(findElement, 200); // Retry if page is still rendering
-        }
-      };
-      findElement();
-    } else {
-      setTourRect(null);
-    }
-  }, [tour.isActive, tour.step, currentPage]);
-
-  const startTour = useCallback(() => { setTour({ isActive: true, step: 0 }); navigateTo('Dashboard'); }, [navigateTo]);
-
-  const handleNextTourStep = () => {
-    const nextStep = tour.step + 1;
-    if (nextStep < TOUR_STEPS.length) {
-      navigateTo(TOUR_STEPS[nextStep].page);
-      setTour({ isActive: true, step: nextStep });
-    } else {
-      setTour({ isActive: false, step: 0 });
-      navigateTo('Dashboard');
-      toast("Setup Tour Complete!", "success");
-    }
-  };
-
-  const endTour = () => { setTour({ isActive: false, step: 0 }); toast("Tour exited.", "info"); };
-
-  // ════════════════════════════════════════════════════════════════════════
-
   if (isHQ) {
     if (!superToken) {
       return <SuperAdminLogin setSuperToken={setSuperToken} />;
@@ -1620,56 +1556,6 @@ function App() {
         </div>
       )}
       {showSplash && <SplashScreen exiting={splashExiting} />}
-
-      {/* 🚀 SMART SPOTLIGHT TOUR OVERLAY */}
-      {tour.isActive && (
-        <div className="fixed inset-0 z-[9990] pointer-events-none">
-          
-          {/* Background Dimmer (If no specific target, dim entire screen) */}
-          {!tourRect && <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm transition-all duration-500" />}
-
-          {/* The Spotlight Cutout (Draws a massive shadow outside the box to dim the screen, leaving the element clear) */}
-          {tourRect && (
-            <div 
-              className="absolute rounded-2xl transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
-              style={{
-                top: tourRect.top - 8, left: tourRect.left - 8, 
-                width: tourRect.width + 16, height: tourRect.height + 16,
-                boxShadow: '0 0 0 9999px rgba(15, 23, 42, 0.75)',
-                border: '2px solid #818cf8'
-              }}
-            />
-          )}
-
-          {/* The Tooltip Card */}
-          <div 
-            className="absolute z-[9999] bg-white rounded-2xl shadow-2xl p-6 w-[340px] pointer-events-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] border border-slate-100"
-            style={
-              !tourRect || TOUR_STEPS[tour.step].position === 'center' 
-                ? { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '400px' } 
-                : TOUR_STEPS[tour.step].position === 'right' 
-                  ? { top: tourRect.top, left: tourRect.left + tourRect.width + 30 }
-                  : TOUR_STEPS[tour.step].position === 'bottom'
-                    ? { top: tourRect.top + tourRect.height + 30, left: tourRect.left + (tourRect.width/2) - 170 }
-                    : { top: tourRect.top - 220, left: tourRect.left + (tourRect.width/2) - 170 } // Top fallback
-            }
-          >
-            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-1.5">Step {tour.step + 1} of {TOUR_STEPS.length}</p>
-            <h3 className="text-lg font-black text-slate-900 mb-2">{TOUR_STEPS[tour.step].title}</h3>
-            <p className="text-sm text-slate-500 font-medium leading-relaxed mb-6">{TOUR_STEPS[tour.step].desc}</p>
-            
-            <div className="flex items-center gap-3">
-              <button onClick={handleNextTourStep} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2">
-                 {tour.step === TOUR_STEPS.length - 1 ? 'Finish Tour' : 'Next'} <ArrowRight size={16} />
-              </button>
-              <button onClick={endTour} className="px-4 py-3 text-slate-400 hover:text-slate-600 font-bold text-xs uppercase tracking-widest transition-colors">
-                 Skip
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
 
       <div
         className="flex overflow-hidden font-['Inter'] antialiased text-slate-900"
@@ -1966,7 +1852,7 @@ function App() {
                 <PageErrorBoundary pageName="Dashboard" onGoHome={() => navigateTo('Dashboard')}>
                   <Suspense fallback={renderPageLoader('Dashboard')}>
                     {currentUser?.role === 'OWNER'
-                      ? <DashboardPage appRuntime={appRuntime} setCurrentPage={setCurrentPage} startTour={startTour} isActive={currentPage === 'Dashboard'} />
+                      ? <DashboardPage appRuntime={appRuntime} setCurrentPage={setCurrentPage} isActive={currentPage === 'Dashboard'} />
                       : <StaffDashboard appRuntime={appRuntime} isActive={currentPage === 'Dashboard'} />}
                   </Suspense>
                 </PageErrorBoundary>
