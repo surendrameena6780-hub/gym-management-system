@@ -57,6 +57,7 @@ const {
     ValidationError,
     ensureTrimmedString,
     ensureEmail,
+    ensureDateOnly,
     ensureInteger,
     ensureChoice,
     ensureObject,
@@ -296,7 +297,37 @@ const hashValue = (value) => crypto.createHash('sha256').update(String(value || 
 
 const generateApiToken = () => `gk_${crypto.randomBytes(24).toString('hex')}`;
 
-const normalizeMemberImportPhone = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+const normalizeMemberImportPhone = (value) => {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (digits.length <= 10) return digits;
+    return digits.slice(-10);
+};
+
+const normalizeImportLookupKey = (value) => String(value || '').trim().toLowerCase();
+
+const findCsvHeaderIndex = (headerRow, keys = []) => keys.reduce((foundIndex, key) => {
+    if (foundIndex !== -1) return foundIndex;
+    return headerRow.indexOf(String(key || '').trim().toLowerCase());
+}, -1);
+
+const getTodayDateOnly = () => new Date().toISOString().slice(0, 10);
+
+const shiftDateOnly = (value, days) => {
+    const normalized = ensureDateOnly(value, { field: 'date' });
+    if (!normalized) return '';
+
+    const parsed = new Date(`${normalized}T00:00:00.000Z`);
+    parsed.setUTCDate(parsed.getUTCDate() + Number(days || 0));
+    return parsed.toISOString().slice(0, 10);
+};
+
+const getPlanDurationDays = (plan = {}) => Number(plan.duration_days || (plan.duration_months * 30) || 30);
+
+const deriveImportedMembershipStartDate = ({ explicitStartDate = '', endDate = '', durationDays = 30 } = {}) => {
+    if (explicitStartDate) return explicitStartDate;
+    if (!endDate) return '';
+    return shiftDateOnly(endDate, -(Math.max(1, Number(durationDays || 30)) - 1));
+};
 
 const buildDefaultBranches = (count) => Array.from({ length: Math.max(1, count) }, (_, index) => ({
     id: `branch-${index + 1}`,
@@ -2288,76 +2319,166 @@ router.post('/import/members', auth, async (req, res) => {
     try {
         const csvText = ensureTrimmedString(req.body?.csv_text, { field: 'csv_text', required: true, max: 500000 });
         const dryRun = req.body?.dry_run === true;
-        const branchDirectory = await getGymBranchDirectory(pool, req.user.gym_id);
+        const gymId = req.user.gym_id;
+        const branchDirectory = await getGymBranchDirectory(pool, gymId);
         const defaultBranchId = branchDirectory[0]?.id || DEFAULT_BRANCH_ID;
+        const branchById = new Map(branchDirectory.map((branch) => [String(branch.id || '').trim(), branch]));
+        const branchByName = new Map(branchDirectory.map((branch) => [normalizeImportLookupKey(branch.name), branch]));
 
         const rows = parseCsvText(csvText);
         if (rows.length === 0) {
             return res.status(400).json({ error: 'No rows found in the import payload.' });
         }
 
-        const headerRow = rows[0].map((cell) => String(cell || '').trim().toLowerCase());
-        const hasHeader = headerRow.includes('full_name') || headerRow.includes('email') || headerRow.includes('phone');
+        const headerRow = rows[0].map((cell) => normalizeImportLookupKey(cell));
+        const hasHeader = headerRow.includes('full_name') || headerRow.includes('phone') || headerRow.includes('plan_name') || headerRow.includes('plan_id');
         const dataRows = hasHeader ? rows.slice(1) : rows;
 
-        const fullNameIndex = hasHeader ? headerRow.indexOf('full_name') : 0;
-        const emailIndex = hasHeader ? headerRow.indexOf('email') : 1;
-        const phoneIndex = hasHeader ? headerRow.indexOf('phone') : 2;
+        const fullNameIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['full_name', 'name', 'member_name']) : 0;
+        const phoneIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['phone', 'mobile', 'contact']) : 2;
+        const emailIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['email']) : 1;
+        const planIdIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['plan_id']) : -1;
+        const planNameIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['plan_name', 'plan']) : -1;
+        const membershipStartDateIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['membership_start_date', 'start_date', 'activation_date']) : -1;
+        const membershipEndDateIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['membership_end_date', 'expiry_date', 'end_date', 'expires_on']) : -1;
+        const joiningDateIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['joining_date', 'member_since']) : -1;
+        const lastVisitDateIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['last_visit_date', 'last_visit']) : -1;
+        const branchIdIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['branch_id']) : -1;
+        const branchNameIndex = hasHeader ? findCsvHeaderIndex(headerRow, ['branch_name', 'branch']) : -1;
 
-        if (fullNameIndex === -1 || emailIndex === -1 || phoneIndex === -1) {
-            return res.status(400).json({ error: 'CSV must include full_name, email, and phone columns.' });
+        if (fullNameIndex === -1 || phoneIndex === -1) {
+            return res.status(400).json({ error: 'CSV must include at least full_name and phone columns.' });
         }
 
-        const existingMembersRes = await pool.query(
-            `SELECT LOWER(email) AS email, phone
-             FROM members
-             WHERE gym_id = $1 AND deleted_at IS NULL`,
-            [req.user.gym_id]
-        );
+        const [existingMembersRes, plansRes] = await Promise.all([
+            pool.query(
+                `SELECT LOWER(email) AS email, phone
+                 FROM members
+                 WHERE gym_id = $1 AND deleted_at IS NULL`,
+                [gymId]
+            ),
+            pool.query(
+                `SELECT id, name, duration_days, duration_months
+                 FROM plans
+                 WHERE gym_id = $1 AND deleted_at IS NULL`,
+                [gymId]
+            ),
+        ]);
+
+        const plansById = new Map(plansRes.rows.map((plan) => [String(plan.id), plan]));
+        const plansByName = new Map(plansRes.rows.map((plan) => [normalizeImportLookupKey(plan.name), plan]));
         const existingEmails = new Set(existingMembersRes.rows.map((row) => String(row.email || '').trim().toLowerCase()).filter(Boolean));
         const existingPhones = new Set(existingMembersRes.rows.map((row) => normalizeMemberImportPhone(row.phone)).filter(Boolean));
         const batchEmails = new Set();
         const batchPhones = new Set();
         const validRows = [];
         const errors = [];
+        const todayDate = getTodayDateOnly();
 
         dataRows.forEach((row, index) => {
-            const full_name = String(row[fullNameIndex] || '').trim();
-            const email = String(row[emailIndex] || '').trim().toLowerCase();
-            const phone = normalizeMemberImportPhone(row[phoneIndex]);
             const rowNumber = hasHeader ? index + 2 : index + 1;
 
-            if (!full_name || !email || !phone) {
-                errors.push({ row: rowNumber, error: 'full_name, email, and phone are required.' });
-                return;
-            }
-            if (!/^\d{10}$/.test(phone)) {
-                errors.push({ row: rowNumber, error: 'Phone must contain exactly 10 digits.' });
-                return;
-            }
-            if (!/^\S+@\S+\.\S+$/.test(email)) {
-                errors.push({ row: rowNumber, error: 'Email format is invalid.' });
-                return;
-            }
-            if (existingEmails.has(email) || batchEmails.has(email)) {
-                errors.push({ row: rowNumber, error: 'Email already exists in this gym.' });
-                return;
-            }
-            if (existingPhones.has(phone) || batchPhones.has(phone)) {
-                errors.push({ row: rowNumber, error: 'Phone already exists in this gym.' });
-                return;
-            }
+            try {
+                const full_name = ensureTrimmedString(row[fullNameIndex], { field: 'full_name', required: true, min: 2, max: 100 });
+                const phone = normalizeMemberImportPhone(row[phoneIndex]);
+                const email = emailIndex === -1 ? '' : ensureEmail(row[emailIndex], { field: 'email', max: 120 });
+                const rawPlanId = planIdIndex === -1 ? '' : String(row[planIdIndex] || '').trim();
+                const rawPlanName = planNameIndex === -1 ? '' : String(row[planNameIndex] || '').trim();
+                const rawMembershipStartDate = membershipStartDateIndex === -1 ? '' : String(row[membershipStartDateIndex] || '').trim();
+                const rawMembershipEndDate = membershipEndDateIndex === -1 ? '' : String(row[membershipEndDateIndex] || '').trim();
+                const rawJoiningDate = joiningDateIndex === -1 ? '' : String(row[joiningDateIndex] || '').trim();
+                const rawLastVisitDate = lastVisitDateIndex === -1 ? '' : String(row[lastVisitDateIndex] || '').trim();
+                const rawBranchId = branchIdIndex === -1 ? '' : String(row[branchIdIndex] || '').trim();
+                const rawBranchName = branchNameIndex === -1 ? '' : String(row[branchNameIndex] || '').trim();
+                const hasMembershipData = Boolean(rawPlanId || rawPlanName || rawMembershipStartDate || rawMembershipEndDate);
 
-            batchEmails.add(email);
-            batchPhones.add(phone);
-            validRows.push({ full_name, email, phone });
+                if (!/^\d{10}$/.test(phone)) {
+                    throw new ValidationError('Phone must contain exactly 10 digits.');
+                }
+                if (email && (existingEmails.has(email) || batchEmails.has(email))) {
+                    throw new ValidationError('Email already exists in this gym.');
+                }
+                if (existingPhones.has(phone) || batchPhones.has(phone)) {
+                    throw new ValidationError('Phone already exists in this gym.');
+                }
+
+                let branchId = defaultBranchId;
+                if (rawBranchId || rawBranchName) {
+                    const resolvedBranch = rawBranchId
+                        ? branchById.get(rawBranchId)
+                        : branchByName.get(normalizeImportLookupKey(rawBranchName));
+                    if (!resolvedBranch) {
+                        throw new ValidationError('Branch was not found in this gym.');
+                    }
+                    branchId = resolvedBranch.id;
+                }
+
+                let importedMembership = null;
+                let joiningDate = rawJoiningDate ? ensureDateOnly(rawJoiningDate, { field: 'joining_date', allowFuture: false }) : '';
+                let lastVisitDate = rawLastVisitDate ? ensureDateOnly(rawLastVisitDate, { field: 'last_visit_date', allowFuture: false }) : '';
+                let memberStatus = 'UNPAID';
+
+                if (hasMembershipData) {
+                    if (!rawPlanId && !rawPlanName) {
+                        throw new ValidationError('plan_id or plan_name is required when importing an existing membership.');
+                    }
+                    if (!rawMembershipEndDate) {
+                        throw new ValidationError('membership_end_date is required when importing an existing membership.');
+                    }
+
+                    const plan = rawPlanId
+                        ? plansById.get(rawPlanId)
+                        : plansByName.get(normalizeImportLookupKey(rawPlanName));
+
+                    if (!plan) {
+                        throw new ValidationError('Plan was not found in this gym.');
+                    }
+
+                    const membershipEndDate = ensureDateOnly(rawMembershipEndDate, { field: 'membership_end_date' });
+                    const membershipStartDate = deriveImportedMembershipStartDate({
+                        explicitStartDate: rawMembershipStartDate ? ensureDateOnly(rawMembershipStartDate, { field: 'membership_start_date' }) : '',
+                        endDate: membershipEndDate,
+                        durationDays: getPlanDurationDays(plan),
+                    });
+
+                    if (membershipStartDate > membershipEndDate) {
+                        throw new ValidationError('membership_start_date cannot be after membership_end_date.');
+                    }
+
+                    const membershipStatus = membershipEndDate >= todayDate ? 'ACTIVE' : 'EXPIRED';
+                    joiningDate = joiningDate || membershipStartDate;
+                    lastVisitDate = lastVisitDate || (membershipStatus === 'ACTIVE' ? todayDate : '');
+                    memberStatus = membershipStatus === 'ACTIVE' ? 'ACTIVE' : 'UNPAID';
+                    importedMembership = {
+                        plan_id: plan.id,
+                        start_date: membershipStartDate,
+                        end_date: membershipEndDate,
+                        status: membershipStatus,
+                    };
+                }
+
+                batchPhones.add(phone);
+                if (email) batchEmails.add(email);
+                validRows.push({
+                    full_name,
+                    email,
+                    phone,
+                    branch_id: branchId,
+                    joining_date: joiningDate || todayDate,
+                    last_visit: lastVisitDate || null,
+                    status: memberStatus,
+                    membership: importedMembership,
+                });
+            } catch (rowError) {
+                errors.push({ row: rowNumber, error: rowError.message || 'Invalid row.' });
+            }
         });
 
         if (validRows.length > 0) {
             const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
                 getBillingConfig(),
-                getGymBillingSnapshot(pool, req.user.gym_id),
-                getGymUsageSnapshot(pool, req.user.gym_id),
+                getGymBillingSnapshot(pool, gymId),
+                getGymUsageSnapshot(pool, gymId),
             ]);
             if (!gymBilling) {
                 return res.status(404).json({ error: 'Gym not found.' });
@@ -2376,15 +2497,27 @@ router.post('/import/members', auth, async (req, res) => {
         }
 
         let importedCount = 0;
+        let importedWithMembershipCount = 0;
         if (!dryRun && validRows.length > 0) {
             client = await pool.connect();
             await client.query('BEGIN');
             for (const row of validRows) {
-                await client.query(
-                    `INSERT INTO members (full_name, email, phone, gym_id, joining_date, status, branch_id)
-                     VALUES ($1, $2, $3, $4, CURRENT_DATE, 'UNPAID', $5)`,
-                    [row.full_name, row.email, row.phone, req.user.gym_id, defaultBranchId]
+                const insertedMember = await client.query(
+                    `INSERT INTO members (full_name, email, phone, gym_id, joining_date, last_visit, status, branch_id)
+                     VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
+                     RETURNING id`,
+                    [row.full_name, row.email || null, row.phone, gymId, row.joining_date, row.last_visit, row.status, row.branch_id]
                 );
+
+                if (row.membership) {
+                    await client.query(
+                        `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+                         VALUES ($1, $2, $3, $4::date, $5::date, $6, $7)`,
+                        [gymId, insertedMember.rows[0].id, row.membership.plan_id, row.membership.start_date, row.membership.end_date, row.membership.status, row.branch_id]
+                    );
+                    importedWithMembershipCount += 1;
+                }
+
                 importedCount += 1;
             }
             await client.query('COMMIT');
@@ -2395,6 +2528,9 @@ router.post('/import/members', auth, async (req, res) => {
             total_rows: dataRows.length,
             valid_rows: validRows.length,
             imported_count: importedCount,
+            imported_with_membership_count: dryRun
+                ? validRows.filter((row) => row.membership).length
+                : importedWithMembershipCount,
             error_count: errors.length,
             errors: errors.slice(0, 20),
         });

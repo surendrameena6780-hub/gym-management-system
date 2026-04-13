@@ -133,7 +133,7 @@ const createWebhookDraft = () => ({
   is_active: true,
 });
 
-const IMPORT_SAMPLE_CSV = 'full_name,email,phone\nAarav Singh,aarav@example.com,9876543210\nMeera Patel,meera@example.com,9123456780';
+const IMPORT_SAMPLE_CSV = 'full_name,phone,email,plan_name,membership_end_date,last_visit_date,branch_name\nAarav Singh,9876543210,aarav@example.com,Gold Plan,2026-05-14,2026-04-13,Main Branch\nMeera Patel,9123456780,,Silver Plan,2026-04-28,,Main Branch\nRohit Das,9988776655,, , , ,Main Branch';
 
 const DEFAULT_MESSAGE_TEMPLATES = [
   { template_key: 'EXPIRING_SOON', title: 'Membership Expiring Soon', whatsapp_text: '', sms_text: '', is_active: true },
@@ -4100,7 +4100,7 @@ const loadRazorpayScript = () => {
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-4">
                     <div>
                       <h3 className="font-bold text-slate-800">Bulk Member Import</h3>
-                      <p className="text-xs text-slate-500 mt-1">Paste CSV rows with <span className="font-bold">full_name,email,phone</span>. Preview first, then import live members in one step.</p>
+                      <p className="text-xs text-slate-500 mt-1">Paste CSV rows with <span className="font-bold">full_name, phone</span>. Optional columns: <span className="font-bold">email, branch_name or branch_id, plan_name or plan_id, membership_start_date, membership_end_date, joining_date, last_visit_date</span>. Use plan + expiry columns to migrate existing active members without charging them again.</p>
                     </div>
                     <button type="button" onClick={() => setImportForm((prev) => ({ ...prev, csv_text: IMPORT_SAMPLE_CSV }))} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all">Load Sample</button>
                   </div>
@@ -4109,7 +4109,7 @@ const loadRazorpayScript = () => {
                     value={importForm.csv_text}
                     onChange={(e) => setImportForm((prev) => ({ ...prev, csv_text: e.target.value }))}
                     className="w-full px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-medium text-slate-700 resize-y outline-none"
-                    placeholder="full_name,email,phone"
+                    placeholder="full_name,phone,email,plan_name,membership_end_date,branch_name"
                   />
                   <div className="flex flex-col sm:flex-row gap-3 mt-4">
                     <button type="button" onClick={() => importMembers(true)} disabled={importSubmitting} className="flex-1 px-4 py-3 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 transition-all disabled:opacity-60">
@@ -4139,6 +4139,11 @@ const loadRazorpayScript = () => {
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Errors</p>
                           <p className="text-xl font-black text-rose-600 mt-1">{importResult.error_count || 0}</p>
                         </div>
+                      </div>
+                      <div className="rounded-xl bg-white border border-slate-200 p-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Live Membership Rows</p>
+                        <p className="text-base font-black text-emerald-700 mt-1">{importResult.imported_with_membership_count || 0}</p>
+                        <p className="text-[11px] font-medium text-slate-500 mt-1">Rows that will create or created a current membership along with the member profile.</p>
                       </div>
                       {Array.isArray(importResult.errors) && importResult.errors.length > 0 && (
                         <div className="rounded-xl bg-white border border-rose-100 p-4">

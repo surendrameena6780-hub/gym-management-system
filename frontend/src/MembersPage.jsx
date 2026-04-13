@@ -374,7 +374,17 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [reminderTargetMember, setReminderTargetMember] = useState(null);
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [addSelectedPlanId, setAddSelectedPlanId] = useState('');
-  const [addFormData, setAddFormData] = useState(() => ({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }));
+  const [addFormData, setAddFormData] = useState(() => ({
+    full_name: '',
+    email: '',
+    phone: '',
+    branch_id: getDefaultMemberBranchId(),
+    onboarding_mode: 'FRESH',
+    migration_plan_id: '',
+    migration_membership_start_date: '',
+    migration_membership_end_date: '',
+    migration_last_visit_date: '',
+  }));
   const [editFormData, setEditFormData] = useState(() => ({ id: '', full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }));
   const [freezeFormData, setFreezeFormData] = useState({ freeze_end_date: '', freeze_reason: '' });
   const [reminderTemplates, setReminderTemplates] = useState([]);
@@ -384,6 +394,25 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [reminderPreviewLoading, setReminderPreviewLoading] = useState(false);
   const [reminderPreviewError, setReminderPreviewError] = useState('');
   const [reminderSending, setReminderSending] = useState(false);
+
+  const isExistingMemberOnboarding = String(addFormData.onboarding_mode || 'FRESH').toUpperCase() === 'EXISTING';
+
+  const resetAddMemberForm = useCallback(() => {
+    setAddSelectedPlanId('');
+    setAddFormData({
+      full_name: '',
+      email: '',
+      phone: '',
+      branch_id: getDefaultMemberBranchId(),
+      onboarding_mode: 'FRESH',
+      migration_plan_id: '',
+      migration_membership_start_date: '',
+      migration_membership_end_date: '',
+      migration_last_visit_date: '',
+    });
+    setAddFile(null);
+    setPreviewUrl(null);
+  }, [getDefaultMemberBranchId]);
 
   // Lifecycle drawer state
   const [drawerTab, setDrawerTab] = useState('profile');
@@ -724,12 +753,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       toast?.('You do not have permission to add members.', 'warning');
       return;
     }
-    setAddFormData({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() });
-    setAddFile(null);
-    setPreviewUrl(null);
-    setAddSelectedPlanId('');
+    resetAddMemberForm();
     setShowAddModal(true);
-  }, [canWriteMembers, getDefaultMemberBranchId, toast]);
+  }, [canWriteMembers, resetAddMemberForm, toast]);
 
   const openActivateModalForMember = useCallback((member) => {
     if (!canWritePayments) {
@@ -1696,9 +1722,21 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       toast?.('You do not have permission to add members.', 'warning');
       return;
     }
+    if (isExistingMemberOnboarding && !canWritePayments) {
+      toast?.('You do not have permission to import an active membership.', 'warning');
+      return;
+    }
     const normalizedPhone = normalizePhoneInput(addFormData.phone);
     if (!isValidPhoneInput(normalizedPhone)) {
       toast?.('Phone must be exactly 10 digits.', 'error');
+      return;
+    }
+    if (isExistingMemberOnboarding && !addFormData.migration_plan_id) {
+      toast?.('Select the current membership plan for this member.', 'error');
+      return;
+    }
+    if (isExistingMemberOnboarding && !addFormData.migration_membership_end_date) {
+      toast?.('Add the current membership expiry date.', 'error');
       return;
     }
     let addFileToUpload = addFile;
@@ -1716,20 +1754,30 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     }
     const formData = new FormData();
     formData.append('full_name', addFormData.full_name);
-    formData.append('email', addFormData.email);
+    formData.append('email', String(addFormData.email || '').trim());
     formData.append('phone', normalizedPhone);
     formData.append('branch_id', addFormData.branch_id || getDefaultMemberBranchId());
+    formData.append('onboarding_mode', isExistingMemberOnboarding ? 'EXISTING' : 'FRESH');
+    if (isExistingMemberOnboarding) {
+      formData.append('migration_plan_id', addFormData.migration_plan_id);
+      formData.append('migration_membership_end_date', addFormData.migration_membership_end_date);
+      if (addFormData.migration_membership_start_date) {
+        formData.append('migration_membership_start_date', addFormData.migration_membership_start_date);
+      }
+      if (addFormData.migration_last_visit_date) {
+        formData.append('migration_last_visit_date', addFormData.migration_last_visit_date);
+      }
+    }
     if (addFileToUpload) formData.append('profile_pic', addFileToUpload);
     try {
       setAddMemberSubmitting(true);
       const res = await axios.post('/api/members/add', formData, { headers: { 'x-auth-token': token } });
       setShowAddModal(false);
-      setAddFormData({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }); setAddFile(null); setPreviewUrl(null);
+      resetAddMemberForm();
       await fetchMembers();
       notifyDashboardDataChanged();
-      toast?.('Member added successfully!', 'success');
-      if (canWritePayments && addSelectedPlanId && res.data) { setSelectedMember(normalizeMemberRecord(res.data)); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
-      setAddSelectedPlanId('');
+      toast?.(isExistingMemberOnboarding ? 'Existing member imported successfully!' : 'Member added successfully!', 'success');
+      if (!isExistingMemberOnboarding && canWritePayments && addSelectedPlanId && res.data) { setSelectedMember(normalizeMemberRecord(res.data)); setSelectedPlanId(addSelectedPlanId); setShowActivateModal(true); }
     } catch (err) {
       const message = err?.response?.data?.error || err?.response?.data?.message || 'Error adding member.';
       toast?.(message, 'error');
@@ -1961,7 +2009,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                               <GradientAvatar name={member.full_name} src={member.profile_pic} sizePx={40} />
                               <div className="min-w-0 flex-1">
                                 <p className="font-bold text-slate-900 truncate">{member.full_name}</p>
-                                <p className="text-xs text-slate-500 truncate">{member.phone} • {member.email}</p>
+                                <p className="text-xs text-slate-500 truncate">{member.phone}{member.email ? ` • ${member.email}` : ''}</p>
                                 {showBranchMeta ? <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{getMemberBranchLabel(member)}</p> : null}
                               </div>
                             </div>
@@ -2030,7 +2078,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                           </div>
                         </td>
                         <td className="py-4 px-2 text-slate-600 text-sm truncate">{member.phone}</td>
-                        <td className="py-4 px-2 text-slate-500 text-xs truncate">{member.email}</td>
+                        <td className="py-4 px-2 text-slate-500 text-xs truncate">{member.email || '—'}</td>
                         <td className="py-4 px-2 text-center"><span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-full ${STATUS_PILLS[statusInfo.label] || 'bg-slate-100 text-slate-500'}`}>{statusInfo.label}</span></td>
                         <td className="py-4 px-2 text-center">{member.plan_name ? <span className="text-xs font-bold text-slate-700 truncate block">{member.plan_name}</span> : <span className="text-slate-300 font-bold text-sm">—</span>}</td>
                         <td className="py-4 px-2 text-center">{statusInfo.label === 'UNPAID' ? <span className="text-slate-300 font-bold text-sm">—</span> : member.days_left <= 0 ? <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-[9px] font-black rounded-full uppercase">Exp'd</span> : member.days_left <= 7 ? <span className="px-2.5 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full">{displayDays}d</span> : <span className="text-sm font-bold text-slate-700">{displayDays}</span>}</td>
@@ -2500,7 +2548,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name</label><input type="text" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.full_name} onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })} /></div>
                 <div className="grid grid-cols-2 gap-3">
                   <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone</label><input type="text" required inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: normalizePhoneInput(e.target.value) })} /></div>
-                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email</label><input type="email" required className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.email} onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })} /></div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email</label><input type="email" placeholder="Optional" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-900 font-semibold text-sm transition-all" value={editFormData.email} onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })} /></div>
                 </div>
                   {canSelectBranch && (
                     <div>
@@ -2523,15 +2571,24 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         <div className="app-modal-shell z-50 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150">
             <div className="relative p-6 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' }}>
-              <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><UserPlus size={18} /></div><div><h2 className="text-lg font-black">New Member</h2><p className="text-white/60 text-[10px] font-bold uppercase tracking-wider">Add to GymVault</p></div></div>
-              <button onClick={() => { setShowAddModal(false); setAddSelectedPlanId(''); setAddFormData({ full_name: '', email: '', phone: '', branch_id: getDefaultMemberBranchId() }); }} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
+              <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><UserPlus size={18} /></div><div><h2 className="text-lg font-black">{isExistingMemberOnboarding ? 'Import Existing Member' : 'New Member'}</h2><p className="text-white/60 text-[10px] font-bold uppercase tracking-wider">{isExistingMemberOnboarding ? 'Bring current subscription into GymVault' : 'Add to GymVault'}</p></div></div>
+              <button onClick={() => { setShowAddModal(false); resetAddMemberForm(); }} className="p-2 rounded-full hover:bg-white/10 text-white/60 hover:text-white transition-all"><X size={20} /></button>
             </div>
             <form onSubmit={handleAddMember} className="app-modal-scroll p-6 space-y-4">
               <div className="flex flex-col items-center"><label className="cursor-pointer block"><div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center hover:border-emerald-400 hover:bg-emerald-50/30 transition-all">{previewUrl ? <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" /> : <div className="flex flex-col items-center gap-1 text-slate-300"><UserPlus size={28} /><span className="text-[9px] font-bold uppercase tracking-wider">Upload</span></div>}</div><input type="file" accept="image/*" className="hidden" onChange={async (e) => { const ok = await handleProfileImageSelect(e.target.files?.[0], 'add'); if (!ok) e.target.value = ''; }} /></label><p className="text-[10px] text-slate-400 font-medium mt-2">Click to upload photo (optional)</p></div>
+              {canWritePayments && (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => { setAddSelectedPlanId(''); setAddFormData((prev) => ({ ...prev, onboarding_mode: 'FRESH', migration_plan_id: '', migration_membership_start_date: '', migration_membership_end_date: '', migration_last_visit_date: '' })); }} className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${!isExistingMemberOnboarding ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-emerald-700 border border-emerald-100'}`}>Fresh Member</button>
+                    <button type="button" onClick={() => { setAddSelectedPlanId(''); setAddFormData((prev) => ({ ...prev, onboarding_mode: 'EXISTING' })); }} className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${isExistingMemberOnboarding ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-emerald-700 border border-emerald-100'}`}>Existing Active Member</button>
+                  </div>
+                  <p className="mt-2 px-1 text-[11px] font-semibold text-emerald-700">Fresh member flow collects a new payment next. Existing member flow imports the current live plan without charging again.</p>
+                </div>
+              )}
               <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Full Name *</label><input type="text" required placeholder="e.g. Rahul Sharma" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.full_name} onChange={(e) => setAddFormData({ ...addFormData, full_name: e.target.value })} /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Phone *</label><input type="text" required inputMode="numeric" maxLength={10} pattern="[0-9]{10}" title="Enter exactly 10 digits" placeholder="9876543210" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.phone} onChange={(e) => setAddFormData({ ...addFormData, phone: normalizePhoneInput(e.target.value) })} /></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email *</label><input type="email" required placeholder="rahul@email.com" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.email} onChange={(e) => setAddFormData({ ...addFormData, email: e.target.value })} /></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Email</label><input type="email" placeholder="Optional" className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.email} onChange={(e) => setAddFormData({ ...addFormData, email: e.target.value })} /></div>
               </div>
               {canSelectBranch && (
                 <div>
@@ -2541,12 +2598,26 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   </select>
                 </div>
               )}
-              {canWritePayments && <div>
+              {canWritePayments && !isExistingMemberOnboarding && <div>
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5"><Zap size={10} className="text-emerald-500" /> Assign Plan Now (optional)</label>
                 <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 text-sm font-semibold text-slate-700 appearance-none cursor-pointer transition-all" value={addSelectedPlanId} onChange={(e) => setAddSelectedPlanId(e.target.value)}><option value="">Skip — assign plan later</option>{plans.map((p) => (<option key={p.id} value={p.id}>{p.name} — ₹{p.price} / {p.duration_days}d</option>))}</select>
                 {addSelectedPlanId && <p className="text-[10px] text-emerald-600 font-bold mt-1.5 ml-0.5">Payment will be collected in the next step →</p>}
               </div>}
-              <button type="submit" disabled={addMemberSubmitting} className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}>{addMemberSubmitting ? <span className="inline-flex items-center gap-2"><RefreshCw size={16} className="animate-spin" /> Saving...</span> : (canWritePayments && addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member')}</button>
+              {canWritePayments && isExistingMemberOnboarding && (
+                <div className="rounded-2xl border border-emerald-100 bg-slate-50 p-4 space-y-3">
+                  <div>
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5"><Zap size={10} className="text-emerald-500" /> Current Plan *</label>
+                    <select required={isExistingMemberOnboarding} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 text-sm font-semibold text-slate-700 appearance-none cursor-pointer transition-all" value={addFormData.migration_plan_id} onChange={(e) => setAddFormData({ ...addFormData, migration_plan_id: e.target.value })}><option value="">Select current plan</option>{plans.map((p) => (<option key={p.id} value={p.id}>{p.name} — ₹{p.price} / {p.duration_days}d</option>))}</select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Current Expiry *</label><input type="date" required={isExistingMemberOnboarding} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.migration_membership_end_date} onChange={(e) => setAddFormData({ ...addFormData, migration_membership_end_date: e.target.value })} /></div>
+                    <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Last Visit</label><input type="date" max={new Date().toISOString().slice(0, 10)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.migration_last_visit_date} onChange={(e) => setAddFormData({ ...addFormData, migration_last_visit_date: e.target.value })} /></div>
+                  </div>
+                  <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 ml-0.5">Plan Start</label><input type="date" className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 font-semibold text-slate-900 text-sm transition-all" value={addFormData.migration_membership_start_date} onChange={(e) => setAddFormData({ ...addFormData, migration_membership_start_date: e.target.value })} /></div>
+                  <p className="text-[11px] font-semibold text-slate-500">Leave Plan Start blank if you only know the expiry date. GymVault will derive the current cycle start from the selected plan duration. No new payment will be recorded during this migration.</p>
+                </div>
+              )}
+              <button type="submit" disabled={addMemberSubmitting} className="w-full py-3 text-white rounded-xl font-black text-sm transition-all hover:opacity-90 active:scale-[0.98] shadow-lg disabled:opacity-70" style={{ background: 'linear-gradient(135deg, #059669, #10b981)', boxShadow: '0 4px 16px rgba(5,150,105,0.35)' }}>{addMemberSubmitting ? <span className="inline-flex items-center gap-2"><RefreshCw size={16} className="animate-spin" /> Saving...</span> : isExistingMemberOnboarding ? 'Import Existing Member' : (canWritePayments && addSelectedPlanId ? 'Add Member & Assign Plan →' : 'Add Member')}</button>
             </form>
           </div>
         </div>

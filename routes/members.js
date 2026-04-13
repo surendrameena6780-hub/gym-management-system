@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
-const { requirePermission } = require('../middleware/rbac');
+const { hasPermission, requirePermission } = require('../middleware/rbac');
 const {
     createProfileUploadMiddleware,
     cleanupUploadedFile,
@@ -104,9 +104,48 @@ const normalizeDocumentUrl = (value) => {
 
 const normalizeMemberIdentityPayload = (payload = {}) => ({
     full_name: ensureTrimmedString(payload.full_name, { field: 'full_name', required: true, min: 2, max: 100 }),
-    email: ensureEmail(payload.email, { field: 'email', required: true, max: 120 }),
+    email: ensureEmail(payload.email, { field: 'email', max: 120 }),
     phone: ensurePhone10(payload.phone, { field: 'phone', required: true }),
 });
+
+const getTodayDateOnly = () => new Date().toISOString().slice(0, 10);
+
+const shiftDateOnly = (value, days) => {
+    const normalized = ensureDateOnly(value, { field: 'date' });
+    if (!normalized) return '';
+
+    const parsed = new Date(`${normalized}T00:00:00.000Z`);
+    parsed.setUTCDate(parsed.getUTCDate() + Number(days || 0));
+    return parsed.toISOString().slice(0, 10);
+};
+
+const getPlanDurationDays = (plan = {}) => Number(plan.duration_days || (plan.duration_months * 30) || 30);
+
+const isDateOnlyOnOrAfterToday = (value) => {
+    const normalized = ensureDateOnly(value, { field: 'date' });
+    return Boolean(normalized) && normalized >= getTodayDateOnly();
+};
+
+const deriveMembershipStartDate = ({ explicitStartDate = '', endDate = '', durationDays = 30 } = {}) => {
+    if (explicitStartDate) return explicitStartDate;
+    if (!endDate) return '';
+    return shiftDateOnly(endDate, -(Math.max(1, Number(durationDays || 30)) - 1));
+};
+
+const normalizeExistingMemberOnboardingPayload = (payload = {}) => {
+    const onboardingMode = String(payload.onboarding_mode || 'FRESH').trim().toUpperCase() === 'EXISTING' ? 'EXISTING' : 'FRESH';
+    if (onboardingMode !== 'EXISTING') {
+        return { onboarding_mode: onboardingMode };
+    }
+
+    return {
+        onboarding_mode: onboardingMode,
+        plan_id: ensureInteger(payload.migration_plan_id, { field: 'migration_plan_id', required: true, min: 1 }),
+        membership_start_date: ensureDateOnly(payload.migration_membership_start_date, { field: 'migration_membership_start_date' }) || '',
+        membership_end_date: ensureDateOnly(payload.migration_membership_end_date, { field: 'migration_membership_end_date', required: true }),
+        last_visit_date: ensureDateOnly(payload.migration_last_visit_date, { field: 'migration_last_visit_date', allowFuture: false }) || '',
+    };
+};
 
 const normalizeMemberDocumentPayload = (payload = {}) => ({
     doc_type: ensureTrimmedString(payload.doc_type, { field: 'doc_type', required: true, max: 60 }),
@@ -522,15 +561,22 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
 
 // --- 3. ADD MEMBER ---
 router.post('/add', auth, saasMiddleware, requirePermission('members:write'), uploadProfilePic, async (req, res) => {
+    let client;
     try {
         const payload = req.body && typeof req.body === 'object' ? req.body : {};
         const gym_id = getGymIdFromRequest(req);
         const normalizedIdentity = normalizeMemberIdentityPayload(payload);
+        const onboardingPayload = normalizeExistingMemberOnboardingPayload(payload);
         const branchScope = await resolveBranchWriteScope(pool, req, payload.branch_id);
 
         if (!gym_id) {
             await discardUploadedProfile(req);
             return res.status(401).json({ error: 'Invalid session. Please login again.' });
+        }
+
+        if (onboardingPayload.onboarding_mode === 'EXISTING' && !hasPermission(req.user, 'payments:write')) {
+            await discardUploadedProfile(req);
+            return res.status(403).json({ error: 'You do not have permission to import a live membership.' });
         }
 
         const profile_pic = getStoredProfileValue(req.file);
@@ -549,18 +595,20 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             return res.status(400).json({ error: 'This phone is already registered in your gym.' });
         }
 
-        const existingEmail = await pool.query(
-                        `SELECT id
-                         FROM members
-                         WHERE gym_id = $1
-                             AND LOWER(BTRIM(COALESCE(email, ''))) = $2
-                             AND deleted_at IS NULL
-                         LIMIT 1`,
-            [gym_id, normalizedIdentity.email]
-        );
-        if (existingEmail.rows.length > 0) {
-            await discardUploadedProfile(req);
-            return res.status(400).json({ error: 'This email is already registered in your gym.' });
+        if (normalizedIdentity.email) {
+            const existingEmail = await pool.query(
+                            `SELECT id
+                             FROM members
+                             WHERE gym_id = $1
+                                 AND LOWER(BTRIM(COALESCE(email, ''))) = $2
+                                 AND deleted_at IS NULL
+                             LIMIT 1`,
+                [gym_id, normalizedIdentity.email]
+            );
+            if (existingEmail.rows.length > 0) {
+                await discardUploadedProfile(req);
+                return res.status(400).json({ error: 'This email is already registered in your gym.' });
+            }
         }
 
         const [billingConfig, gymBilling, usageSnapshot] = await Promise.all([
@@ -582,17 +630,85 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             });
         }
 
-        const newMember = await pool.query(
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        let joiningDate = getTodayDateOnly();
+        let lastVisitDate = null;
+        let memberStatus = 'UNPAID';
+        let importedMembershipPlan = null;
+        let importedMembershipStartDate = '';
+
+        if (onboardingPayload.onboarding_mode === 'EXISTING') {
+            const planResult = await client.query(
+                `SELECT id, name, duration_days, duration_months
+                 FROM plans
+                 WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL
+                 LIMIT 1`,
+                [onboardingPayload.plan_id, gym_id]
+            );
+            if (planResult.rows.length === 0) {
+                await client.query('ROLLBACK');
+                await discardUploadedProfile(req);
+                return res.status(404).json({ error: 'Selected plan was not found for this gym.' });
+            }
+
+            importedMembershipPlan = planResult.rows[0];
+            importedMembershipStartDate = deriveMembershipStartDate({
+                explicitStartDate: onboardingPayload.membership_start_date,
+                endDate: onboardingPayload.membership_end_date,
+                durationDays: getPlanDurationDays(importedMembershipPlan),
+            });
+
+            if (importedMembershipStartDate > onboardingPayload.membership_end_date) {
+                await client.query('ROLLBACK');
+                await discardUploadedProfile(req);
+                return res.status(400).json({ error: 'membership_start_date cannot be after membership_end_date.' });
+            }
+
+            joiningDate = importedMembershipStartDate || getTodayDateOnly();
+            if (isDateOnlyOnOrAfterToday(onboardingPayload.membership_end_date)) {
+                memberStatus = 'ACTIVE';
+                lastVisitDate = onboardingPayload.last_visit_date || getTodayDateOnly();
+            }
+        }
+
+        const newMember = await client.query(
             `INSERT INTO members (full_name, email, phone, profile_pic, gym_id, joining_date, last_visit, status, branch_id)
-             VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, NULL, 'UNPAID', $6)
+             VALUES ($1, $2, $3, $4, $5, $6::date, $7::date, $8, $9)
              RETURNING *`,
-            [normalizedIdentity.full_name, normalizedIdentity.email, normalizedIdentity.phone, profile_pic, gym_id, branchScope.branchId]
+            [
+                normalizedIdentity.full_name,
+                normalizedIdentity.email || null,
+                normalizedIdentity.phone,
+                profile_pic,
+                gym_id,
+                joiningDate,
+                lastVisitDate,
+                memberStatus,
+                branchScope.branchId,
+            ]
         );
+
+        if (onboardingPayload.onboarding_mode === 'EXISTING') {
+            const membershipStatus = isDateOnlyOnOrAfterToday(onboardingPayload.membership_end_date) ? 'ACTIVE' : 'EXPIRED';
+
+            await client.query(
+                `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+                 VALUES ($1, $2, $3, $4::date, $5::date, $6, $7)`,
+                [gym_id, newMember.rows[0].id, onboardingPayload.plan_id, importedMembershipStartDate || joiningDate, onboardingPayload.membership_end_date, membershipStatus, branchScope.branchId]
+            );
+        }
+
+        await client.query('COMMIT');
 
         const [member] = appendMemberBranchMeta(newMember.rows, branchScope.branchDirectory);
         res.json(member);
     } catch (err) {
         console.error("ADD MEMBER ERROR:", err.message);
+        if (client) {
+            await client.query('ROLLBACK').catch(() => {});
+        }
         await discardUploadedProfile(req);
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
@@ -604,6 +720,10 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             return res.status(400).json({ error: "This email or phone is already registered to another member." });
         }
         res.status(500).json({ error: "Server Error" });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 
@@ -662,7 +782,7 @@ router.put('/:id', auth, saasMiddleware, requirePermission('members:write'), upl
             }
         }
 
-        if (normalizedIdentity.email !== currentEmail) {
+        if (normalizedIdentity.email && normalizedIdentity.email !== currentEmail) {
             const existingEmail = await pool.query(
                                 `SELECT id
                                  FROM members
