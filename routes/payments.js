@@ -1355,7 +1355,7 @@ router.post('/record', async (req, res) => {
                 [userId, gym_id, DEFAULT_BRANCH_ID]
             ),
             client.query(
-                'SELECT id, duration_days FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
+                'SELECT id, duration_days, duration_months FROM plans WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL LIMIT 1',
                 [planId, gym_id]
             ),
         ]);
@@ -1373,6 +1373,28 @@ router.post('/record', async (req, res) => {
 
         await client.query('BEGIN');
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payment-record:${gym_id}:${userId}:${planId}`]);
+
+        const currentMembershipResult = await client.query(
+            `SELECT id, plan_id, status, end_date
+             FROM memberships
+             WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL
+             ORDER BY end_date DESC NULLS LAST, id DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [userId, gym_id]
+        );
+        const currentMembership = currentMembershipResult.rows[0] || null;
+        const hasRemainingCoverage = Boolean(
+            currentMembership?.id
+            && currentMembership.end_date
+            && new Date(currentMembership.end_date).getTime() >= Date.now() - 86400000
+            && ['ACTIVE', 'FROZEN', 'GRACE'].includes(String(currentMembership.status || '').toUpperCase())
+        );
+
+        if (hasRemainingCoverage && currentMembership?.plan_id && Number(currentMembership.plan_id) !== planId) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Changing to a different plan before the current membership ends is not supported yet. Renew the current plan now, or switch plans after expiry.' });
+        }
 
         const existingPayment = await findRecentMatchingPayment(client, {
             gymId: gym_id,
@@ -1413,14 +1435,32 @@ router.post('/record', async (req, res) => {
             nextPlanId: planId,
         });
 
-        await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [userId, gym_id]);
-
-        const days = planResult.rows[0].duration_days || 30;
-        await client.query(
-            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
-             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE', $5)`,
-            [gym_id, userId, planId, days, memberBranchId]
-        );
+        const days = planResult.rows[0].duration_days || (planResult.rows[0].duration_months * 30) || 30;
+        if (hasRemainingCoverage && currentMembership?.id && Number(currentMembership.plan_id) === planId) {
+            await client.query(
+                `UPDATE memberships
+                 SET end_date = (
+                         CASE
+                             WHEN end_date >= CURRENT_DATE AND UPPER(COALESCE(status, '')) IN ('ACTIVE', 'FROZEN', 'GRACE')
+                                 THEN end_date + INTERVAL '1 day'
+                             ELSE CURRENT_DATE
+                         END
+                     ) + ($1 || ' day')::interval,
+                     status = 'ACTIVE',
+                     freeze_start_date = NULL,
+                     freeze_end_date = NULL,
+                     freeze_reason = ''
+                 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
+                [days, currentMembership.id, gym_id]
+            );
+        } else {
+            await client.query("UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL", [userId, gym_id]);
+            await client.query(
+                `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+                 VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE', $5)`,
+                [gym_id, userId, planId, days, memberBranchId]
+            );
+        }
 
         await client.query(
             `UPDATE members

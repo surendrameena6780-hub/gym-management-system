@@ -852,6 +852,23 @@ const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentM
         await client.query('BEGIN');
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`membership-activate:${normalizedGymId}:${normalizedMemberId}:${normalizedPlanId}`]);
 
+        const currentMembershipResult = await client.query(
+            `SELECT id, plan_id, status, end_date
+             FROM memberships
+             WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL
+             ORDER BY end_date DESC NULLS LAST, id DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [normalizedMemberId, normalizedGymId]
+        );
+        const currentMembership = currentMembershipResult.rows[0] || null;
+        const hasRemainingCoverage = Boolean(
+            currentMembership?.id
+            && currentMembership.end_date
+            && new Date(currentMembership.end_date).getTime() >= Date.now() - 86400000
+            && ['ACTIVE', 'FROZEN', 'GRACE'].includes(String(currentMembership.status || '').toUpperCase())
+        );
+
         const existingPayment = await findRecentActivationPayment(client, {
             gymId: normalizedGymId,
             memberId: normalizedMemberId,
@@ -876,19 +893,48 @@ const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentM
             };
         }
 
-        await client.query(
-            "UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL",
-            [normalizedMemberId, normalizedGymId]
-        );
+        if (hasRemainingCoverage && currentMembership?.plan_id && Number(currentMembership.plan_id) !== normalizedPlanId) {
+            await client.query('ROLLBACK');
+            return {
+                ok: false,
+                status: 400,
+                error: 'Changing to a different plan before the current membership ends is not supported yet. Renew the current plan now, or switch plans after expiry.',
+            };
+        }
+
         await client.query(
             "UPDATE members SET status = 'ACTIVE', joining_date = COALESCE(joining_date, CURRENT_DATE) WHERE id = $1 AND gym_id = $2",
             [normalizedMemberId, normalizedGymId]
         );
-        await client.query(
-            `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
-             VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE', $5)`,
-            [normalizedGymId, normalizedMemberId, normalizedPlanId, days, memberBranchId]
-        );
+
+        if (hasRemainingCoverage && currentMembership?.id && Number(currentMembership.plan_id) === normalizedPlanId) {
+            await client.query(
+                `UPDATE memberships
+                 SET end_date = (
+                         CASE
+                             WHEN end_date >= CURRENT_DATE AND UPPER(COALESCE(status, '')) IN ('ACTIVE', 'FROZEN', 'GRACE')
+                                 THEN end_date + INTERVAL '1 day'
+                             ELSE CURRENT_DATE
+                         END
+                     ) + ($1 || ' day')::interval,
+                     status = 'ACTIVE',
+                     freeze_start_date = NULL,
+                     freeze_end_date = NULL,
+                     freeze_reason = ''
+                 WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
+                [days, currentMembership.id, normalizedGymId]
+            );
+        } else {
+            await client.query(
+                "UPDATE memberships SET deleted_at = NOW(), status = 'EXPIRED' WHERE member_id = $1 AND gym_id = $2 AND deleted_at IS NULL",
+                [normalizedMemberId, normalizedGymId]
+            );
+            await client.query(
+                `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
+                 VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + ($4 || ' day')::interval, 'ACTIVE', $5)`,
+                [normalizedGymId, normalizedMemberId, normalizedPlanId, days, memberBranchId]
+            );
+        }
         await client.query(
             `INSERT INTO payments
              (gym_id, user_id, plan_id, amount_paid, total_amount, payment_date, status, payment_mode, transaction_id, invoice_id, branch_id)
@@ -1672,7 +1718,13 @@ router.post('/renew', auth, saasMiddleware, requirePermission('payments:write'),
 
         await pool.query(
             `UPDATE memberships
-             SET end_date = GREATEST(end_date, CURRENT_DATE) + ($1 || ' day')::interval,
+             SET end_date = (
+                     CASE
+                         WHEN end_date >= CURRENT_DATE AND UPPER(COALESCE(status, '')) IN ('ACTIVE', 'FROZEN', 'GRACE')
+                             THEN end_date + INTERVAL '1 day'
+                         ELSE CURRENT_DATE
+                     END
+                 ) + ($1 || ' day')::interval,
                  status   = 'ACTIVE'
              WHERE id = $2 AND gym_id = $3 AND deleted_at IS NULL`,
             [daysToAdd, membership_id, req.user.gym_id]

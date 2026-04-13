@@ -511,10 +511,16 @@ const applyMemberRenewalPayment = async ({ gymId, memberId, planId, paymentMode,
 
         let membershipRow = null;
 
-        if (currentMembership?.id && currentMembership.plan_id === normalizedPlanId) {
+        if (hasActiveCoverage && currentMembership?.id && currentMembership.plan_id === normalizedPlanId) {
             const updateMembership = await client.query(
                 `UPDATE memberships
-                 SET end_date = GREATEST(end_date, CURRENT_DATE) + ($1 || ' day')::interval,
+                 SET end_date = (
+                         CASE
+                             WHEN end_date >= CURRENT_DATE AND UPPER(COALESCE(status, '')) IN ('ACTIVE', 'FROZEN', 'GRACE')
+                                 THEN end_date + INTERVAL '1 day'
+                             ELSE CURRENT_DATE
+                         END
+                     ) + ($1 || ' day')::interval,
                      status = 'ACTIVE',
                      freeze_start_date = NULL,
                      freeze_end_date = NULL,
