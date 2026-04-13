@@ -415,6 +415,170 @@ const createCollectionRazorpayClient = (razorpayConfig) => {
     });
 };
 
+const buildRouteTransferStatusError = (message, statusCode = 502) => {
+    const err = new Error(message);
+    err.userMessage = message;
+    err.statusCode = statusCode;
+    return err;
+};
+
+const createRazorpayBasicAuthHeader = (razorpayConfig) => `Basic ${Buffer.from(
+    `${String(razorpayConfig?.keyId || '').trim()}:${String(razorpayConfig?.keySecret || '').trim()}`,
+    'utf8'
+).toString('base64')}`;
+
+const callRazorpayRouteApi = async ({ razorpayConfig, method = 'GET', path, body }) => {
+    const response = await fetch(`https://api.razorpay.com/v1${path}`, {
+        method,
+        headers: {
+            Authorization: createRazorpayBasicAuthHeader(razorpayConfig),
+            'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const err = new Error(
+            String(payload?.error?.description || payload?.error?.reason || response.statusText || 'Razorpay request failed.')
+        );
+        err.statusCode = response.status;
+        err.error = payload?.error || payload;
+        throw err;
+    }
+
+    return payload;
+};
+
+const isInactiveTransferStatus = (value) => ['failed', 'reversed', 'cancelled'].includes(String(value || '').trim().toLowerCase());
+
+const buildPartnerTransferRequest = ({ razorpayConfig, amountPaise, notes }) => {
+    const feePercent = Math.max(0, Math.min(100, parseFloat(process.env.RAZORPAY_PLATFORM_FEE_PERCENT || '0')));
+    const feeAmount = Math.round(amountPaise * feePercent / 100);
+    const transferAmount = amountPaise - feeAmount;
+
+    if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
+        throw buildRouteTransferStatusError('Collection amount is too small for the configured platform fee.', 400);
+    }
+
+    return {
+        account: razorpayConfig.connectedAccount,
+        amount: transferAmount,
+        currency: 'INR',
+        on_hold: false,
+        notes,
+    };
+};
+
+const ensurePartnerTransferForCapturedPayment = async ({
+    razorpayConfig,
+    paymentId,
+    amountPaise,
+    notes,
+    gymId,
+    referenceId = '',
+}) => {
+    if (razorpayConfig?.connectMode !== 'PARTNER') {
+        return { skipped: true };
+    }
+
+    const normalizedPaymentId = String(paymentId || '').trim();
+    if (!normalizedPaymentId.startsWith('pay_')) {
+        throw buildRouteTransferStatusError(
+            'Razorpay has not exposed the final payment id yet for connected-account routing. Retry in a few seconds.',
+            409
+        );
+    }
+
+    const transferRequest = buildPartnerTransferRequest({ razorpayConfig, amountPaise, notes });
+
+    let existingTransfers = [];
+    try {
+        const transferList = await callRazorpayRouteApi({
+            razorpayConfig,
+            method: 'GET',
+            path: `/payments/${encodeURIComponent(normalizedPaymentId)}/transfers`,
+        });
+        existingTransfers = Array.isArray(transferList?.items) ? transferList.items : [];
+    } catch (err) {
+        logCollectionRazorpayError({
+            stage: 'fetch_transfers',
+            error: err,
+            gymId,
+            metadata: {
+                connect_mode: razorpayConfig.connectMode,
+                connected_account_id: razorpayConfig.connectedAccount || '',
+                gateway_source: razorpayConfig.source,
+                environment: razorpayConfig.environment,
+                payment_id: normalizedPaymentId,
+                reference_id: referenceId,
+                amount_paise: amountPaise,
+            },
+        });
+        throw buildRouteTransferStatusError(
+            'Razorpay payment was received but GymVault could not confirm the Route transfer yet. Please retry in a few seconds.',
+            502
+        );
+    }
+
+    const matchingTransfer = existingTransfers.find((item) => {
+        const recipientId = String(item?.recipient || item?.account || '').trim();
+        return recipientId === razorpayConfig.connectedAccount && !isInactiveTransferStatus(item?.status);
+    });
+    if (matchingTransfer) {
+        return {
+            created: false,
+            transferId: String(matchingTransfer.id || '').trim(),
+        };
+    }
+
+    const conflictingTransfer = existingTransfers.find((item) => !isInactiveTransferStatus(item?.status));
+    if (conflictingTransfer) {
+        throw buildRouteTransferStatusError(
+            'This payment is already linked to a different Razorpay Route transfer. Review the connected account before retrying.',
+            409
+        );
+    }
+
+    try {
+        const transferResponse = await callRazorpayRouteApi({
+            razorpayConfig,
+            method: 'POST',
+            path: `/payments/${encodeURIComponent(normalizedPaymentId)}/transfers`,
+            body: {
+                transfers: [transferRequest],
+            },
+        });
+        const createdTransfer = Array.isArray(transferResponse?.items)
+            ? transferResponse.items[0]
+            : transferResponse?.items || transferResponse?.transfer || transferResponse;
+
+        return {
+            created: true,
+            transferId: String(createdTransfer?.id || '').trim(),
+        };
+    } catch (err) {
+        logCollectionRazorpayError({
+            stage: 'create_transfer',
+            error: err,
+            gymId,
+            metadata: {
+                connect_mode: razorpayConfig.connectMode,
+                connected_account_id: razorpayConfig.connectedAccount || '',
+                gateway_source: razorpayConfig.source,
+                environment: razorpayConfig.environment,
+                payment_id: normalizedPaymentId,
+                reference_id: referenceId,
+                amount_paise: amountPaise,
+            },
+        });
+        throw buildRouteTransferStatusError(
+            'Razorpay collected the payment, but GymVault could not route it to the connected gym account yet. Retry once before collecting any new payments.',
+            502
+        );
+    }
+};
+
 const createCollectionPaymentLink = async ({
     razorpayConfig,
     payeeName,
@@ -907,6 +1071,21 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
             });
         }
 
+        await ensurePartnerTransferForCapturedPayment({
+            razorpayConfig: collectionSetup.data.razorpay,
+            paymentId: settledPayment.paymentId,
+            amountPaise: Number(paymentLink?.amount_paid || paymentLink?.amount || Math.round(Number(settledPayment.amount || 0) * 100)) || 0,
+            notes: {
+                purpose: 'MEMBER_PAYMENT',
+                gym_id: String(gym_id),
+                member_id: String(memberId),
+                plan_id: String(planId),
+                payment_link_id: paymentLinkId,
+            },
+            gymId: gym_id,
+            referenceId: String(paymentLink?.reference_id || paymentLinkId || '').trim(),
+        });
+
         const settledTransactionIds = Array.from(new Set([
             settledPayment.paymentId,
             settledPayment.linkId,
@@ -952,6 +1131,9 @@ router.post('/online/payment-link-status', auth, saasMiddleware, requirePermissi
     } catch (err) {
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });
+        }
+        if (err?.userMessage) {
+            return res.status(Number(err.statusCode || 502)).json({ error: err.userMessage });
         }
         console.error('MEMBER PAYMENT LINK STATUS ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to verify Razorpay collection status.' });
