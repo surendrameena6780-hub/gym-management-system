@@ -556,30 +556,110 @@ const findExistingUserByPhone = async (phone, db = pool) => {
 
 const normalizeMemberPhoneDigits = (value) => String(value || '').replace(/\D/g, '').slice(-10);
 
-const loadMemberPortalContextByPhone = async (phone) => {
+const MEMBER_PORTAL_CONTEXT_SELECT = `SELECT m.*, g.name AS gym_name,
+        membership.start_date, membership.end_date, membership.status AS membership_status,
+        p.name AS plan_name, p.price AS plan_price
+ FROM members m
+ JOIN gyms g ON g.id = m.gym_id
+ LEFT JOIN LATERAL (
+    SELECT ms.start_date, ms.end_date, ms.status, ms.plan_id, ms.created_at
+    FROM memberships ms
+    WHERE ms.member_id = m.id
+      AND ms.deleted_at IS NULL
+    ORDER BY CASE
+                 WHEN ms.status = 'ACTIVE' THEN 0
+                 WHEN ms.status = 'FROZEN' THEN 1
+                 WHEN ms.status = 'EXPIRED' THEN 2
+                 ELSE 3
+             END,
+             COALESCE(ms.end_date, ms.start_date) DESC NULLS LAST,
+             ms.created_at DESC,
+             ms.id DESC
+    LIMIT 1
+ ) membership ON TRUE
+ LEFT JOIN plans p ON p.id = membership.plan_id`;
+
+const loadMemberPortalContextsByPhone = async (phone) => {
     const normalizedPhone = normalizeMemberPhoneDigits(phone);
-    if (!normalizedPhone || normalizedPhone.length !== 10) return null;
+    if (!normalizedPhone || normalizedPhone.length !== 10) return [];
 
     const result = await pool.query(
-        `SELECT m.*, g.name AS gym_name,
-                ms.start_date, ms.end_date, ms.status AS membership_status,
-                p.name AS plan_name
-         FROM members m
-         JOIN gyms g ON g.id = m.gym_id
-         LEFT JOIN memberships ms
-           ON ms.member_id = m.id
-          AND ms.deleted_at IS NULL
-          AND ms.status = 'ACTIVE'
-         LEFT JOIN plans p ON p.id = ms.plan_id
+        `${MEMBER_PORTAL_CONTEXT_SELECT}
          WHERE RIGHT(REGEXP_REPLACE(COALESCE(m.phone, ''), '[^0-9]', '', 'g'), 10) = $1
            AND m.deleted_at IS NULL
-         ORDER BY CASE WHEN ms.status = 'ACTIVE' THEN 0 ELSE 1 END,
+         ORDER BY CASE
+                     WHEN membership.status = 'ACTIVE' AND UPPER(COALESCE(m.status, 'UNPAID')) = 'ACTIVE' THEN 0
+                     WHEN membership.status = 'ACTIVE' THEN 1
+                     WHEN membership.status = 'FROZEN' THEN 2
+                     WHEN membership.status = 'EXPIRED' THEN 3
+                     ELSE 4
+                  END,
+                  COALESCE(membership.end_date, membership.start_date, m.joining_date, DATE(m.created_at)) DESC NULLS LAST,
                   m.id DESC
-         LIMIT 1`,
+        `,
         [normalizedPhone]
     );
 
-    return result.rows[0] || null;
+    return result.rows;
+};
+
+const loadMemberPortalContextByPhone = async (phone) => {
+    const matches = await loadMemberPortalContextsByPhone(phone);
+    return matches[0] || null;
+};
+
+const buildMemberPortalProfileOption = (member) => {
+    const membershipStatus = String(member?.membership_status || '').trim().toUpperCase() || 'NONE';
+    const memberStatus = String(member?.status || '').trim().toUpperCase() || 'UNPAID';
+
+    return {
+        id: member.id,
+        gym_id: member.gym_id,
+        gym_name: member.gym_name,
+        full_name: member.full_name,
+        masked_email: maskEmailAddress(member.email),
+        email: member.email,
+        phone: member.phone,
+        plan_name: member.plan_name || '',
+        membership_status: membershipStatus,
+        member_status: memberStatus,
+        membership_start: member.start_date || null,
+        membership_end: member.end_date || null,
+        joining_date: member.joining_date || null,
+        is_recommended: membershipStatus === 'ACTIVE' && memberStatus === 'ACTIVE',
+        can_renew: membershipStatus === 'EXPIRED' || membershipStatus === 'FROZEN' || membershipStatus === 'NONE',
+    };
+};
+
+const resolveMemberPortalSelection = async (phone, memberIdInput) => {
+    const members = await loadMemberPortalContextsByPhone(phone);
+    const requestedMemberId = Number.parseInt(memberIdInput, 10);
+
+    if (!members.length) {
+        return {
+            member: null,
+            members,
+            selectionRequired: false,
+            invalidSelection: false,
+        };
+    }
+
+    if (!requestedMemberId) {
+        return {
+            member: members.length === 1 ? members[0] : null,
+            members,
+            selectionRequired: members.length > 1,
+            invalidSelection: false,
+        };
+    }
+
+    const selectedMember = members.find((entry) => Number(entry.id) === requestedMemberId) || null;
+    return {
+        member: selectedMember,
+        members,
+        selectionRequired: !selectedMember && members.length > 1,
+        invalidSelection: !selectedMember,
+    };
 };
 
 const buildMemberAuthPayload = (member, message = 'Login successful.') => {
@@ -663,6 +743,32 @@ const buildMemberLoginOtpDelivery = async ({ email, otp, memberName }) => {
     };
 };
 
+const handleMemberProfileLookup = async (req, res) => {
+    const phone = normalizeMemberPhoneDigits(req.body?.phone);
+
+    if (!phone || phone.length !== 10) {
+        return res.status(400).json({ message: 'Please enter a valid 10-digit phone number.' });
+    }
+
+    try {
+        const members = await loadMemberPortalContextsByPhone(phone);
+        if (!members.length) {
+            return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
+        }
+
+        return res.json({
+            message: members.length > 1
+                ? 'Choose your gym to continue.'
+                : 'Member profile found. Preparing secure sign-in.',
+            phone,
+            profiles: members.map(buildMemberPortalProfileOption),
+        });
+    } catch (err) {
+        console.error('MEMBER PROFILE LOOKUP ERROR:', err.message);
+        return res.status(500).json({ message: 'Could not load your gym profiles right now. Please try again.' });
+    }
+};
+
 const handleMemberSendOtp = async (req, res) => {
     const phone = normalizeMemberPhoneDigits(req.body?.phone);
 
@@ -671,7 +777,27 @@ const handleMemberSendOtp = async (req, res) => {
     }
 
     try {
-        const member = await loadMemberPortalContextByPhone(phone);
+        const selection = await resolveMemberPortalSelection(phone, req.body?.member_id);
+        const member = selection.member;
+
+        if (!selection.members.length) {
+            return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
+        }
+        if (selection.selectionRequired) {
+            return res.status(409).json({
+                message: 'Choose your gym before requesting a login code.',
+                selection_required: true,
+                profiles: selection.members.map(buildMemberPortalProfileOption),
+            });
+        }
+        if (selection.invalidSelection || !member) {
+            return res.status(400).json({
+                message: 'That gym profile is no longer available. Choose a valid profile and try again.',
+                selection_required: true,
+                profiles: selection.members.map(buildMemberPortalProfileOption),
+            });
+        }
+
         if (!member) {
             return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
         }
@@ -740,6 +866,7 @@ const handleMemberSendOtp = async (req, res) => {
             message: delivery.channel === 'email'
                 ? `A login code was sent to ${delivery.masked_email}.`
                 : `A preview login code is ready for ${delivery.masked_email}.`,
+            profile: buildMemberPortalProfileOption(member),
             masked_email: delivery.masked_email,
             expires_in_minutes: MEMBER_LOGIN_OTP_TTL_MINUTES,
             preview_otp: delivery.preview_otp,
@@ -763,7 +890,27 @@ const handleMemberVerifyOtp = async (req, res) => {
     }
 
     try {
-        const member = await loadMemberPortalContextByPhone(phone);
+        const selection = await resolveMemberPortalSelection(phone, req.body?.member_id);
+        const member = selection.member;
+
+        if (!selection.members.length) {
+            return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
+        }
+        if (selection.selectionRequired) {
+            return res.status(409).json({
+                message: 'Choose your gym before verifying the login code.',
+                selection_required: true,
+                profiles: selection.members.map(buildMemberPortalProfileOption),
+            });
+        }
+        if (selection.invalidSelection || !member) {
+            return res.status(400).json({
+                message: 'That gym profile is no longer available. Choose a valid profile and try again.',
+                selection_required: true,
+                profiles: selection.members.map(buildMemberPortalProfileOption),
+            });
+        }
+
         if (!member) {
             return res.status(404).json({ message: 'No member found with this phone number. Please contact your gym.' });
         }
@@ -2454,6 +2601,7 @@ router.post('/apple', async (req, res) => {
 });
 
 // ─── MEMBER PORTAL: email OTP self-service login ────────────────────────────
+router.post('/member/profiles', handleMemberProfileLookup);
 router.post('/member/send-otp', handleMemberSendOtp);
 router.post('/member/verify-otp', handleMemberVerifyOtp);
 

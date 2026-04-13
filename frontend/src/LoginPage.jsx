@@ -21,6 +21,95 @@ const iFocus = (e) => { e.target.style.borderColor = 'rgba(99,102,241,0.7)'; e.t
 const iBlur  = (e) => { e.target.style.borderColor = 'rgba(255,255,255,0.1)'; e.target.style.background = 'rgba(255,255,255,0.06)'; };
 const iBase  = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' };
 
+const PORTAL_MODE_STORAGE_KEY = 'gymvault_last_portal_mode';
+const MEMBER_AUTO_RESTORE_STORAGE_KEY = 'gymvault_member_portal_restore';
+
+const normalizeMemberPhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+
+const formatMemberProfileDate = (value) => {
+  if (!value) return '';
+
+  const rawValue = typeof value === 'string' && !value.includes('T') ? `${value}T00:00:00` : value;
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const getMemberProfileBadge = (profile) => {
+  const membershipStatus = String(profile?.membership_status || '').trim().toUpperCase();
+
+  if (membershipStatus === 'ACTIVE') {
+    return {
+      label: 'Active Membership',
+      tone: { background: 'rgba(16,185,129,0.14)', border: '1px solid rgba(16,185,129,0.22)', color: '#a7f3d0' },
+    };
+  }
+  if (membershipStatus === 'EXPIRED') {
+    return {
+      label: 'Expired · Renewal Available',
+      tone: { background: 'rgba(251,191,36,0.14)', border: '1px solid rgba(251,191,36,0.22)', color: '#fde68a' },
+    };
+  }
+  if (membershipStatus === 'FROZEN') {
+    return {
+      label: 'Frozen Membership',
+      tone: { background: 'rgba(96,165,250,0.14)', border: '1px solid rgba(96,165,250,0.22)', color: '#bfdbfe' },
+    };
+  }
+
+  return {
+    label: 'Portal Access Available',
+    tone: { background: 'rgba(148,163,184,0.14)', border: '1px solid rgba(148,163,184,0.2)', color: '#cbd5e1' },
+  };
+};
+
+const readStoredPortalMode = () => {
+  if (typeof window === 'undefined') return 'OWNER';
+
+  try {
+    return String(window.localStorage.getItem(PORTAL_MODE_STORAGE_KEY) || 'OWNER').trim().toUpperCase() === 'MEMBER'
+      ? 'MEMBER'
+      : 'OWNER';
+  } catch {
+    return 'OWNER';
+  }
+};
+
+const readMemberAutoRestoreHint = () => {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(MEMBER_AUTO_RESTORE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const writePortalMode = (mode) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(PORTAL_MODE_STORAGE_KEY, String(mode || 'OWNER').trim().toUpperCase() === 'MEMBER' ? 'MEMBER' : 'OWNER');
+  } catch {
+    // Ignore storage failures for auth hints.
+  }
+};
+
+const writeMemberAutoRestoreHint = (enabled) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    if (enabled) {
+      window.localStorage.setItem(MEMBER_AUTO_RESTORE_STORAGE_KEY, 'true');
+    } else {
+      window.localStorage.removeItem(MEMBER_AUTO_RESTORE_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures for auth hints.
+  }
+};
+
 // ─── Google SVG icon ──────────────────────────────────────────────────────────
 function GoogleIcon() {
   return (
@@ -295,7 +384,7 @@ function PasswordResetModal({
 }
 
 // ─── Full-screen Member Portal Dashboard (shown after OTP verification) ──────
-function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
+function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMemberChange }) {
   const qrScannerRef = useRef(null);
   const qrScannerBusyRef = useRef(false);
   const autoGeoAttemptRef = useRef(false);
@@ -1131,12 +1220,18 @@ function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
           </div>
         )}
 
-        {/* Sign out */}
-        <button type="button" onClick={onSignOut}
-          className="w-full py-3.5 rounded-xl text-slate-500 hover:text-slate-300 text-xs font-bold uppercase tracking-widest transition-colors mt-2"
-          style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-          Sign Out
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+          <button type="button" onClick={onSwitchGym}
+            className="w-full py-3.5 rounded-xl text-slate-300 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors"
+            style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.18)' }}>
+            Switch Gym
+          </button>
+          <button type="button" onClick={onSignOut}
+            className="w-full py-3.5 rounded-xl text-slate-500 hover:text-slate-300 text-xs font-bold uppercase tracking-widest transition-colors"
+            style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+            Sign Out
+          </button>
+        </div>
       </div>
 
       {memberQrModalOpen && (
@@ -1241,7 +1336,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onMemberChange }) {
 
 // ─── Main LoginPage ───────────────────────────────────────────────────────────
 export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', onAuthErrorConsumed = null }) {
-  const [tab, setTab]               = useState('OWNER'); // 'OWNER' | 'MEMBER'
+  const [tab, setTab]               = useState(() => readStoredPortalMode()); // 'OWNER' | 'MEMBER'
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
   const [showPwd, setShowPwd]       = useState(false);
@@ -1271,14 +1366,55 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
   const [memberOtpStep, setMemberOtpStep] = useState('phone');
   const [memberOtp, setMemberOtp]   = useState('');
   const [memberOtpDelivery, setMemberOtpDelivery] = useState(null);
+  const [memberProfiles, setMemberProfiles] = useState([]);
+  const [selectedMemberProfileId, setSelectedMemberProfileId] = useState('');
+  const [memberSessionRestorePending, setMemberSessionRestorePending] = useState(() => readStoredPortalMode() === 'MEMBER' && readMemberAutoRestoreHint());
 
-  const clearMemberPortalSession = useCallback(() => {
+  const rememberOwnerPortalMode = useCallback(() => {
+    writePortalMode('OWNER');
+    writeMemberAutoRestoreHint(false);
+  }, []);
+
+  const rememberMemberPortalMode = useCallback(({ autoRestore = true } = {}) => {
+    writePortalMode('MEMBER');
+    writeMemberAutoRestoreHint(autoRestore);
+  }, []);
+
+  const applyMemberProfiles = useCallback((profiles) => {
+    const normalizedProfiles = Array.isArray(profiles)
+      ? profiles.filter((profile) => profile && profile.id)
+      : [];
+
+    setMemberProfiles(normalizedProfiles);
+    setSelectedMemberProfileId((currentId) => {
+      if (currentId && normalizedProfiles.some((profile) => String(profile.id) === String(currentId))) {
+        return currentId;
+      }
+      return String(normalizedProfiles[0]?.id || '');
+    });
+
+    return normalizedProfiles;
+  }, []);
+
+  const clearMemberPortalSession = useCallback((options = {}) => {
+    const {
+      preservePhone = false,
+      preserveProfiles = false,
+      nextOtpStep = 'phone',
+    } = options;
+
     setMemberData(null);
     setMemberToken(null);
-    setPhone('');
+    if (!preservePhone) {
+      setPhone('');
+    }
     setMemberOtp('');
-    setMemberOtpStep('phone');
+    setMemberOtpStep(nextOtpStep);
     setMemberOtpDelivery(null);
+    if (!preserveProfiles) {
+      setMemberProfiles([]);
+      setSelectedMemberProfileId('');
+    }
     setError('');
     setNotice('');
   }, []);
@@ -1336,6 +1472,8 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
   }, [authErrorCode, onAuthErrorConsumed]);
 
   useEffect(() => {
+    if (!memberSessionRestorePending) return undefined;
+
     let cancelled = false;
 
     const restoreMemberSession = async () => {
@@ -1350,18 +1488,27 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
           return;
         }
 
+        rememberMemberPortalMode({ autoRestore: true });
         setTab('MEMBER');
         setError('');
         setNotice('');
+        setPhone(normalizeMemberPhoneInput(restoredMember.phone));
         setMemberData(restoredMember);
         setMemberToken(restoredToken);
         setMemberOtp('');
         setMemberOtpStep('phone');
         setMemberOtpDelivery(null);
+        setMemberProfiles([]);
+        setSelectedMemberProfileId(String(restoredMember.id || ''));
       } catch (err) {
         const status = err?.response?.status;
         if (status === 401 || status === 404) {
+          writeMemberAutoRestoreHint(false);
           axios.post('/api/auth/logout').catch(() => {});
+        }
+      } finally {
+        if (!cancelled) {
+          setMemberSessionRestorePending(false);
         }
       }
     };
@@ -1371,7 +1518,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [memberSessionRestorePending, rememberMemberPortalMode]);
 
   const resetPasswordRecoveryState = () => {
     setPasswordResetStep('request');
@@ -1407,6 +1554,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
     setLoading(true); setError(''); setNotice('');
     try {
       const res = await axios.post('/api/auth/login', { email, password });
+      rememberOwnerPortalMode();
       setToken(res.data.token, res.data.user);
       window.history.pushState({}, '', '/dashboard');
     } catch (err) {
@@ -1426,6 +1574,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
       return;
     }
 
+    rememberOwnerPortalMode();
     window.location.href = buildApiUrl('/api/auth/google?mode=login');
   };
 
@@ -1441,6 +1590,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
         const name     = [resp?.user?.name?.firstName, resp?.user?.name?.lastName].filter(Boolean).join(' ');
         try {
           const res = await axios.post('/api/auth/apple', { id_token, full_name: name });
+          rememberOwnerPortalMode();
           setToken(res.data.token, res.data.user);
           window.history.pushState({}, '', '/dashboard');
         } catch (err) { setError(err?.response?.data?.message || 'Apple Sign-In failed.'); }
@@ -1449,50 +1599,208 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
   };
 
   // ── Member phone login ─────────────────────────────────────────────────────
-  const handleMemberLogin = async (e) => {
-    e.preventDefault();
-    setMemberLoginLoading(true); setError(''); setNotice('');
+  const requestMemberOtpForProfile = useCallback(async ({ phoneValue = phone, memberId = selectedMemberProfileId, skipLoading = false } = {}) => {
+    const normalizedPhone = normalizeMemberPhoneInput(phoneValue);
+    const normalizedMemberId = Number.parseInt(memberId, 10);
+
+    if (normalizedPhone.length !== 10) {
+      setError('Please enter a valid 10-digit phone number.');
+      return false;
+    }
+    if (!normalizedMemberId) {
+      setError('Choose your gym before requesting a login code.');
+      return false;
+    }
+
+    if (!skipLoading) {
+      setMemberLoginLoading(true);
+    }
+    setError('');
+    setNotice('');
+
     try {
-      const res = await axios.post('/api/auth/member/send-otp', { phone });
+      const res = await axios.post('/api/auth/member/send-otp', {
+        phone: normalizedPhone,
+        member_id: normalizedMemberId,
+      });
+
+      if (res.data?.profile?.id) {
+        setSelectedMemberProfileId(String(res.data.profile.id));
+      }
+      setPhone(normalizedPhone);
       setMemberOtpDelivery({
         maskedEmail: res.data?.masked_email || '',
         expiresInMinutes: res.data?.expires_in_minutes || 10,
         previewOtp: res.data?.preview_otp || '',
         previewNotice: res.data?.preview_notice || '',
       });
+      setMemberOtp('');
       setMemberOtpStep('otp');
       setNotice(res.data?.message || 'A login code has been sent.');
+      return true;
     } catch (err) {
-      const retry = err?.response?.data?.retry_after_seconds;
-      const apiMessage = err?.response?.data?.message || 'Unable to send login code. Please try again.';
+      const payload = err?.response?.data || {};
+      if (payload?.selection_required && Array.isArray(payload?.profiles)) {
+        applyMemberProfiles(payload.profiles);
+        setMemberOtpStep('select');
+        setNotice(payload?.message || 'Choose your gym to continue.');
+        return false;
+      }
+
+      const retry = payload?.retry_after_seconds;
+      const apiMessage = payload?.message || 'Unable to send login code. Please try again.';
       setError(retry ? `Please wait ${retry}s before requesting another code.` : apiMessage);
+      return false;
+    } finally {
+      if (!skipLoading) {
+        setMemberLoginLoading(false);
+      }
     }
-    finally { setMemberLoginLoading(false); }
+  }, [applyMemberProfiles, phone, selectedMemberProfileId]);
+
+  const loadMemberProfiles = useCallback(async ({ phoneValue = phone, autoSendSingle = true, requireMultiple = false } = {}) => {
+    const normalizedPhone = normalizeMemberPhoneInput(phoneValue);
+
+    if (normalizedPhone.length !== 10) {
+      setError('Please enter a valid 10-digit phone number.');
+      return false;
+    }
+
+    setMemberLoginLoading(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const res = await axios.post('/api/auth/member/profiles', { phone: normalizedPhone });
+      const profiles = applyMemberProfiles(res.data?.profiles);
+
+      if (!profiles.length) {
+        setError('No member found with this phone number. Please contact your gym.');
+        return false;
+      }
+
+      setPhone(normalizedPhone);
+      setMemberOtp('');
+      setMemberOtpDelivery(null);
+
+      if (requireMultiple && profiles.length < 2) {
+        setNotice('No other GymVault gym is linked to this phone number yet.');
+        return false;
+      }
+
+      if (profiles.length === 1 && autoSendSingle && !requireMultiple) {
+        return await requestMemberOtpForProfile({
+          phoneValue: normalizedPhone,
+          memberId: profiles[0].id,
+          skipLoading: true,
+        });
+      }
+
+      setMemberOtpStep('select');
+      setNotice(res.data?.message || 'Choose your gym to continue.');
+      return true;
+    } catch (err) {
+      const payload = err?.response?.data || {};
+      setError(payload?.message || 'Unable to load your gym profiles right now. Please try again.');
+      return false;
+    } finally {
+      setMemberLoginLoading(false);
+    }
+  }, [applyMemberProfiles, phone, requestMemberOtpForProfile]);
+
+  const handleMemberLogin = async (e) => {
+    e.preventDefault();
+    await loadMemberProfiles({ phoneValue: phone, autoSendSingle: true });
   };
 
   const handleMemberVerifyOtp = async (e) => {
     e.preventDefault();
     setMemberLoginLoading(true); setError(''); setNotice('');
     try {
-      const res = await axios.post('/api/auth/member/verify-otp', { phone, otp: memberOtp });
+      const res = await axios.post('/api/auth/member/verify-otp', {
+        phone: normalizeMemberPhoneInput(phone),
+        otp: memberOtp,
+        member_id: selectedMemberProfileId ? Number(selectedMemberProfileId) : undefined,
+      });
+      rememberMemberPortalMode({ autoRestore: true });
+      setPhone(normalizeMemberPhoneInput(res.data?.member?.phone || phone));
       setMemberData(res.data.member);
       setMemberToken(res.data.token);
+      setSelectedMemberProfileId(String(res.data?.member?.id || selectedMemberProfileId || ''));
+      setMemberProfiles([]);
       setMemberOtpStep('phone');
       setMemberOtp('');
       setMemberOtpDelivery(null);
-    } catch (err) { setError(err?.response?.data?.message || 'Invalid login code. Please try again.'); }
+    } catch (err) {
+      const payload = err?.response?.data || {};
+      if (payload?.selection_required && Array.isArray(payload?.profiles)) {
+        applyMemberProfiles(payload.profiles);
+        setMemberOtpStep('select');
+        setNotice(payload?.message || 'Choose your gym to continue.');
+      } else {
+        setError(payload?.message || 'Invalid login code. Please try again.');
+      }
+    }
     finally { setMemberLoginLoading(false); }
   };
 
-  const handleMemberSignOut = async () => {
+  const handleMemberSignOut = async ({ preserveMemberMode = true } = {}) => {
     try {
       await axios.post('/api/auth/logout');
     } catch (_err) {
       // Even if the request fails, clear local member state so the portal can close.
     }
 
+    if (preserveMemberMode) {
+      rememberMemberPortalMode({ autoRestore: false });
+    } else {
+      rememberOwnerPortalMode();
+    }
+    setMemberSessionRestorePending(false);
     clearMemberPortalSession();
-    setTab('MEMBER');
+    setTab(preserveMemberMode ? 'MEMBER' : 'OWNER');
+  };
+
+  const handleMemberSwitchGym = async () => {
+    const preservedPhone = normalizeMemberPhoneInput(memberData?.phone || phone);
+
+    if (preservedPhone.length !== 10) {
+      setNotice('Could not identify the member phone number. Sign out and log in again.');
+      return;
+    }
+
+    setMemberLoginLoading(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const res = await axios.post('/api/auth/member/profiles', { phone: preservedPhone });
+      const profiles = Array.isArray(res.data?.profiles) ? res.data.profiles.filter((profile) => profile && profile.id) : [];
+
+      if (profiles.length < 2) {
+        window.alert('No other GymVault gym is linked to this phone number yet.');
+        return;
+      }
+
+      try {
+        await axios.post('/api/auth/logout');
+      } catch (_err) {
+        // Continue switching gyms even if cookie cleanup fails; the next login will refresh the session.
+      }
+
+      rememberMemberPortalMode({ autoRestore: false });
+      setMemberSessionRestorePending(false);
+      clearMemberPortalSession({ preservePhone: true, nextOtpStep: 'select' });
+      setTab('MEMBER');
+      setPhone(preservedPhone);
+      applyMemberProfiles(profiles);
+      setMemberOtpStep('select');
+      setNotice('Choose the gym you want to open. Expired profiles can still be used to renew.');
+    } catch (err) {
+      window.alert(err?.response?.data?.message || 'Could not load your linked gym profiles right now.');
+    } finally {
+      setMemberLoginLoading(false);
+    }
   };
 
   const handlePasswordResetRequest = async (e) => {
@@ -1576,11 +1884,34 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
 
   const switchTab = (t) => {
     setTab(t);
+    if (t === 'OWNER') {
+      setMemberSessionRestorePending(false);
+    }
     clearMemberPortalSession();
     setShowForgotEmailHint(false);
     setPasswordResetOpen(false);
     resetPasswordRecoveryState();
   };
+
+  if (memberSessionRestorePending && tab === 'MEMBER' && !memberData && !memberToken) {
+    return (
+      <div className="app-min-shell-height flex items-center justify-center font-['Inter'] px-6"
+        style={{ background: 'linear-gradient(170deg, #0c1120 0%, #090c18 100%)' }}>
+        <div className="w-full max-w-sm rounded-[30px] p-7 text-center"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="w-12 h-12 mx-auto rounded-2xl flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 10px 28px rgba(99,102,241,0.38)' }}>
+            <Dumbbell size={22} className="text-white" strokeWidth={2.5} />
+          </div>
+          <div className="w-10 h-10 mx-auto mt-5 border-2 border-white/15 border-t-indigo-400 rounded-full animate-spin" />
+          <p className="text-white font-black text-lg mt-5">Opening your member portal</p>
+          <p className="text-slate-400 text-sm font-medium mt-2 leading-relaxed">
+            Restoring your saved GymVault session so you can continue without signing in again.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Full-screen member portal — takes over the entire page after OTP verification
   if (tab === 'MEMBER' && memberData && memberToken) {
@@ -1589,6 +1920,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
         member={memberData}
         token={memberToken}
         onMemberChange={setMemberData}
+        onSwitchGym={handleMemberSwitchGym}
         onSignOut={handleMemberSignOut}
       />
     );
@@ -1843,14 +2175,14 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
               {memberOtpStep === 'phone' && (
               <form onSubmit={handleMemberLogin} className="space-y-4">
                 <p className="text-slate-400 text-sm font-medium mb-5 leading-relaxed">
-                  Enter your registered phone number. We'll send a login code to your email on file.
+                  Enter your registered phone number. If this number is used at more than one GymVault gym, we'll ask which gym you want to open.
                 </p>
                 <div>
                   <label className="block text-[10px] font-extrabold uppercase tracking-[0.15em] mb-2 text-slate-500">Phone Number</label>
                   <div className="relative">
                     <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" />
                     <input required type="tel" value={phone}
-                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      onChange={(e) => setPhone(normalizeMemberPhoneInput(e.target.value))}
                       placeholder="9876543210"
                       className="w-full pl-11 pr-4 py-3.5 rounded-xl text-white text-sm font-medium placeholder-slate-700 outline-none transition-all"
                       style={iBase} onFocus={iFocus} onBlur={iBlur} />
@@ -1864,10 +2196,93 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
                     opacity: (memberLoginLoading || phone.length < 10) ? 0.65 : 1,
                   }}>
                   {memberLoginLoading
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Checking profile...</>
+                    : <>Continue <ArrowRight size={16} /></>}
+                </button>
+              </form>
+              )}
+
+              {memberOtpStep === 'select' && (
+              <div className="space-y-4">
+                <p className="text-slate-400 text-sm font-medium mb-1 leading-relaxed">
+                  Choose the gym profile you want to open. Active memberships stay on top, while expired profiles still remain available so members can renew without support.
+                </p>
+
+                <div className="space-y-3">
+                  {memberProfiles.map((profile) => {
+                    const badge = getMemberProfileBadge(profile);
+                    const isSelected = String(selectedMemberProfileId) === String(profile.id);
+                    const profileDate = profile.membership_end
+                      ? `Ends ${formatMemberProfileDate(profile.membership_end)}`
+                      : (profile.joining_date ? `Joined ${formatMemberProfileDate(profile.joining_date)}` : 'No active plan dates yet');
+
+                    return (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        onClick={() => setSelectedMemberProfileId(String(profile.id))}
+                        className="w-full text-left p-4 rounded-[22px] transition-all"
+                        style={{
+                          background: isSelected ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
+                          border: isSelected ? '1px solid rgba(129,140,248,0.42)' : '1px solid rgba(255,255,255,0.08)',
+                          boxShadow: isSelected ? '0 12px 30px rgba(99,102,241,0.16)' : 'none',
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-white font-black text-base leading-tight">{profile.gym_name || 'GymVault Gym'}</p>
+                            <p className="text-slate-400 text-[12px] font-semibold mt-1">{profile.masked_email || 'Email on file required'}</p>
+                          </div>
+                          {isSelected ? <CheckCircle size={18} className="text-indigo-300 shrink-0" /> : null}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 mt-3">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider" style={badge.tone}>
+                            {badge.label}
+                          </span>
+                          {profile.is_recommended ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                              style={{ background: 'rgba(99,102,241,0.14)', border: '1px solid rgba(99,102,241,0.22)', color: '#c7d2fe' }}>
+                              Recommended
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 text-[11px] font-semibold">
+                          <div className="px-3 py-2 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Plan</p>
+                            <p className="text-white mt-1">{profile.plan_name || 'No active plan'}</p>
+                          </div>
+                          <div className="px-3 py-2 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Status</p>
+                            <p className="text-white mt-1">{profileDate}</p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button type="button"
+                  onClick={() => requestMemberOtpForProfile({ phoneValue: phone, memberId: selectedMemberProfileId })}
+                  disabled={memberLoginLoading || !selectedMemberProfileId}
+                  className="w-full py-4 rounded-xl font-black text-sm uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                    boxShadow: '0 8px 28px rgba(99,102,241,0.5)',
+                    opacity: (memberLoginLoading || !selectedMemberProfileId) ? 0.65 : 1,
+                  }}>
+                  {memberLoginLoading
                     ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending code...</>
                     : <>Send Login Code <ArrowRight size={16} /></>}
                 </button>
-              </form>
+
+                <button type="button"
+                  onClick={() => { setMemberOtpStep('phone'); setMemberProfiles([]); setSelectedMemberProfileId(''); setError(''); setNotice(''); }}
+                  className="w-full text-center text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors mt-1">
+                  ← Use a different phone number
+                </button>
+              </div>
               )}
 
               {memberOtpStep === 'otp' && (
@@ -1903,9 +2318,9 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
                     : <>Verify & Open Portal <ArrowRight size={16} /></>}
                 </button>
                 <button type="button"
-                  onClick={() => { setMemberOtpStep('phone'); setMemberOtp(''); setError(''); setNotice(''); }}
+                  onClick={() => { setMemberOtpStep(memberProfiles.length > 1 ? 'select' : 'phone'); setMemberOtp(''); setError(''); setNotice(''); }}
                   className="w-full text-center text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors mt-1">
-                  ← Back to phone number
+                  ← {memberProfiles.length > 1 ? 'Back to gym selection' : 'Back to phone number'}
                 </button>
               </form>
               )}
