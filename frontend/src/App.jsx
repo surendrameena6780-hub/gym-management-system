@@ -543,9 +543,17 @@ function App() {
   const [authCheckBump, setAuthCheckBump] = useState(0);
   useEffect(() => {
     if (isHQ) return;
+    const currentPath = (String(window.location.pathname || '/').replace(/\/+$/, '') || '/');
     const params   = new URLSearchParams(window.location.search);
     const authSource = params.get('auth_source');
     if (!authSource) return;
+
+    // Google sign-up returns to /signup with a temporary signup token. That flow is
+    // not a logged-in cookie bootstrap yet, so keep the user on the signup page.
+    if (currentPath === '/signup' || params.has('google_signup_token')) {
+      return;
+    }
+
     stabilizeViewportAfterAuth();
     // Token is in the HttpOnly cookie now, trigger a /me check
     oauthCookiePending.current = true;
