@@ -419,6 +419,12 @@ const getPasswordlessProviderMessage = (user) => {
     return 'This account uses social sign-in. Continue with the original sign-in method.';
 };
 
+const isLegacyPasswordlessGoogleAccount = (user) => {
+    return String(user?.password_hash || '') === 'OAUTH_NO_PASSWORD'
+        && String(user?.auth_provider || '').trim().toLowerCase() === 'google'
+        && !String(user?.google_id || '').trim();
+};
+
 const createGoogleSignupToken = ({ googleId, email, fullName, avatarUrl }) => jwt.sign(
     {
         type: 'google_signup',
@@ -2133,7 +2139,24 @@ router.get('/google/callback', async (req, res) => {
             let user = await loadUserAuthContextByProvider('google_id', googleId, client);
             if (!user) {
                 const emailUser = await findExistingOauthEmailUser(email, client);
-                return { redirectError: emailUser ? 'google_use_email_login' : 'google_signup_required' };
+                if (!emailUser) {
+                    return { redirectError: 'google_signup_required' };
+                }
+
+                const emailUserAuthError = getOauthAccountError(emailUser);
+                if (emailUserAuthError) {
+                    return { redirectError: emailUserAuthError };
+                }
+
+                if (!isLegacyPasswordlessGoogleAccount(emailUser)) {
+                    return { redirectError: 'google_use_email_login' };
+                }
+
+                await client.query(
+                    'UPDATE users SET google_id = $1, avatar_url = $2, auth_provider = $3, last_login_at = NOW() WHERE id = $4',
+                    [googleId, avatarUrl || null, 'google', emailUser.id]
+                );
+                user = await loadUserAuthContextById(emailUser.id, client);
             }
 
             const authError = getOauthAccountError(user);
