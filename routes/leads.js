@@ -19,11 +19,246 @@ const {
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
 const { DEFAULT_BRANCH_ID, resolveBranchReadScope, resolveBranchWriteScope } = require('../utils/branchAccess');
+const { buildTemplateBodyVariables, normalizeLocalIndianPhone } = require('../utils/msg91');
+const { ensureWhatsAppDeliverySchema, sendTrackedWhatsAppTemplate } = require('../utils/whatsappDelivery');
+
+const LEAD_REPLY_TEMPLATE = {
+    template_key: 'LEAD_REPLY',
+    title: 'Lead Chat Reply',
+    whatsapp_text: 'Hi {{name}}, {{message}} Reply here if you want the team at {{gym_name}} to continue helping you.',
+    sms_text: 'Hi {{name}}, {{message}} Reply here if you need help from {{gym_name}}.',
+    whatsapp_template_language: 'en_US',
+    whatsapp_template_category: 'UTILITY',
+};
+
+let ensureLeadMessagingSchemaPromise;
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
     const gymId = Number.parseInt(rawGymId, 10);
     return Number.isInteger(gymId) ? gymId : null;
+};
+
+const normalizeLeadPhoneForLookup = (value) => {
+    const normalized = normalizeLocalIndianPhone(value);
+    if (normalized) return normalized;
+    return String(value || '').replace(/\D/g, '').slice(-10);
+};
+
+const normalizeTemplateStatus = (value) => String(value || '').trim().toUpperCase();
+
+const ensureLeadMessagingSchema = async () => {
+    if (!ensureLeadMessagingSchemaPromise) {
+        ensureLeadMessagingSchemaPromise = (async () => {
+            await pool.query(`
+                ALTER TABLE gyms
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_number VARCHAR(30),
+                ADD COLUMN IF NOT EXISTS messaging_whatsapp_status VARCHAR(30) DEFAULT 'NOT_CONFIGURED';
+            `);
+
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS gym_message_templates (
+                    id SERIAL PRIMARY KEY,
+                    gym_id INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                    template_key VARCHAR(60) NOT NULL,
+                    title VARCHAR(120) NOT NULL,
+                    whatsapp_text TEXT NOT NULL DEFAULT '',
+                    sms_text TEXT NOT NULL DEFAULT '',
+                    whatsapp_template_name VARCHAR(180),
+                    whatsapp_template_language VARCHAR(20) DEFAULT 'en_US',
+                    whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_CREATED',
+                    whatsapp_template_category VARCHAR(30) DEFAULT 'UTILITY',
+                    last_synced_at TIMESTAMPTZ,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (gym_id, template_key)
+                );
+            `);
+
+            await pool.query(`
+                ALTER TABLE gym_message_templates
+                ADD COLUMN IF NOT EXISTS whatsapp_text TEXT NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS sms_text TEXT NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS whatsapp_template_name VARCHAR(180),
+                ADD COLUMN IF NOT EXISTS whatsapp_template_language VARCHAR(20) DEFAULT 'en_US',
+                ADD COLUMN IF NOT EXISTS whatsapp_template_status VARCHAR(30) DEFAULT 'NOT_CREATED',
+                ADD COLUMN IF NOT EXISTS whatsapp_template_category VARCHAR(30) DEFAULT 'UTILITY',
+                ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
+                ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+            `);
+        })();
+    }
+
+    await ensureLeadMessagingSchemaPromise;
+};
+
+const seedLeadReplyTemplate = async (gymId) => {
+    if (!gymId) return;
+
+    await pool.query(
+        `INSERT INTO gym_message_templates (
+            gym_id,
+            template_key,
+            title,
+            whatsapp_text,
+            sms_text,
+            whatsapp_template_language,
+            whatsapp_template_category,
+            is_active
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+         ON CONFLICT (gym_id, template_key) DO NOTHING`,
+        [
+            gymId,
+            LEAD_REPLY_TEMPLATE.template_key,
+            LEAD_REPLY_TEMPLATE.title,
+            LEAD_REPLY_TEMPLATE.whatsapp_text,
+            LEAD_REPLY_TEMPLATE.sms_text,
+            LEAD_REPLY_TEMPLATE.whatsapp_template_language,
+            LEAD_REPLY_TEMPLATE.whatsapp_template_category,
+        ]
+    );
+};
+
+const renderLeadTemplatePreview = (templateText, lead = {}, gymName = '', replyText = '') => {
+    const firstName = String(lead?.full_name || '').trim().split(/\s+/).filter(Boolean)[0] || 'there';
+    const values = {
+        name: String(lead?.full_name || firstName || 'Member').trim() || 'Member',
+        member_name: String(lead?.full_name || firstName || 'Member').trim() || 'Member',
+        customer_name: String(lead?.full_name || firstName || 'Member').trim() || 'Member',
+        gym_name: String(gymName || 'GymVault').trim() || 'GymVault',
+        message: String(replyText || 'we would be happy to help you with the next step.').trim(),
+        reply: String(replyText || 'we would be happy to help you with the next step.').trim(),
+        reply_text: String(replyText || 'we would be happy to help you with the next step.').trim(),
+    };
+
+    return String(templateText || '').replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_token, placeholder) => {
+        const key = String(placeholder || '').trim().toLowerCase();
+        return values[key] || key.replace(/_/g, ' ');
+    });
+};
+
+const loadLeadById = async (gymId, leadId) => {
+    const result = await pool.query(
+        `SELECT *
+         FROM leads
+         WHERE id = $1 AND gym_id = $2
+         LIMIT 1`,
+        [leadId, gymId]
+    );
+
+    return result.rows[0] || null;
+};
+
+const loadLeadChatSetup = async (gymId) => {
+    await Promise.all([ensureLeadMessagingSchema(), ensureWhatsAppDeliverySchema()]);
+    await seedLeadReplyTemplate(gymId);
+
+    const [gymResult, templateResult] = await Promise.all([
+        pool.query(
+            `SELECT id, name, messaging_whatsapp_number, messaging_whatsapp_status
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [gymId]
+        ),
+        pool.query(
+            `SELECT
+                template_key,
+                title,
+                whatsapp_text,
+                sms_text,
+                whatsapp_template_name,
+                whatsapp_template_language,
+                whatsapp_template_status,
+                whatsapp_template_category,
+                is_active
+             FROM gym_message_templates
+             WHERE gym_id = $1
+               AND COALESCE(is_active, TRUE) = TRUE
+             ORDER BY CASE WHEN template_key = $2 THEN 0 ELSE 1 END, title ASC`,
+            [gymId, LEAD_REPLY_TEMPLATE.template_key]
+        ),
+    ]);
+
+    const gym = gymResult.rows[0] || null;
+    const templates = templateResult.rows.map((row) => ({
+        template_key: String(row.template_key || '').trim().toUpperCase(),
+        title: String(row.title || '').trim(),
+        whatsapp_text: String(row.whatsapp_text || '').trim(),
+        sms_text: String(row.sms_text || '').trim(),
+        whatsapp_template_name: String(row.whatsapp_template_name || '').trim(),
+        whatsapp_template_language: String(row.whatsapp_template_language || 'en_US').trim() || 'en_US',
+        whatsapp_template_status: normalizeTemplateStatus(row.whatsapp_template_status),
+        whatsapp_template_category: String(row.whatsapp_template_category || 'UTILITY').trim().toUpperCase() || 'UTILITY',
+    }));
+    const approvedTemplates = templates.filter((template) => template.whatsapp_template_status === 'APPROVED' && template.whatsapp_template_name);
+    const leadReplyTemplate = templates.find((template) => template.template_key === LEAD_REPLY_TEMPLATE.template_key) || null;
+    const preferredTemplate = approvedTemplates.find((template) => template.template_key === LEAD_REPLY_TEMPLATE.template_key) || approvedTemplates[0] || null;
+
+    return {
+        gym,
+        templates,
+        approvedTemplates,
+        leadReplyTemplate,
+        preferredTemplate,
+        whatsappConnected: normalizeTemplateStatus(gym?.messaging_whatsapp_status) === 'CONNECTED' && Boolean(String(gym?.messaging_whatsapp_number || '').trim()),
+    };
+};
+
+const loadLeadConversation = async ({ gymId, leadId, phone }) => {
+    const normalizedPhone = normalizeLeadPhoneForLookup(phone);
+    if (!gymId || !normalizedPhone) return [];
+
+    const result = await pool.query(
+        `SELECT *
+         FROM (
+            SELECT
+                CONCAT('outbound-', id) AS id,
+                'OUTBOUND' AS direction,
+                COALESCE(message_preview, '') AS message_text,
+                COALESCE(current_status, provider_status, 'SUBMITTED') AS delivery_status,
+                COALESCE(read_at, delivered_at, sent_at, submitted_at, failed_at, created_at) AS occurred_at,
+                COALESCE(template_title, template_key, 'WhatsApp message') AS template_title,
+                COALESCE(source_kind, 'LEAD_CHAT') AS source_kind
+            FROM whatsapp_delivery_logs
+            WHERE gym_id = $1
+                            AND source_kind = 'LEAD_CHAT'
+              AND RIGHT(REGEXP_REPLACE(COALESCE(recipient_number, ''), '\\D', '', 'g'), 10) = $2
+
+            UNION ALL
+
+            SELECT
+                CONCAT('inbound-', id) AS id,
+                'INBOUND' AS direction,
+                COALESCE(message_text, '') AS message_text,
+                'RECEIVED' AS delivery_status,
+                COALESCE(received_at, created_at) AS occurred_at,
+                'Member reply' AS template_title,
+                'INBOUND_REPLY' AS source_kind
+            FROM whatsapp_inbound_logs
+            WHERE gym_id = $1
+              AND (
+                    lead_id = $3
+                    OR RIGHT(REGEXP_REPLACE(COALESCE(sender_number, ''), '\\D', '', 'g'), 10) = $2
+                  )
+         ) conversation
+         ORDER BY occurred_at ASC NULLS LAST, id ASC`,
+        [gymId, normalizedPhone, leadId]
+    );
+
+    return result.rows.map((row) => ({
+        id: row.id,
+        direction: row.direction,
+        message_text: String(row.message_text || '').trim(),
+        delivery_status: normalizeTemplateStatus(row.delivery_status || 'SUBMITTED') || 'SUBMITTED',
+        occurred_at: row.occurred_at,
+        template_title: String(row.template_title || '').trim(),
+        source_kind: String(row.source_kind || '').trim(),
+    }));
 };
 
 const normalizeLeadPayload = (payload = {}) => {
@@ -159,6 +394,147 @@ router.get('/', requirePermission('members:read'), async (req, res) => {
     } catch (err) {
         console.error('LEADS LIST ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to load leads.' });
+    }
+});
+
+router.get('/:id/chat', requirePermission('members:read'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const leadId = ensureInteger(req.params.id, { field: 'lead id', required: true, min: 1 });
+        const lead = await loadLeadById(gymId, leadId);
+
+        if (!lead) {
+            return res.status(404).json({ error: 'Lead not found.' });
+        }
+
+        const chatSetup = await loadLeadChatSetup(gymId);
+        const conversation = await loadLeadConversation({ gymId, leadId, phone: lead.phone });
+
+        return res.json({
+            lead,
+            conversation,
+            messaging: {
+                whatsapp_connected: chatSetup.whatsappConnected,
+                whatsapp_number: String(chatSetup.gym?.messaging_whatsapp_number || '').trim(),
+                preferred_template_key: chatSetup.preferredTemplate?.template_key || '',
+                lead_reply_ready: chatSetup.leadReplyTemplate?.whatsapp_template_status === 'APPROVED' && Boolean(chatSetup.leadReplyTemplate?.whatsapp_template_name),
+                lead_reply_template: chatSetup.leadReplyTemplate ? {
+                    template_key: chatSetup.leadReplyTemplate.template_key,
+                    title: chatSetup.leadReplyTemplate.title,
+                    whatsapp_template_name: chatSetup.leadReplyTemplate.whatsapp_template_name,
+                    whatsapp_template_status: chatSetup.leadReplyTemplate.whatsapp_template_status,
+                    preview_text: renderLeadTemplatePreview(chatSetup.leadReplyTemplate.whatsapp_text, lead, chatSetup.gym?.name || ''),
+                } : null,
+                approved_templates: chatSetup.approvedTemplates.map((template) => ({
+                    template_key: template.template_key,
+                    title: template.title,
+                    whatsapp_template_name: template.whatsapp_template_name,
+                    whatsapp_template_status: template.whatsapp_template_status,
+                    preview_text: renderLeadTemplatePreview(template.whatsapp_text, lead, chatSetup.gym?.name || ''),
+                })),
+            },
+        });
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('LEAD CHAT LOAD ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load lead chat.' });
+    }
+});
+
+router.post('/:id/chat/messages', requirePermission('members:write'), async (req, res) => {
+    try {
+        const gymId = getGymIdFromRequest(req);
+        const leadId = ensureInteger(req.params.id, { field: 'lead id', required: true, min: 1 });
+        const lead = await loadLeadById(gymId, leadId);
+
+        if (!lead) {
+            return res.status(404).json({ error: 'Lead not found.' });
+        }
+
+        const requestedTemplateKey = ensureTrimmedString(req.body?.template_key, {
+            field: 'template_key',
+            max: 60,
+            uppercase: true,
+        });
+        const replyText = ensureTrimmedString(req.body?.message, {
+            field: 'message',
+            max: 700,
+        });
+        const chatSetup = await loadLeadChatSetup(gymId);
+
+        if (!chatSetup.whatsappConnected) {
+            return res.status(409).json({ error: 'Connect your GymVault WhatsApp business number first to send replies from Leads.' });
+        }
+
+        const selectedTemplate = requestedTemplateKey
+            ? chatSetup.approvedTemplates.find((template) => template.template_key === requestedTemplateKey)
+            : (chatSetup.preferredTemplate || null);
+
+        if (!selectedTemplate) {
+            return res.status(409).json({ error: 'No approved WhatsApp template is ready for lead chat yet. Approve a template in Settings and try again.' });
+        }
+
+        if (selectedTemplate.template_key === LEAD_REPLY_TEMPLATE.template_key && !replyText) {
+            return res.status(400).json({ error: 'Enter a reply message before sending.' });
+        }
+
+        const messagePreview = renderLeadTemplatePreview(selectedTemplate.whatsapp_text, lead, chatSetup.gym?.name || '', replyText);
+        const variables = buildTemplateBodyVariables(
+            selectedTemplate.whatsapp_text,
+            {
+                full_name: lead.full_name,
+                plan_name: 'your plan',
+                days_to_expiry: 0,
+            },
+            chatSetup.gym?.name || '',
+            { message: replyText }
+        );
+
+        const delivery = await sendTrackedWhatsAppTemplate({
+            gymId,
+            memberId: lead.converted_member_id || null,
+            initiatedBy: req.user?.id || null,
+            sourceKind: 'LEAD_CHAT',
+            sourceLabel: `Lead ${lead.id}`,
+            integratedNumber: chatSetup.gym.messaging_whatsapp_number,
+            recipientNumber: lead.phone,
+            recipientName: lead.full_name,
+            templateKey: selectedTemplate.template_key,
+            templateTitle: selectedTemplate.title,
+            templateName: selectedTemplate.whatsapp_template_name,
+            templateLanguage: selectedTemplate.whatsapp_template_language,
+            messagePreview,
+            variables,
+        });
+
+        await pool.query(
+            `UPDATE leads
+             SET last_contacted_at = NOW(),
+                 status = CASE WHEN status = 'NEW' THEN 'CONTACTED' ELSE status END,
+                 updated_at = NOW()
+             WHERE id = $1 AND gym_id = $2`,
+            [leadId, gymId]
+        );
+
+        const conversation = await loadLeadConversation({ gymId, leadId, phone: lead.phone });
+
+        return res.status(201).json({
+            ok: true,
+            delivery: {
+                log_id: delivery.logId,
+                correlation_id: delivery.correlationId,
+                status: normalizeTemplateStatus(delivery.acceptance?.status || 'SUBMITTED') || 'SUBMITTED',
+            },
+            conversation,
+        });
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('LEAD CHAT SEND ERROR:', err.message);
+        return res.status(500).json({ error: err.message || 'Failed to send WhatsApp reply.' });
     }
 });
 

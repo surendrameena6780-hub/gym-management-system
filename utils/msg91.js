@@ -18,6 +18,7 @@ const TEMPLATE_CATEGORY_MAP = {
     UNPAID: 'UTILITY',
     PAYMENT_DUE: 'UTILITY',
     RENEWAL_REMINDER: 'UTILITY',
+    LEAD_REPLY: 'UTILITY',
     INACTIVE: 'MARKETING',
     SALES_OFFER: 'MARKETING',
     HOLIDAY: 'MARKETING',
@@ -28,6 +29,7 @@ const TEMPLATE_PLACEHOLDER_DEFAULTS = {
     plan: 'your plan',
     days_left: '3',
     gym_name: 'GymVault',
+    message: 'We would love to help you with the next step.',
 };
 
 const TEMPLATE_PLACEHOLDER_ALIASES = {
@@ -47,6 +49,10 @@ const TEMPLATE_PLACEHOLDER_ALIASES = {
     gymname: 'gym_name',
     gym: 'gym_name',
     studio_name: 'gym_name',
+    message: 'message',
+    reply: 'message',
+    reply_text: 'message',
+    message_text: 'message',
 };
 
 const toTrimmedString = (value) => String(value || '').trim();
@@ -558,13 +564,25 @@ const extractTemplatePlaceholderKeys = (text) => {
     return matches.map((token) => token.replace(/[{}\s]/g, '').toLowerCase());
 };
 
-const resolveTemplatePlaceholderValue = (placeholder, member = {}, gymName = '') => {
+const resolveTemplatePlaceholderValue = (placeholder, member = {}, gymName = '', extraValues = {}) => {
     const daysLeft = Number.isFinite(Number(member?.days_to_expiry)) ? Number(member.days_to_expiry) : 0;
+    const normalizedExtraValues = Object.entries(extraValues || {}).reduce((accumulator, [key, value]) => {
+        const normalizedKey = normalizeTemplatePlaceholderKey(key);
+        if (!normalizedKey) return accumulator;
+
+        const normalizedValue = toTrimmedString(value);
+        if (!normalizedValue) return accumulator;
+
+        accumulator[normalizedKey] = normalizedValue;
+        return accumulator;
+    }, {});
     const values = {
         name: toTrimmedString(member?.full_name) || TEMPLATE_PLACEHOLDER_DEFAULTS.name,
         plan: toTrimmedString(member?.plan_name) || TEMPLATE_PLACEHOLDER_DEFAULTS.plan,
         days_left: String(daysLeft),
         gym_name: toTrimmedString(gymName) || TEMPLATE_PLACEHOLDER_DEFAULTS.gym_name,
+        message: toTrimmedString(normalizedExtraValues.message) || TEMPLATE_PLACEHOLDER_DEFAULTS.message,
+        ...normalizedExtraValues,
     };
     return values[placeholder] || TEMPLATE_PLACEHOLDER_DEFAULTS[placeholder] || placeholder.replace(/_/g, ' ');
 };
@@ -679,12 +697,12 @@ const deleteWhatsAppTemplate = async ({ integratedNumber, templateName }) => {
     });
 };
 
-const buildTemplateBodyVariables = (whatsappText, member = {}, gymName = '') => {
+const buildTemplateBodyVariables = (whatsappText, member = {}, gymName = '', extraValues = {}) => {
     const placeholderKeys = extractTemplatePlaceholderKeys(whatsappText);
     return placeholderKeys.reduce((accumulator, placeholder, index) => {
         accumulator[`body_${index + 1}`] = {
             type: 'text',
-            value: resolveTemplatePlaceholderValue(placeholder, member, gymName),
+            value: resolveTemplatePlaceholderValue(placeholder, member, gymName, extraValues),
         };
         return accumulator;
     }, {});

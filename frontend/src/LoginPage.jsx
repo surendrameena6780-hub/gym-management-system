@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
-import { QRCodeCanvas } from 'qrcode.react';
 import { buildApiUrl } from './utils/apiUrl';
 import MemberSelfServiceHub from './MemberSelfServiceHub';
 import {
   Dumbbell, Mail, Lock, ArrowRight, Eye, EyeOff,
   Users, TrendingUp, Layers, ChevronRight, Phone, CheckCircle,
-  Copy, LocateFixed, MapPin, QrCode, RefreshCw, ScanLine, X
+  Copy, X
 } from 'lucide-react';
 
 // ─── Static left-panel stats (design elements) ────────────────────────────────
@@ -385,30 +384,8 @@ function PasswordResetModal({
 
 // ─── Full-screen Member Portal Dashboard (shown after OTP verification) ──────
 function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMemberChange }) {
-  const qrScannerRef = useRef(null);
-  const qrScannerBusyRef = useRef(false);
-  const autoGeoAttemptRef = useRef(false);
   const [attendance, setAttendance] = useState([]);
   const [loadingAtt, setLoadingAtt] = useState(true);
-  const [memberQr, setMemberQr] = useState(null);
-  const [memberQrLoading, setMemberQrLoading] = useState(true);
-  const [memberQrModalOpen, setMemberQrModalOpen] = useState(false);
-  const [scanModalOpen, setScanModalOpen] = useState(false);
-  const [scannerBooting, setScannerBooting] = useState(false);
-  const [selfCheckinBusy, setSelfCheckinBusy] = useState(false);
-  const [geoCheckinBusy, setGeoCheckinBusy] = useState(false);
-  const [geoPermissionBusy, setGeoPermissionBusy] = useState(false);
-  const [geoPermissionState, setGeoPermissionState] = useState('checking');
-  const [attendanceOptionsLoading, setAttendanceOptionsLoading] = useState(true);
-  const [attendanceOptions, setAttendanceOptions] = useState({
-    gym: { id: null, name: member.gym_name || '' },
-    attendance_mode: 'STAFF',
-    attendance_geo_enabled: false,
-    gym_radius_meters: 200,
-    self_checkin_available: false,
-    member_qr_available: true,
-    gym_qr_available: true,
-  });
   const [portalNotice, setPortalNotice] = useState(null);
 
   const memberHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
@@ -425,152 +402,12 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     }
   }, [memberHeaders]);
 
-  const loadMemberQr = useCallback(async () => {
-    setMemberQrLoading(true);
-    try {
-      const res = await axios.get('/api/attendance/member/qr', memberHeaders);
-      setMemberQr(res.data || null);
-    } catch (_err) {
-      setPortalNotice({ type: 'error', message: 'Could not load your attendance QR. Please try again.' });
-    } finally {
-      setMemberQrLoading(false);
-    }
-  }, [memberHeaders]);
-
-  const loadAttendanceOptions = useCallback(async () => {
-    setAttendanceOptionsLoading(true);
-    try {
-      const res = await axios.get('/api/attendance/member/options', memberHeaders);
-      setAttendanceOptions((prev) => ({
-        ...prev,
-        ...(res.data || {}),
-        gym: {
-          id: res.data?.gym?.id || null,
-          name: res.data?.gym?.name || member.gym_name || prev.gym?.name || '',
-        },
-      }));
-    } catch (_err) {
-      setPortalNotice((prev) => prev || { type: 'error', message: 'Could not load attendance options for this gym.' });
-    } finally {
-      setAttendanceOptionsLoading(false);
-    }
-  }, [member.gym_name, memberHeaders]);
-
-  const submitGymQr = useCallback(async (decodedText) => {
-    setSelfCheckinBusy(true);
-    try {
-      const res = await axios.post('/api/attendance/member/checkin/qr', { token: decodedText }, memberHeaders);
-      setPortalNotice({
-        type: 'success',
-        message: res.data?.warning || res.data?.message || 'Self check-in recorded successfully.',
-      });
-      await loadAttendance();
-    } catch (err) {
-      const apiMessage = err?.response?.data?.message || err?.response?.data?.error || 'Self check-in failed.';
-      setPortalNotice({ type: 'error', message: apiMessage });
-    } finally {
-      setSelfCheckinBusy(false);
-    }
-  }, [loadAttendance, memberHeaders]);
-
-  const submitLocationSelfCheckin = useCallback(async ({ auto = false } = {}) => {
-    if (!navigator.geolocation) {
-      setGeoPermissionState('unsupported');
-      if (!auto) {
-        setPortalNotice({ type: 'error', message: 'Location is not supported on this device.' });
-      }
-      return false;
-    }
-
-    setGeoCheckinBusy(true);
-    try {
-      const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          resolve,
-          reject,
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 45000 }
-        );
-      });
-
-      const res = await axios.post('/api/attendance/member/checkin/self', {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      }, memberHeaders);
-
-      setPortalNotice({
-        type: 'success',
-        message: auto
-          ? (res.data?.warning || 'You were checked in automatically when the app opened near the gym.')
-          : (res.data?.warning || res.data?.message || 'Location self check-in successful.'),
-      });
-      setGeoPermissionState('granted');
-      await loadAttendance();
-      return true;
-    } catch (err) {
-      if (typeof err?.code === 'number') {
-        if (err.code === 1) {
-          setGeoPermissionState('denied');
-        }
-        const geoMessage = err.code === 1
-          ? 'Location permission is required for geo self check-in.'
-          : err.code === 2
-            ? 'Could not detect your location right now. Move closer to the entrance and try again.'
-            : 'Location request timed out. Try again while standing near the gym entrance.';
-        if (!auto) {
-          setPortalNotice({ type: 'error', message: geoMessage });
-        }
-        return false;
-      }
-
-      const apiMessage = err?.response?.data?.message || err?.response?.data?.error || 'Location self check-in failed.';
-      setPortalNotice({ type: 'error', message: apiMessage });
-      return false;
-    } finally {
-      setGeoCheckinBusy(false);
-    }
-  }, [loadAttendance, memberHeaders]);
-
-  const requestLocationAccess = useCallback(async () => {
-    if (!navigator.geolocation) {
-      setGeoPermissionState('unsupported');
-      setPortalNotice({ type: 'error', message: 'Location is not supported on this device.' });
-      return false;
-    }
-
-    setGeoPermissionBusy(true);
-    try {
-      await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          resolve,
-          reject,
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
-      });
-
-      setGeoPermissionState('granted');
-      setPortalNotice({ type: 'success', message: 'Location access enabled. Automatic and manual self check-in are now ready.' });
-      return true;
-    } catch (err) {
-      if (typeof err?.code === 'number' && err.code === 1) {
-        setGeoPermissionState('denied');
-        setPortalNotice({ type: 'error', message: 'Location permission was denied. Enable it in browser settings to use geo check-in.' });
-      } else {
-        setPortalNotice({ type: 'error', message: 'Could not enable location access right now. Try again near the gym entrance.' });
-      }
-      return false;
-    } finally {
-      setGeoPermissionBusy(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadAttendance();
-    loadMemberQr();
-    loadAttendanceOptions();
-  }, [loadAttendance, loadAttendanceOptions, loadMemberQr]);
+  }, [loadAttendance]);
 
   useEffect(() => {
-    const gymId = attendanceOptions?.gym?.id || member?.gym_id || null;
+    const gymId = member?.gym_id || null;
     if (!gymId || !member?.id || !token) return undefined;
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return undefined;
     if (Notification.permission === 'denied') return undefined;
@@ -626,137 +463,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     return () => {
       cancelled = true;
     };
-  }, [attendanceOptions?.gym?.id, member?.gym_id, member?.id, token]);
-
-  useEffect(() => {
-    if (!navigator?.geolocation) {
-      setGeoPermissionState('unsupported');
-      return undefined;
-    }
-
-    if (!navigator?.permissions?.query) {
-      setGeoPermissionState('prompt');
-      return undefined;
-    }
-
-    let active = true;
-    let permissionStatus = null;
-
-    const applyPermissionState = () => {
-      if (active && permissionStatus?.state) {
-        setGeoPermissionState(permissionStatus.state);
-      }
-    };
-
-    navigator.permissions.query({ name: 'geolocation' })
-      .then((status) => {
-        if (!active) return;
-        permissionStatus = status;
-        applyPermissionState();
-        permissionStatus.onchange = applyPermissionState;
-      })
-      .catch(() => {
-        if (active) {
-          setGeoPermissionState('prompt');
-        }
-      });
-
-    return () => {
-      active = false;
-      if (permissionStatus) {
-        permissionStatus.onchange = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!scanModalOpen) return undefined;
-
-    let cancelled = false;
-    let scanner = null;
-
-    const stopScanner = async () => {
-      const activeScanner = scanner || qrScannerRef.current;
-      qrScannerRef.current = null;
-      if (!activeScanner) return;
-      try {
-        await activeScanner.stop();
-      } catch (_err) {
-        // ignore stop errors during teardown
-      }
-      try {
-        await activeScanner.clear();
-      } catch (_err) {
-        // ignore clear errors during teardown
-      }
-    };
-
-    const bootScanner = async () => {
-      setScannerBooting(true);
-      try {
-        const { Html5Qrcode } = await import('html5-qrcode');
-        if (cancelled) return;
-
-        scanner = new Html5Qrcode('member-gym-qr-reader');
-        qrScannerRef.current = scanner;
-
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1 },
-          async (decodedText) => {
-            if (qrScannerBusyRef.current) return;
-            qrScannerBusyRef.current = true;
-            await stopScanner();
-            if (!cancelled) {
-              setScannerBooting(false);
-              setScanModalOpen(false);
-            }
-            await submitGymQr(decodedText);
-            qrScannerBusyRef.current = false;
-          },
-          () => {}
-        );
-
-        if (!cancelled) {
-          setScannerBooting(false);
-        }
-      } catch (_err) {
-        await stopScanner();
-        if (!cancelled) {
-          setScannerBooting(false);
-          setScanModalOpen(false);
-          setPortalNotice({ type: 'error', message: 'Could not start the camera. Please check permission and try again.' });
-        }
-      }
-    };
-
-    bootScanner();
-
-    return () => {
-      cancelled = true;
-      qrScannerBusyRef.current = false;
-      setScannerBooting(false);
-      stopScanner();
-    };
-  }, [scanModalOpen, submitGymQr]);
-
-  const copyMemberQr = async () => {
-    if (!memberQr?.token) return;
-    try {
-      await navigator.clipboard.writeText(memberQr.token);
-      setPortalNotice({ type: 'success', message: 'Your QR token has been copied.' });
-    } catch (_err) {
-      setPortalNotice({ type: 'error', message: 'Could not copy your QR token.' });
-    }
-  };
-
-  const formatPortalDateTime = (value) => {
-    if (!value) return '—';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime())
-      ? '—'
-      : date.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  };
+  }, [member?.gym_id, member?.id, token]);
 
   const formatPortalDate = (value) => {
     if (!value) return '—';
@@ -767,94 +474,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
       : date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const toDateStr = (d) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-  const todayStr = toDateStr(new Date());
-  const todayAttendance = attendance.find((entry) => String(entry.date).slice(0, 10) === todayStr);
-  const todayCheckins = Number(todayAttendance?.count || 0);
-  const checkedInToday = todayCheckins > 0;
   const lastVisitLabel = attendance[0]?.date ? formatPortalDate(attendance[0].date) : 'No recent check-in';
-  const availableMethods = [
-    attendanceOptions.self_checkin_available ? 'Geo' : null,
-    attendanceOptions.gym_qr_available ? 'Gym QR' : null,
-    attendanceOptions.member_qr_available ? 'Member QR' : null,
-  ].filter(Boolean);
-  const geoStatusMeta = {
-    unsupported: {
-      label: 'Unsupported',
-      tone: { background: 'rgba(148,163,184,0.14)', border: '1px solid rgba(148,163,184,0.22)', color: '#cbd5e1' },
-    },
-    checking: {
-      label: 'Checking Device',
-      tone: { background: 'rgba(129,140,248,0.14)', border: '1px solid rgba(129,140,248,0.22)', color: '#c7d2fe' },
-    },
-    prompt: {
-      label: 'Needs Permission',
-      tone: { background: 'rgba(251,191,36,0.14)', border: '1px solid rgba(251,191,36,0.22)', color: '#fde68a' },
-    },
-    denied: {
-      label: 'Blocked',
-      tone: { background: 'rgba(248,113,113,0.14)', border: '1px solid rgba(248,113,113,0.22)', color: '#fecaca' },
-    },
-    granted: {
-      label: 'Auto Ready',
-      tone: { background: 'rgba(52,211,153,0.14)', border: '1px solid rgba(52,211,153,0.22)', color: '#a7f3d0' },
-    },
-  }[geoPermissionState] || {
-    label: 'Checking Device',
-    tone: { background: 'rgba(129,140,248,0.14)', border: '1px solid rgba(129,140,248,0.22)', color: '#c7d2fe' },
-  };
-
-  useEffect(() => {
-    if (!attendanceOptions.self_checkin_available) return;
-    if (autoGeoAttemptRef.current) return;
-    if (loadingAtt) return;
-    if (checkedInToday) return;
-    if (!navigator?.permissions?.query) return;
-
-    const storageKey = `gymvault:auto-self-check:${member.id}:${todayStr}`;
-    try {
-      if (window.localStorage.getItem(storageKey)) {
-        autoGeoAttemptRef.current = true;
-        return;
-      }
-    } catch (_err) {
-      // ignore storage access errors
-    }
-
-    autoGeoAttemptRef.current = true;
-
-    const run = async () => {
-      try {
-        const permission = await navigator.permissions.query({ name: 'geolocation' });
-        if (permission.state !== 'granted') {
-          return;
-        }
-
-        const success = await submitLocationSelfCheckin({ auto: true });
-        if (success) {
-          try {
-            window.localStorage.setItem(storageKey, String(Date.now()));
-          } catch (_err) {
-            // ignore storage access errors
-          }
-        }
-      } catch (_err) {
-        // permissions api not available or rejected, stay manual
-      }
-    };
-
-    run();
-  }, [attendanceOptions.self_checkin_available, checkedInToday, loadingAtt, member.id, submitLocationSelfCheckin, todayStr]);
-
-  const last14 = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (13 - i));
-    return { date: toDateStr(d), day: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][d.getDay()], dayNum: d.getDate() };
-  });
-
-  const attendedDates = new Set(attendance.map(a => String(a.date).slice(0, 10)));
 
   const daysLeft = member.membership_end
     ? Math.max(0, Math.ceil((new Date(member.membership_end) - Date.now()) / 86400000))
@@ -866,27 +486,13 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     ? Math.max(0, Math.min(100, Math.round(((totalDays - daysLeft) / totalDays) * 100)))
     : null;
 
-  const now = new Date();
-  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const thisMonthCount = attendance.filter(a => String(a.date).startsWith(currentYM)).length;
-
-  const streak = (() => {
-    let s = 0;
-    const checkedToday = attendedDates.has(todayStr);
-    for (let i = checkedToday ? 0 : 1; i <= 30; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      if (attendedDates.has(toDateStr(d))) s++;
-      else if (i > 0) break;
-    }
-    return s;
-  })();
-
   const urgency = daysLeft === null ? 'gray' : daysLeft <= 7 ? 'rose' : daysLeft <= 30 ? 'amber' : 'emerald';
   const clr     = { rose: '#f87171', amber: '#fbbf24', emerald: '#34d399', gray: '#94a3b8' }[urgency];
   const expiryLabel = member.membership_end
     ? new Date(member.membership_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : 'No active plan';
+  const membershipStatusLabel = String(member.status || 'INACTIVE').toUpperCase() === 'ACTIVE' ? 'Active' : 'Inactive';
+  const lastVisitSubLabel = lastVisitLabel === 'No recent check-in' ? 'No attendance recorded yet' : 'Latest attendance recorded';
 
   return (
     <div className="app-min-shell-height font-['Inter'] overflow-y-auto"
@@ -947,20 +553,34 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
           </div>
         </div>
 
-        {/* 3-stat grid */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Days Left',  value: daysLeft !== null ? String(daysLeft) : '—', color: clr,       sub: 'until expiry'  },
-            { label: 'This Month', value: String(thisMonthCount),                      color: '#818cf8', sub: 'check-ins'     },
-            { label: 'Streak',     value: String(streak),                              color: '#34d399', sub: 'days in a row' },
-          ].map(({ label, value, color, sub }) => (
-            <div key={label} className="p-3.5 rounded-2xl text-center"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-              <p className="font-black text-2xl leading-none" style={{ color }}>{value}</p>
-              <p className="text-white text-[10px] font-bold mt-1">{label}</p>
-              <p className="text-slate-600 text-[9px] mt-0.5">{sub}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="p-3.5 rounded-2xl"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Days Left</p>
+            <p className="mt-2 font-black text-2xl leading-none" style={{ color: clr }}>{daysLeft !== null ? String(daysLeft) : '—'}</p>
+            <p className="mt-1 text-[10px] font-semibold text-slate-500">until expiry</p>
+          </div>
+          <div className="p-3.5 rounded-2xl"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Last Check-In</p>
+              {loadingAtt && <div className="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />}
             </div>
-          ))}
+            <p className="mt-2 text-sm font-black leading-snug text-white">{lastVisitLabel}</p>
+            <p className="mt-1 text-[10px] font-semibold text-slate-500">{lastVisitSubLabel}</p>
+          </div>
+          <div className="p-3.5 rounded-2xl"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Status</p>
+            <p className={`mt-2 text-lg font-black ${membershipStatusLabel === 'Active' ? 'text-emerald-400' : 'text-amber-400'}`}>{membershipStatusLabel}</p>
+            <p className="mt-1 text-[10px] font-semibold text-slate-500">member access</p>
+          </div>
+          <div className="p-3.5 rounded-2xl"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Plan</p>
+            <p className="mt-2 text-sm font-black leading-snug text-white">{member.plan_name || 'No active plan'}</p>
+            <p className="mt-1 text-[10px] font-semibold text-slate-500">current membership</p>
+          </div>
         </div>
 
         {/* Membership card */}
@@ -1001,224 +621,19 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
           </div>
         )}
 
-        <MemberSelfServiceHub member={member} token={token} onMemberChange={onMemberChange} />
-
-        <div className="space-y-3">
-          <div className="p-5 rounded-[28px] relative overflow-hidden"
-            style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.94) 0%, rgba(30,41,59,0.92) 52%, rgba(67,56,202,0.25) 100%)', border: '1px solid rgba(129,140,248,0.18)' }}>
-            <div className="absolute -right-12 -top-10 w-40 h-40 rounded-full pointer-events-none"
-              style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.24) 0%, transparent 70%)', filter: 'blur(24px)' }} />
-            <div className="absolute -left-12 bottom-0 w-32 h-32 rounded-full pointer-events-none"
-              style={{ background: 'radial-gradient(circle, rgba(20,184,166,0.16) 0%, transparent 70%)', filter: 'blur(20px)' }} />
-
-            <div className="relative z-10 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-indigo-300 text-[10px] font-black uppercase tracking-[0.22em]">Check-In Hub</p>
-                <h3 className="text-white font-black text-2xl leading-tight mt-1">Fast, guided attendance</h3>
-                <p className="text-slate-400 text-sm font-medium mt-2 max-w-md">Use the fastest available method for your gym: geo self check-in, scan the gym QR, or show your member pass at the desk.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  loadMemberQr();
-                  loadAttendanceOptions();
-                }}
-                disabled={memberQrLoading || attendanceOptionsLoading}
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-white disabled:opacity-60 shrink-0"
-                style={{ background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(129,140,248,0.24)' }}
-              >
-                <RefreshCw size={15} className={memberQrLoading || attendanceOptionsLoading ? 'animate-spin' : ''} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-5 relative z-10">
-              <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Today</p>
-                <p className="text-white font-black text-lg mt-1">{checkedInToday ? 'Checked In' : 'Ready'}</p>
-                <p className="text-slate-400 text-[11px] font-semibold mt-1">{checkedInToday ? `${todayCheckins} mark${todayCheckins !== 1 ? 's' : ''} today` : 'No attendance mark yet'}</p>
-              </div>
-              <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Location</p>
-                <p className="text-white font-black text-lg mt-1">{attendanceOptions.self_checkin_available ? `${attendanceOptions.gym_radius_meters || 200}m` : 'Off'}</p>
-                <p className="text-slate-400 text-[11px] font-semibold mt-1">{attendanceOptions.self_checkin_available ? 'Geo radius active' : 'Geo self check-in disabled'}</p>
-              </div>
-              <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Methods</p>
-                <p className="text-white font-black text-lg mt-1">{availableMethods.length}</p>
-                <p className="text-slate-400 text-[11px] font-semibold mt-1">{availableMethods.join(' • ') || 'Staff only'}</p>
-              </div>
-              <div className="p-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Last Visit</p>
-                <p className="text-white font-black text-lg mt-1">{lastVisitLabel === 'No recent check-in' ? '—' : lastVisitLabel}</p>
-                <p className="text-slate-400 text-[11px] font-semibold mt-1">{lastVisitLabel === 'No recent check-in' ? 'No attendance in last 30 days' : 'Recent attendance found'}</p>
-              </div>
-            </div>
-          </div>
-
-          {portalNotice && (
-            <div
-              className="p-3.5 rounded-2xl text-sm font-semibold"
-              style={{
-                background: portalNotice.type === 'success' ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.1)',
-                border: portalNotice.type === 'success' ? '1px solid rgba(52,211,153,0.22)' : '1px solid rgba(248,113,113,0.18)',
-                color: portalNotice.type === 'success' ? '#6ee7b7' : '#fca5a5',
-              }}>
-              {portalNotice.message}
-            </div>
-          )}
-
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="p-5 rounded-[28px]"
-                style={{ background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-                    style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.18)' }}>
-                    <ScanLine size={18} className="text-indigo-300" />
-                  </div>
-                  <div>
-                    <p className="text-white font-black text-base">Scan Gym QR</p>
-                    <p className="text-slate-400 text-sm font-medium mt-1">Best for front-desk kiosks or a wall-mounted gym QR. Open the scanner and point your camera at the gym code.</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 p-3 rounded-2xl text-[11px] font-semibold text-slate-400"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  Works even when geo radius is disabled. The server still validates your membership before attendance is recorded.
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setScanModalOpen(true)}
-                  disabled={selfCheckinBusy || geoCheckinBusy}
-                  className="w-full mt-4 flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                  style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
-                  <ScanLine size={16} /> {selfCheckinBusy ? 'Waiting...' : 'Open QR Scanner'}
-                </button>
-              </div>
-
-              <div className="p-5 rounded-[28px]"
-                style={{ background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-                      style={{ background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.18)' }}>
-                      <QrCode size={18} className="text-sky-300" />
-                    </div>
-                    <div>
-                      <p className="text-white font-black text-base">Member Pass</p>
-                      <p className="text-slate-400 text-sm font-medium mt-1">Show this QR at reception for a quick desk scan when staff is checking people in.</p>
-                    </div>
-                  </div>
-                  <div className="w-[82px] h-[82px] rounded-2xl bg-white flex items-center justify-center shrink-0 overflow-hidden">
-                    {memberQr?.token ? (
-                      <QRCodeCanvas value={memberQr.token} size={74} includeMargin={false} level="H" />
-                    ) : (
-                      <QrCode size={24} className="text-slate-300" />
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4 p-3 rounded-2xl text-[11px] font-semibold text-slate-400"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  Pass expiry: <span className="text-white font-black">{formatPortalDateTime(memberQr?.expires_at)}</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <button
-                    type="button"
-                    onClick={() => setMemberQrModalOpen(true)}
-                    disabled={!memberQr?.token}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                    style={{ background: 'linear-gradient(135deg, #0ea5e9, #6366f1)' }}>
-                    <QrCode size={16} /> Open Full Pass
-                  </button>
-                  <button
-                    type="button"
-                    onClick={copyMemberQr}
-                    disabled={!memberQr?.token}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                    style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                    <Copy size={15} /> Copy Backup Token
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {attendanceOptions.self_checkin_available && (
-              <button
-                type="button"
-                onClick={() => submitLocationSelfCheckin({ auto: false })}
-                disabled={geoCheckinBusy || selfCheckinBusy}
-                className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                style={{ background: 'linear-gradient(135deg, #10b981, #14b8a6)' }}>
-                <LocateFixed size={16} /> {geoCheckinBusy ? 'Checking location...' : 'Quick Geo Check-In'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* 14-day attendance grid */}
-        <div className="p-5 rounded-2xl"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-white font-black text-sm">Last 14 Days</p>
-            {loadingAtt && (
-              <div className="w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />
-            )}
-          </div>
-          <div className="grid grid-cols-7 gap-2">
-            {last14.map(({ date, day, dayNum }) => {
-              const checked = attendedDates.has(date);
-              const isToday = date === todayStr;
-              return (
-                <div key={date} className="flex flex-col items-center gap-1">
-                  <p className="text-slate-600 text-[9px] font-bold">{day}</p>
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center text-[11px] font-black"
-                    style={{
-                      background: checked  ? 'linear-gradient(135deg, #6366f1, #a855f7)'
-                                 : isToday ? 'rgba(99,102,241,0.15)'
-                                 :           'rgba(255,255,255,0.04)',
-                      border:    checked  ? 'none'
-                                 : isToday ? '1.5px solid rgba(99,102,241,0.5)'
-                                 :           '1px solid rgba(255,255,255,0.07)',
-                      color:     checked  ? 'white'
-                                 : isToday ? '#818cf8'
-                                 :           'rgba(255,255,255,0.2)',
-                    }}>
-                    {checked ? '✓' : dayNum}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-4 mt-3 justify-end">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)' }} />
-              <span className="text-slate-500 text-[10px] font-semibold">Checked in</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
-              <span className="text-slate-500 text-[10px] font-semibold">Missed</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Motivational message */}
-        {thisMonthCount > 0 && (
-          <div className="p-4 rounded-2xl text-center"
-            style={{ background: 'linear-gradient(135deg, rgba(52,211,153,0.08), rgba(99,102,241,0.08))', border: '1px solid rgba(52,211,153,0.15)' }}>
-            <p className="text-emerald-400 font-black text-sm">
-              {thisMonthCount >= 20 ? "🔥 You're crushing it this month!"
-               : thisMonthCount >= 12 ? '💪 Great consistency this month!'
-               : thisMonthCount >= 5  ? '⚡ Keep that momentum going!'
-               :                        '🌟 Every session counts. Keep going!'}
-            </p>
-            <p className="text-slate-500 text-xs mt-1">
-              {thisMonthCount} check-in{thisMonthCount !== 1 ? 's' : ''} this month
-            </p>
+        {portalNotice && (
+          <div
+            className="p-3.5 rounded-2xl text-sm font-semibold"
+            style={{
+              background: portalNotice.type === 'success' ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.1)',
+              border: portalNotice.type === 'success' ? '1px solid rgba(52,211,153,0.22)' : '1px solid rgba(248,113,113,0.18)',
+              color: portalNotice.type === 'success' ? '#6ee7b7' : '#fca5a5',
+            }}>
+            {portalNotice.message}
           </div>
         )}
+
+        <MemberSelfServiceHub member={member} token={token} onMemberChange={onMemberChange} />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
           <button type="button" onClick={onSwitchGym}
@@ -1233,103 +648,6 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
           </button>
         </div>
       </div>
-
-      {memberQrModalOpen && (
-        <div className="fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-md px-4 py-6 flex items-center justify-center">
-          <div className="w-full max-w-md rounded-[30px] p-5"
-            style={{ background: 'linear-gradient(170deg, #0c1120 0%, #090c18 100%)', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <p className="text-sky-300 text-[10px] font-black uppercase tracking-[0.24em]">Member Pass</p>
-                <h3 className="text-white font-black text-2xl mt-1">Show this at reception</h3>
-                <p className="text-slate-500 text-xs font-medium mt-1">Staff can scan this pass directly from your phone screen to record attendance fast.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMemberQrModalOpen(false)}
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-300"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="rounded-[28px] p-5"
-              style={{ background: 'linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%)' }}>
-              <div className="flex justify-center">
-                {memberQr?.token ? (
-                  <QRCodeCanvas value={memberQr.token} size={248} includeMargin level="H" />
-                ) : (
-                  <div className="h-[248px] w-[248px] rounded-[24px] flex items-center justify-center bg-slate-100 text-slate-400 text-sm font-bold">
-                    QR unavailable
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 p-3 rounded-2xl"
-                style={{ background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(148,163,184,0.16)' }}>
-                <p className="text-slate-900 font-black text-sm">{member.full_name}</p>
-                <p className="text-slate-500 text-xs font-semibold mt-1">{member.plan_name || 'Active member'} · {member.gym_name}</p>
-                <p className="text-slate-400 text-[11px] font-semibold mt-2">Pass expiry: {formatPortalDateTime(memberQr?.expires_at)}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              <button
-                type="button"
-                onClick={loadMemberQr}
-                disabled={memberQrLoading}
-                className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                <RefreshCw size={15} className={memberQrLoading ? 'animate-spin' : ''} /> Refresh Pass
-              </button>
-              <button
-                type="button"
-                onClick={copyMemberQr}
-                disabled={!memberQr?.token}
-                className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
-                style={{ background: 'linear-gradient(135deg, #0ea5e9, #6366f1)' }}>
-                <Copy size={15} /> Copy Backup Token
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {scanModalOpen && (
-        <div className="fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-md px-4 py-6 flex items-center justify-center">
-          <div className="w-full max-w-md rounded-[28px] p-5"
-            style={{ background: 'linear-gradient(170deg, #0c1120 0%, #090c18 100%)', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <p className="text-indigo-300 text-[10px] font-black uppercase tracking-wider">Self Check-In</p>
-                <h3 className="text-white font-black text-xl mt-1">Scan Gym QR</h3>
-                <p className="text-slate-500 text-xs font-medium mt-1">Point your camera at the QR displayed by the gym to mark today’s attendance.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setScanModalOpen(false)}
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-300"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="rounded-[24px] overflow-hidden"
-              style={{ background: '#020617', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <div id="member-gym-qr-reader" className="min-h-[320px]" />
-            </div>
-
-            <div className="mt-4 p-3 rounded-2xl"
-              style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.16)' }}>
-              <p className="text-white text-sm font-black">Attendance rules stay enforced</p>
-              <p className="text-slate-400 text-xs font-medium mt-1">The server still checks membership status and duplicate windows before accepting the scan.</p>
-            </div>
-
-            {scannerBooting ? <p className="mt-3 text-xs font-bold text-slate-500">Starting camera...</p> : null}
-            {selfCheckinBusy ? <p className="mt-2 text-xs font-bold text-indigo-300">Recording check-in...</p> : null}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

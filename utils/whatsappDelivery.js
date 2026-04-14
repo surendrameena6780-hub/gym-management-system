@@ -673,28 +673,6 @@ const applyWebhookRecordToLog = async (logRow, record) => {
     );
 };
 
-const buildInboundReplyNote = (record, context = {}) => {
-    const parsedDate = record?.receivedAt ? new Date(record.receivedAt) : new Date();
-    const timeLabel = Number.isNaN(parsedDate.getTime())
-        ? new Date().toISOString()
-        : parsedDate.toLocaleString('en-GB', {
-            day: '2-digit',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    const sourceParts = [];
-
-    if (context?.templateTitle) {
-        sourceParts.push(`after ${context.templateTitle}`);
-    } else if (context?.sourceLabel) {
-        sourceParts.push(`after ${context.sourceLabel}`);
-    }
-
-    const prefix = sourceParts.length > 0 ? `${sourceParts.join(' ')}. ` : '';
-    return truncateText(`[WhatsApp reply · ${timeLabel}] ${prefix}${record?.messageText || 'Customer replied on WhatsApp.'}`, 1900);
-};
-
 const appendLeadNotes = (currentValue, nextValue) => {
     const current = toTrimmedString(currentValue);
     const next = toTrimmedString(nextValue);
@@ -705,6 +683,20 @@ const appendLeadNotes = (currentValue, nextValue) => {
     if (combined.length <= 2000) return combined;
     return combined.slice(combined.length - 2000);
 };
+
+const AUTOMATED_LEAD_THREAD_NOTE_PATTERN = /^(\[WhatsApp reply\b|WhatsApp thread active\.)/i;
+
+const stripAutomatedLeadThreadNotes = (value) => String(value || '')
+    .split(/\n\s*\n/)
+    .map((part) => toTrimmedString(part))
+    .filter(Boolean)
+    .filter((part) => !AUTOMATED_LEAD_THREAD_NOTE_PATTERN.test(part))
+    .join('\n\n');
+
+const buildInboundReplySummaryNote = (record) => truncateText(
+    `WhatsApp thread active. Latest reply: ${record?.messageText || 'Customer replied on WhatsApp.'}`,
+    320
+);
 
 const findRecentOutboundContextForInbound = async (record) => {
     const integratedLocal = normalizeLocalIndianPhone(record?.integratedNumber);
@@ -867,7 +859,6 @@ const upsertLeadForInboundReply = async ({ record, context }) => {
     const phone = normalizeLocalIndianPhone(record?.senderNumber);
     if (!gymId || !phone) return null;
 
-    const note = buildInboundReplyNote(record, context);
     const existingLeadResult = await pool.query(
         `SELECT id, source, status, priority, notes
          FROM leads
@@ -883,6 +874,7 @@ const upsertLeadForInboundReply = async ({ record, context }) => {
     if (existingLead?.id) {
         const currentStatus = toTrimmedString(existingLead.status).toUpperCase();
         const nextStatus = currentStatus === 'TRIAL_BOOKED' ? 'TRIAL_BOOKED' : 'FOLLOW_UP';
+        const preservedNotes = stripAutomatedLeadThreadNotes(existingLead.notes);
         const updatedLead = await pool.query(
             `UPDATE leads
              SET status = $1,
@@ -895,7 +887,7 @@ const upsertLeadForInboundReply = async ({ record, context }) => {
              RETURNING id`,
             [
                 nextStatus,
-                appendLeadNotes(existingLead.notes, note),
+                appendLeadNotes(preservedNotes, buildInboundReplySummaryNote(record)),
                 existingLead.id,
             ]
         );
@@ -922,7 +914,7 @@ const upsertLeadForInboundReply = async ({ record, context }) => {
             truncateText(context?.fullName || record?.senderName || `WhatsApp Reply ${phone}`, 120),
             phone,
             toTrimmedString(context?.email),
-            note,
+            buildInboundReplySummaryNote(record),
         ]
     );
 

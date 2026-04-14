@@ -101,6 +101,7 @@ const renderWhatsAppTemplatePreviewText = (templateText, member = {}, gymName = 
         plan: String(member?.plan_name || 'your plan').trim() || 'your plan',
         days_left: String(daysLeft),
         gym_name: String(gymName || 'GymVault').trim() || 'GymVault',
+        message: 'we would be happy to help you with the next step.',
     };
 
     return String(templateText || '').replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_token, placeholder) => {
@@ -202,6 +203,12 @@ const MESSAGE_TEMPLATE_DEFAULTS = [
         title: 'Payment Due Alert',
         whatsapp_text: 'Hi {{name}}, this is a payment due reminder from {{gym_name}}. Please clear your due amount to avoid service interruption.',
         sms_text: 'Payment due reminder from {{gym_name}}. Please clear your pending amount soon.',
+    },
+    {
+        template_key: 'LEAD_REPLY',
+        title: 'Lead Chat Reply',
+        whatsapp_text: 'Hi {{name}}, {{message}} Reply here if you want the team at {{gym_name}} to continue helping you.',
+        sms_text: 'Hi {{name}}, {{message}} Reply here if you need help from {{gym_name}}.',
     },
 ];
 

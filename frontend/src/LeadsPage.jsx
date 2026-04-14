@@ -2,9 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import {
   Search, Plus, X, Phone, MessageSquare, Target, Clock3, CalendarDays,
-  Pencil, Trash2, ArrowRight, CheckCircle2, Sparkles,
+  Pencil, Trash2, ArrowRight, CheckCircle2, Sparkles, Send, RefreshCw,
 } from 'lucide-react';
-import { openWhatsAppConversation } from './utils/externalNavigation';
 import { getBranchRequestValue } from './utils/branchScope';
 import PageLoader from './PageLoader';
 import PaginationControls from './components/PaginationControls';
@@ -100,6 +99,60 @@ const isDueLead = (lead) => {
   return parsed <= endOfToday;
 };
 
+const AUTOMATED_THREAD_NOTE_PATTERN = /^(\[WhatsApp reply\b|WhatsApp thread active\.)/i;
+
+const buildLeadNoteSummary = (notes, lostReason) => {
+  if (lostReason) {
+    return {
+      tone: 'lost',
+      title: 'Lost reason',
+      body: String(lostReason || '').trim(),
+      badge: '',
+      extra: '',
+    };
+  }
+
+  const rawNotes = String(notes || '').trim();
+  if (!rawNotes) return null;
+
+  const blocks = rawNotes
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const threadBlocks = blocks.filter((block) => AUTOMATED_THREAD_NOTE_PATTERN.test(block));
+  const manualBlocks = blocks.filter((block) => !AUTOMATED_THREAD_NOTE_PATTERN.test(block));
+
+  if (threadBlocks.length === 0) {
+    return {
+      tone: 'notes',
+      title: 'Notes',
+      body: rawNotes,
+      badge: '',
+      extra: '',
+    };
+  }
+
+  const latestThreadBlock = threadBlocks[threadBlocks.length - 1]
+    .replace(/^\[WhatsApp reply[^\]]*\]\s*/i, '')
+    .replace(/^WhatsApp thread active\.\s*Latest reply:\s*/i, '')
+    .trim();
+
+  return {
+    tone: 'thread',
+    title: 'WhatsApp thread',
+    body: latestThreadBlock || 'Latest WhatsApp reply received.',
+    badge: `${threadBlocks.length} repl${threadBlocks.length === 1 ? 'y' : 'ies'}`,
+    extra: manualBlocks.join(' '),
+  };
+};
+
+const formatChatStatusLabel = (value) => {
+  const status = String(value || '').trim().toUpperCase();
+  if (!status) return 'Queued';
+  if (status === 'RECEIVED') return 'Received';
+  return status.replace(/_/g, ' ');
+};
+
 const requestDataRefresh = (source) => {
   window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
     detail: { source, at: Date.now() },
@@ -121,7 +174,16 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingLead, setEditingLead] = useState(null);
   const [formState, setFormState] = useState(INITIAL_FORM);
+  const [chatLead, setChatLead] = useState(null);
+  const [chatConversation, setChatConversation] = useState([]);
+  const [chatMessaging, setChatMessaging] = useState(null);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatRefreshing, setChatRefreshing] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatTemplateKey, setChatTemplateKey] = useState('');
+  const [chatMessage, setChatMessage] = useState('');
   const loadCompletedRef = useRef(false);
+  const chatEndRef = useRef(null);
 
   const fetchLeadsData = useCallback(async ({ soft = false } = {}) => {
     if (!token) return;
@@ -174,11 +236,56 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
     setPagination((prev) => prev.page === 1 ? prev : { ...prev, page: 1 });
   }, [searchTerm, statusFilter]);
 
+  useEffect(() => {
+    if (!chatLead) return;
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [chatConversation, chatLead]);
+
   const closeFormModal = () => {
     setShowFormModal(false);
     setEditingLead(null);
     setFormState(INITIAL_FORM);
   };
+
+  const closeChatModal = useCallback(() => {
+    setChatLead(null);
+    setChatConversation([]);
+    setChatMessaging(null);
+    setChatLoading(false);
+    setChatRefreshing(false);
+    setChatSending(false);
+    setChatTemplateKey('');
+    setChatMessage('');
+  }, []);
+
+  const fetchLeadChat = useCallback(async (lead, { soft = false } = {}) => {
+    if (!token || !lead?.id) return;
+
+    if (soft) setChatRefreshing(true);
+    else setChatLoading(true);
+
+    try {
+      const response = await axios.get(`/api/leads/${lead.id}/chat`, { headers: { 'x-auth-token': token } });
+      const nextMessaging = response.data?.messaging || null;
+      setChatLead(response.data?.lead || lead);
+      setChatConversation(Array.isArray(response.data?.conversation) ? response.data.conversation : []);
+      setChatMessaging(nextMessaging);
+      setChatTemplateKey((current) => {
+        const approvedTemplates = Array.isArray(nextMessaging?.approved_templates) ? nextMessaging.approved_templates : [];
+        const stillValid = approvedTemplates.some((template) => template.template_key === current);
+        if (stillValid) return current;
+        return nextMessaging?.preferred_template_key || approvedTemplates[0]?.template_key || '';
+      });
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Unable to load lead chat.', 'error');
+      if (!soft) {
+        closeChatModal();
+      }
+    } finally {
+      setChatLoading(false);
+      setChatRefreshing(false);
+    }
+  }, [closeChatModal, token, toast]);
 
   const openCreateModal = () => {
     if (!canManage) {
@@ -300,12 +407,83 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
     window.open(`tel:${phone}`, '_self');
   };
 
-  const handleWhatsApp = (lead) => {
-    openWhatsAppConversation({
-      phone: lead.phone,
-      message: `Hi ${lead.full_name}, this is a quick follow-up from the gym. Let us know if you want to book a visit or start your membership.`,
-    });
+  const handleOpenChat = async (lead) => {
+    setChatLead(lead);
+    setChatConversation([]);
+    setChatMessaging(null);
+    setChatTemplateKey('');
+    setChatMessage('');
+    await fetchLeadChat(lead);
   };
+
+  const handleSendChatMessage = async () => {
+    if (!chatLead?.id) return;
+
+    if (!canManage) {
+      toast?.('You do not have permission to reply to leads.', 'warning');
+      return;
+    }
+
+    const selectedTemplate = Array.isArray(chatMessaging?.approved_templates)
+      ? chatMessaging.approved_templates.find((template) => template.template_key === chatTemplateKey)
+      : null;
+
+    if (!selectedTemplate) {
+      toast?.('Select an approved WhatsApp template first.', 'warning');
+      return;
+    }
+
+    const trimmedMessage = chatMessage.trim();
+    if (selectedTemplate.template_key === 'LEAD_REPLY' && !trimmedMessage) {
+      toast?.('Type your reply before sending.', 'warning');
+      return;
+    }
+
+    setChatSending(true);
+    try {
+      await axios.post(
+        `/api/leads/${chatLead.id}/chat/messages`,
+        {
+          template_key: selectedTemplate.template_key,
+          message: trimmedMessage || undefined,
+        },
+        { headers: { 'x-auth-token': token } }
+      );
+      setChatMessage('');
+      toast?.('WhatsApp reply sent from GymVault.', 'success');
+      requestDataRefresh('lead-chat');
+      await Promise.all([
+        fetchLeadChat(chatLead, { soft: true }),
+        fetchLeadsData({ soft: true }),
+      ]);
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Unable to send WhatsApp reply.', 'error');
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  const selectedChatTemplate = useMemo(() => {
+    if (!Array.isArray(chatMessaging?.approved_templates)) return null;
+    return chatMessaging.approved_templates.find((template) => template.template_key === chatTemplateKey) || null;
+  }, [chatMessaging?.approved_templates, chatTemplateKey]);
+
+  const chatPreviewText = useMemo(() => {
+    const preview = String(selectedChatTemplate?.preview_text || '').trim();
+    if (!preview) return '';
+    if (selectedChatTemplate?.template_key !== 'LEAD_REPLY') return preview;
+
+    const typedMessage = chatMessage.trim();
+    if (!typedMessage) return preview;
+
+    return preview.replace('we would be happy to help you with the next step.', typedMessage);
+  }, [chatMessage, selectedChatTemplate]);
+
+  const leadReplyTemplatePending = useMemo(() => {
+    const leadReplyTemplate = chatMessaging?.lead_reply_template;
+    if (!leadReplyTemplate) return false;
+    return String(leadReplyTemplate.whatsapp_template_status || '').toUpperCase() !== 'APPROVED';
+  }, [chatMessaging?.lead_reply_template]);
 
   const metrics = [
     {
@@ -428,6 +606,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 const due = isDueLead(lead);
                 const statusLabel = String(lead.status || 'NEW').toUpperCase();
                 const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
+                const noteSummary = buildLeadNoteSummary(lead.notes, lead.lost_reason);
                 return (
                   <div key={lead.id} className={`rounded-2xl border p-4 space-y-3 shadow-[0_10px_30px_rgba(15,23,42,0.18)] ${due ? 'border-amber-500/35 bg-amber-500/10' : 'border-slate-700 bg-slate-900/75'}`}>
                     <div className="flex items-start justify-between gap-3">
@@ -452,11 +631,19 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                       </div>
                     </div>
 
-                    {(lead.notes || lead.lost_reason || lead.trial_date) && (
+                    {(noteSummary || lead.trial_date) && (
                       <div className="rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2.5 space-y-1">
                         {lead.trial_date && <p className="text-xs font-semibold text-slate-200"><span className="text-slate-500">Trial:</span> {formatDateTimeLabel(lead.trial_date)}</p>}
-                        {lead.notes && <p className="text-xs text-slate-300 line-clamp-2">{lead.notes}</p>}
-                        {lead.lost_reason && <p className="text-xs text-rose-300 line-clamp-2">Lost reason: {lead.lost_reason}</p>}
+                        {noteSummary && (
+                          <>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${noteSummary.tone === 'thread' ? 'text-emerald-300' : noteSummary.tone === 'lost' ? 'text-rose-300' : 'text-slate-500'}`}>{noteSummary.title}</p>
+                              {noteSummary.badge && <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-200">{noteSummary.badge}</span>}
+                            </div>
+                            <p className={`text-xs line-clamp-2 ${noteSummary.tone === 'lost' ? 'text-rose-300' : 'text-slate-300'}`}>{noteSummary.body}</p>
+                            {noteSummary.extra && <p className="text-[11px] text-slate-500 line-clamp-2">{noteSummary.extra}</p>}
+                          </>
+                        )}
                       </div>
                     )}
 
@@ -464,8 +651,8 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                       <button onClick={() => handleCall(lead.phone)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-blue-500/15 text-blue-200 border border-blue-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-blue-500 hover:text-white transition-all">
                         <Phone size={12} /> Call
                       </button>
-                      <button onClick={() => handleWhatsApp(lead)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-emerald-500/15 text-emerald-200 border border-emerald-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-emerald-500 hover:text-white transition-all">
-                        <MessageSquare size={12} /> WhatsApp
+                      <button onClick={() => handleOpenChat(lead)} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-emerald-500/15 text-emerald-200 border border-emerald-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-emerald-500 hover:text-white transition-all">
+                        <MessageSquare size={12} /> Chat
                       </button>
                       {lead.converted_member_id ? (
                         <button onClick={() => navigateTo?.('Members', 'All', { memberId: lead.converted_member_id })} className="flex-1 min-w-[110px] py-2.5 rounded-xl bg-violet-500/15 text-violet-200 border border-violet-500/30 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-violet-500 hover:text-white transition-all">
@@ -494,7 +681,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 const due = isDueLead(lead);
                 const statusLabel = String(lead.status || 'NEW').toUpperCase();
                 const priorityLabel = String(lead.priority || 'MEDIUM').toUpperCase();
-                const noteText = lead.lost_reason ? `Lost reason: ${lead.lost_reason}` : lead.notes;
+                const noteSummary = buildLeadNoteSummary(lead.notes, lead.lost_reason);
 
                 return (
                   <article
@@ -512,11 +699,16 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                           <p className="text-sm font-semibold text-slate-200 break-all">{lead.phone}</p>
                           {lead.email && <p className="text-sm font-medium text-slate-400 break-all">{lead.email}</p>}
                         </div>
-                        {noteText && (
-                          <div className={`rounded-2xl border px-3 py-2.5 ${lead.lost_reason ? 'border-rose-500/30 bg-rose-500/10' : 'border-slate-700 bg-slate-800/90'}`}>
-                            <p className={`text-xs leading-relaxed break-words ${lead.lost_reason ? 'font-semibold text-rose-300' : 'font-medium text-slate-300'}`}>
-                              {noteText}
+                        {noteSummary && (
+                          <div className={`rounded-2xl border px-3 py-2.5 ${noteSummary.tone === 'lost' ? 'border-rose-500/30 bg-rose-500/10' : noteSummary.tone === 'thread' ? 'border-emerald-500/20 bg-emerald-500/10' : 'border-slate-700 bg-slate-800/90'}`}>
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <p className={`text-[10px] font-black uppercase tracking-[0.18em] ${noteSummary.tone === 'lost' ? 'text-rose-300' : noteSummary.tone === 'thread' ? 'text-emerald-200' : 'text-slate-500'}`}>{noteSummary.title}</p>
+                              {noteSummary.badge && <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-200">{noteSummary.badge}</span>}
+                            </div>
+                            <p className={`text-xs leading-relaxed break-words ${noteSummary.tone === 'lost' ? 'font-semibold text-rose-300' : 'font-medium text-slate-300'}`}>
+                              {noteSummary.body}
                             </p>
+                            {noteSummary.extra && <p className="mt-1.5 text-[11px] leading-relaxed break-words text-slate-500">{noteSummary.extra}</p>}
                           </div>
                         )}
                       </div>
@@ -552,7 +744,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                           <button type="button" aria-label={`Call ${lead.full_name}`} onClick={() => handleCall(lead.phone)} className="p-2.5 text-blue-200 bg-blue-500/15 border border-blue-500/30 rounded-xl hover:bg-blue-500 hover:text-white transition-all">
                             <Phone size={14} />
                           </button>
-                          <button type="button" aria-label={`WhatsApp ${lead.full_name}`} onClick={() => handleWhatsApp(lead)} className="p-2.5 text-emerald-200 bg-emerald-500/15 border border-emerald-500/30 rounded-xl hover:bg-emerald-500 hover:text-white transition-all">
+                          <button type="button" aria-label={`Open chat for ${lead.full_name}`} onClick={() => handleOpenChat(lead)} className="p-2.5 text-emerald-200 bg-emerald-500/15 border border-emerald-500/30 rounded-xl hover:bg-emerald-500 hover:text-white transition-all">
                             <MessageSquare size={14} />
                           </button>
                           {lead.converted_member_id ? (
@@ -594,6 +786,212 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
           </>
         )}
       </div>
+
+      {chatLead && (
+        <div className="app-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel w-full max-w-5xl overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.96) 55%, rgba(5,150,105,0.28) 100%)' }}>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-xl font-black text-white">Lead Chat</h2>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${STATUS_STYLES[String(chatLead.status || 'NEW').toUpperCase()] || 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
+                    {String(chatLead.status || 'NEW').replace(/_/g, ' ')}
+                  </span>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${PRIORITY_STYLES[String(chatLead.priority || 'MEDIUM').toUpperCase()] || PRIORITY_STYLES.MEDIUM}`}>
+                    {String(chatLead.priority || 'MEDIUM')}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-black text-white truncate">{chatLead.full_name}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-300 break-all">{chatLead.phone}{chatLead.email ? ` • ${chatLead.email}` : ''}</p>
+                <p className="mt-2 text-[11px] font-semibold text-emerald-200/90">Messages sent here go through your connected business WhatsApp line and stay tracked inside GymVault.</p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  aria-label="Refresh lead chat"
+                  onClick={() => fetchLeadChat(chatLead, { soft: true })}
+                  disabled={chatLoading || chatRefreshing || chatSending}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/75 transition hover:bg-white/10 hover:text-white disabled:opacity-60"
+                >
+                  <RefreshCw size={16} className={chatRefreshing ? 'animate-spin' : ''} />
+                </button>
+                <button type="button" aria-label="Close lead chat" onClick={closeChatModal} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/75 transition hover:bg-white/10 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid max-h-[82vh] grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_360px]">
+              <div className="flex min-h-[420px] flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
+                <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3 sm:px-6">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Conversation</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-400">Inbound replies and tracked outbound sends appear here.</p>
+                  </div>
+                  {chatRefreshing && <span className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Refreshing</span>}
+                </div>
+
+                <div className="app-modal-scroll flex-1 space-y-4 bg-slate-950/90 px-5 py-5 sm:px-6">
+                  {chatLoading ? (
+                    <div className="flex min-h-[260px] items-center justify-center">
+                      <PageLoader className="min-h-[180px]" />
+                    </div>
+                  ) : chatConversation.length === 0 ? (
+                    <div className="flex min-h-[260px] flex-col items-center justify-center rounded-[28px] border border-dashed border-slate-700 bg-slate-900/60 px-6 text-center">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/10 text-emerald-300">
+                        <MessageSquare size={28} />
+                      </div>
+                      <h3 className="mt-4 text-lg font-black text-white">No thread yet</h3>
+                      <p className="mt-2 max-w-sm text-sm font-medium text-slate-400">Start the conversation from here. Once the lead replies on WhatsApp, the thread will continue in this popup.</p>
+                    </div>
+                  ) : (
+                    chatConversation.map((message) => {
+                      const isOutbound = String(message.direction || '').toUpperCase() === 'OUTBOUND';
+                      return (
+                        <div key={message.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[88%] rounded-[24px] px-4 py-3 shadow-lg ${isOutbound ? 'bg-emerald-500 text-emerald-950' : 'border border-slate-700 bg-slate-900 text-slate-100'}`}>
+                            <div className="flex items-center gap-2">
+                              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isOutbound ? 'text-emerald-950/65' : 'text-slate-400'}`}>
+                                {isOutbound ? 'GymVault send' : 'Lead reply'}
+                              </p>
+                              {message.template_title && (
+                                <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${isOutbound ? 'bg-emerald-950/10 text-emerald-950/70' : 'bg-slate-800 text-slate-400'}`}>
+                                  {message.template_title}
+                                </span>
+                              )}
+                            </div>
+                            <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${isOutbound ? 'text-emerald-950' : 'text-slate-100'}`}>{message.message_text || 'No message content available.'}</p>
+                            <div className={`mt-3 flex items-center justify-between gap-3 text-[11px] font-semibold ${isOutbound ? 'text-emerald-950/70' : 'text-slate-400'}`}>
+                              <span>{formatDateTimeLabel(message.occurred_at)}</span>
+                              <span>{formatChatStatusLabel(message.delivery_status)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+              </div>
+
+              <div className="app-modal-scroll flex flex-col gap-4 bg-slate-950 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Source</p>
+                    <p className="mt-1 text-sm font-bold text-white">{chatLead.source || 'Walk-in'}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Follow-up</p>
+                    <p className="mt-1 text-sm font-bold text-white">{formatDateTimeLabel(chatLead.next_follow_up_at)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Last contacted</p>
+                    <p className="mt-1 text-sm font-bold text-white">{formatDateTimeLabel(chatLead.last_contacted_at)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Business line</p>
+                    <p className="mt-1 text-sm font-bold text-white">{chatMessaging?.whatsapp_number || 'Not connected'}</p>
+                  </div>
+                </div>
+
+                {!chatMessaging?.whatsapp_connected ? (
+                  <div className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">Connection needed</p>
+                    <p className="mt-2 text-sm font-semibold text-amber-100">Connect the gym WhatsApp business number in Settings before replying from the lead inbox.</p>
+                  </div>
+                ) : !Array.isArray(chatMessaging?.approved_templates) || chatMessaging.approved_templates.length === 0 ? (
+                  <div className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">Template approval needed</p>
+                    <p className="mt-2 text-sm font-semibold text-amber-100">Approve at least one WhatsApp template in Settings before sending lead replies from here.</p>
+                  </div>
+                ) : (
+                  <>
+                    {leadReplyTemplatePending && (
+                      <div className="rounded-[24px] border border-sky-500/30 bg-sky-500/10 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-sky-300">Lead reply template pending</p>
+                        <p className="mt-2 text-sm font-semibold text-sky-100">Your dedicated Lead Chat Reply template is not approved yet. You can still send any approved template from this inbox today.</p>
+                      </div>
+                    )}
+
+                    <div className="space-y-3 rounded-[28px] border border-slate-800 bg-slate-900/70 p-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Send via WhatsApp</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-400">Choose an approved template. If Lead Chat Reply is approved, you can type the message here and send it without leaving GymVault.</p>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 ml-0.5 block text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Template</label>
+                        <select
+                          value={chatTemplateKey}
+                          onChange={(event) => setChatTemplateKey(event.target.value)}
+                          className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-white outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/40"
+                        >
+                          {chatMessaging.approved_templates.map((template) => (
+                            <option key={template.template_key} value={template.template_key}>{template.title}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedChatTemplate?.template_key === 'LEAD_REPLY' && (
+                        <>
+                          <div>
+                            <label className="mb-1.5 ml-0.5 block text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Reply message</label>
+                            <textarea
+                              value={chatMessage}
+                              onChange={(event) => setChatMessage(event.target.value)}
+                              rows={5}
+                              placeholder="Type the message you want GymVault to send over WhatsApp."
+                              className="w-full resize-none rounded-[24px] border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-medium text-white outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/40"
+                            />
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              'Would you like us to book your trial slot for today?',
+                              'If you want, I can share the current membership offer here.',
+                              'Tell me your preferred workout time and I will help you with the best plan.',
+                            ].map((quickReply) => (
+                              <button
+                                key={quickReply}
+                                type="button"
+                                onClick={() => setChatMessage(quickReply)}
+                                className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-black text-emerald-200 transition hover:bg-emerald-500 hover:text-white"
+                              >
+                                {quickReply}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      <div className="rounded-[24px] border border-slate-800 bg-slate-950/80 p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Preview</p>
+                          <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-emerald-200">Tracked send</span>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm font-medium leading-relaxed text-slate-200">{chatPreviewText || 'Select a template to preview the WhatsApp message.'}</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSendChatMessage}
+                        disabled={chatSending || chatRefreshing || !selectedChatTemplate || (selectedChatTemplate.template_key === 'LEAD_REPLY' && !chatMessage.trim()) || !canManage}
+                        className="flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black text-white transition disabled:opacity-60"
+                        style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}
+                      >
+                        <Send size={15} /> {chatSending ? 'Sending WhatsApp...' : 'Send From GymVault'}
+                      </button>
+
+                      {!canManage && <p className="text-center text-[11px] font-semibold text-slate-500">You can view the thread, but only lead managers can send replies.</p>}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showFormModal && (
         <div className="app-modal-shell z-[140] bg-slate-900/60 backdrop-blur-sm">
