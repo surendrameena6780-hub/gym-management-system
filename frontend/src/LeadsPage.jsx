@@ -798,7 +798,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
 
       {chatLead && (
         <div className="app-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel app-modal-panel--xl w-full overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel app-modal-panel--xl lead-chat-modal-panel w-full overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.96) 55%, rgba(5,150,105,0.28) 100%)' }}>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -830,7 +830,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1.45fr)_360px] lg:overflow-hidden">
+            <div className="lead-chat-modal-body flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1.45fr)_360px] lg:overflow-hidden">
               <div className="flex min-h-0 flex-1 flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
                 <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3 sm:px-6">
                   <div>
@@ -840,7 +840,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                   {chatRefreshing && <span className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Refreshing</span>}
                 </div>
 
-                <div className="app-modal-scroll flex-1 bg-slate-950/90 px-5 py-5 sm:px-6">
+                <div className="app-modal-scroll lead-chat-thread-scroll flex-1 bg-slate-950/90 px-5 py-5 sm:px-6">
                   {chatLoading ? (
                     <div className="flex min-h-[260px] items-center justify-center">
                       <PageLoader className="min-h-[180px]" />
@@ -885,7 +885,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 </div>
               </div>
 
-              <div className="shrink-0 space-y-4 border-t border-slate-800 bg-slate-950 px-5 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
+              <div className="lead-chat-composer shrink-0 space-y-4 border-t border-slate-800 bg-slate-950 px-5 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
                 {!chatMessaging?.whatsapp_connected ? (
                   <div className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-4">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">Connection needed</p>

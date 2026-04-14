@@ -188,6 +188,36 @@ html.gv-compact-ui main.app-scroll-shell > div {
   scroll-padding-bottom: calc(var(--safe-area-bottom) + 1rem);
 }
 
+.lead-chat-modal-panel {
+  height: min(100%, calc(var(--app-viewport-height) - var(--safe-area-top) - 4rem - var(--app-bottom-ui-offset) - var(--app-keyboard-inset) - 1rem));
+}
+
+.lead-chat-modal-body {
+  min-height: 0;
+}
+
+.lead-chat-thread-scroll {
+  min-height: 12rem;
+}
+
+.lead-chat-composer {
+  max-height: min(20rem, 42vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+@media (min-width: 1024px) {
+  .lead-chat-composer {
+    max-height: none;
+  }
+
+  .lead-chat-thread-scroll {
+    min-height: 0;
+  }
+}
+
 .app-main-scroll {
   padding-bottom: var(--mobile-content-safe-padding) !important;
 }
