@@ -388,7 +388,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   const [autoPayForm, setAutoPayForm] = useState({ user_id: '', base_pay: '', pay_day: '1', auto_enabled: true });
   const [autoPaySaving, setAutoPaySaving] = useState(false);
   const [showPosModal, setShowPosModal] = useState(false);
-  const [posForm, setPosForm] = useState({ name: '', category: 'supplement', price: '', stock_qty: '' });
+  const [posForm, setPosForm] = useState({ name: '', category: 'supplement', price: '', cost_price: '', stock_qty: '' });
+  const [posAnalytics, setPosAnalytics] = useState(null);
   const [posProductSaving, setPosProductSaving] = useState(false);
   const [posSearch, setPosSearch] = useState('');
   const [posCategoryFilter, setPosCategoryFilter] = useState('all');
@@ -411,6 +412,15 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       setPosProducts(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPosProducts([]);
+    }
+  }, [branchParams, token]);
+
+  const fetchPosAnalytics = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/finance/pos/analytics', { headers: { 'x-auth-token': token }, params: branchParams });
+      setPosAnalytics(res.data || null);
+    } catch {
+      setPosAnalytics(null);
     }
   }, [branchParams, token]);
 
@@ -540,10 +550,11 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     } else if (financeTab === 'pos' && canAccessPos) {
       fetchPosProducts();
       fetchPosSales();
+      fetchPosAnalytics();
     } else if (financeTab === 'collections') {
       fetchFinanceOverview();
     }
-  }, [canAccessPos, financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchFinanceOverview, fetchPayrollPayoutSettings, fetchPayrollStaffDestinations, fetchStaffOptions]);
+  }, [canAccessPos, financeTab, fetchExpenses, fetchPayroll, fetchAutoPayConfigs, fetchPosProducts, fetchPosSales, fetchPosAnalytics, fetchFinanceOverview, fetchPayrollPayoutSettings, fetchPayrollStaffDestinations, fetchStaffOptions]);
 
   useEffect(() => {
     if (!canAccessPos && financeTab === 'pos') {
@@ -765,8 +776,9 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       }
       setShowPosModal(false);
       setPosEditingProduct(null);
-      setPosForm({ name: '', category: 'supplement', price: '', stock_qty: '' });
+      setPosForm({ name: '', category: 'supplement', price: '', cost_price: '', stock_qty: '' });
       fetchPosProducts();
+      if (canAccessPos) { fetchPosAnalytics(); }
     } catch { toast?.('Failed to save product', 'error'); }
     finally { setPosProductSaving(false); }
   };
@@ -808,7 +820,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
 
   const openEditProduct = (product) => {
     setPosEditingProduct(product);
-    setPosForm({ name: product.name, category: product.category || 'supplement', price: String(product.price), stock_qty: String(product.stock_qty) });
+    setPosForm({ name: product.name, category: product.category || 'supplement', price: String(product.price), cost_price: String(product.cost_price || ''), stock_qty: String(product.stock_qty) });
     setShowPosModal(true);
     setPosMenuOpenId(null);
   };
@@ -877,6 +889,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       fetchPosProducts();
       fetchPosSales();
       fetchFinanceOverview();
+      fetchPosAnalytics();
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Failed to complete POS sale.', 'error');
     } finally {
@@ -2646,6 +2659,88 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {/* ═══════ POS TAB ═══════ */}
       {financeTab === 'pos' && canAccessPos && (
         <div ref={posCatalogRef} className="space-y-4 scroll-mt-28 min-h-[400px]" onClick={() => { setPosMenuOpenId(null); }}>
+
+          {/* ── POS Performance Analytics ── */}
+          {posAnalytics && (
+            <div className="rounded-[20px] border border-slate-100 bg-white p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-900">POS Performance</h3>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Sales revenue vs inventory cost</p>
+                </div>
+                {posAnalytics.margin > 0 && (
+                  <span className={`rounded-full px-3 py-1.5 text-xs font-black ${posAnalytics.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : posAnalytics.margin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'}`}>
+                    {posAnalytics.margin}% margin
+                  </span>
+                )}
+              </div>
+
+              {/* Primary metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: 'Total Revenue', value: `₹${Number(posAnalytics.revenue || 0).toLocaleString()}`, sub: `${posAnalytics.total_sales} sale${posAnalytics.total_sales !== 1 ? 's' : ''}`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { label: 'Stock Cost (COGS)', value: `₹${Number(posAnalytics.cogs || 0).toLocaleString()}`, sub: `${posAnalytics.units_sold} units sold`, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  { label: 'Gross Profit', value: `₹${Number(posAnalytics.profit || 0).toLocaleString()}`, sub: `${posAnalytics.margin}% margin`, color: posAnalytics.profit >= 0 ? 'text-emerald-600' : 'text-rose-500', bg: posAnalytics.profit >= 0 ? 'bg-emerald-50' : 'bg-rose-50' },
+                  { label: 'Avg Sale Value', value: `₹${Number(posAnalytics.avg_sale || 0).toLocaleString()}`, sub: `per transaction`, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                ].map(m => (
+                  <div key={m.label} className={`rounded-2xl ${m.bg} px-4 py-3`}>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{m.label}</p>
+                    <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
+                    <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{m.sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Stock health + top products */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                {/* Inventory health */}
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Inventory Health</p>
+                  <div className="space-y-2">
+                    {[
+                      { label: 'Total products', val: posAnalytics.total_products },
+                      { label: 'Stock on hand value', val: `₹${Number(posAnalytics.stock_value || 0).toLocaleString()}` },
+                      { label: 'Stock at cost', val: `₹${Number(posAnalytics.stock_cost || 0).toLocaleString()}` },
+                      { label: 'Low stock alerts', val: posAnalytics.low_stock_count, badge: posAnalytics.low_stock_count > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500' },
+                      { label: 'Out of stock', val: posAnalytics.out_of_stock_count, badge: posAnalytics.out_of_stock_count > 0 ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500' },
+                    ].map(row => (
+                      <div key={row.label} className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-slate-500">{row.label}</span>
+                        {row.badge ? (
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${row.badge}`}>{row.val}</span>
+                        ) : (
+                          <span className="text-xs font-black text-slate-800">{row.val}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Top products */}
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Top Products by Revenue</p>
+                  {posAnalytics.top_products && posAnalytics.top_products.length > 0 ? (
+                    <div className="space-y-2">
+                      {posAnalytics.top_products.map((tp, i) => {
+                        const tpProfit = Number(tp.revenue || 0) - Number(tp.cogs || 0);
+                        const tpMargin = Number(tp.revenue) > 0 ? Math.round((tpProfit / Number(tp.revenue)) * 100) : 0;
+                        return (
+                          <div key={tp.name} className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black flex items-center justify-center shrink-0">{i + 1}</span>
+                            <span className="text-xs font-bold text-slate-800 truncate flex-1">{tp.name}</span>
+                            <span className="text-xs font-black text-slate-900 shrink-0">₹{Number(tp.revenue || 0).toLocaleString()}</span>
+                            <span className={`text-[10px] font-black shrink-0 ${tpMargin >= 20 ? 'text-emerald-600' : tpMargin >= 0 ? 'text-amber-600' : 'text-rose-500'}`}>{tpMargin}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 font-semibold">No sales yet — start selling to see top products.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
             {/* ── LEFT: Catalog ── */}
             <div className="space-y-4">
@@ -3671,20 +3766,53 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           <div className="app-modal-panel bg-white rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <div><h2 className="text-xl font-black text-slate-900">{posEditingProduct ? 'Edit Product' : 'Add Product'}</h2></div>
-              <button onClick={() => { setShowPosModal(false); setPosEditingProduct(null); setPosForm({ name: '', category: 'supplement', price: '', stock_qty: '' }); }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
+              <button onClick={() => { setShowPosModal(false); setPosEditingProduct(null); setPosForm({ name: '', category: 'supplement', price: '', cost_price: '', stock_qty: '' }); }} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div><label className="text-xs font-bold text-slate-600 block mb-1">Product Name</label><input value={posForm.name} onChange={e => setPosForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="e.g. Creatine Monohydrate" /></div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1">Category</label>
                   <select value={posForm.category} onChange={e => setPosForm(p => ({ ...p, category: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm">
                     {['supplement', 'merchandise', 'accessory', 'beverage', 'other'].map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <div><label className="text-xs font-bold text-slate-600 block mb-1">Price (₹)</label><input type="number" value={posForm.price} onChange={e => setPosForm(p => ({ ...p, price: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
-                <div><label className="text-xs font-bold text-slate-600 block mb-1">Stock Qty</label><input type="number" value={posForm.stock_qty} onChange={e => setPosForm(p => ({ ...p, stock_qty: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" /></div>
+                <div><label className="text-xs font-bold text-slate-600 block mb-1">Stock Qty</label><input type="number" min="0" value={posForm.stock_qty} onChange={e => setPosForm(p => ({ ...p, stock_qty: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="0" /></div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Selling Price (₹)</label>
+                  <input type="number" min="0" value={posForm.price} onChange={e => setPosForm(p => ({ ...p, price: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="0" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Cost Price (₹)</label>
+                  <input type="number" min="0" value={posForm.cost_price} onChange={e => setPosForm(p => ({ ...p, cost_price: e.target.value }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm" placeholder="0 (what you paid)" />
+                  <p className="text-[10px] text-slate-400 mt-1">Buying cost — used to calculate profit</p>
+                </div>
+              </div>
+              {posForm.cost_price && posForm.price && Number(posForm.price) > 0 && Number(posForm.cost_price) >= 0 && (
+                <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Per unit profit</p>
+                    <p className={`text-base font-black mt-0.5 ${Number(posForm.price) - Number(posForm.cost_price) >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                      ₹{(Number(posForm.price) - Number(posForm.cost_price)).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Margin</p>
+                    <p className={`text-base font-black mt-0.5 ${Number(posForm.price) > Number(posForm.cost_price) ? 'text-emerald-600' : 'text-rose-500'}`}>
+                      {Number(posForm.price) > 0 ? Math.round(((Number(posForm.price) - Number(posForm.cost_price)) / Number(posForm.price)) * 100) : 0}%
+                    </p>
+                  </div>
+                </div>
+              )}
+              {posForm.cost_price && posForm.stock_qty && Number(posForm.stock_qty) > 0 && Number(posForm.cost_price) > 0 && !posEditingProduct && (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-2.5 flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">Stock purchase cost</span>
+                  <span className="text-sm font-black text-amber-700 ml-auto">₹{(Number(posForm.cost_price) * Number(posForm.stock_qty)).toLocaleString()}</span>
+                  <span className="text-[10px] text-amber-500">→ auto-added to Expenses</span>
+                </div>
+              )}
               <button onClick={handleSavePosProduct} disabled={posProductSaving || !posForm.name || !posForm.price} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
                 {posProductSaving ? 'Saving...' : posEditingProduct ? 'Update Product' : 'Save Product'}
               </button>

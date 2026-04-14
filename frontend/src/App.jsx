@@ -789,13 +789,24 @@ function App() {
     oauthCookiePending.current = false;
     oauthBootstrapTokenRef.current = '';
 
+    // Safety fallback: if auth check hangs > 10 s (network stall), use cached user or go to login
+    const authFallbackTimer = setTimeout(() => {
+      if (cancelled) return;
+      const cachedUser = readStoredUser();
+      if (cachedUser) {
+        setCurrentUser(cachedUser);
+      }
+      setIsAuthChecking(false);
+    }, 10000);
+
     const headers = token ? { 'x-auth-token': token } : {};
     const authRequest = pendingOauthBootstrapToken
-      ? axios.post('/api/auth/oauth/bootstrap', { bootstrap_token: pendingOauthBootstrapToken })
-      : axios.get('/api/auth/me', { headers });
+      ? axios.post('/api/auth/oauth/bootstrap', { bootstrap_token: pendingOauthBootstrapToken }, { timeout: 8000 })
+      : axios.get('/api/auth/me', { headers, timeout: 8000 });
 
     authRequest
       .then((res) => {
+        clearTimeout(authFallbackTimer);
         if (cancelled) return;
 
         const user = res.data?.user;
@@ -840,6 +851,7 @@ function App() {
         setIsAuthChecking(false);
       })
       .catch((err) => {
+        clearTimeout(authFallbackTimer);
         if (cancelled) return;
 
         if (pendingOauthBootstrapToken) {
@@ -877,6 +889,7 @@ function App() {
 
     return () => {
       cancelled = true;
+      clearTimeout(authFallbackTimer);
     };
   }, [token, isHQ, clearAuthState, authCheckBump]);
 

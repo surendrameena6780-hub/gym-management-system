@@ -1209,7 +1209,7 @@ router.get('/pos/products', requirePermission('payments:read'), ensurePosPlanAcc
         const params = [gid];
         const branchFilter = getBranchFilterSql(params, branchScope.branchId, 'branch_id');
         const result = await pool.query(
-            `SELECT id, name, category, price, stock_qty, low_stock_threshold, branch_id
+            `SELECT id, name, category, price, cost_price, stock_qty, low_stock_threshold, branch_id
              FROM pos_products
              WHERE gym_id=$1 AND deleted_at IS NULL${branchFilter}
              ORDER BY name ASC`, params);
@@ -1234,6 +1234,20 @@ router.post('/pos/products', requirePermission('payments:write'), ensurePosPlanA
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
             [gid, String(name).trim(), String(category||'General').trim(), Number(price), Number(cost_price||0),
              Number(stock_qty||0), Number(low_stock_threshold||5), String(sku||'').trim(), branchScope.branchId]);
+
+        // Auto-log a POS Purchase expense when stock is bought
+        const cp = Number(cost_price || 0);
+        const sq = Number(stock_qty || 0);
+        if (cp > 0 && sq > 0) {
+            const totalCost = Math.round(cp * sq * 100) / 100;
+            const productName = String(name).trim();
+            await pool.query(
+                `INSERT INTO expenses (gym_id, category, vendor, description, amount, bill_date, payment_mode, branch_id, created_by)
+                 VALUES ($1, 'POS Purchase', 'Inventory', $2, $3, CURRENT_DATE, 'Cash', $4, $5)`,
+                [gid, `Stock purchase: ${productName} (${sq} units @ ₹${cp})`, totalCost, branchScope.branchId, req.user.id]
+            );
+        }
+
         return res.status(201).json({
             ...result.rows[0],
             branch_id: branchScope.branchId,
@@ -1255,6 +1269,13 @@ router.put('/pos/products/:id', requirePermission('payments:write'), ensurePosPl
         const { name, category, price, cost_price, stock_qty, low_stock_threshold, sku, is_active } = req.body || {};
         const existingBranchId = await loadScopedRecordBranch(pool, 'pos_products', id, gid);
         if (!existingBranchId) return res.status(404).json({ error: 'Not found.' });
+
+        // Fetch old quantities before update to detect restock
+        const oldProductRes = await pool.query(
+            `SELECT stock_qty, cost_price FROM pos_products WHERE id=$1 AND gym_id=$2 AND deleted_at IS NULL`,
+            [id, gid]);
+        const oldProduct = oldProductRes.rows[0] || {};
+
         const branchScope = await resolveBranchWriteScope(pool, req, req.body?.branch_id === undefined ? existingBranchId : req.body?.branch_id);
         const result = await pool.query(
             `UPDATE pos_products SET name=$1, category=$2, price=$3, cost_price=$4, stock_qty=$5,
@@ -1263,6 +1284,20 @@ router.put('/pos/products/:id', requirePermission('payments:write'), ensurePosPl
              Number(stock_qty||0), Number(low_stock_threshold||5), String(sku||'').trim(),
              typeof is_active === 'boolean' ? is_active : true, branchScope.branchId, id, gid]);
         if (!result.rows.length) return res.status(404).json({ error: 'Not found.' });
+
+        // Auto-log expense if stock was increased (restock)
+        const additionalQty = Number(stock_qty || 0) - Number(oldProduct.stock_qty || 0);
+        const cp = Number(cost_price || oldProduct.cost_price || 0);
+        if (additionalQty > 0 && cp > 0) {
+            const totalCost = Math.round(additionalQty * cp * 100) / 100;
+            const productName = String(name || '').trim();
+            await pool.query(
+                `INSERT INTO expenses (gym_id, category, vendor, description, amount, bill_date, payment_mode, branch_id, created_by)
+                 VALUES ($1, 'POS Purchase', 'Inventory', $2, $3, CURRENT_DATE, 'Cash', $4, $5)`,
+                [gid, `Restock: ${productName} (+${additionalQty} units @ ₹${cp})`, totalCost, branchScope.branchId, req.user.id]
+            );
+        }
+
         return res.json({
             ...result.rows[0],
             branch_id: branchScope.branchId,
@@ -1517,6 +1552,84 @@ router.get('/pos/low-stock', requirePermission('payments:read'), ensurePosPlanAc
     } catch (err) {
         console.error('POS LOW STOCK:', err.message);
         return res.status(500).json({ error: 'Failed to load low-stock products.' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════
+//   POS: Analytics
+// ═══════════════════════════════════════════════════════════
+router.get('/pos/analytics', requirePermission('payments:read'), ensurePosPlanAccess, async (req, res) => {
+    try {
+        const gid = gymId(req);
+        const branchScope = await resolveBranchReadScope(pool, req);
+        const branchId = branchScope.branchId;
+        const branchParam = branchId ? [gid, branchId] : [gid];
+        const branchFilter = branchId ? ' AND ps.branch_id = $2' : '';
+        const productBranchFilter = branchId ? ' AND branch_id = $2' : '';
+
+        const [analyticsRes, stockRes, topRes] = await Promise.all([
+            pool.query(
+                `SELECT
+                    COALESCE(SUM(psi.total_price), 0)::NUMERIC AS revenue,
+                    COALESCE(SUM(psi.quantity * COALESCE(pp.cost_price, 0)), 0)::NUMERIC AS cogs,
+                    COALESCE(SUM(psi.quantity), 0)::INTEGER AS units_sold,
+                    COALESCE(COUNT(DISTINCT ps.id), 0)::INTEGER AS total_sales
+                 FROM pos_sale_items psi
+                 JOIN pos_sales ps ON ps.id = psi.sale_id AND ps.gym_id = $1 AND ps.voided_at IS NULL${branchFilter}
+                 LEFT JOIN pos_products pp ON pp.id = psi.product_id`,
+                branchParam),
+            pool.query(
+                `SELECT
+                    COALESCE(SUM(price * stock_qty), 0)::NUMERIC AS stock_value,
+                    COALESCE(SUM(cost_price * stock_qty), 0)::NUMERIC AS stock_cost,
+                    COALESCE(COUNT(*) FILTER (WHERE stock_qty > 0 AND stock_qty <= low_stock_threshold), 0)::INTEGER AS low_stock_count,
+                    COALESCE(COUNT(*) FILTER (WHERE stock_qty = 0), 0)::INTEGER AS out_of_stock_count,
+                    COALESCE(COUNT(*), 0)::INTEGER AS total_products
+                 FROM pos_products WHERE gym_id = $1 AND deleted_at IS NULL${productBranchFilter}`,
+                branchParam),
+            pool.query(
+                `SELECT
+                    COALESCE(psi.product_name, pp.name, 'Unknown') AS name,
+                    SUM(psi.total_price)::NUMERIC AS revenue,
+                    SUM(psi.quantity)::INTEGER AS units_sold,
+                    COALESCE(SUM(psi.quantity * COALESCE(pp.cost_price, 0)), 0)::NUMERIC AS cogs
+                 FROM pos_sale_items psi
+                 JOIN pos_sales ps ON ps.id = psi.sale_id AND ps.gym_id = $1 AND ps.voided_at IS NULL${branchFilter}
+                 LEFT JOIN pos_products pp ON pp.id = psi.product_id
+                 GROUP BY COALESCE(psi.product_name, pp.name, 'Unknown')
+                 ORDER BY revenue DESC LIMIT 5`,
+                branchParam),
+        ]);
+
+        const a = analyticsRes.rows[0] || {};
+        const s = stockRes.rows[0] || {};
+        const revenue = Number(a.revenue || 0);
+        const cogs = Number(a.cogs || 0);
+        const profit = revenue - cogs;
+        const margin = revenue > 0 ? Math.round((profit / revenue) * 100 * 10) / 10 : 0;
+        const totalSales = Number(a.total_sales || 0);
+
+        return res.json({
+            revenue,
+            cogs,
+            profit,
+            margin,
+            units_sold: Number(a.units_sold || 0),
+            total_sales: totalSales,
+            avg_sale: totalSales > 0 ? Math.round(revenue / totalSales) : 0,
+            stock_value: Number(s.stock_value || 0),
+            stock_cost: Number(s.stock_cost || 0),
+            low_stock_count: Number(s.low_stock_count || 0),
+            out_of_stock_count: Number(s.out_of_stock_count || 0),
+            total_products: Number(s.total_products || 0),
+            top_products: topRes.rows,
+        });
+    } catch (err) {
+        console.error('POS ANALYTICS:', err.message);
+        if (err instanceof BranchAccessError) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        return res.status(500).json({ error: 'Failed to load POS analytics.' });
     }
 });
 
