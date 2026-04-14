@@ -33,10 +33,7 @@ import { getGreeting, getPriorityMeta } from './dashboardPageUtils';
 
 const SmartTipsPanel = ({ controller }) => {
   const { dashboardData, navigateTo } = controller;
-  const featuredRecommendation = dashboardData.ai.recommendations[0] || dashboardData.ai.primary || null;
-  const secondaryRecommendations = dashboardData.ai.recommendations
-    .filter((recommendation) => recommendation.id !== featuredRecommendation?.id)
-    .slice(0, 2);
+  const visibleRecommendations = dashboardData.ai.recommendations.slice(0, 3);
 
   return (
     <div
@@ -73,31 +70,6 @@ const SmartTipsPanel = ({ controller }) => {
           ))}
         </div>
 
-        {featuredRecommendation && (
-          <button
-            type="button"
-            onClick={featuredRecommendation.action}
-            className="w-full rounded-[20px] border border-emerald-200 bg-emerald-50/80 p-4 text-left transition-colors hover:bg-emerald-100"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-700">Action To Take</p>
-              <span className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-emerald-800">
-                {featuredRecommendation.urgency}
-              </span>
-            </div>
-            <p className="mt-2 text-sm font-black leading-snug text-slate-900">{featuredRecommendation.title}</p>
-            <p className="mt-1 text-[11px] font-semibold leading-relaxed text-slate-600">{featuredRecommendation.reason}</p>
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <span className="inline-flex rounded-full bg-emerald-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-white">
-                {featuredRecommendation.cta}
-              </span>
-              <span className="text-[10px] font-black text-emerald-800">
-                ₹{Number(featuredRecommendation.impact || 0).toLocaleString()} opportunity
-              </span>
-            </div>
-          </button>
-        )}
-
         {(dashboardData.automations.weeklyRuns > 0 || dashboardData.automations.weeklySent > 0) ? (
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg border border-slate-100 bg-slate-50/70 px-2 py-2">
@@ -129,13 +101,13 @@ const SmartTipsPanel = ({ controller }) => {
         </p>
 
         <div className="space-y-2">
-          {secondaryRecommendations.map((recommendation, index) => (
+          {visibleRecommendations.map((recommendation, index) => (
             <div
               key={recommendation.id}
               className="w-full rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-left"
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-black text-slate-800">Tip {index + 2}</p>
+                <p className="text-[10px] font-black text-slate-800">Tip {index + 1}</p>
                 <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200">
                   {recommendation.urgency}
                 </span>

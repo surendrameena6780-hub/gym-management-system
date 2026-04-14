@@ -811,8 +811,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                   </span>
                 </div>
                 <p className="mt-2 text-sm font-black text-white truncate">{chatLead.full_name}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-300 break-all">{chatLead.phone}{chatLead.email ? ` • ${chatLead.email}` : ''}</p>
-                <p className="mt-2 text-[11px] font-semibold text-emerald-200/90">Messages sent here go through your connected business WhatsApp line and stay tracked inside GymVault.</p>
+                <p className="mt-1 max-w-full truncate whitespace-nowrap text-xs font-semibold text-slate-300">{chatLead.phone}{chatLead.email ? ` • ${chatLead.email}` : ''}</p>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
@@ -831,8 +830,8 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
               </div>
             </div>
 
-            <div className="app-modal-scroll flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1.45fr)_360px] lg:overflow-hidden">
-              <div className="flex min-h-[320px] flex-col border-b border-slate-800 lg:min-h-0 lg:border-b-0 lg:border-r">
+            <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1.45fr)_360px] lg:overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
                 <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3 sm:px-6">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Conversation</p>
@@ -841,7 +840,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                   {chatRefreshing && <span className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Refreshing</span>}
                 </div>
 
-                <div className="overflow-visible bg-slate-950/90 px-5 py-5 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+                <div className="app-modal-scroll flex-1 bg-slate-950/90 px-5 py-5 sm:px-6">
                   {chatLoading ? (
                     <div className="flex min-h-[260px] items-center justify-center">
                       <PageLoader className="min-h-[180px]" />
@@ -855,55 +854,38 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                       <p className="mt-2 max-w-sm text-sm font-medium text-slate-400">Start the conversation from here. Once the lead replies on WhatsApp, the thread will continue in this popup.</p>
                     </div>
                   ) : (
-                    chatConversation.map((message) => {
-                      const isOutbound = String(message.direction || '').toUpperCase() === 'OUTBOUND';
-                      return (
-                        <div key={message.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[88%] rounded-[24px] px-4 py-3 shadow-lg ${isOutbound ? 'bg-emerald-500 text-emerald-950' : 'border border-slate-700 bg-slate-900 text-slate-100'}`}>
-                            <div className="flex items-center gap-2">
-                              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isOutbound ? 'text-emerald-950/65' : 'text-slate-400'}`}>
-                                {isOutbound ? 'GymVault send' : 'Lead reply'}
-                              </p>
-                              {message.template_title && (
-                                <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${isOutbound ? 'bg-emerald-950/10 text-emerald-950/70' : 'bg-slate-800 text-slate-400'}`}>
-                                  {message.template_title}
-                                </span>
-                              )}
-                            </div>
-                            <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${isOutbound ? 'text-emerald-950' : 'text-slate-100'}`}>{message.message_text || 'No message content available.'}</p>
-                            <div className={`mt-3 flex items-center justify-between gap-3 text-[11px] font-semibold ${isOutbound ? 'text-emerald-950/70' : 'text-slate-400'}`}>
-                              <span>{formatDateTimeLabel(message.occurred_at)}</span>
-                              <span>{formatChatStatusLabel(message.delivery_status)}</span>
+                    <div className="space-y-4">
+                      {chatConversation.map((message) => {
+                        const isOutbound = String(message.direction || '').toUpperCase() === 'OUTBOUND';
+                        return (
+                          <div key={message.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[88%] rounded-[24px] px-4 py-3 shadow-lg ${isOutbound ? 'bg-emerald-500 text-emerald-950' : 'border border-slate-700 bg-slate-900 text-slate-100'}`}>
+                              <div className="flex items-center gap-2">
+                                <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isOutbound ? 'text-emerald-950/65' : 'text-slate-400'}`}>
+                                  {isOutbound ? 'GymVault send' : 'Lead reply'}
+                                </p>
+                                {message.template_title && (
+                                  <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${isOutbound ? 'bg-emerald-950/10 text-emerald-950/70' : 'bg-slate-800 text-slate-400'}`}>
+                                    {message.template_title}
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${isOutbound ? 'text-emerald-950' : 'text-slate-100'}`}>{message.message_text || 'No message content available.'}</p>
+                              <div className={`mt-3 flex items-center justify-between gap-3 text-[11px] font-semibold ${isOutbound ? 'text-emerald-950/70' : 'text-slate-400'}`}>
+                                <span>{formatDateTimeLabel(message.occurred_at)}</span>
+                                <span>{formatChatStatusLabel(message.delivery_status)}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })}
+                    </div>
                   )}
                   <div ref={chatEndRef} />
                 </div>
               </div>
 
-              <div className="flex flex-col gap-4 overflow-visible bg-slate-950 px-5 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Source</p>
-                    <p className="mt-1 text-sm font-bold text-white">{chatLead.source || 'Walk-in'}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Follow-up</p>
-                    <p className="mt-1 text-sm font-bold text-white">{formatDateTimeLabel(chatLead.next_follow_up_at)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Last contacted</p>
-                    <p className="mt-1 text-sm font-bold text-white">{formatDateTimeLabel(chatLead.last_contacted_at)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Business line</p>
-                    <p className="mt-1 text-sm font-bold text-white">{chatMessaging?.whatsapp_number || 'Not connected'}</p>
-                  </div>
-                </div>
-
+              <div className="shrink-0 space-y-4 border-t border-slate-800 bg-slate-950 px-5 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
                 {!chatMessaging?.whatsapp_connected ? (
                   <div className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-4">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">Connection needed</p>
