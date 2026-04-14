@@ -797,9 +797,10 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
       </div>
 
       {chatLead && (
-        <div className="app-modal-shell lead-chat-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel app-modal-panel--xl lead-chat-modal-panel w-full overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.96) 55%, rgba(5,150,105,0.28) 100%)' }}>
+        <div className="app-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel app-modal-panel--xl w-full overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
+            {/* Sticky header — always visible, contains close button */}
+            <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.96) 55%, rgba(5,150,105,0.28) 100%)' }}>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-xl font-black text-white">Lead Chat</h2>
@@ -830,62 +831,60 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
               </div>
             </div>
 
-            <div className="lead-chat-modal-body flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1.45fr)_360px] lg:overflow-hidden">
-              <div className="flex min-h-0 flex-1 flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
-                <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3 sm:px-6">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Conversation</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-400">Inbound replies and tracked outbound sends appear here.</p>
-                  </div>
-                  {chatRefreshing && <span className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Refreshing</span>}
+            {/* Single scroll region — conversation + composer flow naturally */}
+            <div className="app-modal-scroll px-5 py-5 sm:px-6 space-y-5">
+              {/* Conversation section */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Conversation</p>
+                  {chatRefreshing && <span className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Refreshing…</span>}
                 </div>
 
-                <div className="app-modal-scroll lead-chat-thread-scroll flex-1 bg-slate-950/90 px-5 py-5 sm:px-6">
-                  {chatLoading ? (
-                    <div className="flex min-h-[260px] items-center justify-center">
-                      <PageLoader className="min-h-[180px]" />
+                {chatLoading ? (
+                  <div className="flex min-h-[220px] items-center justify-center">
+                    <PageLoader className="min-h-[160px]" />
+                  </div>
+                ) : chatConversation.length === 0 ? (
+                  <div className="flex min-h-[220px] flex-col items-center justify-center rounded-[28px] border border-dashed border-slate-700 bg-slate-900/60 px-6 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/10 text-emerald-300">
+                      <MessageSquare size={28} />
                     </div>
-                  ) : chatConversation.length === 0 ? (
-                    <div className="flex min-h-[260px] flex-col items-center justify-center rounded-[28px] border border-dashed border-slate-700 bg-slate-900/60 px-6 text-center">
-                      <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/10 text-emerald-300">
-                        <MessageSquare size={28} />
-                      </div>
-                      <h3 className="mt-4 text-lg font-black text-white">No thread yet</h3>
-                      <p className="mt-2 max-w-sm text-sm font-medium text-slate-400">Start the conversation from here. Once the lead replies on WhatsApp, the thread will continue in this popup.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {chatConversation.map((message) => {
-                        const isOutbound = String(message.direction || '').toUpperCase() === 'OUTBOUND';
-                        return (
-                          <div key={message.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[88%] rounded-[24px] px-4 py-3 shadow-lg ${isOutbound ? 'bg-emerald-500 text-emerald-950' : 'border border-slate-700 bg-slate-900 text-slate-100'}`}>
-                              <div className="flex items-center gap-2">
-                                <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isOutbound ? 'text-emerald-950/65' : 'text-slate-400'}`}>
-                                  {isOutbound ? 'GymVault send' : 'Lead reply'}
-                                </p>
-                                {message.template_title && (
-                                  <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${isOutbound ? 'bg-emerald-950/10 text-emerald-950/70' : 'bg-slate-800 text-slate-400'}`}>
-                                    {message.template_title}
-                                  </span>
-                                )}
-                              </div>
-                              <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${isOutbound ? 'text-emerald-950' : 'text-slate-100'}`}>{message.message_text || 'No message content available.'}</p>
-                              <div className={`mt-3 flex items-center justify-between gap-3 text-[11px] font-semibold ${isOutbound ? 'text-emerald-950/70' : 'text-slate-400'}`}>
-                                <span>{formatDateTimeLabel(message.occurred_at)}</span>
-                                <span>{formatChatStatusLabel(message.delivery_status)}</span>
-                              </div>
+                    <h3 className="mt-4 text-lg font-black text-white">No thread yet</h3>
+                    <p className="mt-2 max-w-sm text-sm font-medium text-slate-400">Start the conversation below. Once the lead replies on WhatsApp the thread will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {chatConversation.map((message) => {
+                      const isOutbound = String(message.direction || '').toUpperCase() === 'OUTBOUND';
+                      return (
+                        <div key={message.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[88%] rounded-[24px] px-4 py-3 shadow-lg ${isOutbound ? 'bg-emerald-500 text-emerald-950' : 'border border-slate-700 bg-slate-900 text-slate-100'}`}>
+                            <div className="flex items-center gap-2">
+                              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isOutbound ? 'text-emerald-950/65' : 'text-slate-400'}`}>
+                                {isOutbound ? 'GymVault send' : 'Lead reply'}
+                              </p>
+                              {message.template_title && (
+                                <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${isOutbound ? 'bg-emerald-950/10 text-emerald-950/70' : 'bg-slate-800 text-slate-400'}`}>
+                                  {message.template_title}
+                                </span>
+                              )}
+                            </div>
+                            <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${isOutbound ? 'text-emerald-950' : 'text-slate-100'}`}>{message.message_text || 'No message content available.'}</p>
+                            <div className={`mt-3 flex items-center justify-between gap-3 text-[11px] font-semibold ${isOutbound ? 'text-emerald-950/70' : 'text-slate-400'}`}>
+                              <span>{formatDateTimeLabel(message.occurred_at)}</span>
+                              <span>{formatChatStatusLabel(message.delivery_status)}</span>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
+                        </div>
+                      );
+                    })}
+                    <div ref={chatEndRef} />
+                  </div>
+                )}
               </div>
 
-              <div className="lead-chat-composer shrink-0 space-y-4 border-t border-slate-800 bg-slate-950 px-5 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
+              {/* Composer section */}
+              <div className="space-y-4 border-t border-slate-800 pt-5">
                 {!chatMessaging?.whatsapp_connected ? (
                   <div className="rounded-[24px] border border-amber-500/30 bg-amber-500/10 p-4">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">Connection needed</p>
