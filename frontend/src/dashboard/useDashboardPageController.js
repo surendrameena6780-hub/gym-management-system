@@ -193,6 +193,16 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   });
   const [churnInsights, setChurnInsights] = useState({ summary: { high: 0, medium: 0, low: 0 }, members: [] });
   const [campaignLogs, setCampaignLogs] = useState([]);
+  const [leadSummary, setLeadSummary] = useState({
+    total: 0,
+    open_leads: 0,
+    new_leads: 0,
+    follow_ups_due: 0,
+    trials_today: 0,
+    trial_booked: 0,
+    converted_this_month: 0,
+    lost_leads: 0,
+  });
 
   const isAnyDashboardModalOpen = showAddModal || showPaymentModal || showBroadcastModal || showCheckinModal;
   const authHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
@@ -264,6 +274,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         membersRes, plansRes, statsRes,
         chart30Res, chart7Res, attendanceRes,
         todayRes, setupRes, churnRes, logsRes,
+        leadsSummaryRes,
         settingsRes,
       ] = await Promise.allSettled([
         axios.get('/api/members', requestConfig),
@@ -276,6 +287,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         axios.get('/api/dashboard/setup-status', requestConfig),
         axios.get('/api/notifications/campaign/churn-scores?limit=30', requestConfig),
         axios.get('/api/notifications/campaign/logs?limit=50', requestConfig),
+        axios.get('/api/leads/summary', requestConfig),
         axios.get('/api/settings', requestConfig),
       ]);
 
@@ -335,12 +347,38 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       });
       setCampaignLogs(asArray(pickData(logsRes, [])));
 
-      const failedCalls = [membersRes, plansRes, statsRes, chart30Res, chart7Res, attendanceRes, todayRes, setupRes, churnRes, logsRes, settingsRes]
+      const fallbackLeadSummary = {
+        total: 0,
+        open_leads: 0,
+        new_leads: 0,
+        follow_ups_due: 0,
+        trials_today: 0,
+        trial_booked: 0,
+        converted_this_month: 0,
+        lost_leads: 0,
+      };
+      setLeadSummary(asObject(pickData(leadsSummaryRes, fallbackLeadSummary), fallbackLeadSummary));
+
+      const requestResults = [
+        membersRes,
+        plansRes,
+        statsRes,
+        chart30Res,
+        chart7Res,
+        attendanceRes,
+        todayRes,
+        setupRes,
+        churnRes,
+        logsRes,
+        leadsSummaryRes,
+        settingsRes,
+      ];
+      const failedCalls = requestResults
         .filter((result) => result.status === 'rejected')
         .length;
-      const successfulCalls = 11 - failedCalls;
+      const successfulCalls = requestResults.length - failedCalls;
 
-      if (failedCalls === 11 && warmupRetryCountRef.current === 0) {
+      if (failedCalls === requestResults.length && warmupRetryCountRef.current === 0) {
         toast?.('Server is waking up. Dashboard will retry automatically.', 'warning');
       }
 
@@ -1206,6 +1244,21 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     const monthlyRevenue = chart30.reduce((sum, day) => sum + (day.revenue || 0), 0);
     const healthScore = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
     const pendingDues = Number(payStats.pending_dues || 0);
+    const normalizedLeadSummary = asObject(leadSummary, {
+      total: 0,
+      open_leads: 0,
+      new_leads: 0,
+      follow_ups_due: 0,
+      trials_today: 0,
+      trial_booked: 0,
+      converted_this_month: 0,
+      lost_leads: 0,
+    });
+    const openLeads = Number(normalizedLeadSummary.open_leads || 0);
+    const newLeads = Number(normalizedLeadSummary.new_leads || 0);
+    const followUpsDue = Number(normalizedLeadSummary.follow_ups_due || 0);
+    const trialsToday = Number(normalizedLeadSummary.trials_today || 0);
+    const trialBooked = Number(normalizedLeadSummary.trial_booked || 0);
 
     const planCounts = {};
     members.forEach((member) => {
@@ -1254,6 +1307,9 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     const expiredWinbackValue = Math.round(expired.length * avgPlanPrice * 0.5);
     const expiringFollowupMembers = expiringIn7Days.filter((member) => member.days_left > 3);
     const expiringFollowupRiskAmount = expiringFollowupMembers.reduce((sum, member) => sum + estimateMemberValue(member), 0);
+    const leadFollowupValue = Math.round(Math.max(avgPlanPrice, followUpsDue * avgPlanPrice * 0.38));
+    const leadPipelineValue = Math.round(Math.max(avgPlanPrice, openLeads * avgPlanPrice * 0.24));
+    const trialsTodayValue = Math.round(Math.max(avgPlanPrice, trialsToday * avgPlanPrice * 0.55));
 
     const reminderMessages = {
       highChurn: 'Hi {{name}}, we noticed your routine at {{gym_name}} has slowed down. Reply and we will help you with the right plan to get back on track.',
@@ -1429,6 +1485,12 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       };
     };
 
+    const leadPipelineReason = [
+      `${openLeads} open lead${openLeads === 1 ? '' : 's'} in the pipeline`,
+      newLeads > 0 ? `${newLeads} new` : '',
+      trialBooked > 0 ? `${trialBooked} trial${trialBooked === 1 ? '' : 's'} booked` : '',
+    ].filter(Boolean).join(' · ');
+
     const aiCandidates = [
       !highChurnCta.isCompleted && buildRecommendation({
         id: 'HIGH_CHURN',
@@ -1532,6 +1594,45 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       .sort((a, b) => b.score - a.score);
 
     const opportunityCandidates = [
+      followUpsDue > 0 && buildRecommendation({
+        id: 'LEAD_FOLLOW_UP',
+        title: followUpsDue === 1 ? 'Reply to the lead due today' : 'Follow up with leads due today',
+        reason: `${followUpsDue} lead${followUpsDue === 1 ? '' : 's'} already need follow-up. Fast replies here can turn warm interest into trial visits.`,
+        count: followUpsDue,
+        impact: leadFollowupValue,
+        confidence: Math.min(90, 74 + followUpsDue * 3),
+        urgency: 'Today',
+        priority: followUpsDue >= 3 ? 'P1' : 'P2',
+        cta: 'Open Leads',
+        sub: 'Follow leads for more joins',
+        action: () => navigateTo('Leads'),
+      }),
+      trialsToday > 0 && buildRecommendation({
+        id: 'TRIALS_TODAY',
+        title: trialsToday === 1 ? 'Prepare today\'s trial visit' : 'Prepare today\'s trial visits',
+        reason: `${trialsToday} trial${trialsToday === 1 ? '' : 's'} are scheduled today. Tight follow-up after the visit can move them to paid joins faster.`,
+        count: trialsToday,
+        impact: trialsTodayValue,
+        confidence: Math.min(86, 68 + trialsToday * 4),
+        urgency: 'Today',
+        priority: 'P2',
+        cta: 'Open Leads',
+        sub: 'Move trials toward conversion',
+        action: () => navigateTo('Leads'),
+      }),
+      openLeads > 0 && buildRecommendation({
+        id: 'LEAD_PIPELINE',
+        title: newLeads > 0 ? 'Work the fresh leads queue' : 'Keep the lead pipeline moving',
+        reason: leadPipelineReason || 'Leads are waiting for a follow-up and trial conversion push.',
+        count: openLeads,
+        impact: leadPipelineValue,
+        confidence: Math.min(84, 64 + Math.min(openLeads, 8) * 2),
+        urgency: newLeads > 0 ? 'Today' : 'This week',
+        priority: 'P2',
+        cta: 'Open Leads',
+        sub: 'Follow leads for more joins',
+        action: () => navigateTo('Leads'),
+      }),
       incompleteSetupSteps.length > 0 && buildRecommendation({
         id: 'SETUP_PROGRESS',
         title: setup.progress < 50 ? 'Complete your gym setup' : 'Finish remaining setup steps',
@@ -1634,55 +1735,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     ].filter(Boolean)
       .sort((a, b) => b.score - a.score);
 
-    const recommendations = opportunityCandidates.slice(0, 3);
-    const primary = recommendations[0] || {
-      id: 'BASELINE',
-      title: 'Keep the gym running strong',
-      reason: 'Things look stable. Keep following up and keep new joins moving.',
-      count: active.length || members.length || 0,
-      impact: avgPlanPrice * 2,
-      confidence: 76,
-      urgency: 'This week',
-      priority: 'P2',
-      cta: plans.length > 0 ? 'Add Member' : 'Create Plan',
-      sub: plans.length > 0 ? 'Keep growth steady' : 'Set up your plans',
-      action: () => {
-        if (plans.length === 0) {
-          navigateTo('Plans');
-          return;
-        }
-        setShowAddModal(true);
-      },
-    };
-
-    const activeCoveragePct = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
-    const nextWatchline = expiringIn7Days.length > 0
-      ? `${expiringIn7Days.length} renewals are due within the next 7 days`
-      : unpaid.length > 0
-        ? `${unpaid.length} unpaid profiles are still waiting for activation`
-        : ghosts.length > 0
-          ? `${ghosts.length} active members have gone quiet recently`
-          : 'No immediate retention or revenue risks are peaking right now';
-    const aiSummaryLines = recommendations.length > 0
-      ? [
-          { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
-          { label: 'Money collected', value: (() => {
-            const earliest = chart30.find((day) => (day.revenue || 0) > 0);
-            const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null;
-            return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`;
-          })() },
-          { label: 'Watch today', value: nextWatchline },
-        ]
-      : [
-          { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
-          { label: 'Money collected', value: (() => {
-            const earliest = chart30.find((day) => (day.revenue || 0) > 0);
-            const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null;
-            return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`;
-          })() },
-          { label: 'Watch today', value: nextWatchline },
-        ];
-
     const subscriptionWarning = (() => {
       if (accessDaysRemaining === null) return null;
       if ((accessDerivedStatus === 'ACTIVE' || accessDerivedStatus === 'FREE_TRIAL') && accessDaysRemaining > 7) return null;
@@ -1718,13 +1770,14 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
 
     const maxActionRows = 4;
     const priorityRank = { P0: 0, P1: 1, P2: 2 };
+    const sortRecommendationCandidates = (a, b) => {
+      const rankDiff = (priorityRank[a.priority] ?? 99) - (priorityRank[b.priority] ?? 99);
+      if (rankDiff !== 0) return rankDiff;
+      return Number(b.score || 0) - Number(a.score || 0);
+    };
     const actionCandidates = [subscriptionWarning, ...aiCandidates]
       .filter(Boolean)
-      .sort((a, b) => {
-        const rankDiff = (priorityRank[a.priority] ?? 99) - (priorityRank[b.priority] ?? 99);
-        if (rankDiff !== 0) return rankDiff;
-        return Number(b.score || 0) - Number(a.score || 0);
-      });
+      .sort(sortRecommendationCandidates);
     const setupFillCandidates = setupActionRows.length > 0
       ? setupActionRows.map((row, index) => buildRecommendation({
         id: row.id,
@@ -1798,6 +1851,39 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         action: () => navigateTo('Members'),
       }),
     ].filter(Boolean);
+    const smartTipPool = [
+      ...actionCandidates,
+      ...opportunityCandidates,
+      ...fillerActionRows,
+    ].filter(Boolean).sort(sortRecommendationCandidates);
+    const recommendations = [];
+    const seenRecommendationIds = new Set();
+    smartTipPool.forEach((candidate) => {
+      if (!candidate || recommendations.length >= 3 || seenRecommendationIds.has(candidate.id)) {
+        return;
+      }
+      recommendations.push(candidate);
+      seenRecommendationIds.add(candidate.id);
+    });
+    const primary = recommendations[0] || {
+      id: 'BASELINE',
+      title: 'Keep the gym running strong',
+      reason: 'Things look stable. Keep following up and keep new joins moving.',
+      count: active.length || members.length || 0,
+      impact: avgPlanPrice * 2,
+      confidence: 76,
+      urgency: 'This week',
+      priority: 'P2',
+      cta: plans.length > 0 ? 'Add Member' : 'Create Plan',
+      sub: plans.length > 0 ? 'Keep growth steady' : 'Set up your plans',
+      action: () => {
+        if (plans.length === 0) {
+          navigateTo('Plans');
+          return;
+        }
+        setShowAddModal(true);
+      },
+    };
     const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
     const mergedActionRows = [];
     const seenActionIds = new Set();
@@ -1818,6 +1904,23 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       pushUniqueRows(fillerActionRows);
     }
     const urgentCount = actionRequiredRows.length;
+    const activeCoveragePct = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
+    const nextWatchline = expiringIn7Days.length > 0
+      ? `${expiringIn7Days.length} renewals are due within the next 7 days`
+      : unpaid.length > 0
+        ? `${unpaid.length} unpaid profiles are still waiting for activation`
+        : ghosts.length > 0
+          ? `${ghosts.length} active members have gone quiet recently`
+          : 'No immediate retention or revenue risks are peaking right now';
+    const aiSummaryLines = [
+      { label: 'Active plans', value: `${active.length} of ${members.length || 0} members are active right now (${activeCoveragePct}%)` },
+      { label: 'Money collected', value: (() => {
+        const earliest = chart30.find((day) => (day.revenue || 0) > 0);
+        const sinceLabel = earliest?.date ? new Date(earliest.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null;
+        return sinceLabel ? `₹${monthlyRevenue.toLocaleString()} collected since ${sinceLabel}` : `₹${monthlyRevenue.toLocaleString()} collected in the last 30 days`;
+      })() },
+      { label: 'Watch today', value: nextWatchline },
+    ];
 
     return {
       active: active.length,
@@ -1861,6 +1964,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     chart30,
     churnInsights,
     gymBilling,
+    leadSummary,
     members,
     navigateTo,
     openBroadcastDraft,

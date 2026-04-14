@@ -241,6 +241,15 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatConversation, chatLead]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('app-modal-open', Boolean(showFormModal || chatLead));
+
+    return () => {
+      root.classList.remove('app-modal-open');
+    };
+  }, [chatLead, showFormModal]);
+
   const closeFormModal = () => {
     setShowFormModal(false);
     setEditingLead(null);
@@ -789,7 +798,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
 
       {chatLead && (
         <div className="app-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel w-full max-w-5xl overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
+          <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel app-modal-panel--xl w-full overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.96) 55%, rgba(5,150,105,0.28) 100%)' }}>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -822,8 +831,8 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
               </div>
             </div>
 
-            <div className="grid max-h-[82vh] grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_360px]">
-              <div className="flex min-h-[420px] flex-col border-b border-slate-800 lg:border-b-0 lg:border-r">
+            <div className="app-modal-scroll flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1.45fr)_360px] lg:overflow-hidden">
+              <div className="flex min-h-[320px] flex-col border-b border-slate-800 lg:min-h-0 lg:border-b-0 lg:border-r">
                 <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3 sm:px-6">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Conversation</p>
@@ -832,7 +841,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                   {chatRefreshing && <span className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Refreshing</span>}
                 </div>
 
-                <div className="app-modal-scroll flex-1 space-y-4 bg-slate-950/90 px-5 py-5 sm:px-6">
+                <div className="overflow-visible bg-slate-950/90 px-5 py-5 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
                   {chatLoading ? (
                     <div className="flex min-h-[260px] items-center justify-center">
                       <PageLoader className="min-h-[180px]" />
@@ -875,7 +884,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                 </div>
               </div>
 
-              <div className="app-modal-scroll flex flex-col gap-4 bg-slate-950 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
+              <div className="flex flex-col gap-4 overflow-visible bg-slate-950 px-5 py-5 sm:px-6 lg:min-h-0 lg:overflow-y-auto" style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(2,6,23,0.98) 100%)' }}>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
                     <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Source</p>
