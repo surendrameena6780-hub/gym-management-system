@@ -797,7 +797,7 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
       </div>
 
       {chatLead && (
-        <div className="app-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
+        <div className="app-modal-shell lead-chat-modal-shell z-[145] bg-slate-950/70 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-label={`Lead chat for ${chatLead.full_name}`} className="app-modal-panel app-modal-panel--xl lead-chat-modal-panel w-full overflow-hidden rounded-[30px] border border-slate-700 bg-slate-950 text-white shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-5 sm:px-6" style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(30,41,59,0.96) 55%, rgba(5,150,105,0.28) 100%)' }}>
               <div className="min-w-0">
