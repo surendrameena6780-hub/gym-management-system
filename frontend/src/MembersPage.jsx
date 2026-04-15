@@ -739,6 +739,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   }, []);
 
   useEffect(() => {
+    let isCancelled = false;
+
     if (showDetailsModal && selectedMember?.id) {
       const currentMember = selectedMemberRef.current;
       setDrawerTab('profile');
@@ -748,9 +750,39 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       fetchMemberDocs(selectedMember.id);
       fetchMemberWaivers(selectedMember.id);
       loadMemberDetails(selectedMember.id).catch(() => {});
-      fetchGymWhatsAppStarter().catch(() => {});
+
+      if (token) {
+        setGymWhatsAppStarterLoading(true);
+        axios.get('/api/settings/integrations', {
+          headers: { 'x-auth-token': token },
+        })
+          .then((response) => {
+            if (isCancelled) return;
+            const payload = unwrapMembersApiData(response.data);
+            const number = String(payload.whatsapp_number || '').trim();
+            setGymWhatsAppStarter({
+              number,
+              displayName: String(payload.whatsapp_display_name || '').trim(),
+              ready: String(payload.whatsapp_status || '').trim().toUpperCase() === 'CONNECTED' && Boolean(number),
+            });
+          })
+          .catch(() => {
+            if (!isCancelled) {
+              setGymWhatsAppStarter({ number: '', displayName: '', ready: false });
+            }
+          })
+          .finally(() => {
+            if (!isCancelled) {
+              setGymWhatsAppStarterLoading(false);
+            }
+          });
+      }
     }
-  }, [fetchGymWhatsAppStarter, fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal, token]);
 
   const openAddMemberModal = useCallback(() => {
     if (!canWriteMembers) {
@@ -1587,28 +1619,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     setReminderTemplates(templates);
     return templates;
   }, [reminderTemplates, token]);
-
-  const fetchGymWhatsAppStarter = useCallback(async () => {
-    if (!token) return;
-
-    try {
-      setGymWhatsAppStarterLoading(true);
-      const response = await axios.get('/api/settings/integrations', {
-        headers: { 'x-auth-token': token },
-      });
-      const payload = unwrapMembersApiData(response.data);
-      const number = String(payload.whatsapp_number || '').trim();
-      setGymWhatsAppStarter({
-        number,
-        displayName: String(payload.whatsapp_display_name || '').trim(),
-        ready: String(payload.whatsapp_status || '').trim().toUpperCase() === 'CONNECTED' && Boolean(number),
-      });
-    } catch (_err) {
-      setGymWhatsAppStarter({ number: '', displayName: '', ready: false });
-    } finally {
-      setGymWhatsAppStarterLoading(false);
-    }
-  }, [token]);
 
   const memberWhatsAppStarterMessage = useMemo(() => {
     const fullName = String(selectedMember?.full_name || 'Member').trim() || 'Member';
