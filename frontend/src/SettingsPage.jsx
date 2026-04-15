@@ -4085,9 +4085,12 @@ const loadRazorpayScript = () => {
                                   ))}
                                 </div>
 
-                                <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
                                   <p className="text-[11px] font-semibold text-amber-800 leading-relaxed">
                                     <span className="font-black">Submitted</span> means MSG91 accepted the send. It does <span className="font-black">not</span> mean the recipient received it yet. This screen only refreshes the latest receipts already saved by GymVault.
+                                  </p>
+                                  <p className="text-[11px] font-semibold text-amber-800 leading-relaxed">
+                                    If a number stays stuck, open <span className="font-black">MSG91 &gt; WhatsApp &gt; Logs</span> and filter that customer number. Common Meta outcomes: <span className="font-black">131049</span> means WhatsApp suppressed a marketing message, so wait 24 hours and turn on <span className="font-black">Retry Failed Message</span> in MSG91 Numbers. <span className="font-black">131050</span> means the user stopped marketing delivery. <span className="font-black">131026</span> means the recipient account is not currently reachable on WhatsApp.
                                   </p>
                                 </div>
 
