@@ -76,6 +76,111 @@ const normalizeMetaFailureCode = (value) => {
     return code || 'UNKNOWN_META';
 };
 
+const looksLikeFailureStatusDetailText = (...values) => {
+    const combined = values
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean)
+        .join(' ');
+
+    if (!combined) {
+        return false;
+    }
+
+    return combined.includes('failed by meta')
+        || combined.includes('healthy ecosystem')
+        || combined.includes('undeliver')
+        || combined.includes('reject')
+        || combined.includes('error')
+        || combined.includes('failed')
+        || /131\d{3}/.test(combined);
+};
+
+const repairStaleFailedDeliveryStatuses = async ({
+    gymId,
+    recipientNumbers = [],
+    hours = 24 * 30,
+} = {}) => {
+    await ensureWhatsAppDeliverySchema();
+
+    if (!gymId) {
+        return 0;
+    }
+
+    const normalizedRecipients = Array.from(new Set(
+        (Array.isArray(recipientNumbers) ? recipientNumbers : [recipientNumbers])
+            .map((value) => normalizeE164Phone(value))
+            .filter(Boolean)
+    ));
+    const safeHours = Math.max(1, Math.min(Number.parseInt(hours, 10) || (24 * 30), 24 * 30));
+    const params = [gymId, safeHours];
+    let recipientFilterSql = '';
+
+    if (normalizedRecipients.length > 0) {
+        recipientFilterSql = 'AND recipient_number = ANY($3::text[])';
+        params.push(normalizedRecipients);
+    }
+
+    const candidates = await pool.query(
+        `SELECT id, provider_status, current_status, status_detail, last_provider_payload
+         FROM whatsapp_delivery_logs
+         WHERE gym_id = $1
+           AND current_status IN ('QUEUED', 'SUBMITTED', 'SENT')
+           AND COALESCE(failed_at, updated_at, created_at) >= NOW() - ($2::int * INTERVAL '1 hour')
+           ${recipientFilterSql}
+           AND (
+                COALESCE(provider_status, '') ILIKE '%fail%'
+                OR COALESCE(provider_status, '') ILIKE '%meta%'
+                OR COALESCE(provider_status, '') ILIKE '%reject%'
+                OR COALESCE(provider_status, '') ILIKE '%error%'
+                OR COALESCE(status_detail, '') ILIKE '%fail%'
+                OR COALESCE(status_detail, '') ILIKE '%meta%'
+                OR COALESCE(status_detail, '') ILIKE '%reject%'
+                OR COALESCE(status_detail, '') ILIKE '%error%'
+                OR COALESCE(status_detail, '') ILIKE '%healthy ecosystem%'
+                OR COALESCE(status_detail, '') ~ '131[0-9]{3}'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%fail%'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%meta%'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%reject%'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%error%'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%healthy ecosystem%'
+                OR COALESCE(last_provider_payload::text, '') ~ '131[0-9]{3}'
+           )`,
+        params
+    );
+
+    const staleFailedIds = (candidates.rows || [])
+        .filter((row) => {
+            const providerStatus = normalizeDeliveryStatus(row?.provider_status);
+            return providerStatus === 'FAILED'
+                || looksLikeFailureStatusDetailText(
+                    row?.provider_status,
+                    row?.status_detail,
+                    JSON.stringify(row?.last_provider_payload || {})
+                );
+        })
+        .map((row) => Number(row.id || 0))
+        .filter((value) => value > 0);
+
+    if (staleFailedIds.length === 0) {
+        return 0;
+    }
+
+    const updateResult = await pool.query(
+        `UPDATE whatsapp_delivery_logs
+         SET provider_status = CASE
+                 WHEN COALESCE(NULLIF(TRIM(provider_status), ''), '') = '' THEN 'FAILED'
+                 ELSE provider_status
+             END,
+             current_status = 'FAILED',
+             failed_at = COALESCE(failed_at, updated_at, created_at, NOW()),
+             updated_at = NOW()
+         WHERE id = ANY($1::int[])`,
+        [staleFailedIds]
+    );
+
+    return Number(updateResult.rowCount || 0);
+};
+
 const mapMetaFailureRow = (row) => {
     const payloadText = toTrimmedString(JSON.stringify(row?.last_provider_payload || {}));
     const failureCode = extractMetaFailureCode(row?.status_detail, row?.provider_status, payloadText);
@@ -182,7 +287,7 @@ const mergeDeliveryStatus = (currentStatus, incomingStatus) => {
     const incoming = normalizeDeliveryStatus(incomingStatus || 'UNKNOWN');
 
     if (incoming === 'UNKNOWN') return current === 'UNKNOWN' ? 'QUEUED' : current;
-    if (incoming === 'FAILED' && ['DELIVERED', 'READ'].includes(current)) return current;
+    if (incoming === 'FAILED') return ['DELIVERED', 'READ'].includes(current) ? current : 'FAILED';
 
     return (STATUS_PRIORITY[incoming] ?? -1) >= (STATUS_PRIORITY[current] ?? -1)
         ? incoming
@@ -1113,7 +1218,7 @@ const applyWhatsAppDeliveryWebhook = async (payload) => {
 };
 
 const getWhatsAppDeliverySummary = async (gymId) => {
-    await ensureWhatsAppDeliverySchema();
+    await repairStaleFailedDeliveryStatuses({ gymId, hours: 24 * 30 });
 
     const result = await pool.query(
         `SELECT
@@ -1138,7 +1243,7 @@ const getWhatsAppDeliverySummary = async (gymId) => {
 };
 
 const getRecentWhatsAppDeliveryLogs = async (gymId, limit = 20) => {
-    await ensureWhatsAppDeliverySchema();
+    await repairStaleFailedDeliveryStatuses({ gymId, hours: 24 * 30 });
 
     const result = await pool.query(
         `SELECT
@@ -1173,7 +1278,7 @@ const getRecentWhatsAppDeliveryLogs = async (gymId, limit = 20) => {
 };
 
 const getRecentMetaFailureLogs = async (gymId, { recipientNumbers = [], hours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS, limit = 100 } = {}) => {
-    await ensureWhatsAppDeliverySchema();
+    await repairStaleFailedDeliveryStatuses({ gymId, recipientNumbers, hours });
 
     const normalizedRecipients = Array.from(new Set(
         (Array.isArray(recipientNumbers) ? recipientNumbers : [recipientNumbers])
