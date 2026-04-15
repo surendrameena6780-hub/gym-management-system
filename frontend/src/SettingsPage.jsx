@@ -7,7 +7,7 @@ import {
   CheckCircle, Plus, Download, Smartphone,
   Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
   RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
-  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon
+  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon, Upload
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
@@ -4100,9 +4100,41 @@ const loadRazorpayScript = () => {
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-4">
                     <div>
                       <h3 className="font-bold text-slate-800">Bulk Member Import</h3>
-                      <p className="text-xs text-slate-500 mt-1">Paste CSV rows with <span className="font-bold">full_name, phone</span>. Optional columns: <span className="font-bold">email, branch_name or branch_id, plan_name or plan_id, membership_start_date, membership_end_date, joining_date, last_visit_date</span>. Use plan + expiry columns to migrate existing active members without charging them again.</p>
+                      <p className="text-xs text-slate-500 mt-1">Upload a <span className="font-bold">.csv file</span> or paste CSV rows with <span className="font-bold">full_name, phone</span>. Optional columns: <span className="font-bold">email, branch_name or branch_id, plan_name or plan_id, membership_start_date, membership_end_date, joining_date, last_visit_date</span>. Use plan + expiry columns to migrate existing active members without charging them again.</p>
                     </div>
-                    <button type="button" onClick={() => setImportForm((prev) => ({ ...prev, csv_text: IMPORT_SAMPLE_CSV }))} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all">Load Sample</button>
+                    <div className="flex gap-2 shrink-0">
+                      <label className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100 transition-all cursor-pointer flex items-center gap-2">
+                        <Upload size={16} /> Upload CSV
+                        <input
+                          type="file"
+                          accept=".csv,text/csv,application/vnd.ms-excel"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 2 * 1024 * 1024) {
+                              toast('File is too large. Maximum size is 2 MB.', 'error');
+                              e.target.value = '';
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const text = event.target?.result;
+                              if (typeof text === 'string' && text.trim()) {
+                                setImportForm((prev) => ({ ...prev, csv_text: text }));
+                                toast(`Loaded ${file.name} (${Math.round(file.size / 1024)} KB)`, 'success');
+                              } else {
+                                toast('File appears empty. Please check the CSV and try again.', 'warning');
+                              }
+                            };
+                            reader.onerror = () => { toast('Failed to read file. Please try again.', 'error'); };
+                            reader.readAsText(file);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <button type="button" onClick={() => setImportForm((prev) => ({ ...prev, csv_text: IMPORT_SAMPLE_CSV }))} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all">Load Sample</button>
+                    </div>
                   </div>
                   <textarea
                     rows={8}

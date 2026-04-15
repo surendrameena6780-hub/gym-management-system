@@ -541,6 +541,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
   useEffect(() => {
     if (financeTab === 'expenses') {
       fetchExpenses();
+      if (canAccessPos) fetchPosAnalytics();
     } else if (financeTab === 'payroll') {
       fetchPayroll();
       fetchAutoPayConfigs();
@@ -2285,7 +2286,122 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {/* ═══════ EXPENSES TAB ═══════ */}
       {financeTab === 'expenses' && (
         <div ref={expensesListRef} className="space-y-4 scroll-mt-28">
-          {expenses.length === 0 ? (
+
+          {/* ── Expense Summary + POS Performance ── */}
+          {(expenses.length > 0 || posAnalytics) && (() => {
+            const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+            const posPurchaseTotal = expenses.filter(e => e.category === 'POS Purchase').reduce((sum, e) => sum + Number(e.amount || 0), 0);
+            const operationalTotal = totalExpenses - posPurchaseTotal;
+            const categoryBreakdown = {};
+            expenses.forEach(e => { const cat = e.category || 'Other'; categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + Number(e.amount || 0); });
+            const topCategories = Object.entries(categoryBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 5);
+            return (
+              <div className="space-y-4">
+                {/* Expense overview cards */}
+                {expenses.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="rounded-2xl bg-rose-50 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Total Expenses</p>
+                      <p className="text-xl font-black text-rose-600">₹{totalExpenses.toLocaleString()}</p>
+                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{expenses.length} entries</p>
+                    </div>
+                    <div className="rounded-2xl bg-amber-50 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Inventory Purchases</p>
+                      <p className="text-xl font-black text-amber-600">₹{posPurchaseTotal.toLocaleString()}</p>
+                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">POS stock costs</p>
+                    </div>
+                    <div className="rounded-2xl bg-indigo-50 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Operational</p>
+                      <p className="text-xl font-black text-indigo-600">₹{operationalTotal.toLocaleString()}</p>
+                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Non-inventory</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Top Category</p>
+                      <p className="text-base font-black text-slate-800 truncate">{topCategories[0]?.[0] || '—'}</p>
+                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{topCategories[0] ? `₹${topCategories[0][1].toLocaleString()}` : '—'}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* POS Performance Analytics — moved from POS tab */}
+                {posAnalytics && (
+                  <div className="rounded-[20px] border border-slate-100 bg-white p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-black text-slate-900">POS Performance</h3>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Sales revenue vs inventory cost</p>
+                      </div>
+                      {posAnalytics.margin > 0 && (
+                        <span className={`rounded-full px-3 py-1.5 text-xs font-black ${posAnalytics.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : posAnalytics.margin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'}`}>
+                          {posAnalytics.margin}% margin
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { label: 'Total Revenue', value: `₹${Number(posAnalytics.revenue || 0).toLocaleString()}`, sub: `${posAnalytics.total_sales} sale${posAnalytics.total_sales !== 1 ? 's' : ''}`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                        { label: 'Stock Cost (COGS)', value: `₹${Number(posAnalytics.cogs || 0).toLocaleString()}`, sub: `${posAnalytics.units_sold} units sold`, color: 'text-amber-600', bg: 'bg-amber-50' },
+                        { label: 'Gross Profit', value: `₹${Number(posAnalytics.profit || 0).toLocaleString()}`, sub: `${posAnalytics.margin}% margin`, color: posAnalytics.profit >= 0 ? 'text-emerald-600' : 'text-rose-500', bg: posAnalytics.profit >= 0 ? 'bg-emerald-50' : 'bg-rose-50' },
+                        { label: 'Avg Sale Value', value: `₹${Number(posAnalytics.avg_sale || 0).toLocaleString()}`, sub: `per transaction`, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+                      ].map(m => (
+                        <div key={m.label} className={`rounded-2xl ${m.bg} px-4 py-3`}>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{m.label}</p>
+                          <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
+                          <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{m.sub}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                      <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Inventory Health</p>
+                        <div className="space-y-2">
+                          {[
+                            { label: 'Total products', val: posAnalytics.total_products },
+                            { label: 'Stock on hand value', val: `₹${Number(posAnalytics.stock_value || 0).toLocaleString()}` },
+                            { label: 'Stock at cost', val: `₹${Number(posAnalytics.stock_cost || 0).toLocaleString()}` },
+                            { label: 'Low stock alerts', val: posAnalytics.low_stock_count, badge: posAnalytics.low_stock_count > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500' },
+                            { label: 'Out of stock', val: posAnalytics.out_of_stock_count, badge: posAnalytics.out_of_stock_count > 0 ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500' },
+                          ].map(row => (
+                            <div key={row.label} className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-slate-500">{row.label}</span>
+                              {row.badge ? (
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${row.badge}`}>{row.val}</span>
+                              ) : (
+                                <span className="text-xs font-black text-slate-800">{row.val}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Top Products by Revenue</p>
+                        {posAnalytics.top_products && posAnalytics.top_products.length > 0 ? (
+                          <div className="space-y-2">
+                            {posAnalytics.top_products.map((tp, i) => {
+                              const tpProfit = Number(tp.revenue || 0) - Number(tp.cogs || 0);
+                              const tpMargin = Number(tp.revenue) > 0 ? Math.round((tpProfit / Number(tp.revenue)) * 100) : 0;
+                              return (
+                                <div key={tp.name} className="flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black flex items-center justify-center shrink-0">{i + 1}</span>
+                                  <span className="text-xs font-bold text-slate-800 truncate flex-1">{tp.name}</span>
+                                  <span className="text-xs font-black text-slate-900 shrink-0">₹{Number(tp.revenue || 0).toLocaleString()}</span>
+                                  <span className={`text-[10px] font-black shrink-0 ${tpMargin >= 20 ? 'text-emerald-600' : tpMargin >= 0 ? 'text-amber-600' : 'text-rose-500'}`}>{tpMargin}%</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400 font-semibold">No sales yet — start selling to see top products.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {expenses.length === 0 && !posAnalytics ? (
             <div className="text-center py-12 text-slate-400">
               <p className="text-lg font-bold">No expenses recorded yet</p>
               <p className="text-sm mt-1">Add your first expense to start tracking outflows.</p>
@@ -2659,87 +2775,6 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       {/* ═══════ POS TAB ═══════ */}
       {financeTab === 'pos' && canAccessPos && (
         <div ref={posCatalogRef} className="space-y-4 scroll-mt-28 min-h-[400px]" onClick={() => { setPosMenuOpenId(null); }}>
-
-          {/* ── POS Performance Analytics ── */}
-          {posAnalytics && (
-            <div className="rounded-[20px] border border-slate-100 bg-white p-5 space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">POS Performance</h3>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Sales revenue vs inventory cost</p>
-                </div>
-                {posAnalytics.margin > 0 && (
-                  <span className={`rounded-full px-3 py-1.5 text-xs font-black ${posAnalytics.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : posAnalytics.margin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'}`}>
-                    {posAnalytics.margin}% margin
-                  </span>
-                )}
-              </div>
-
-              {/* Primary metrics */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { label: 'Total Revenue', value: `₹${Number(posAnalytics.revenue || 0).toLocaleString()}`, sub: `${posAnalytics.total_sales} sale${posAnalytics.total_sales !== 1 ? 's' : ''}`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                  { label: 'Stock Cost (COGS)', value: `₹${Number(posAnalytics.cogs || 0).toLocaleString()}`, sub: `${posAnalytics.units_sold} units sold`, color: 'text-amber-600', bg: 'bg-amber-50' },
-                  { label: 'Gross Profit', value: `₹${Number(posAnalytics.profit || 0).toLocaleString()}`, sub: `${posAnalytics.margin}% margin`, color: posAnalytics.profit >= 0 ? 'text-emerald-600' : 'text-rose-500', bg: posAnalytics.profit >= 0 ? 'bg-emerald-50' : 'bg-rose-50' },
-                  { label: 'Avg Sale Value', value: `₹${Number(posAnalytics.avg_sale || 0).toLocaleString()}`, sub: `per transaction`, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-                ].map(m => (
-                  <div key={m.label} className={`rounded-2xl ${m.bg} px-4 py-3`}>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{m.label}</p>
-                    <p className={`text-xl font-black ${m.color}`}>{m.value}</p>
-                    <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{m.sub}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Stock health + top products */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                {/* Inventory health */}
-                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Inventory Health</p>
-                  <div className="space-y-2">
-                    {[
-                      { label: 'Total products', val: posAnalytics.total_products },
-                      { label: 'Stock on hand value', val: `₹${Number(posAnalytics.stock_value || 0).toLocaleString()}` },
-                      { label: 'Stock at cost', val: `₹${Number(posAnalytics.stock_cost || 0).toLocaleString()}` },
-                      { label: 'Low stock alerts', val: posAnalytics.low_stock_count, badge: posAnalytics.low_stock_count > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500' },
-                      { label: 'Out of stock', val: posAnalytics.out_of_stock_count, badge: posAnalytics.out_of_stock_count > 0 ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500' },
-                    ].map(row => (
-                      <div key={row.label} className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-slate-500">{row.label}</span>
-                        {row.badge ? (
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${row.badge}`}>{row.val}</span>
-                        ) : (
-                          <span className="text-xs font-black text-slate-800">{row.val}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {/* Top products */}
-                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Top Products by Revenue</p>
-                  {posAnalytics.top_products && posAnalytics.top_products.length > 0 ? (
-                    <div className="space-y-2">
-                      {posAnalytics.top_products.map((tp, i) => {
-                        const tpProfit = Number(tp.revenue || 0) - Number(tp.cogs || 0);
-                        const tpMargin = Number(tp.revenue) > 0 ? Math.round((tpProfit / Number(tp.revenue)) * 100) : 0;
-                        return (
-                          <div key={tp.name} className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black flex items-center justify-center shrink-0">{i + 1}</span>
-                            <span className="text-xs font-bold text-slate-800 truncate flex-1">{tp.name}</span>
-                            <span className="text-xs font-black text-slate-900 shrink-0">₹{Number(tp.revenue || 0).toLocaleString()}</span>
-                            <span className={`text-[10px] font-black shrink-0 ${tpMargin >= 20 ? 'text-emerald-600' : tpMargin >= 0 ? 'text-amber-600' : 'text-rose-500'}`}>{tpMargin}%</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400 font-semibold">No sales yet — start selling to see top products.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
             {/* ── LEFT: Catalog ── */}

@@ -1768,7 +1768,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       });
     })();
 
-    const maxActionRows = 4;
     const priorityRank = { P0: 0, P1: 1, P2: 2 };
     const sortRecommendationCandidates = (a, b) => {
       const rankDiff = (priorityRank[a.priority] ?? 99) - (priorityRank[b.priority] ?? 99);
@@ -1851,11 +1850,137 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         action: () => navigateTo('Members'),
       }),
     ].filter(Boolean);
-    const smartTipPool = [
-      ...actionCandidates,
-      ...opportunityCandidates,
-      ...fillerActionRows,
+    // ── Build action rows FIRST so we know which ids are shown there ──
+    const maxActionRows = 4;
+    const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
+    const mergedActionRows = [];
+    const seenActionIds = new Set();
+    const pushUniqueRows = (rows) => {
+      rows.forEach((row) => {
+        if (!row || mergedActionRows.length >= maxActionRows || seenActionIds.has(row.id)) {
+          return;
+        }
+        mergedActionRows.push(row);
+        seenActionIds.add(row.id);
+      });
+    };
+    pushUniqueRows(actionRequiredRows);
+    pushUniqueRows(setupFillCandidates);
+    pushUniqueRows(actionCandidates.filter((item) => item.priority !== 'P0' && item.priority !== 'P1'));
+    if (setupActionRows.length === 0) {
+      pushUniqueRows(fillerActionRows);
+    }
+    const urgentCount = actionRequiredRows.length;
+
+    // ── Build Smart Tips that are DIFFERENT from action rows ──
+    // Insight-style analytical tips that give the owner strategic value
+    const retentionRate = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
+    const avgDailyRevenue = chart30.length > 0 ? Math.round(monthlyRevenue / Math.max(1, chart30.filter(d => d.revenue > 0).length)) : 0;
+    const bestDay = chart30.reduce((best, day) => (day.revenue || 0) > (best?.revenue || 0) ? day : best, { revenue: 0 });
+    const worstRecentDay = chart30.slice(-7).reduce((worst, day) => ((day.revenue || 0) < (worst?.revenue || Infinity) && day.date) ? day : worst, { revenue: Infinity });
+    const activeWithNoVisit14 = active.filter(m => getDaysAbsent(m) >= 14 && getDaysAbsent(m) < 30).length;
+    const convertedThisMonth = Number(normalizedLeadSummary.converted_this_month || 0);
+    const lostLeads = Number(normalizedLeadSummary.lost_leads || 0);
+    const leadConversionRate = openLeads + convertedThisMonth + lostLeads > 0
+      ? Math.round((convertedThisMonth / (openLeads + convertedThisMonth + lostLeads)) * 100) : 0;
+
+    const insightCandidates = [
+      // Retention health insight
+      members.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_RETENTION',
+        title: retentionRate >= 80 ? 'Strong retention — keep it up' : retentionRate >= 60 ? 'Retention needs a push' : 'Retention is below healthy range',
+        reason: `${retentionRate}% of your ${members.length} members are currently active. ${retentionRate >= 80 ? 'This is above the industry benchmark of 75%.' : retentionRate >= 60 ? 'Industry average is around 75% — a few re-engagement campaigns can close the gap.' : 'Below 60% signals a churn problem. Focus on bringing back expired and ghost members this week.'}`,
+        count: active.length,
+        impact: Math.round(avgPlanPrice * Math.max(1, (100 - retentionRate) * 0.15)),
+        confidence: Math.min(92, 70 + Math.round(members.length / 5)),
+        urgency: retentionRate < 60 ? 'Today' : 'This week',
+        priority: retentionRate < 60 ? 'P1' : 'P2',
+        cta: 'View Members',
+        sub: 'Retention health check',
+        action: () => navigateTo('Members'),
+      }),
+      // Revenue trend insight
+      monthlyRevenue > 0 && chart30.length >= 7 && buildRecommendation({
+        id: 'INSIGHT_REVENUE_TREND',
+        title: avgDailyRevenue > 0 ? `Your daily average is ₹${avgDailyRevenue.toLocaleString()}` : 'Track revenue patterns',
+        reason: bestDay.date ? `Best collection day was ${new Date(bestDay.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} at ₹${Number(bestDay.revenue).toLocaleString()}. ${avgDailyRevenue > 0 ? `Use this pattern — schedule renewals and follow-ups on your peak days.` : ''}` : `₹${monthlyRevenue.toLocaleString()} collected in 30 days. Keep collection calls daily to build consistency.`,
+        count: Math.max(1, chart30.filter(d => d.revenue > 0).length),
+        impact: avgDailyRevenue > 0 ? avgDailyRevenue : avgPlanPrice,
+        confidence: Math.min(88, 65 + chart30.filter(d => d.revenue > 0).length),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'View Payments',
+        sub: 'Revenue pattern analysis',
+        action: () => navigateTo('Payments'),
+      }),
+      // Attendance engagement insight
+      active.length >= 5 && activeWithNoVisit14 > 0 && buildRecommendation({
+        id: 'INSIGHT_ENGAGEMENT',
+        title: `${activeWithNoVisit14} active member${activeWithNoVisit14 === 1 ? '' : 's'} going quiet`,
+        reason: `${activeWithNoVisit14} member${activeWithNoVisit14 === 1 ? ' has' : 's have'} valid plans but haven\'t visited in 14+ days. A personal check-in call or workout reminder can prevent them from drifting to inactive.`,
+        count: activeWithNoVisit14,
+        impact: Math.round(activeWithNoVisit14 * avgPlanPrice * 0.5),
+        confidence: Math.min(86, 68 + activeWithNoVisit14 * 3),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Check Attendance',
+        sub: 'Member engagement signal',
+        action: () => navigateTo('Attendance'),
+      }),
+      // Lead conversion insight
+      (openLeads > 0 || convertedThisMonth > 0) && buildRecommendation({
+        id: 'INSIGHT_LEAD_CONVERSION',
+        title: convertedThisMonth > 0 ? `${convertedThisMonth} lead${convertedThisMonth === 1 ? '' : 's'} converted this month` : 'No leads converted yet this month',
+        reason: leadConversionRate > 0
+          ? `Your lead-to-member conversion rate is ${leadConversionRate}%. ${leadConversionRate >= 30 ? 'That\'s strong — keep your follow-up cadence tight.' : 'Industry leaders hit 25-35%. Speed up first replies and add trial visits to boost this.'}${lostLeads > 0 ? ` ${lostLeads} lead${lostLeads === 1 ? ' was' : 's were'} marked lost — review why.` : ''}`
+          : `${openLeads} lead${openLeads === 1 ? ' is' : 's are'} in the pipeline but none converted yet. Focus on trial bookings and quick follow-up replies to move them forward.`,
+        count: Math.max(1, convertedThisMonth),
+        impact: Math.round(Math.max(avgPlanPrice, convertedThisMonth * avgPlanPrice * 0.6)),
+        confidence: Math.min(84, 60 + Math.min(openLeads + convertedThisMonth, 10) * 3),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Open Leads',
+        sub: 'Sales pipeline analysis',
+        action: () => navigateTo('Leads'),
+      }),
+      // Plan pricing insight
+      plans.length >= 2 && members.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_PLAN_MIX',
+        title: topPlanEntry ? `${topPlanPct}% of members are on "${topPlanEntry[0]}"` : 'Review your plan distribution',
+        reason: topPlanPct >= 80 ? `Heavy concentration on one plan limits upsell potential. Consider promoting your other plans to diversify revenue.` : topPlanPct >= 50 ? `Your top plan holds ${topPlanPct}% share. Balanced distribution is good — look for upsell opportunities on premium tiers.` : `Your plan distribution is well balanced across ${plans.length} plans. This lowers risk from any single plan performing poorly.`,
+        count: members.length,
+        impact: Math.round(avgPlanPrice * 1.5),
+        confidence: Math.min(82, 58 + plans.length * 5),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'Review Plans',
+        sub: 'Plan mix analysis',
+        action: () => navigateTo('Plans'),
+      }),
+      // Check-in consistency insight
+      todayCheckins > 0 && active.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_CHECKIN_RATE',
+        title: `${todayCheckins} check-in${todayCheckins === 1 ? '' : 's'} today vs ${active.length} active`,
+        reason: `${Math.round((todayCheckins / active.length) * 100)}% of active members have checked in today. ${todayCheckins / active.length >= 0.15 ? 'Good floor traffic — keep the reception desk running.' : 'Traffic is light today. A WhatsApp nudge to inactive members can boost walk-ins.'}`,
+        count: todayCheckins,
+        impact: Math.round(avgPlanPrice * 0.8),
+        confidence: Math.min(80, 60 + todayCheckins * 2),
+        urgency: 'Today',
+        priority: 'P2',
+        cta: 'Open Check-In',
+        sub: 'Today\'s floor traffic',
+        action: () => { setCheckinQuery(''); setShowCheckinModal(true); },
+      }),
     ].filter(Boolean).sort(sortRecommendationCandidates);
+
+    // Smart tips: exclude anything already in action rows, prefer insights
+    const actionRowIds = new Set(mergedActionRows.map(r => r.id));
+    const smartTipPool = [
+      ...insightCandidates,
+      ...opportunityCandidates.filter(c => !actionRowIds.has(c.id)),
+      ...fillerActionRows.filter(c => !actionRowIds.has(c.id)),
+    ].filter(Boolean).sort(sortRecommendationCandidates);
+
     const recommendations = [];
     const seenRecommendationIds = new Set();
     smartTipPool.forEach((candidate) => {
@@ -1884,26 +2009,6 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         setShowAddModal(true);
       },
     };
-    const actionRequiredRows = actionCandidates.filter((item) => item.priority === 'P0' || item.priority === 'P1');
-    const mergedActionRows = [];
-    const seenActionIds = new Set();
-    const pushUniqueRows = (rows) => {
-      rows.forEach((row) => {
-        if (!row || mergedActionRows.length >= maxActionRows || seenActionIds.has(row.id)) {
-          return;
-        }
-        mergedActionRows.push(row);
-        seenActionIds.add(row.id);
-      });
-    };
-    pushUniqueRows(actionRequiredRows);
-    pushUniqueRows(setupFillCandidates);
-    pushUniqueRows(actionCandidates.filter((item) => item.priority !== 'P0' && item.priority !== 'P1'));
-    // Only show generic filler rows when onboarding setup is fully done
-    if (setupActionRows.length === 0) {
-      pushUniqueRows(fillerActionRows);
-    }
-    const urgentCount = actionRequiredRows.length;
     const activeCoveragePct = members.length > 0 ? Math.round((active.length / members.length) * 100) : 0;
     const nextWatchline = expiringIn7Days.length > 0
       ? `${expiringIn7Days.length} renewals are due within the next 7 days`

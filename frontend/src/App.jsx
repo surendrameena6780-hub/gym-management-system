@@ -1025,7 +1025,7 @@ function App() {
 
     const intervalId = setInterval(() => {
       fetchNotifications();
-    }, 90000);
+    }, 30000);
 
     return () => clearInterval(intervalId);
   }, [fetchNotifications, token, isHQ, isSuspended]);
@@ -1721,53 +1721,88 @@ function App() {
                 >
                   <Bell size={20} />
                   {unreadCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse" />
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-rose-500 rounded-full border-2 border-white text-[9px] font-black text-white px-1">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
                   )}
                 </button>
 
                 {showNotifications && (
                   <>
-                    <div className="fixed inset-0 z-[40]" onClick={() => setShowNotifications(false)} />
-                    <div className="absolute top-full right-0 mt-3 w-80 bg-white rounded-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.3)] border border-slate-100 overflow-hidden z-[50] animate-in slide-in-from-top-2 fade-in duration-200">
-                      <div className="p-4 border-b flex items-center justify-between bg-slate-50/50">
-                        <h3 className="font-bold text-slate-800 text-sm">Notifications</h3>
-                        {unreadCount > 0 && (
-                          <button onClick={handleMarkAllAsRead} className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 hover:text-indigo-700">
-                            Mark all read
+                    <div className="fixed inset-0 z-[40] bg-black/20 backdrop-blur-[2px]" onClick={() => setShowNotifications(false)} />
+                    <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-3 sm:w-96 bg-white rounded-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.3)] border border-slate-100 overflow-hidden z-[50] animate-in slide-in-from-top-2 fade-in duration-200 max-h-[min(80vh,520px)] flex flex-col">
+                      <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-indigo-50 to-slate-50 shrink-0">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-100 flex items-center justify-center">
+                            <Bell size={16} className="text-indigo-600" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-slate-800 text-sm">Notifications</h3>
+                            {unreadCount > 0 && <p className="text-[10px] text-indigo-600 font-bold">{unreadCount} unread</p>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {unreadCount > 0 && (
+                            <button onClick={handleMarkAllAsRead} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                              Mark all read
+                            </button>
+                          )}
+                          <button onClick={() => setShowNotifications(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors sm:hidden">
+                            <X size={16} />
                           </button>
-                        )}
+                        </div>
                       </div>
                       
-                      <div className="max-h-[350px] overflow-y-auto">
+                      <div className="overflow-y-auto flex-1 overscroll-contain">
                         {notifications.length === 0 ? (
-                          <div className="p-8 text-center text-sm text-slate-400 font-semibold">
-                            You're all caught up!
+                          <div className="p-10 text-center">
+                            <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-slate-50 flex items-center justify-center">
+                              <Bell size={24} className="text-slate-300" />
+                            </div>
+                            <p className="text-sm font-bold text-slate-500">All caught up!</p>
+                            <p className="text-xs text-slate-400 mt-1">No new notifications</p>
                           </div>
                         ) : (
-                          notifications.map(notif => (
-                            <div 
-                              key={notif.id} 
-                              onClick={() => { if(!notif.is_read) handleMarkAsRead(notif.id) }}
-                              className={`p-4 border-b border-slate-50 last:border-0 transition-colors cursor-pointer ${notif.is_read ? 'bg-white hover:bg-slate-50' : 'bg-indigo-50/40 hover:bg-indigo-50/70'}`}
-                            >
-                              <div className="flex gap-3">
-                                <div className="pt-1.5 shrink-0">
-                                   <div className={`w-2 h-2 rounded-full ${notif.is_read ? 'bg-slate-200' : 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]'}`} />
+                          <div className="divide-y divide-slate-100">
+                            {notifications.map(notif => {
+                              const now = Date.now();
+                              const created = new Date(notif.created_at).getTime();
+                              const diffMin = Math.max(0, Math.floor((now - created) / 60000));
+                              let timeLabel;
+                              if (diffMin < 1) timeLabel = 'Just now';
+                              else if (diffMin < 60) timeLabel = `${diffMin}m ago`;
+                              else if (diffMin < 1440) timeLabel = `${Math.floor(diffMin / 60)}h ago`;
+                              else if (diffMin < 2880) timeLabel = 'Yesterday';
+                              else timeLabel = new Date(notif.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+                              return (
+                                <div 
+                                  key={notif.id} 
+                                  onClick={() => { if(!notif.is_read) handleMarkAsRead(notif.id); }}
+                                  className={`px-4 py-3.5 transition-all cursor-pointer group ${notif.is_read ? 'bg-white hover:bg-slate-50/80' : 'bg-indigo-50/30 hover:bg-indigo-50/60'}`}
+                                >
+                                  <div className="flex gap-3 items-start">
+                                    <div className="mt-1 shrink-0">
+                                      <div className={`w-2.5 h-2.5 rounded-full transition-all ${notif.is_read ? 'bg-slate-200' : 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)] ring-4 ring-indigo-500/10'}`} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <h4 className={`text-[13px] leading-tight ${notif.is_read ? 'font-semibold text-slate-600' : 'font-black text-slate-900'}`}>
+                                          {notif.title}
+                                        </h4>
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider shrink-0 mt-0.5">
+                                          {timeLabel}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
+                                        {notif.message}
+                                      </p>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div>
-                                  <h4 className={`text-sm ${notif.is_read ? 'font-semibold text-slate-600' : 'font-black text-slate-900'}`}>
-                                    {notif.title}
-                                  </h4>
-                                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                                    {notif.message}
-                                  </p>
-                                  <span className="text-[10px] text-slate-400 mt-2 block font-bold uppercase tracking-wider">
-                                    {new Date(notif.created_at).toLocaleDateString()}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          ))
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
                     </div>

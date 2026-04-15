@@ -873,8 +873,13 @@ const handleMemberSendOtp = async (req, res) => {
             preview_notice: delivery.preview_notice,
         });
     } catch (err) {
-        console.error('MEMBER SEND OTP ERROR:', err.message);
-        return res.status(500).json({ message: 'Could not send login code right now. Please try again.' });
+        console.error('MEMBER SEND OTP ERROR:', err.message, err.stack);
+        const isSmtpError = /smtp|mail|transport|envelope|recipient|sender/i.test(err.message);
+        return res.status(500).json({
+            message: isSmtpError
+                ? 'Could not deliver the login code to your email. Please contact your gym for assistance.'
+                : 'Could not send login code right now. Please try again.',
+        });
     }
 };
 

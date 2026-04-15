@@ -798,6 +798,7 @@ const createCollectionPaymentLink = async ({
     const payload = {
         amount: amountPaise,
         currency: 'INR',
+        accept_partial: false,
         reference_id: referenceId,
         description,
         customer,

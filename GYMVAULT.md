@@ -736,7 +736,7 @@ This is probably the most unique part of the GymVault story. The entire applicat
 | Model | Provider | Period | What It Helped Build |
 |-------|----------|--------|---------------------|
 | **Claude Sonnet 3.5** | Anthropic | Early phase | Initial project structure, database schema design, basic CRUD routes |
-| **Claude Sonnet 3.7** | Anthropic | Mid phase | Complex feature development — attendance system, payment flows, class scheduling |
+| **GPT-5.4 | GPT | Best model to ever exist- used the most | Complex feature development — attendance system, payment flows, class scheduling |
 | **Claude Sonnet 4** | Anthropic | Late phase | Advanced integrations — Razorpay partner mode, MSG91 WhatsApp, multi-branch architecture |
 | **Claude Opus 4** | Anthropic | Final phase (current) | Production hardening — iOS PWA fixes, global state sync, branch runtime, performance optimization |
 
@@ -775,17 +775,16 @@ We estimate **thousands of AI interactions** over 3+ months — from simple "wri
 
 | Service | Plan | Monthly Cost |
 |---------|------|-------------|
-| **Vercel** | Free (Hobby) | $0 |
-| **Render** | Free / Starter | $0–$7 |
-| **Supabase** | Free tier | $0 |
-| **GitHub** | Free | $0 |
-| **Domain** (optional) | Custom domain | ~$10/year |
+| **Vercel** | Free (Hobby) | $7 for a domain annual |
+| **Render** | Free / Starter | $7 |
+| **Supabase** | Free tier | $25 |
+| **GitHub** | Free | $10 for copilot |
 | **MSG91** | Pay-per-use | Variable (₹0.15–₹0.50 per WhatsApp/SMS) |
 | **Razorpay** | 2% per transaction | Variable |
-| **Redis** (optional) | Upstash free / Render | $0–$5 |
+| 
 
-**Total minimum monthly cost: $0** (on free tiers)
-**Realistic production cost: $7–$25/month** (Render starter + MSG91 credits)
+**Total minimum monthly cost: $50
+**Realistic production upgrade cost: $100
 
 ### Development Costs
 
