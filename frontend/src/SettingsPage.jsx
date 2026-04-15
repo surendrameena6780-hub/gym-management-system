@@ -255,8 +255,47 @@ const getWhatsAppDeliveryActivity = (log) => {
   return { label: 'Created', time: log?.created_at };
 };
 
+const getWhatsAppDeliveryGuidance = (log) => {
+  const normalizedStatus = String(log?.current_status || 'QUEUED').trim().toUpperCase();
+  const statusDetail = String(log?.status_detail || '').trim();
+  if (statusDetail) {
+    return { tone: normalizedStatus === 'FAILED' ? 'danger' : 'neutral', text: statusDetail };
+  }
+
+  const createdAt = log?.created_at ? new Date(log.created_at).getTime() : null;
+  const ageMinutes = createdAt ? Math.max(0, Math.floor((Date.now() - createdAt) / 60000)) : 0;
+
+  if (normalizedStatus === 'READ') {
+    return { tone: 'success', text: 'WhatsApp confirmed the recipient opened the message.' };
+  }
+  if (normalizedStatus === 'DELIVERED') {
+    return { tone: 'success', text: 'WhatsApp confirmed the message reached the recipient device.' };
+  }
+  if (normalizedStatus === 'SENT') {
+    return { tone: 'neutral', text: 'The provider pushed the message onward and is waiting for the delivery receipt.' };
+  }
+  if (normalizedStatus === 'SUBMITTED') {
+    if (ageMinutes >= 10) {
+      return {
+        tone: 'warning',
+        text: 'MSG91 accepted the send, but WhatsApp still has not confirmed delivery. If other numbers are delivering, this is usually specific to the recipient account, device, or WhatsApp availability.',
+      };
+    }
+    return { tone: 'warning', text: 'MSG91 accepted the send, but delivery to the recipient is not confirmed yet.' };
+  }
+  if (normalizedStatus === 'FAILED') {
+    return { tone: 'danger', text: 'The provider reported a delivery failure or rejection for this message.' };
+  }
+  if (normalizedStatus === 'QUEUED') {
+    return { tone: 'neutral', text: 'The message is still queued and waiting to be submitted to the provider.' };
+  }
+
+  return { tone: 'neutral', text: 'Waiting for the latest delivery receipt from the provider.' };
+};
+
 const DELIVERY_LOG_FILTERS = [
   { value: 'ALL', label: 'All' },
+  { value: 'SUBMITTED', label: 'Submitted' },
   { value: 'DELIVERED', label: 'Delivered' },
   { value: 'FAILED', label: 'Failed' },
   { value: 'READ', label: 'Read' },
@@ -3978,7 +4017,7 @@ const loadRazorpayScript = () => {
                                 <p className="text-xs text-slate-500 mt-0.5">Delivery receipts stay here in Settings only. Nothing new appears on the main app screens.</p>
                               </div>
                               <button type="button" onClick={loadPlatform} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-black hover:bg-slate-50 transition-colors">
-                                <RefreshCw size={14} /> Refresh Status
+                                <RefreshCw size={14} /> Refresh Logs
                               </button>
                             </div>
 
@@ -4014,7 +4053,7 @@ const loadRazorpayScript = () => {
                                     <p className="text-2xl font-black text-slate-900 mt-1">{platformData.whatsapp_delivery?.summary?.total_count || 0}</p>
                                   </div>
                                   <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">In Flight</p>
+                                    <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] leading-tight text-slate-400 break-words">Awaiting Receipt</p>
                                     <p className="text-2xl font-black text-indigo-600 mt-1">{platformData.whatsapp_delivery?.summary?.in_flight_count || 0}</p>
                                   </div>
                                   <div className="min-w-0 min-h-[92px] rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -4046,6 +4085,12 @@ const loadRazorpayScript = () => {
                                   ))}
                                 </div>
 
+                                <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                  <p className="text-[11px] font-semibold text-amber-800 leading-relaxed">
+                                    <span className="font-black">Submitted</span> means MSG91 accepted the send. It does <span className="font-black">not</span> mean the recipient received it yet. This screen only refreshes the latest receipts already saved by GymVault.
+                                  </p>
+                                </div>
+
                                 <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
                                 {visibleDeliveryLogs.length === 0 ? (
                                   <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm font-medium">{deliveryLogFilter === 'ALL' ? 'No WhatsApp delivery logs yet.' : `No ${activeDeliveryFilterLabel.toLowerCase()} logs yet.`}</div>
@@ -4053,6 +4098,7 @@ const loadRazorpayScript = () => {
                                   visibleDeliveryLogs.map((log) => {
                                     const statusMeta = getWhatsAppDeliveryMeta(log.current_status);
                                     const activity = getWhatsAppDeliveryActivity(log);
+                                    const guidance = getWhatsAppDeliveryGuidance(log);
                                     return (
                                       <div key={log.id} className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
                                         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -4063,9 +4109,7 @@ const loadRazorpayScript = () => {
                                             </div>
                                             <p className="text-xs font-semibold text-slate-500 mt-1">{log.recipient_number || 'No phone'} • {log.template_title || log.template_key || 'Template not recorded'}</p>
                                             <p className="text-xs font-semibold text-slate-500 mt-2">{activity.label}: {activity.time ? new Date(activity.time).toLocaleString() : 'Waiting for update'}</p>
-                                            {log.status_detail && (
-                                              <p className="text-[11px] font-semibold text-rose-600 leading-relaxed mt-2">{log.status_detail}</p>
-                                            )}
+                                            <p className={`text-[11px] font-semibold leading-relaxed mt-2 ${guidance.tone === 'danger' ? 'text-rose-600' : guidance.tone === 'warning' ? 'text-amber-700' : guidance.tone === 'success' ? 'text-emerald-700' : 'text-slate-500'}`}>{guidance.text}</p>
                                           </div>
                                           <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
                                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${statusMeta.pill}`}>{statusMeta.label}</span>
