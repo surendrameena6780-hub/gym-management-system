@@ -33,6 +33,7 @@ const {
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
+const { getRecentMetaSuppressionRecipients } = require('../utils/whatsappDelivery');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -546,6 +547,21 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
 
         if (result.rows.length === 0) return res.status(404).json({ error: "Member not found" });
         const [member] = appendMemberBranchMeta(result.rows, branchScope.branchDirectory);
+
+        const recentMetaSuppressionRecipients = await getRecentMetaSuppressionRecipients(gym_id, member.phone);
+        const recentMetaSuppression = Array.from(recentMetaSuppressionRecipients.values())[0] || null;
+        member.whatsapp_meta_suppression = recentMetaSuppression
+            ? {
+                active: true,
+                last_failed_at: recentMetaSuppression.lastFailedAt instanceof Date
+                    ? recentMetaSuppression.lastFailedAt.toISOString()
+                    : recentMetaSuppression.lastFailedAt || null,
+                cooldown_hours: recentMetaSuppression.cooldownHours,
+                status_detail: recentMetaSuppression.statusDetail || '',
+                prompt_message: 'This member recently hit WhatsApp Meta 131049. Use the member phone to open the gym chat first, then retry the reminder later.',
+              }
+            : { active: false };
+
         res.json(member);
    } catch (err) {
         console.error("GET MEMBER ERROR:", err.message);

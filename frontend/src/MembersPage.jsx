@@ -9,7 +9,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
-import { buildWhatsAppConversationUrl, openWhatsAppConversation } from './utils/externalNavigation';
+import { buildWhatsAppConversationUrl } from './utils/externalNavigation';
 import PageLoader from './PageLoader';
 import { reportClientError } from './utils/clientErrorReporter';
 import PaginationControls from './components/PaginationControls';
@@ -270,7 +270,30 @@ const hasPermission = (user, permission) => {
 const normalizeMemberRecord = (member) => ({
   ...member,
   profile_pic: normalizeProfileImageUrl(member?.profile_pic),
+  whatsapp_meta_suppression: member?.whatsapp_meta_suppression && typeof member.whatsapp_meta_suppression === 'object'
+    ? member.whatsapp_meta_suppression
+    : { active: false },
 });
+
+const getWhatsAppStarterAckKey = (memberId) => `gymvault:whatsapp-starter-ack:${memberId}`;
+
+const readWhatsAppStarterAckMarker = (memberId) => {
+  if (!memberId || typeof window === 'undefined') return '';
+  try {
+    return String(window.localStorage.getItem(getWhatsAppStarterAckKey(memberId)) || '');
+  } catch (_err) {
+    return '';
+  }
+};
+
+const writeWhatsAppStarterAckMarker = (memberId, marker) => {
+  if (!memberId || !marker || typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(getWhatsAppStarterAckKey(memberId), String(marker));
+  } catch (_err) {
+    // Ignore storage failures on restricted devices.
+  }
+};
 
 const unwrapMembersApiData = (payload) => {
   if (payload && typeof payload === 'object' && 'data' in payload) {
@@ -397,6 +420,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [reminderSending, setReminderSending] = useState(false);
   const [gymWhatsAppStarter, setGymWhatsAppStarter] = useState({ number: '', displayName: '', ready: false });
   const [gymWhatsAppStarterLoading, setGymWhatsAppStarterLoading] = useState(false);
+  const [whatsappStarterAckMarker, setWhatsAppStarterAckMarker] = useState('');
 
   const isExistingMemberOnboarding = String(addFormData.onboarding_mode || 'FRESH').toUpperCase() === 'EXISTING';
 
@@ -739,8 +763,6 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   }, []);
 
   useEffect(() => {
-    let isCancelled = false;
-
     if (showDetailsModal && selectedMember?.id) {
       const currentMember = selectedMemberRef.current;
       setDrawerTab('profile');
@@ -750,39 +772,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       fetchMemberDocs(selectedMember.id);
       fetchMemberWaivers(selectedMember.id);
       loadMemberDetails(selectedMember.id).catch(() => {});
-
-      if (token) {
-        setGymWhatsAppStarterLoading(true);
-        axios.get('/api/settings/integrations', {
-          headers: { 'x-auth-token': token },
-        })
-          .then((response) => {
-            if (isCancelled) return;
-            const payload = unwrapMembersApiData(response.data);
-            const number = String(payload.whatsapp_number || '').trim();
-            setGymWhatsAppStarter({
-              number,
-              displayName: String(payload.whatsapp_display_name || '').trim(),
-              ready: String(payload.whatsapp_status || '').trim().toUpperCase() === 'CONNECTED' && Boolean(number),
-            });
-          })
-          .catch(() => {
-            if (!isCancelled) {
-              setGymWhatsAppStarter({ number: '', displayName: '', ready: false });
-            }
-          })
-          .finally(() => {
-            if (!isCancelled) {
-              setGymWhatsAppStarterLoading(false);
-            }
-          });
-      }
     }
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal, token]);
+  }, [fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal]);
 
   const openAddMemberModal = useCallback(() => {
     if (!canWriteMembers) {
@@ -1620,10 +1611,67 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return templates;
   }, [reminderTemplates, token]);
 
+  const activeWhatsAppStarterSuppression = useMemo(() => {
+    const suppression = selectedMember?.whatsapp_meta_suppression;
+    return suppression && suppression.active ? suppression : null;
+  }, [selectedMember?.whatsapp_meta_suppression]);
+
+  const activeWhatsAppStarterMarker = useMemo(() => String(activeWhatsAppStarterSuppression?.last_failed_at || ''), [activeWhatsAppStarterSuppression?.last_failed_at]);
+
+  const showWhatsAppStarterCard = Boolean(activeWhatsAppStarterSuppression && activeWhatsAppStarterMarker && whatsappStarterAckMarker !== activeWhatsAppStarterMarker);
+
+  useEffect(() => {
+    if (!selectedMember?.id || !activeWhatsAppStarterMarker) {
+      setWhatsAppStarterAckMarker('');
+      return;
+    }
+
+    setWhatsAppStarterAckMarker(readWhatsAppStarterAckMarker(selectedMember.id));
+  }, [activeWhatsAppStarterMarker, selectedMember?.id]);
+
+  useEffect(() => {
+    if (!showWhatsAppStarterCard || !token) {
+      setGymWhatsAppStarter({ number: '', displayName: '', ready: false });
+      setGymWhatsAppStarterLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setGymWhatsAppStarterLoading(true);
+
+    axios.get('/api/settings/integrations', {
+      headers: { 'x-auth-token': token },
+    })
+      .then((response) => {
+        if (isCancelled) return;
+        const payload = unwrapMembersApiData(response.data);
+        const number = String(payload.whatsapp_number || '').trim();
+        setGymWhatsAppStarter({
+          number,
+          displayName: String(payload.whatsapp_display_name || '').trim(),
+          ready: String(payload.whatsapp_status || '').trim().toUpperCase() === 'CONNECTED' && Boolean(number),
+        });
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setGymWhatsAppStarter({ number: '', displayName: '', ready: false });
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setGymWhatsAppStarterLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [showWhatsAppStarterCard, token]);
+
   const memberWhatsAppStarterMessage = useMemo(() => {
     const fullName = String(selectedMember?.full_name || 'Member').trim() || 'Member';
-    return `Hi, this is ${fullName}. Please keep this WhatsApp thread active for my membership updates and renewal support.`;
-  }, [selectedMember?.full_name]);
+    return `Hi, this is ${fullName}. I am messaging from my phone so ${gymWhatsAppStarter.displayName || 'the gym'} can send my membership updates here.`;
+  }, [gymWhatsAppStarter.displayName, selectedMember?.full_name]);
 
   const memberWhatsAppStarterUrl = useMemo(() => {
     if (!gymWhatsAppStarter.ready) return '';
@@ -1633,21 +1681,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     });
   }, [gymWhatsAppStarter.number, gymWhatsAppStarter.ready, memberWhatsAppStarterMessage]);
 
-  const handleOpenMemberWhatsAppStarter = useCallback(() => {
-    if (!gymWhatsAppStarter.ready) {
-      toast?.('Connect the gym business WhatsApp number in Settings first.', 'warning');
-      return;
-    }
-
-    const launched = openWhatsAppConversation({
-      phone: gymWhatsAppStarter.number,
-      message: memberWhatsAppStarterMessage,
-    });
-
-    if (!launched) {
-      toast?.('Unable to open WhatsApp on this device right now.', 'error');
-    }
-  }, [gymWhatsAppStarter.number, gymWhatsAppStarter.ready, memberWhatsAppStarterMessage, toast]);
+  const acknowledgeWhatsAppStarterPrompt = useCallback(() => {
+    const memberId = Number(selectedMember?.id || 0);
+    if (!memberId || !activeWhatsAppStarterMarker) return;
+    writeWhatsAppStarterAckMarker(memberId, activeWhatsAppStarterMarker);
+    setWhatsAppStarterAckMarker(activeWhatsAppStarterMarker);
+  }, [activeWhatsAppStarterMarker, selectedMember?.id]);
 
   const handleCopyMemberWhatsAppStarterLink = useCallback(async () => {
     if (!memberWhatsAppStarterUrl) {
@@ -1657,12 +1696,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
     const copied = await copyCollectionText(memberWhatsAppStarterUrl);
     if (copied) {
-      toast?.('WhatsApp starter link copied.', 'success');
+      acknowledgeWhatsAppStarterPrompt();
+      toast?.('Member WhatsApp link copied. Open it from the member phone or let the member scan the QR once.', 'success');
       return;
     }
 
     toast?.('Copy failed on this device. Long-press and copy it manually.', 'warning');
-  }, [memberWhatsAppStarterUrl, toast]);
+  }, [acknowledgeWhatsAppStarterPrompt, memberWhatsAppStarterUrl, toast]);
 
   useEffect(() => {
     if (!token) return;
@@ -2287,49 +2327,52 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               </div>
             </div>
 
-            <div className={`rounded-2xl border p-3.5 ${gymWhatsAppStarter.ready ? 'border-emerald-100 bg-emerald-50/70' : 'border-slate-200 bg-slate-50'}`}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600/80">WhatsApp Starter</p>
-                  <p className="mt-1 text-sm font-black text-slate-900">Start the member thread once from the customer phone</p>
-                  <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
-                    This opens a real WhatsApp conversation before future reminders. It is the cleanest way to reduce Meta 131049 suppression without using fallback channels.
-                  </p>
-                  {gymWhatsAppStarterLoading ? (
-                    <p className="mt-2 text-[11px] font-bold text-slate-500">Loading your connected gym WhatsApp...</p>
-                  ) : gymWhatsAppStarter.ready ? (
-                    <p className="mt-2 text-[11px] font-bold text-emerald-700">
-                      Opens {gymWhatsAppStarter.displayName || 'your gym WhatsApp'} with a professional onboarding message from this member.
+            {showWhatsAppStarterCard ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-slate-900 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">Recent WhatsApp Block</p>
+                    <p className="mt-1 text-sm font-black text-slate-900">This member recently hit Meta 131049</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-700">
+                      Use this only from the member phone. Let the member scan the QR or open the copied link once. That opens a chat to your gym WhatsApp with a ready hello from the member.
                     </p>
-                  ) : (
-                    <p className="mt-2 text-[11px] font-bold text-amber-700">Connect the gym business WhatsApp number in Settings to use this thread starter.</p>
-                  )}
-                </div>
-                {memberWhatsAppStarterUrl ? (
-                  <div className="mx-auto rounded-[20px] border border-emerald-100 bg-white p-2.5 shadow-sm sm:mx-0">
-                    <QRCodeCanvas value={memberWhatsAppStarterUrl} size={94} includeMargin level="M" bgColor="#ffffff" fgColor="#0f172a" />
+                    <p className="mt-2 text-[11px] font-bold text-slate-800">
+                      {activeWhatsAppStarterSuppression?.prompt_message || 'After the member sends that first message, retry the reminder later for this member.'}
+                    </p>
+                    {gymWhatsAppStarterLoading ? (
+                      <p className="mt-2 text-[11px] font-bold text-slate-600">Loading your connected gym WhatsApp...</p>
+                    ) : gymWhatsAppStarter.ready ? (
+                      <p className="mt-2 text-[11px] font-bold text-emerald-700">Member chat target: {gymWhatsAppStarter.displayName || 'your gym WhatsApp'}.</p>
+                    ) : (
+                      <p className="mt-2 text-[11px] font-bold text-rose-700">Connect the gym business WhatsApp number in Settings first.</p>
+                    )}
                   </div>
-                ) : null}
+                  {memberWhatsAppStarterUrl ? (
+                    <div className="mx-auto rounded-[20px] border border-slate-300 bg-white p-2.5 shadow-sm sm:mx-0">
+                      <QRCodeCanvas value={memberWhatsAppStarterUrl} size={94} includeMargin level="M" bgColor="#ffffff" fgColor="#111827" />
+                      <p className="mt-2 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Scan on member phone</p>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyMemberWhatsAppStarterLink}
+                    disabled={gymWhatsAppStarterLoading || !memberWhatsAppStarterUrl}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-white transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Copy size={14} /> Copy Member Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={acknowledgeWhatsAppStarterPrompt}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-slate-700 transition-all hover:bg-slate-100"
+                  >
+                    <X size={14} /> Hide For Now
+                  </button>
+                </div>
               </div>
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleOpenMemberWhatsAppStarter}
-                  disabled={gymWhatsAppStarterLoading || !gymWhatsAppStarter.ready}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-white transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <MessageSquare size={14} fill="currentColor" /> Start Thread
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyMemberWhatsAppStarterLink}
-                  disabled={gymWhatsAppStarterLoading || !memberWhatsAppStarterUrl}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-slate-700 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Copy size={14} /> Copy Invite Link
-                </button>
-              </div>
-            </div>
+            ) : null}
 
             {/* stats row */}
             <div className="grid grid-cols-4 gap-2">
