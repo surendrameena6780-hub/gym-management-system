@@ -255,11 +255,35 @@ const getWhatsAppDeliveryActivity = (log) => {
   return { label: 'Created', time: log?.created_at };
 };
 
+const extractWhatsAppFailureCode = (value) => {
+  const match = String(value || '').match(/\b(131049|131050|131026)\b/);
+  return match ? match[1] : '';
+};
+
 const getWhatsAppDeliveryGuidance = (log) => {
   const normalizedStatus = String(log?.current_status || 'QUEUED').trim().toUpperCase();
   const statusDetail = String(log?.status_detail || '').trim();
   const hasProviderReceipt = Boolean(log?.msg91_request_id || log?.msg91_message_uuid);
+  const failureCode = extractWhatsAppFailureCode(statusDetail);
   if (statusDetail) {
+    if (failureCode === '131049') {
+      return {
+        tone: 'warning',
+        text: 'Meta suppressed this recipient for healthy ecosystem engagement. This is not a bad phone number. Wait 24 hours, turn on Retry Failed Message in MSG91 Numbers, and ask the member to message your gym WhatsApp first before retrying.',
+      };
+    }
+    if (failureCode === '131050') {
+      return {
+        tone: 'warning',
+        text: 'The recipient has opted out of this business on WhatsApp. They need to re-engage with your business before template delivery will work again.',
+      };
+    }
+    if (failureCode === '131026') {
+      return {
+        tone: 'warning',
+        text: 'WhatsApp says this recipient account is currently not reachable. Verify the number on WhatsApp and retry later.',
+      };
+    }
     return { tone: normalizedStatus === 'FAILED' ? 'danger' : 'neutral', text: statusDetail };
   }
 
@@ -4100,7 +4124,7 @@ const loadRazorpayScript = () => {
                                     <span className="font-black">Submitted</span> means MSG91 accepted the send. It does <span className="font-black">not</span> mean the recipient received it yet. This screen only refreshes the latest receipts already saved by GymVault.
                                   </p>
                                   <p className="text-[11px] font-semibold text-amber-800 leading-relaxed">
-                                    If a number stays stuck, open <span className="font-black">MSG91 &gt; WhatsApp &gt; Logs</span>, change <span className="font-black">Billable Logs</span> to <span className="font-black">All</span>, then search by customer number or request ID. If the live list still shows nothing, use <span className="font-black">WhatsApp report export</span> with Request ID and Failure Reason fields. Common Meta outcomes: <span className="font-black">131049</span> means WhatsApp suppressed a marketing message, so wait 24 hours and turn on <span className="font-black">Retry Failed Message</span> in MSG91 Numbers. <span className="font-black">131050</span> means the user stopped marketing delivery. <span className="font-black">131026</span> means the recipient account is not currently reachable on WhatsApp.
+                                    If a number stays stuck, open <span className="font-black">MSG91 &gt; WhatsApp &gt; Logs</span>, change <span className="font-black">Billable Logs</span> to <span className="font-black">All</span>, then search by customer number or request ID. If the live list still shows nothing, use <span className="font-black">WhatsApp report export</span> with Request ID and Failure Reason fields. Common Meta outcomes: <span className="font-black">131049</span> means Meta suppressed that recipient for healthy ecosystem engagement, so wait 24 hours, turn on <span className="font-black">Retry Failed Message</span> in MSG91 Numbers, and have the member message your gym first before retrying. <span className="font-black">131050</span> means the user stopped delivery from your business. <span className="font-black">131026</span> means the recipient account is not currently reachable on WhatsApp.
                                   </p>
                                 </div>
 
