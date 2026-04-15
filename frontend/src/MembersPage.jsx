@@ -267,13 +267,20 @@ const hasPermission = (user, permission) => {
   return Boolean(scope && permissions.includes(`${scope}:*`));
 };
 
-const normalizeMemberRecord = (member) => ({
-  ...member,
-  profile_pic: normalizeProfileImageUrl(member?.profile_pic),
-  whatsapp_meta_suppression: member?.whatsapp_meta_suppression && typeof member.whatsapp_meta_suppression === 'object'
-    ? member.whatsapp_meta_suppression
-    : { active: false },
-});
+const normalizeMemberRecord = (member) => {
+  const normalized = {
+    ...member,
+    profile_pic: normalizeProfileImageUrl(member?.profile_pic),
+  };
+
+  if (Object.prototype.hasOwnProperty.call(member || {}, 'whatsapp_meta_suppression')) {
+    normalized.whatsapp_meta_suppression = member?.whatsapp_meta_suppression && typeof member.whatsapp_meta_suppression === 'object'
+      ? member.whatsapp_meta_suppression
+      : { active: false };
+  }
+
+  return normalized;
+};
 
 const getWhatsAppStarterAckKey = (memberId) => `gymvault:whatsapp-starter-ack:${memberId}`;
 
@@ -466,10 +473,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const fetchMemberSummaryRef = useRef(null);
   const checkActivationRazorpayStatusRef = useRef(null);
   const selectedMemberRef = useRef(selectedMember);
+  const showDetailsModalRef = useRef(showDetailsModal);
   const hasLoadedMembersRef = useRef(false);
   const membersRequestIdRef = useRef(0);
   const memberSummaryRequestIdRef = useRef(0);
   const resumeRefreshAtRef = useRef(0);
+  const memberSuppressionRefreshTimersRef = useRef([]);
   const activationResumeStateRef = useRef({
     showActivateModal: false,
     activationOnlineMode: 'RAZORPAY',
@@ -484,6 +493,10 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   useEffect(() => {
     selectedMemberRef.current = selectedMember;
   }, [selectedMember]);
+
+  useEffect(() => {
+    showDetailsModalRef.current = showDetailsModal;
+  }, [showDetailsModal]);
 
   const [addFile, setAddFile] = useState(null);
   const [editFile, setEditFile] = useState(null);
@@ -756,11 +769,49 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   // Load lifecycle data when drawer opens
   useEffect(() => {
     return () => {
+      memberSuppressionRefreshTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      memberSuppressionRefreshTimersRef.current = [];
       if (memberActionTimerRef.current) {
         clearTimeout(memberActionTimerRef.current);
       }
     };
   }, []);
+
+  const clearSelectedMemberSuppressionRefreshTimers = useCallback(() => {
+    memberSuppressionRefreshTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    memberSuppressionRefreshTimersRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    if (!showDetailsModal) {
+      clearSelectedMemberSuppressionRefreshTimers();
+    }
+  }, [clearSelectedMemberSuppressionRefreshTimers, showDetailsModal]);
+
+  const refreshSelectedMemberAfterReminderSend = useCallback((memberId) => {
+    const normalizedMemberId = Number(memberId || 0);
+    if (!normalizedMemberId) {
+      return;
+    }
+
+    clearSelectedMemberSuppressionRefreshTimers();
+
+    const runRefresh = () => {
+      if (!showDetailsModalRef.current || Number(selectedMemberRef.current?.id || 0) !== normalizedMemberId) {
+        return;
+      }
+
+      loadMemberDetails(normalizedMemberId).catch(() => {});
+      fetchMembersRef.current?.({ background: true });
+    };
+
+    runRefresh();
+
+    [2500, 8000, 20000].forEach((delayMs) => {
+      const timerId = window.setTimeout(runRefresh, delayMs);
+      memberSuppressionRefreshTimersRef.current.push(timerId);
+    });
+  }, [clearSelectedMemberSuppressionRefreshTimers, loadMemberDetails]);
 
   useEffect(() => {
     if (showDetailsModal && selectedMember?.id) {
@@ -1819,14 +1870,18 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
     try {
       setReminderSending(true);
+      const reminderTargetMemberId = Number(reminderTargetMember.id || 0);
       const payload = await sendWhatsAppReminders({
         token,
-        memberIds: [reminderTargetMember.id],
+        memberIds: [reminderTargetMemberId],
         templateKey: selectedReminderTemplateKey,
       });
       const summary = summarizeReminderResult(payload, 'Reminder');
       toast?.(summary.message, summary.tone);
       closeReminderModal();
+      if (reminderTargetMemberId && Number(selectedMemberRef.current?.id || 0) === reminderTargetMemberId) {
+        refreshSelectedMemberAfterReminderSend(reminderTargetMemberId);
+      }
     } catch (err) {
       toast?.(getApiErrorMessage(err, 'Failed to queue WhatsApp reminder.'), 'error');
     } finally {
@@ -2332,7 +2387,11 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-700">Recent WhatsApp Block</p>
-                    <p className="mt-1 text-sm font-black text-slate-900">This member recently hit Meta 131049</p>
+                    <p className="mt-1 text-sm font-black text-slate-900">
+                      {String(activeWhatsAppStarterSuppression?.failure_code || '').trim() === '131049'
+                        ? 'This member recently hit Meta 131049'
+                        : 'This member recently hit a WhatsApp Meta delivery block'}
+                    </p>
                     <p className="mt-1 text-xs font-semibold leading-5 text-slate-700">
                       Use this only from the member phone. Let the member scan the QR or open the copied link once. That opens a chat to your gym WhatsApp with a ready hello from the member.
                     </p>
