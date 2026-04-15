@@ -33,7 +33,7 @@ const {
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
-const { getRecentMetaSuppressionRecipients } = require('../utils/whatsappDelivery');
+const { getRecentFailedDeliveryForMember } = require('../utils/whatsappDelivery');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -548,19 +548,20 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
         if (result.rows.length === 0) return res.status(404).json({ error: "Member not found" });
         const [member] = appendMemberBranchMeta(result.rows, branchScope.branchDirectory);
 
-        const recentMetaSuppressionRecipients = await getRecentMetaSuppressionRecipients(gym_id, member.phone);
-        const recentMetaSuppression = Array.from(recentMetaSuppressionRecipients.values())[0] || null;
-        member.whatsapp_meta_suppression = recentMetaSuppression
+        const recentWhatsAppFailure = await getRecentFailedDeliveryForMember(gym_id, member.id);
+        member.whatsapp_meta_suppression = recentWhatsAppFailure
             ? {
                 active: true,
-                                failure_code: recentMetaSuppression.failureCode || 'UNKNOWN_META',
-                                provider_status: recentMetaSuppression.providerStatus || '',
-                last_failed_at: recentMetaSuppression.lastFailedAt instanceof Date
-                    ? recentMetaSuppression.lastFailedAt.toISOString()
-                    : recentMetaSuppression.lastFailedAt || null,
-                cooldown_hours: recentMetaSuppression.cooldownHours,
-                status_detail: recentMetaSuppression.statusDetail || '',
-                                prompt_message: 'This member recently hit a WhatsApp Meta delivery block. Use the member phone to open the gym chat first, then retry the reminder later.',
+                failure_code: recentWhatsAppFailure.failureCode || 'UNKNOWN_META',
+                provider_status: recentWhatsAppFailure.providerStatus || '',
+                last_failed_at: recentWhatsAppFailure.failedAt instanceof Date
+                    ? recentWhatsAppFailure.failedAt.toISOString()
+                    : recentWhatsAppFailure.failedAt || null,
+                cooldown_hours: 24,
+                status_detail: recentWhatsAppFailure.statusDetail || '',
+                prompt_message: recentWhatsAppFailure.isMetaFailure
+                    ? 'This member recently hit a WhatsApp Meta delivery block. Use the member phone to open the gym chat first, then retry the reminder later.'
+                    : 'This member recently hit a WhatsApp delivery failure. If MSG91 later shows Failed By Meta or code 131049, ask the member to message your gym first before retrying.',
               }
             : { active: false };
 
