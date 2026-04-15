@@ -1588,7 +1588,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     if (!token) return;
 
     const handleReminderTemplateInvalidation = (event) => {
-      if (event?.detail?.scope && event.detail.scope !== 'messaging-templates') {
+      if (event?.detail?.scope !== 'messaging-templates') {
         return;
       }
 
@@ -1629,6 +1629,22 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       setReminderLoadingKey('');
     }
   };
+
+  useEffect(() => {
+    if (!showReminderModal || !reminderTargetMember?.id || reminderTemplates.length === 0) {
+      return;
+    }
+
+    const hasSelectedTemplate = reminderTemplates.some((template) => template.template_key === selectedReminderTemplateKey);
+    if (hasSelectedTemplate) {
+      return;
+    }
+
+    const fallbackTemplateKey = resolveReminderDefaultTemplateKey(reminderTargetMember, reminderTemplates);
+    if (fallbackTemplateKey) {
+      setSelectedReminderTemplateKey(fallbackTemplateKey);
+    }
+  }, [reminderTargetMember, reminderTemplates, selectedReminderTemplateKey, showReminderModal]);
 
   useEffect(() => {
     if (!showReminderModal || !reminderTargetMember?.id || !selectedReminderTemplateKey) {
