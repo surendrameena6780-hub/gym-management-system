@@ -20,6 +20,7 @@ const {
     serializeBillingConfig,
 } = require('../utils/platformSettings');
 const { getRuntimeTelemetrySnapshot, listRuntimeEvents } = require('../utils/runtimeTelemetry');
+const { getRecentMetaFailureLogs } = require('../utils/whatsappDelivery');
 
 // Configure VAPID (shared config)
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -35,6 +36,30 @@ const superadminEnabled = masterPassword.length >= 8;
 const disabledMessage = 'Superadmin is disabled. Set MASTER_PASSWORD (or SUPERADMIN_PASSWORD) with at least 8 characters.';
 const REPORTS_LIGHT_CACHE_TTL_MS = Math.max(10000, parseInt(process.env.SUPERADMIN_REPORTS_LIGHT_CACHE_TTL_MS || '60000', 10) || 60000);
 let reportsLightCache = { payload: null, expiresAt: 0 };
+const SUPERADMIN_META_FAILURE_WINDOW_HOURS = 24 * 7;
+
+const buildGymMetaFailureSummary = (entries = [], windowHours = SUPERADMIN_META_FAILURE_WINDOW_HOURS) => {
+    const codeCounts = new Map();
+    const affectedRecipients = new Set();
+
+    entries.forEach((entry) => {
+        const code = String(entry?.failureCode || 'UNKNOWN_META').trim() || 'UNKNOWN_META';
+        codeCounts.set(code, (codeCounts.get(code) || 0) + 1);
+        if (entry?.recipientNumber) {
+            affectedRecipients.add(entry.recipientNumber);
+        }
+    });
+
+    return {
+        window_hours: windowHours,
+        total_failures: entries.length,
+        unique_members: affectedRecipients.size,
+        code_breakdown: Array.from(codeCounts.entries())
+            .map(([code, count]) => ({ code, count }))
+            .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code)),
+        recent: entries.slice(0, 25),
+    };
+};
 
 const normalizeIp = (value) => {
     const raw = String(value || '').trim();
@@ -555,11 +580,12 @@ router.get('/gyms/:id', superAuth, async (req, res) => {
         }
 
         const gymRow = gym.rows[0];
-        const [billingConfig, gymBilling, usageSnapshot, branchUsageBreakdown] = await Promise.all([
+        const [billingConfig, gymBilling, usageSnapshot, branchUsageBreakdown, recentMetaFailures] = await Promise.all([
             getBillingConfig(),
             getGymBillingSnapshot(pool, gymId),
             getGymUsageSnapshot(pool, gymId),
             getGymBranchUsageBreakdown(pool, gymId, gymRow.branch_directory, Number(gymRow.branches_count || 1)),
+            getRecentMetaFailureLogs(gymId, { hours: SUPERADMIN_META_FAILURE_WINDOW_HOURS, limit: 200 }),
         ]);
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymRow.plan, gymBilling || gymRow);
 
@@ -569,6 +595,7 @@ router.get('/gyms/:id', superAuth, async (req, res) => {
             total_staff: Number(usageSnapshot?.staff || 0),
             effective_limits: effectiveLimits,
             branch_usage_breakdown: branchUsageBreakdown,
+            whatsapp_meta_failures: buildGymMetaFailureSummary(recentMetaFailures, SUPERADMIN_META_FAILURE_WINDOW_HOURS),
         });
     } catch (err) {
         console.error('SUPERADMIN GYM DETAIL ERROR:', err.message);

@@ -250,6 +250,20 @@ const describeEffectiveLimitMode = (effectiveLimits = {}) => {
   return `Live limits now follow the exact HQ-configured totals for this plan. This setup currently allows ${memberLimit} members, ${staffLimit} staff users, and ${branchLimit} branches before add-ons, and those totals do not auto-scale when a gym changes its active branch count.`;
 };
 
+const formatSuperAdminDateTime = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('en-GB');
+};
+
+const formatMetaFailureCodeLabel = (code) => {
+  const normalized = String(code || '').trim().toUpperCase();
+  if (!normalized || normalized === 'UNKNOWN_META') return 'Meta failure (code unavailable)';
+  if (normalized === '131049') return '131049 Healthy ecosystem block';
+  if (normalized === '131050') return '131050 Recipient is not eligible';
+  return normalized;
+};
+
 function SuperAdminDashboard({ token, onLogout }) {
   const headers = useMemo(() => ({ headers: { 'x-super-token': token } }), [token]);
 
@@ -2445,6 +2459,63 @@ function SuperAdminDashboard({ token, onLogout }) {
                   {(!selectedGym.branch_usage_breakdown || selectedGym.branch_usage_breakdown.length === 0) && (
                     <p className="text-sm text-slate-500">No branch usage found.</p>
                   )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest font-black text-slate-400">WhatsApp Meta Failures</p>
+                    <p className="text-sm text-slate-500 mt-1">Recent recipient-level failures where Meta blocked or rejected message delivery for this gym.</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-right">
+                    <p className="text-[11px] font-black uppercase tracking-widest text-amber-200">Window</p>
+                    <p className="text-sm font-black text-white">Last {Math.max(1, Math.round(Number(selectedGym.whatsapp_meta_failures?.window_hours || 168) / 24))} days</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-slate-500">Failed Sends</p>
+                    <p className="font-black text-white">{Number(selectedGym.whatsapp_meta_failures?.total_failures || 0).toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-slate-500">Affected Members</p>
+                    <p className="font-black text-white">{Number(selectedGym.whatsapp_meta_failures?.unique_members || 0).toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-slate-500">Latest Failure</p>
+                    <p className="font-black text-white">{formatSuperAdminDateTime(selectedGym.whatsapp_meta_failures?.recent?.[0]?.failedAt)}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {(selectedGym.whatsapp_meta_failures?.code_breakdown || []).map((item) => (
+                    <span key={item.code} className="px-2.5 py-1 rounded-full border border-amber-400/20 bg-amber-500/10 text-amber-100 text-[11px] font-black uppercase tracking-wide">
+                      {formatMetaFailureCodeLabel(item.code)}: {Number(item.count || 0).toLocaleString()}
+                    </span>
+                  ))}
+                  {(!selectedGym.whatsapp_meta_failures?.code_breakdown || selectedGym.whatsapp_meta_failures.code_breakdown.length === 0) && (
+                    <span className="text-xs font-bold text-slate-500">No Meta-related WhatsApp failures recorded in this window.</span>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  {(selectedGym.whatsapp_meta_failures?.recent || []).map((entry) => (
+                    <div key={entry.id || `${entry.recipientNumber}-${entry.failedAt}`} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-sm font-black text-white">{entry.recipientName || entry.recipientNumber || 'Unknown recipient'}</p>
+                          <p className="text-xs text-slate-400 mt-1">{entry.recipientNumber || '-'} • {entry.templateTitle || entry.templateKey || entry.sourceLabel || entry.sourceKind || 'Unknown source'}</p>
+                          <p className="text-xs text-slate-500 mt-1">{entry.providerStatus || 'Failed By Meta'}{entry.statusDetail ? ` • ${entry.statusDetail}` : ''}</p>
+                        </div>
+                        <div className="text-left md:text-right">
+                          <p className="text-xs font-black uppercase tracking-widest text-amber-200">{formatMetaFailureCodeLabel(entry.failureCode)}</p>
+                          <p className="text-xs text-slate-400 mt-1">{formatSuperAdminDateTime(entry.failedAt)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 

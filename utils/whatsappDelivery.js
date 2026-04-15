@@ -52,6 +52,54 @@ const truncateText = (value, max = 240) => {
     return `${normalized.slice(0, Math.max(0, max - 1)).trim()}…`;
 };
 
+const extractMetaFailureCode = (...values) => {
+    for (const candidate of values) {
+        const match = String(candidate || '').match(/(131\d{3})/);
+        if (match?.[1]) {
+            return match[1];
+        }
+    }
+
+    return '';
+};
+
+const looksLikeMetaFailure = ({ providerStatus = '', statusDetail = '', payloadText = '' } = {}) => {
+    const combined = `${providerStatus} ${statusDetail} ${payloadText}`.toLowerCase();
+    return combined.includes('meta')
+        || combined.includes('failed by meta')
+        || combined.includes('healthy ecosystem')
+        || /131\d{3}/.test(combined);
+};
+
+const normalizeMetaFailureCode = (value) => {
+    const code = String(value || '').trim();
+    return code || 'UNKNOWN_META';
+};
+
+const mapMetaFailureRow = (row) => {
+    const payloadText = toTrimmedString(JSON.stringify(row?.last_provider_payload || {}));
+    const failureCode = extractMetaFailureCode(row?.status_detail, row?.provider_status, payloadText);
+
+    return {
+        id: Number(row?.id || 0) || null,
+        gymId: Number(row?.gym_id || 0) || null,
+        memberId: Number(row?.member_id || 0) || null,
+        sourceKind: toTrimmedString(row?.source_kind).toUpperCase(),
+        sourceLabel: toTrimmedString(row?.source_label),
+        templateKey: toTrimmedString(row?.template_key).toUpperCase(),
+        templateTitle: toTrimmedString(row?.template_title),
+        recipientName: truncateText(row?.recipient_name, 120),
+        recipientNumber: normalizeE164Phone(row?.recipient_number),
+        providerStatus: toTrimmedString(row?.provider_status),
+        statusDetail: toTrimmedString(row?.status_detail),
+        failureCode: normalizeMetaFailureCode(failureCode),
+        failedAt: row?.failed_at || row?.updated_at || row?.created_at || null,
+        requestId: toTrimmedString(row?.msg91_request_id),
+        messageUuid: toTrimmedString(row?.msg91_message_uuid),
+        correlationId: toTrimmedString(row?.msg91_crqid),
+    };
+};
+
 const normalizeDeliveryStatus = (value) => {
     const raw = toTrimmedString(value).toUpperCase();
     if (!raw) return 'UNKNOWN';
@@ -1124,9 +1172,75 @@ const getRecentWhatsAppDeliveryLogs = async (gymId, limit = 20) => {
     return result.rows;
 };
 
-const getRecentMetaSuppressionRecipients = async (gymId, recipientNumbers = [], cooldownHours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS) => {
+const getRecentMetaFailureLogs = async (gymId, { recipientNumbers = [], hours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS, limit = 100 } = {}) => {
     await ensureWhatsAppDeliverySchema();
 
+    const normalizedRecipients = Array.from(new Set(
+        (Array.isArray(recipientNumbers) ? recipientNumbers : [recipientNumbers])
+            .map((value) => normalizeE164Phone(value))
+            .filter(Boolean)
+    ));
+    const safeHours = Math.max(1, Math.min(Number.parseInt(hours, 10) || DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS, 24 * 30));
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+    const params = [gymId, safeHours];
+    let recipientFilterSql = '';
+
+    if (normalizedRecipients.length > 0) {
+        recipientFilterSql = `AND recipient_number = ANY($3::text[])`;
+        params.push(normalizedRecipients);
+    }
+
+    params.push(safeLimit);
+    const limitParam = `$${params.length}`;
+
+    const result = await pool.query(
+        `SELECT
+            id,
+            gym_id,
+            member_id,
+            source_kind,
+            source_label,
+            template_key,
+            template_title,
+            recipient_name,
+            recipient_number,
+            provider_status,
+            status_detail,
+            failed_at,
+            updated_at,
+            created_at,
+            msg91_request_id,
+            msg91_message_uuid,
+            msg91_crqid,
+            last_provider_payload
+         FROM whatsapp_delivery_logs
+         WHERE gym_id = $1
+           AND current_status = 'FAILED'
+           AND COALESCE(failed_at, updated_at, created_at) >= NOW() - ($2::int * INTERVAL '1 hour')
+           ${recipientFilterSql}
+           AND (
+                COALESCE(provider_status, '') ILIKE '%meta%'
+                OR COALESCE(status_detail, '') ILIKE '%meta%'
+                OR COALESCE(status_detail, '') ~ '131[0-9]{3}'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%meta%'
+                OR COALESCE(last_provider_payload::text, '') ~ '131[0-9]{3}'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%healthy ecosystem%'
+           )
+         ORDER BY COALESCE(failed_at, updated_at, created_at) DESC
+         LIMIT ${limitParam}`,
+        params
+    );
+
+    return (result.rows || [])
+        .filter((row) => looksLikeMetaFailure({
+            providerStatus: row?.provider_status,
+            statusDetail: row?.status_detail,
+            payloadText: toTrimmedString(JSON.stringify(row?.last_provider_payload || {})),
+        }))
+        .map(mapMetaFailureRow);
+};
+
+const getRecentMetaSuppressionRecipients = async (gymId, recipientNumbers = [], cooldownHours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS) => {
     const normalizedRecipients = Array.from(new Set(
         (Array.isArray(recipientNumbers) ? recipientNumbers : [recipientNumbers])
             .map((value) => normalizeE164Phone(value))
@@ -1138,36 +1252,31 @@ const getRecentMetaSuppressionRecipients = async (gymId, recipientNumbers = [], 
     }
 
     const safeCooldownHours = Math.max(1, Math.min(Number.parseInt(cooldownHours, 10) || DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS, 168));
-    const result = await pool.query(
-        `SELECT DISTINCT ON (recipient_number)
-            recipient_number,
-            status_detail,
-            failed_at,
-            updated_at,
-            created_at
-         FROM whatsapp_delivery_logs
-         WHERE gym_id = $1
-           AND recipient_number = ANY($2::text[])
-           AND current_status = 'FAILED'
-           AND COALESCE(failed_at, updated_at, created_at) >= NOW() - ($3::int * INTERVAL '1 hour')
-           AND (
-                COALESCE(status_detail, '') ILIKE '%' || $4 || '%'
-                OR COALESCE(last_provider_payload::text, '') ILIKE '%' || $4 || '%'
-           )
-         ORDER BY recipient_number ASC, COALESCE(failed_at, updated_at, created_at) DESC`,
-        [gymId, normalizedRecipients, safeCooldownHours, META_HEALTHY_ECOSYSTEM_FAILURE_CODE]
-    );
+    const failures = await getRecentMetaFailureLogs(gymId, {
+        recipientNumbers: normalizedRecipients,
+        hours: safeCooldownHours,
+        limit: Math.max(20, normalizedRecipients.length * 4),
+    });
+
+    const latestByRecipient = new Map();
+    failures.forEach((failure) => {
+        if (!failure.recipientNumber || latestByRecipient.has(failure.recipientNumber)) {
+            return;
+        }
+        latestByRecipient.set(failure.recipientNumber, failure);
+    });
 
     return new Map(
-        (result.rows || []).map((row) => {
-            const normalizedRecipientNumber = normalizeE164Phone(row.recipient_number);
+        Array.from(latestByRecipient.values()).map((failure) => {
+            const normalizedRecipientNumber = normalizeE164Phone(failure.recipientNumber);
             return [
                 normalizedRecipientNumber,
                 {
                     recipientNumber: normalizedRecipientNumber,
-                    failureCode: META_HEALTHY_ECOSYSTEM_FAILURE_CODE,
-                    statusDetail: toTrimmedString(row.status_detail),
-                    lastFailedAt: row.failed_at || row.updated_at || row.created_at || null,
+                    failureCode: failure.failureCode || META_HEALTHY_ECOSYSTEM_FAILURE_CODE,
+                    providerStatus: failure.providerStatus || '',
+                    statusDetail: failure.statusDetail || '',
+                    lastFailedAt: failure.failedAt || null,
                     cooldownHours: safeCooldownHours,
                 },
             ];
@@ -1179,6 +1288,7 @@ module.exports = {
     MSG91_WHATSAPP_WEBHOOK_DOC_URL,
     ensureWhatsAppDeliverySchema,
     extractSendAcceptanceMeta,
+    getRecentMetaFailureLogs,
     getRecentMetaSuppressionRecipients,
     getRecentWhatsAppDeliveryLogs,
     getWhatsAppDeliverySummary,

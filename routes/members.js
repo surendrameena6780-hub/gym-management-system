@@ -553,12 +553,14 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
         member.whatsapp_meta_suppression = recentMetaSuppression
             ? {
                 active: true,
+                                failure_code: recentMetaSuppression.failureCode || 'UNKNOWN_META',
+                                provider_status: recentMetaSuppression.providerStatus || '',
                 last_failed_at: recentMetaSuppression.lastFailedAt instanceof Date
                     ? recentMetaSuppression.lastFailedAt.toISOString()
                     : recentMetaSuppression.lastFailedAt || null,
                 cooldown_hours: recentMetaSuppression.cooldownHours,
                 status_detail: recentMetaSuppression.statusDetail || '',
-                prompt_message: 'This member recently hit WhatsApp Meta 131049. Use the member phone to open the gym chat first, then retry the reminder later.',
+                                prompt_message: 'This member recently hit a WhatsApp Meta delivery block. Use the member phone to open the gym chat first, then retry the reminder later.',
               }
             : { active: false };
 
