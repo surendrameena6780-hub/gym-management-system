@@ -1403,6 +1403,72 @@ const getRecentFailedDeliveryForMember = async (gymId, memberId, { hours = DEFAU
     return failures.find((failure) => failure.isMetaFailure) || failures[0] || null;
 };
 
+const getRecentFailedDeliveryForMembers = async (gymId, memberIds = [], { hours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS } = {}) => {
+    await repairStaleFailedDeliveryStatuses({ gymId, hours });
+
+    const normalizedGymId = Number.parseInt(gymId, 10);
+    const normalizedMemberIds = Array.from(new Set(
+        (Array.isArray(memberIds) ? memberIds : [memberIds])
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isInteger(value) && value > 0)
+    ));
+
+    if (!Number.isInteger(normalizedGymId) || normalizedMemberIds.length === 0) {
+        return new Map();
+    }
+
+    const safeHours = Math.max(1, Math.min(Number.parseInt(hours, 10) || DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS, 24 * 30));
+    const result = await pool.query(
+        `SELECT
+            id,
+            gym_id,
+            member_id,
+            source_kind,
+            source_label,
+            template_key,
+            template_title,
+            recipient_name,
+            recipient_number,
+            provider_status,
+            status_detail,
+            failed_at,
+            updated_at,
+            created_at,
+            msg91_request_id,
+            msg91_message_uuid,
+            msg91_crqid,
+            last_provider_payload
+         FROM whatsapp_delivery_logs
+         WHERE gym_id = $1
+           AND member_id = ANY($2::int[])
+           AND current_status = 'FAILED'
+           AND COALESCE(failed_at, updated_at, created_at) >= NOW() - ($3::int * INTERVAL '1 hour')
+         ORDER BY member_id ASC, COALESCE(failed_at, updated_at, created_at) DESC, id DESC`,
+        [normalizedGymId, normalizedMemberIds, safeHours]
+    );
+
+    const latestByMemberId = new Map();
+    (result.rows || []).forEach((row) => {
+        const normalizedMemberId = Number.parseInt(row?.member_id, 10);
+        if (!Number.isInteger(normalizedMemberId) || latestByMemberId.has(normalizedMemberId)) {
+            return;
+        }
+
+        const mapped = mapMetaFailureRow(row);
+        const payloadText = toTrimmedString(JSON.stringify(row?.last_provider_payload || {}));
+        latestByMemberId.set(normalizedMemberId, {
+            ...mapped,
+            isMetaFailure: looksLikeMetaFailure({
+                providerStatus: row?.provider_status,
+                statusDetail: row?.status_detail,
+                payloadText,
+            }),
+        });
+    });
+
+    return latestByMemberId;
+};
+
 const getRecentMetaSuppressionRecipients = async (gymId, recipientNumbers = [], cooldownHours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS) => {
     const normalizedRecipients = Array.from(new Set(
         (Array.isArray(recipientNumbers) ? recipientNumbers : [recipientNumbers])
@@ -1452,6 +1518,7 @@ module.exports = {
     ensureWhatsAppDeliverySchema,
     extractSendAcceptanceMeta,
     getRecentFailedDeliveryForMember,
+    getRecentFailedDeliveryForMembers,
     getRecentMetaFailureLogs,
     getRecentMetaSuppressionRecipients,
     getRecentWhatsAppDeliveryLogs,

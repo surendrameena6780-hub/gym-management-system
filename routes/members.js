@@ -33,7 +33,7 @@ const {
     getGymBillingSnapshot,
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
-const { getRecentFailedDeliveryForMember } = require('../utils/whatsappDelivery');
+const { getRecentFailedDeliveryForMember, getRecentFailedDeliveryForMembers } = require('../utils/whatsappDelivery');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -216,6 +216,48 @@ const appendMemberBranchMeta = (rows = [], branchDirectory = []) => rows.map((ro
     };
 });
 
+const buildMemberWhatsAppRecoveryState = (failure) => {
+    if (!failure) {
+        return { active: false };
+    }
+
+    return {
+        active: true,
+        failure_code: failure.failureCode || 'UNKNOWN_META',
+        provider_status: failure.providerStatus || '',
+        last_failed_at: failure.failedAt instanceof Date
+            ? failure.failedAt.toISOString()
+            : failure.failedAt || null,
+        cooldown_hours: 24,
+        status_detail: failure.statusDetail || '',
+        prompt_message: failure.isMetaFailure
+            ? 'This member recently hit a WhatsApp Meta delivery block. Use the member phone to open the gym chat first, then retry the reminder later.'
+            : 'This member recently hit a WhatsApp delivery failure. If MSG91 later shows Failed By Meta or code 131049, ask the member to message your gym first before retrying.',
+    };
+};
+
+const appendMemberWhatsAppRecovery = async (gymId, rows = []) => {
+    const normalizedRows = Array.isArray(rows) ? rows : [];
+    if (!gymId || normalizedRows.length === 0) {
+        return normalizedRows.map((row) => ({
+            ...row,
+            whatsapp_meta_suppression: { active: false },
+        }));
+    }
+
+    const failuresByMemberId = await getRecentFailedDeliveryForMembers(
+        gymId,
+        normalizedRows.map((row) => row?.id)
+    );
+
+    return normalizedRows.map((row) => ({
+        ...row,
+        whatsapp_meta_suppression: buildMemberWhatsAppRecoveryState(
+            failuresByMemberId.get(Number.parseInt(row?.id, 10)) || null
+        ),
+    }));
+};
+
 const assertMemberBranchAccess = async (db, req, memberId) => {
     const gymId = getGymIdFromRequest(req);
     const branchScope = await resolveBranchReadScope(db, req);
@@ -371,7 +413,8 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
 
         if (!paginate) {
             const result = await pool.query(orderedQuery, filteredParams);
-            return res.json(appendMemberBranchMeta(result.rows, branchScope.branchDirectory));
+            const rowsWithBranchMeta = appendMemberBranchMeta(result.rows, branchScope.branchDirectory);
+            return res.json(await appendMemberWhatsAppRecovery(gym_id, rowsWithBranchMeta));
         }
 
         const pagedParams = [...filteredParams, limit, offset];
@@ -383,8 +426,10 @@ router.get('/', auth, saasMiddleware, requirePermission('members:read'), async (
 
         const total = countResult.rows[0]?.total || 0;
 
+        const pagedRowsWithBranchMeta = appendMemberBranchMeta(pagedResult.rows, branchScope.branchDirectory);
+
         return res.json({
-            items: appendMemberBranchMeta(pagedResult.rows, branchScope.branchDirectory),
+            items: await appendMemberWhatsAppRecovery(gym_id, pagedRowsWithBranchMeta),
             pagination: {
                 page,
                 limit,
@@ -549,21 +594,7 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
         const [member] = appendMemberBranchMeta(result.rows, branchScope.branchDirectory);
 
         const recentWhatsAppFailure = await getRecentFailedDeliveryForMember(gym_id, member.id);
-        member.whatsapp_meta_suppression = recentWhatsAppFailure
-            ? {
-                active: true,
-                failure_code: recentWhatsAppFailure.failureCode || 'UNKNOWN_META',
-                provider_status: recentWhatsAppFailure.providerStatus || '',
-                last_failed_at: recentWhatsAppFailure.failedAt instanceof Date
-                    ? recentWhatsAppFailure.failedAt.toISOString()
-                    : recentWhatsAppFailure.failedAt || null,
-                cooldown_hours: 24,
-                status_detail: recentWhatsAppFailure.statusDetail || '',
-                prompt_message: recentWhatsAppFailure.isMetaFailure
-                    ? 'This member recently hit a WhatsApp Meta delivery block. Use the member phone to open the gym chat first, then retry the reminder later.'
-                    : 'This member recently hit a WhatsApp delivery failure. If MSG91 later shows Failed By Meta or code 131049, ask the member to message your gym first before retrying.',
-              }
-            : { active: false };
+        member.whatsapp_meta_suppression = buildMemberWhatsAppRecoveryState(recentWhatsAppFailure);
 
         res.json(member);
    } catch (err) {
