@@ -1542,12 +1542,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     const daysSinceVisit = getWholeDayDiffFromDate(getEffectiveVisitSource(member));
 
     const candidateKeys = statusLabel === 'EXPIRED' || statusLabel === 'EXPIRING SOON'
-      ? ['RENEWAL_REMINDER', statusLabel === 'EXPIRED' ? 'EXPIRED' : 'EXPIRING_SOON', 'PAYMENT_DUE', 'SALES_OFFER']
+      ? ['RENEWAL_REMINDER', statusLabel === 'EXPIRED' ? 'EXPIRED' : 'EXPIRING_SOON', 'PAYMENT_DUE', 'UNPAID']
       : statusLabel === 'UNPAID' || amountDue > 0
-        ? ['PAYMENT_DUE', 'UNPAID', 'SALES_OFFER', 'RENEWAL_REMINDER']
+        ? ['PAYMENT_DUE', 'UNPAID', 'RENEWAL_REMINDER', 'EXPIRING_SOON']
         : statusLabel === 'INACTIVE' || (Number.isFinite(daysSinceVisit) && daysSinceVisit >= 7)
-          ? ['INACTIVE', 'SALES_OFFER', 'HOLIDAY', 'PAYMENT_DUE']
-          : ['SALES_OFFER', 'HOLIDAY', 'INACTIVE', 'PAYMENT_DUE'];
+          ? ['RENEWAL_REMINDER', 'PAYMENT_DUE', 'UNPAID', 'EXPIRING_SOON']
+          : ['RENEWAL_REMINDER', 'PAYMENT_DUE', 'UNPAID', 'EXPIRING_SOON', 'EXPIRED'];
 
     return candidateKeys.find((templateKey) => availableKeys.has(templateKey)) || normalizedTemplates[0]?.template_key || '';
   };
@@ -2490,7 +2490,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   ))}
                 </select>
                 <p className="mt-2 text-[11px] font-semibold leading-5 text-slate-400">
-                  Renewal Reminder is preselected only for expired and expiring-soon members. Active members default to a sales or re-engagement message instead.
+                  Utility templates usually deliver more reliably for reminders. Marketing templates can still be selected, but WhatsApp may throttle them for some recipients.
                 </p>
               </div>
 

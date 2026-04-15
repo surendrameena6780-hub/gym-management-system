@@ -258,6 +258,7 @@ const getWhatsAppDeliveryActivity = (log) => {
 const getWhatsAppDeliveryGuidance = (log) => {
   const normalizedStatus = String(log?.current_status || 'QUEUED').trim().toUpperCase();
   const statusDetail = String(log?.status_detail || '').trim();
+  const hasProviderReceipt = Boolean(log?.msg91_request_id || log?.msg91_message_uuid);
   if (statusDetail) {
     return { tone: normalizedStatus === 'FAILED' ? 'danger' : 'neutral', text: statusDetail };
   }
@@ -272,9 +273,18 @@ const getWhatsAppDeliveryGuidance = (log) => {
     return { tone: 'success', text: 'WhatsApp confirmed the message reached the recipient device.' };
   }
   if (normalizedStatus === 'SENT') {
+    if (!hasProviderReceipt) {
+      return { tone: 'warning', text: 'GymVault has not stored a MSG91 request ID for this send yet. If it stays this way, the provider did not confirm the outbound record.' };
+    }
     return { tone: 'neutral', text: 'The provider pushed the message onward and is waiting for the delivery receipt.' };
   }
   if (normalizedStatus === 'SUBMITTED') {
+    if (!hasProviderReceipt) {
+      return {
+        tone: 'warning',
+        text: 'GymVault never received a MSG91 request ID or message UUID for this send. This usually means the API call returned without creating a provider delivery record.',
+      };
+    }
     if (ageMinutes >= 10) {
       return {
         tone: 'warning',
@@ -4111,6 +4121,11 @@ const loadRazorpayScript = () => {
                                               <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-500">{String(log.source_kind || 'WHATSAPP').replace(/_/g, ' ')}</span>
                                             </div>
                                             <p className="text-xs font-semibold text-slate-500 mt-1">{log.recipient_number || 'No phone'} • {log.template_title || log.template_key || 'Template not recorded'}</p>
+                                            {(log.msg91_request_id || log.msg91_message_uuid || log.msg91_crqid) ? (
+                                              <p className="text-[10px] font-semibold text-slate-400 mt-1 break-all">
+                                                {log.msg91_request_id ? `Request ID: ${log.msg91_request_id}` : log.msg91_message_uuid ? `Message UUID: ${log.msg91_message_uuid}` : `CRQID: ${log.msg91_crqid}`}
+                                              </p>
+                                            ) : null}
                                             <p className="text-xs font-semibold text-slate-500 mt-2">{activity.label}: {activity.time ? new Date(activity.time).toLocaleString() : 'Waiting for update'}</p>
                                             <p className={`text-[11px] font-semibold leading-relaxed mt-2 ${guidance.tone === 'danger' ? 'text-rose-600' : guidance.tone === 'warning' ? 'text-amber-700' : guidance.tone === 'success' ? 'text-emerald-700' : 'text-slate-500'}`}>{guidance.text}</p>
                                           </div>

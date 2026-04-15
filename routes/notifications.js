@@ -281,22 +281,22 @@ const pickReminderTemplateCandidates = (member = {}, requestedTemplateKey = '') 
     const daysInactive = Number(member.days_inactive || 0);
 
     if (amountDue > 0 || membershipStatus === 'UNPAID') {
-        return ['PAYMENT_DUE', 'UNPAID', 'SALES_OFFER', 'RENEWAL_REMINDER'];
+        return ['PAYMENT_DUE', 'UNPAID', 'RENEWAL_REMINDER', 'EXPIRING_SOON', 'EXPIRED'];
     }
 
     if (membershipStatus === 'EXPIRED' || (Number.isFinite(daysToExpiry) && daysToExpiry < 0)) {
-        return ['RENEWAL_REMINDER', 'EXPIRED'];
+        return ['RENEWAL_REMINDER', 'EXPIRED', 'PAYMENT_DUE', 'UNPAID', 'EXPIRING_SOON'];
     }
 
     if (membershipStatus === 'ACTIVE' && Number.isFinite(daysToExpiry) && daysToExpiry <= 7) {
-        return ['RENEWAL_REMINDER', 'EXPIRING_SOON'];
+        return ['RENEWAL_REMINDER', 'EXPIRING_SOON', 'PAYMENT_DUE', 'UNPAID'];
     }
 
     if (daysInactive >= 7) {
-        return ['INACTIVE', 'SALES_OFFER', 'HOLIDAY', 'RENEWAL_REMINDER'];
+        return ['RENEWAL_REMINDER', 'PAYMENT_DUE', 'UNPAID', 'EXPIRING_SOON', 'EXPIRED'];
     }
 
-    return ['SALES_OFFER', 'HOLIDAY', 'INACTIVE', 'PAYMENT_DUE', 'RENEWAL_REMINDER', 'EXPIRING_SOON', 'EXPIRED'];
+    return ['RENEWAL_REMINDER', 'PAYMENT_DUE', 'UNPAID', 'EXPIRING_SOON', 'EXPIRED'];
 };
 
 const getApprovedReminderTemplates = async (gymId) => {
@@ -307,6 +307,7 @@ const getApprovedReminderTemplates = async (gymId) => {
             whatsapp_text,
             whatsapp_template_name,
             whatsapp_template_language,
+            whatsapp_template_category,
             whatsapp_template_status,
             is_active
          FROM gym_message_templates
@@ -331,6 +332,11 @@ const pickApprovedTemplate = (templateMap, candidateKeys = []) => {
             return templateMap.get(normalizedKey);
         }
     }
+
+    for (const template of templateMap.values()) {
+        return template;
+    }
+
     return null;
 };
 
@@ -505,6 +511,7 @@ router.get('/reminders/templates', auth, saasMiddleware, async (req, res) => {
                 template_key: template.template_key,
                 title: template.title,
                 whatsapp_text: template.whatsapp_text,
+                whatsapp_template_category: template.whatsapp_template_category,
             })),
         });
     } catch (err) {

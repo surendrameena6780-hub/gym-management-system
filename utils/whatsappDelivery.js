@@ -151,6 +151,8 @@ const extractSendAcceptanceMeta = (payload) => {
     const messageUuid = toTrimmedString(pickFirstPrimitiveByKeys(payload, ['message_uuid', 'messageUuid', 'messageuuid']));
     const correlationId = toTrimmedString(pickFirstPrimitiveByKeys(payload, ['CRQID', 'crqid']));
     const providerStatus = toTrimmedString(pickFirstPrimitiveByKeys(payload, ['status', 'type']));
+    const hasConfirmedReceipt = Boolean(requestId || messageUuid);
+    const statusDetail = buildStatusDetail(payload);
 
     return {
         requestId,
@@ -158,7 +160,8 @@ const extractSendAcceptanceMeta = (payload) => {
         correlationId,
         providerStatus,
         normalizedStatus: providerStatus ? normalizeDeliveryStatus(providerStatus) : 'QUEUED',
-        statusDetail: buildStatusDetail(payload),
+        statusDetail: statusDetail || (hasConfirmedReceipt ? '' : 'MSG91 did not return a request_id or message_uuid for this recipient send.'),
+        hasConfirmedReceipt,
     };
 };
 
@@ -566,6 +569,11 @@ const sendTrackedWhatsAppTemplate = async ({
         });
 
         const acceptance = extractSendAcceptanceMeta(providerPayload);
+        if (!acceptance.hasConfirmedReceipt) {
+            const error = new Error(acceptance.statusDetail || 'MSG91 did not confirm this recipient send.');
+            error.payload = providerPayload;
+            throw error;
+        }
         await updateDeliveryFromAcceptance({ logId: log.id, providerPayload, acceptance });
 
         return {
