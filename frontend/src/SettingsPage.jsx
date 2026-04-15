@@ -288,10 +288,10 @@ const getWhatsAppDeliveryGuidance = (log) => {
     if (ageMinutes >= 10) {
       return {
         tone: 'warning',
-        text: 'MSG91 accepted the send, but WhatsApp still has not confirmed delivery. If other numbers are delivering, this is usually specific to the recipient account, device, or WhatsApp availability.',
+        text: 'MSG91 accepted the send, but WhatsApp still has not confirmed delivery. In MSG91 live logs, switch Billable Logs to All before searching this request ID. If live logs still stay empty, use WhatsApp report export with Request ID and Failure Reason fields.',
       };
     }
-    return { tone: 'warning', text: 'MSG91 accepted the send, but delivery to the recipient is not confirmed yet.' };
+    return { tone: 'warning', text: 'MSG91 accepted the send, but delivery to the recipient is not confirmed yet. If you check MSG91, use All Logs instead of Billable.' };
   }
   if (normalizedStatus === 'FAILED') {
     return { tone: 'danger', text: 'The provider reported a delivery failure or rejection for this message.' };
@@ -4100,7 +4100,7 @@ const loadRazorpayScript = () => {
                                     <span className="font-black">Submitted</span> means MSG91 accepted the send. It does <span className="font-black">not</span> mean the recipient received it yet. This screen only refreshes the latest receipts already saved by GymVault.
                                   </p>
                                   <p className="text-[11px] font-semibold text-amber-800 leading-relaxed">
-                                    If a number stays stuck, open <span className="font-black">MSG91 &gt; WhatsApp &gt; Logs</span> and filter that customer number. Common Meta outcomes: <span className="font-black">131049</span> means WhatsApp suppressed a marketing message, so wait 24 hours and turn on <span className="font-black">Retry Failed Message</span> in MSG91 Numbers. <span className="font-black">131050</span> means the user stopped marketing delivery. <span className="font-black">131026</span> means the recipient account is not currently reachable on WhatsApp.
+                                    If a number stays stuck, open <span className="font-black">MSG91 &gt; WhatsApp &gt; Logs</span>, change <span className="font-black">Billable Logs</span> to <span className="font-black">All</span>, then search by customer number or request ID. If the live list still shows nothing, use <span className="font-black">WhatsApp report export</span> with Request ID and Failure Reason fields. Common Meta outcomes: <span className="font-black">131049</span> means WhatsApp suppressed a marketing message, so wait 24 hours and turn on <span className="font-black">Retry Failed Message</span> in MSG91 Numbers. <span className="font-black">131050</span> means the user stopped marketing delivery. <span className="font-black">131026</span> means the recipient account is not currently reachable on WhatsApp.
                                   </p>
                                 </div>
 
