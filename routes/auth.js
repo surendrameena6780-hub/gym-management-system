@@ -952,7 +952,10 @@ const handleMemberVerifyOtp = async (req, res) => {
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS) {
             await pool.query(
-                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW(),
+                     lockout_until = NOW() + make_interval(mins => $2::integer)
+                 WHERE id = $1::integer`,
                 [otpRow.id, OTP_LOCKOUT_MINUTES]
             );
             return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
@@ -964,11 +967,11 @@ const handleMemberVerifyOtp = async (req, res) => {
             const shouldLock = nextAttempts >= MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
-                 SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
-                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
-                 WHERE id = $3`,
-                [nextAttempts, MEMBER_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
+                 SET attempts = $1::integer,
+                     consumed_at = CASE WHEN $2::boolean THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $3::boolean THEN NOW() + make_interval(mins => $4::integer) ELSE lockout_until END
+                 WHERE id = $5::integer`,
+                [nextAttempts, shouldLock, shouldLock, OTP_LOCKOUT_MINUTES, otpRow.id]
             );
 
             if (shouldLock) {
@@ -1296,7 +1299,10 @@ router.post('/signup/verify-email-otp', async (req, res) => {
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS) {
             await pool.query(
-                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW(),
+                     lockout_until = NOW() + make_interval(mins => $2::integer)
+                 WHERE id = $1::integer`,
                 [otpRow.id, OTP_LOCKOUT_MINUTES]
             );
             return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
@@ -1308,11 +1314,11 @@ router.post('/signup/verify-email-otp', async (req, res) => {
             const shouldLock = nextAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
-                 SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
-                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
-                 WHERE id = $3`,
-                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
+                 SET attempts = $1::integer,
+                     consumed_at = CASE WHEN $2::boolean THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $3::boolean THEN NOW() + make_interval(mins => $4::integer) ELSE lockout_until END
+                 WHERE id = $5::integer`,
+                [nextAttempts, shouldLock, shouldLock, OTP_LOCKOUT_MINUTES, otpRow.id]
             );
 
             if (shouldLock) {
@@ -1681,7 +1687,10 @@ router.post('/admin/verify-otp', async (req, res) => {
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) {
             await pool.query(
-                `UPDATE user_login_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                `UPDATE user_login_otps
+                 SET consumed_at = NOW(),
+                     lockout_until = NOW() + make_interval(mins => $2::integer)
+                 WHERE id = $1::integer`,
                 [otpRow.id, OTP_LOCKOUT_MINUTES]
             );
             return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
@@ -1713,11 +1722,11 @@ router.post('/admin/verify-otp', async (req, res) => {
             const shouldLock = nextAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE user_login_otps
-                 SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 OR $3 THEN NOW() ELSE consumed_at END,
-                     lockout_until = CASE WHEN $5 THEN NOW() + ($6 || ' minutes')::interval ELSE lockout_until END
-                 WHERE id = $4`,
-                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, shouldConsumeOtp, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
+                 SET attempts = $1::integer,
+                     consumed_at = CASE WHEN $2::boolean THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $3::boolean THEN NOW() + make_interval(mins => $4::integer) ELSE lockout_until END
+                 WHERE id = $5::integer`,
+                [nextAttempts, (nextAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) || shouldConsumeOtp, shouldLock, OTP_LOCKOUT_MINUTES, otpRow.id]
             );
 
             if (shouldConsumeOtp) {
@@ -1900,7 +1909,10 @@ router.post('/admin/verify-email-otp', async (req, res) => {
         const previousAttempts = Number(otpRow.attempts || 0);
         if (previousAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS) {
             await pool.query(
-                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW(),
+                     lockout_until = NOW() + make_interval(mins => $2::integer)
+                 WHERE id = $1::integer`,
                 [otpRow.id, OTP_LOCKOUT_MINUTES]
             );
             return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
@@ -1912,11 +1924,11 @@ router.post('/admin/verify-email-otp', async (req, res) => {
             const shouldLock = nextAttempts >= ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
-                 SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
-                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
-                 WHERE id = $3`,
-                [nextAttempts, ADMIN_LOGIN_MAX_VERIFY_ATTEMPTS, otpRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
+                 SET attempts = $1::integer,
+                     consumed_at = CASE WHEN $2::boolean THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $3::boolean THEN NOW() + make_interval(mins => $4::integer) ELSE lockout_until END
+                 WHERE id = $5::integer`,
+                [nextAttempts, shouldLock, shouldLock, OTP_LOCKOUT_MINUTES, otpRow.id]
             );
 
             if (shouldLock) {
@@ -2116,7 +2128,10 @@ router.post('/password-reset/confirm', async (req, res) => {
         const previousAttempts = Number(resetRow.attempts || 0);
         if (previousAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS) {
             await pool.query(
-                `UPDATE password_reset_otps SET consumed_at = NOW(), lockout_until = NOW() + ($2 || ' minutes')::interval WHERE id = $1`,
+                `UPDATE password_reset_otps
+                 SET consumed_at = NOW(),
+                     lockout_until = NOW() + make_interval(mins => $2::integer)
+                 WHERE id = $1::integer`,
                 [resetRow.id, OTP_LOCKOUT_MINUTES]
             );
             return res.status(429).json({ message: `Too many invalid attempts. Try again in ${OTP_LOCKOUT_MINUTES} minutes.`, retry_after_seconds: OTP_LOCKOUT_MINUTES * 60 });
@@ -2128,11 +2143,11 @@ router.post('/password-reset/confirm', async (req, res) => {
             const shouldLock = nextAttempts >= PASSWORD_RESET_MAX_VERIFY_ATTEMPTS;
             await pool.query(
                 `UPDATE password_reset_otps
-                 SET attempts = $1,
-                     consumed_at = CASE WHEN $1 >= $2 THEN NOW() ELSE consumed_at END,
-                     lockout_until = CASE WHEN $4 THEN NOW() + ($5 || ' minutes')::interval ELSE lockout_until END
-                 WHERE id = $3`,
-                [nextAttempts, PASSWORD_RESET_MAX_VERIFY_ATTEMPTS, resetRow.id, shouldLock, OTP_LOCKOUT_MINUTES]
+                 SET attempts = $1::integer,
+                     consumed_at = CASE WHEN $2::boolean THEN NOW() ELSE consumed_at END,
+                     lockout_until = CASE WHEN $3::boolean THEN NOW() + make_interval(mins => $4::integer) ELSE lockout_until END
+                 WHERE id = $5::integer`,
+                [nextAttempts, shouldLock, shouldLock, OTP_LOCKOUT_MINUTES, resetRow.id]
             );
 
             if (shouldLock) {
