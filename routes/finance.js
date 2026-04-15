@@ -342,7 +342,7 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
         const paymentsBranchFilter = branchScope.branchId ? ' AND p.branch_id = $4' : '';
         const collectionsBranchFilter = branchScope.branchId ? ' AND pc.branch_id = $4' : '';
         const overdueBranchFilter = branchScope.branchId ? ' AND branch_id = $2' : '';
-        const [revRes, expRes, payrollRes, posRes, pendingRes] = await Promise.all([
+        const [revRes, expRes, payrollRes, posRes, pendingRes, cogsRes] = await Promise.all([
             pool.query(`WITH collection_totals AS (
                             SELECT
                                 pc.payment_id,
@@ -399,15 +399,25 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
                         COALESCE(SUM(amount_due),0)::NUMERIC AS overdue_amount
                         FROM payments WHERE gym_id=$1 AND deleted_at IS NULL AND amount_due > 0
                         AND payment_date < CURRENT_DATE - INTERVAL '7 days'${overdueBranchFilter}`, overdueParams),
+            pool.query(`SELECT COALESCE(SUM(psi.quantity * COALESCE(pp.cost_price, 0)), 0)::NUMERIC AS period_cogs
+                        FROM pos_sale_items psi
+                        JOIN pos_sales ps ON ps.id = psi.sale_id AND ps.gym_id = $1 AND ps.voided_at IS NULL${rootBranchFilter}
+                        LEFT JOIN pos_products pp ON pp.id = psi.product_id
+                        WHERE ($2::timestamptz IS NULL OR ps.created_at >= $2::timestamptz)
+                          AND ($3::timestamptz IS NULL OR ps.created_at < $3::timestamptz)`, overviewParams),
         ]);
 
         const revenue = revRes.rows[0] || {};
         const expenses = expRes.rows[0] || {};
         const payroll = payrollRes.rows[0] || {};
         const pos = posRes.rows[0] || {};
+        const posCogs = cogsRes.rows[0] || {};
 
+        const periodExpenses = Number(expenses.period_expenses || 0);
+        const periodPayroll = Number(payroll.period_payroll || 0);
+        const periodPosCogs = Number(posCogs.period_cogs || 0);
         const periodIncome = Number(revenue.period_revenue || 0) + Number(pos.period_revenue || 0);
-        const periodOutflows = Number(expenses.period_expenses || 0) + Number(payroll.period_payroll || 0);
+        const periodOutflows = periodExpenses + periodPayroll + periodPosCogs;
         const periodProfit = periodIncome - periodOutflows;
 
         const financeResponse = {
@@ -422,6 +432,9 @@ router.get('/overview', requirePermission('payments:read'), async (req, res) => 
                 period_income: periodIncome,
                 period_outflows: periodOutflows,
                 period_profit: periodProfit,
+                period_expenses: periodExpenses,
+                period_payroll: periodPayroll,
+                period_pos_cogs: periodPosCogs,
             },
         };
 

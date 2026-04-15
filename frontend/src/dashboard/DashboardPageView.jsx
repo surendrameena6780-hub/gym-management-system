@@ -91,8 +91,8 @@ const SmartTipsPanel = ({ controller }) => {
             onClick={() => navigateTo('Dashboard', null, { action: 'broadcast' })}
             className="w-full rounded-xl border border-dashed border-indigo-300 bg-indigo-100 p-3 text-center hover:bg-indigo-200 transition-colors"
           >
-            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">No campaigns this week</p>
-            <p className="text-[11px] font-bold text-indigo-900 mt-1">Run your first broadcast to see stats here</p>
+            <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700">No messages this week</p>
+            <p className="text-[11px] font-bold text-indigo-900 mt-1">Send your first message to see results here</p>
           </button>
         )}
 
@@ -153,11 +153,11 @@ const AttentionPanel = ({ controller }) => {
               <CheckCircle size={20} className="text-emerald-500" />
             </div>
             <div>
-              <p className="text-sm font-black text-slate-800">No urgent issues right now.</p>
+              <p className="text-sm font-black text-slate-800">Everything looks good!</p>
               <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
                 {setup.steps?.profile && setup.steps?.plans && setup.steps?.members
-                  ? 'Keep an eye on renewals and check-ins.'
-                  : 'Finish the remaining setup to unlock the full flow.'}
+                  ? 'Keep checking renewals and attendance.'
+                  : 'Complete the setup to use all features.'}
               </p>
             </div>
             {(!setup.steps?.profile || !setup.steps?.plans || !setup.steps?.members) && (
@@ -255,9 +255,9 @@ const DesktopRevenuePulsePanel = ({ controller }) => {
           <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-indigo-600">
             <Activity size={12} /> Desk Pulse
           </div>
-          <h3 className="mt-3 text-lg font-black tracking-tight text-slate-900">Operations Snapshot</h3>
+          <h3 className="mt-3 text-lg font-black tracking-tight text-slate-900">Today's Overview</h3>
           <p className="mt-1 text-sm font-semibold text-slate-500">
-            Keep the chart focused, and use this panel for the daily operational read.
+            Your gym's daily numbers at a glance.
           </p>
         </div>
 
@@ -294,9 +294,9 @@ const DesktopRevenuePulsePanel = ({ controller }) => {
         <div className="rounded-[22px] border border-indigo-100 bg-[linear-gradient(135deg,rgba(99,102,241,0.08),rgba(6,182,212,0.05))] px-4 py-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Next Best Move</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">What To Do Next</p>
               <p className="mt-2 text-base font-black text-slate-900">
-                {nextRecommendation?.title || 'Momentum is stable today'}
+                {nextRecommendation?.title || 'Everything is running smoothly'}
               </p>
             </div>
             <div className="rounded-2xl bg-white/80 px-3 py-2 text-right shadow-sm">
@@ -305,7 +305,7 @@ const DesktopRevenuePulsePanel = ({ controller }) => {
             </div>
           </div>
           <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
-            {nextRecommendation?.reason || 'No urgent recommendation right now. Keep an eye on renewals and daily collections.'}
+            {nextRecommendation?.reason || 'No urgent action needed right now. Keep an eye on renewals and daily collections.'}
           </p>
         </div>
 
@@ -316,7 +316,7 @@ const DesktopRevenuePulsePanel = ({ controller }) => {
             className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-left text-white transition-colors hover:bg-slate-800"
           >
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">Collections</p>
-            <p className="mt-1 text-sm font-black">Open revenue desk</p>
+            <p className="mt-1 text-sm font-black">Open payments</p>
           </button>
           <button
             type="button"
@@ -473,7 +473,7 @@ const DashboardPageView = ({ controller, isActive = true }) => {
 
       {isWarmupRetrying && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm font-semibold">
-          Backend is waking up. Retrying dashboard data automatically...
+          Backend is starting up. Loading your data...
         </div>
       )}
 

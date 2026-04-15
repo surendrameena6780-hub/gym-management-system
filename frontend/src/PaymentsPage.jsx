@@ -1775,19 +1775,34 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
     const periodIncome = Number(summary.period_income || 0);
     const periodOutflows = Number(summary.period_outflows || 0);
     const periodProfit = Number(summary.period_profit || 0);
+    const periodExpenses = Number(summary.period_expenses || 0);
+    const periodPayroll = Number(summary.period_payroll || 0);
+    const periodPosCogs = Number(summary.period_pos_cogs || 0);
 
     return {
       periodLabel,
       periodIncome,
       periodOutflows,
       periodProfit,
+      periodExpenses,
+      periodPayroll,
+      periodPosCogs,
     };
   }, [dateRange, financeOverview, getDateRangeLabel]);
 
   const profitInsight = useMemo(() => {
     const profit = roundMoney(financePeriodSummary.periodProfit);
     const outflows = roundMoney(financePeriodSummary.periodOutflows);
+    const expAmt = roundMoney(financePeriodSummary.periodExpenses);
+    const payAmt = roundMoney(financePeriodSummary.periodPayroll);
+    const posAmt = roundMoney(financePeriodSummary.periodPosCogs);
     const label = dateRange === 'all' ? 'Profit earned overall' : `Profit earned · ${financePeriodSummary.periodLabel}`;
+
+    const breakdownParts = [];
+    if (expAmt > 0) breakdownParts.push(`₹${expAmt.toLocaleString()} expenses`);
+    if (payAmt > 0) breakdownParts.push(`₹${payAmt.toLocaleString()} payroll`);
+    if (posAmt > 0) breakdownParts.push(`₹${posAmt.toLocaleString()} POS stock cost`);
+    const breakdownText = breakdownParts.length > 0 ? breakdownParts.join(', ') : `₹${outflows.toLocaleString()} total outflows`;
 
     if (profit > 0) {
       return {
@@ -1795,7 +1810,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         icon: CheckCircle2,
         tone: 'emerald',
         title: label,
-        detail: `₹${profit.toLocaleString()} net after ₹${outflows.toLocaleString()} of expenses and payroll.`,
+        detail: `₹${profit.toLocaleString()} net profit after ${breakdownText}.`,
       };
     }
 
@@ -1805,7 +1820,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
         icon: AlertCircle,
         tone: 'rose',
         title: label,
-        detail: `₹${Math.abs(profit).toLocaleString()} net loss after ₹${outflows.toLocaleString()} of expenses and payroll.`,
+        detail: `₹${Math.abs(profit).toLocaleString()} net loss after ${breakdownText}.`,
       };
     }
 
@@ -1815,8 +1830,8 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
       tone: 'slate',
       title: label,
       detail: outflows > 0
-        ? `Collections are currently matching ₹${outflows.toLocaleString()} of expenses and payroll.`
-        : 'No expense or payroll outflow recorded in the selected period yet.',
+        ? `Collections matching outflows: ${breakdownText}.`
+        : 'No expenses, payroll, or POS costs recorded yet.',
     };
   }, [dateRange, financePeriodSummary]);
 
@@ -2057,7 +2072,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5">
             <div>
               <h3 className="text-lg font-black text-slate-900">Collection Intelligence</h3>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Short signals to improve cashflow today</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Quick tips to collect more money</p>
             </div>
             <div className="hidden sm:block rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 self-start">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Dominant Mode</p>
@@ -2297,29 +2312,12 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
             const topCategories = Object.entries(categoryBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 5);
             return (
               <div className="space-y-4">
-                {/* Expense overview cards */}
+                {/* Expense overview card */}
                 {expenses.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="rounded-2xl bg-rose-50 px-4 py-3">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Total Expenses</p>
-                      <p className="text-xl font-black text-rose-600">₹{totalExpenses.toLocaleString()}</p>
-                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{expenses.length} entries</p>
-                    </div>
-                    <div className="rounded-2xl bg-amber-50 px-4 py-3">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Inventory Purchases</p>
-                      <p className="text-xl font-black text-amber-600">₹{posPurchaseTotal.toLocaleString()}</p>
-                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">POS stock costs</p>
-                    </div>
-                    <div className="rounded-2xl bg-indigo-50 px-4 py-3">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Operational</p>
-                      <p className="text-xl font-black text-indigo-600">₹{operationalTotal.toLocaleString()}</p>
-                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">Non-inventory</p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Top Category</p>
-                      <p className="text-base font-black text-slate-800 truncate">{topCategories[0]?.[0] || '—'}</p>
-                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{topCategories[0] ? `₹${topCategories[0][1].toLocaleString()}` : '—'}</p>
-                    </div>
+                  <div className="rounded-2xl bg-rose-50 px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Total Expenses</p>
+                    <p className="text-xl font-black text-rose-600">₹{totalExpenses.toLocaleString()}</p>
+                    <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{expenses.length} entries</p>
                   </div>
                 )}
 
@@ -2329,7 +2327,7 @@ const PaymentsPage = ({ appRuntime, defaultFilter = 'All', focusPaymentId = null
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-base font-black text-slate-900">POS Performance</h3>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Sales revenue vs inventory cost</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">How your shop/counter is doing</p>
                       </div>
                       {posAnalytics.margin > 0 && (
                         <span className={`rounded-full px-3 py-1.5 text-xs font-black ${posAnalytics.margin >= 30 ? 'bg-emerald-100 text-emerald-700' : posAnalytics.margin >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'}`}>

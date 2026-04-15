@@ -1102,7 +1102,6 @@ function App() {
         headers: { 'x-auth-token': token }
       });
       fetchNotifications();
-      setShowNotifications(false); 
     } catch (err) {
       reportClientError('Notifications mark all read', err);
     }
@@ -1716,7 +1715,11 @@ function App() {
                 {/* NOTIFICATION BELL */}
                 <div className="relative">
                 <button 
-                  onClick={() => setShowNotifications(!showNotifications)}
+                  onClick={() => {
+                    const opening = !showNotifications;
+                    setShowNotifications(opening);
+                    if (opening && unreadCount > 0) handleMarkAllAsRead();
+                  }}
                   className="relative p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
                 >
                   <Bell size={20} />
@@ -1729,42 +1732,27 @@ function App() {
 
                 {showNotifications && (
                   <>
-                    <div className="fixed inset-0 z-[40] bg-black/20 backdrop-blur-[2px]" onClick={() => setShowNotifications(false)} />
-                    <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-3 sm:w-96 bg-white rounded-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.3)] border border-slate-100 overflow-hidden z-[50] animate-in slide-in-from-top-2 fade-in duration-200 max-h-[min(80vh,520px)] flex flex-col">
-                      <div className="p-4 border-b flex items-center justify-between bg-gradient-to-r from-indigo-50 to-slate-50 shrink-0">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-indigo-100 flex items-center justify-center">
-                            <Bell size={16} className="text-indigo-600" />
-                          </div>
-                          <div>
-                            <h3 className="font-black text-slate-800 text-sm">Notifications</h3>
-                            {unreadCount > 0 && <p className="text-[10px] text-indigo-600 font-bold">{unreadCount} unread</p>}
-                          </div>
-                        </div>
+                    <div className="fixed inset-0 z-[40] bg-black/30" onClick={() => setShowNotifications(false)} />
+                    <div className="fixed inset-x-4 top-14 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-3 sm:w-96 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-[50] max-h-[min(70vh,420px)] flex flex-col">
+                      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
                         <div className="flex items-center gap-2">
-                          {unreadCount > 0 && (
-                            <button onClick={handleMarkAllAsRead} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
-                              Mark all read
-                            </button>
-                          )}
-                          <button onClick={() => setShowNotifications(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors sm:hidden">
-                            <X size={16} />
-                          </button>
+                          <Bell size={16} className="text-slate-500" />
+                          <h3 className="font-bold text-slate-800 text-sm">Notifications</h3>
                         </div>
+                        <button onClick={() => setShowNotifications(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                          <X size={16} />
+                        </button>
                       </div>
                       
                       <div className="overflow-y-auto flex-1 overscroll-contain">
                         {notifications.length === 0 ? (
-                          <div className="p-10 text-center">
-                            <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-slate-50 flex items-center justify-center">
-                              <Bell size={24} className="text-slate-300" />
-                            </div>
-                            <p className="text-sm font-bold text-slate-500">All caught up!</p>
-                            <p className="text-xs text-slate-400 mt-1">No new notifications</p>
+                          <div className="p-8 text-center">
+                            <Bell size={20} className="text-slate-300 mx-auto mb-2" />
+                            <p className="text-sm font-semibold text-slate-500">No notifications yet</p>
                           </div>
                         ) : (
                           <div className="divide-y divide-slate-100">
-                            {notifications.map(notif => {
+                            {notifications.slice(0, 6).map(notif => {
                               const now = Date.now();
                               const created = new Date(notif.created_at).getTime();
                               const diffMin = Math.max(0, Math.floor((now - created) / 60000));
@@ -1778,23 +1766,22 @@ function App() {
                               return (
                                 <div 
                                   key={notif.id} 
-                                  onClick={() => { if(!notif.is_read) handleMarkAsRead(notif.id); }}
-                                  className={`px-4 py-3.5 transition-all cursor-pointer group ${notif.is_read ? 'bg-white hover:bg-slate-50/80' : 'bg-indigo-50/30 hover:bg-indigo-50/60'}`}
+                                  className="px-4 py-3 hover:bg-slate-50 transition-colors"
                                 >
                                   <div className="flex gap-3 items-start">
-                                    <div className="mt-1 shrink-0">
-                                      <div className={`w-2.5 h-2.5 rounded-full transition-all ${notif.is_read ? 'bg-slate-200' : 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)] ring-4 ring-indigo-500/10'}`} />
+                                    <div className="mt-1.5 shrink-0">
+                                      <div className={`w-2 h-2 rounded-full ${notif.is_read ? 'bg-slate-200' : 'bg-indigo-500'}`} />
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-start justify-between gap-2">
-                                        <h4 className={`text-[13px] leading-tight ${notif.is_read ? 'font-semibold text-slate-600' : 'font-black text-slate-900'}`}>
+                                        <h4 className="text-[13px] font-semibold text-slate-800 leading-tight">
                                           {notif.title}
                                         </h4>
-                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider shrink-0 mt-0.5">
+                                        <span className="text-[10px] text-slate-400 font-semibold shrink-0 mt-0.5 uppercase">
                                           {timeLabel}
                                         </span>
                                       </div>
-                                      <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
+                                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed line-clamp-2">
                                         {notif.message}
                                       </p>
                                     </div>

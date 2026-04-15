@@ -383,7 +383,7 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
           <div className="min-w-0 sm:pr-1">
             <h1 className="text-3xl font-black text-slate-900 tracking-tight">Gym Insights</h1>
           </div>
-          <p className="mt-2 text-slate-500 font-medium sm:col-span-2 sm:mt-0">Simple numbers from real payments, memberships, and attendance.</p>
+          <p className="mt-2 text-slate-500 font-medium sm:col-span-2 sm:mt-0">See how your gym is doing — payments, members, and attendance.</p>
         </div>
         <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm w-fit">
             {['1M', '3M', '6M', '1Y'].map((range) => (
@@ -444,46 +444,46 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPICard title="Average Per Member" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
+            <KPICard title="Avg Per Member" value={`₹${analytics.revenue.arpu.toLocaleString()}`} icon={Target} color="bg-emerald-500" className="gv-fade-up" />
             <KPICard title="Renewals Due Soon" value={analytics.risk.expiringCount} change={analytics.risk.expiringCount > 0 ? 'urgent' : null} trend="down" icon={Clock} color="bg-amber-500" className="gv-fade-up gv-fade-up-1" />
             <KPICard title="Members Staying" value={`${analytics.health.retention}%`} change={`${analytics.health.expired} expired`} trend={Number(analytics.health.churn || 0) > 0 ? 'down' : 'up'} icon={Activity} color="bg-violet-500" className="gv-fade-up gv-fade-up-2" />
             <KPICard title="Money At Risk" value={`₹${analytics.risk.revenueAtRisk.toLocaleString()}`} change={analytics.risk.inactiveCount > 0 ? `${analytics.risk.inactiveCount} not visiting` : null} trend={analytics.risk.revenueAtRisk > 0 ? 'down' : 'up'} icon={AlertTriangle} color="bg-rose-500" className="gv-fade-up gv-fade-up-3" />
           </div>
 
           <div className="bg-white backdrop-blur-sm rounded-[20px] border border-slate-200/80 p-5 space-y-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Quick Summary</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Summary</p>
             <div className="grid grid-cols-1 desktop:grid-cols-2 gap-4 text-sm text-slate-600 font-medium leading-relaxed">
               <div className="space-y-2">
                 <p>
                   <span className="font-bold text-slate-900">Money:</span>{' '}
                   {analytics.revenue.arpu > 0
-                    ? `You are earning about ₹${analytics.revenue.arpu.toLocaleString()} per active member, and ₹${analytics.revenue.lostRevenue.toLocaleString()} was lost from expired plans. `
-                    : 'No payment data is available yet for this period. '}
-                  {analytics.health.active > 0 && `If current members stay active, that is about ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()} for the month.`}
+                    ? `You are earning about ₹${analytics.revenue.arpu.toLocaleString()} per member. ₹${analytics.revenue.lostRevenue.toLocaleString()} was lost from expired plans. `
+                    : 'No payment data yet for this period. '}
+                  {analytics.health.active > 0 && `If all current members stay, you can expect about ₹${(analytics.health.active * analytics.revenue.arpu).toLocaleString()} this month.`}
                 </p>
                 <p>
                   <span className="font-bold text-slate-900">Members staying:</span>{' '}
                   {Number(analytics.health.retention) >= 80
-                    ? `${analytics.health.retention}% of members are staying active. `
+                    ? `${analytics.health.retention}% of members are staying. This is good! `
                     : Number(analytics.health.retention) >= 50
-                      ? `${analytics.health.retention}% of members are staying active, but this needs attention. `
-                      : `Only ${analytics.health.retention}% of members are staying active. Follow-up is needed. `}
-                  {analytics.health.expired > 0 && `${analytics.health.expired} memberships expired in this window.`}
+                      ? `${analytics.health.retention}% of members are staying. This needs improvement. `
+                      : `Only ${analytics.health.retention}% of members are staying. You need to follow up with inactive members. `}
+                  {analytics.health.expired > 0 && `${analytics.health.expired} memberships expired recently.`}
                 </p>
               </div>
               <div className="space-y-2">
                 <p>
-                  <span className="font-bold text-slate-900">Attention needed:</span>{' '}
+                  <span className="font-bold text-slate-900">Action needed:</span>{' '}
                   {analytics.risk.expiringCount > 0
-                    ? `${analytics.risk.expiringCount} renewals are due soon and ₹${analytics.risk.revenueAtRisk.toLocaleString()} could be lost. `
-                    : 'No urgent renewal risk right now. '}
-                  {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members are not visiting and may stop coming.`}
+                    ? `${analytics.risk.expiringCount} renewals are due soon. ₹${analytics.risk.revenueAtRisk.toLocaleString()} could be lost if they don't renew. `
+                    : 'No urgent renewals right now. '}
+                  {analytics.risk.inactiveCount > 0 && `${analytics.risk.inactiveCount} members have stopped visiting.`}
                 </p>
                 <p>
-                  <span className="font-bold text-slate-900">Visits:</span>{' '}
+                  <span className="font-bold text-slate-900">Attendance:</span>{' '}
                   {hasPeakHourData
-                    ? `Attendance data now shows the busiest hours. Open the Attendance tab below to see them.`
-                    : 'Attendance data is still building. Check again after a few more check-ins.'}
+                    ? `Your busiest hours are now showing. Check the Attendance tab below to see them.`
+                    : 'Attendance data is building up. Check again after more check-ins.'}
                 </p>
               </div>
             </div>
@@ -495,8 +495,8 @@ const InsightsPage = ({ appRuntime, isActive = true }) => {
         {[
           { id: 'revenue', label: 'Money', icon: TrendingUp },
           { id: 'attendance', label: 'Attendance', icon: Users },
-          { id: 'retention', label: 'Member Health', icon: UserCheck },
-          { id: 'risk', label: 'Attention Needed', icon: AlertTriangle },
+          { id: 'retention', label: 'Members', icon: UserCheck },
+          { id: 'risk', label: 'Action Needed', icon: AlertTriangle },
           ...(canViewFranchiseInsights ? [{ id: 'franchise', label: 'Franchise', icon: Building2 }] : []),
         ].map((tab) => (
           <button
