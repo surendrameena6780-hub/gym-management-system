@@ -9,8 +9,9 @@ const { ok, fail } = require('../utils/apiResponse');
 const {
     buildTemplateBodyVariables,
     normalizeLocalIndianPhone,
+    normalizeE164Phone,
 } = require('../utils/msg91');
-const { sendTrackedWhatsAppTemplate } = require('../utils/whatsappDelivery');
+const { getRecentMetaSuppressionRecipients, sendTrackedWhatsAppTemplate } = require('../utils/whatsappDelivery');
 const { writeAuditLog } = require('../utils/auditLog');
 
 const AUDIENCE_MAP = {
@@ -27,6 +28,7 @@ const BOT_MEMBER_EMAIL_DOMAIN = '@seed.gymvault.bot';
 const REMINDER_REQUEST_WINDOW_MS = 15 * 60 * 1000;
 const REMINDER_REQUEST_LIMIT = Math.max(1, parseInt(process.env.REMINDER_REQUEST_LIMIT || '6', 10) || 6);
 const REMINDER_HOURLY_SEND_LIMIT = Math.max(1, parseInt(process.env.REMINDER_HOURLY_SEND_LIMIT || '250', 10) || 250);
+const META_SUPPRESSION_COOLDOWN_HOURS = Math.max(1, Math.min(parseInt(process.env.WHATSAPP_META_SUPPRESSION_COOLDOWN_HOURS || '24', 10) || 24, 168));
 
 const CHURN_SCORE_SQL = `
 WITH latest_membership AS (
@@ -414,6 +416,56 @@ const buildReminderPreviewItems = ({ members = [], approvedTemplates = new Map()
     });
 };
 
+const formatMetaSuppressionRetryAt = (value) => {
+    if (!value) return '';
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+
+    return parsed.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const buildMetaSuppressionBlockReason = (suppression) => {
+    const cooldownHours = Math.max(1, Number.parseInt(suppression?.cooldownHours, 10) || META_SUPPRESSION_COOLDOWN_HOURS);
+    const lastFailedAt = suppression?.lastFailedAt ? new Date(suppression.lastFailedAt) : null;
+    const retryAt = lastFailedAt && !Number.isNaN(lastFailedAt.getTime())
+        ? new Date(lastFailedAt.getTime() + (cooldownHours * 60 * 60 * 1000))
+        : null;
+    const retryLabel = formatMetaSuppressionRetryAt(retryAt);
+
+    return retryLabel
+        ? `WhatsApp recently returned Meta 131049 for this recipient. Ask the member to start the gym WhatsApp thread first, then retry after ${retryLabel}.`
+        : `WhatsApp recently returned Meta 131049 for this recipient. Ask the member to start the gym WhatsApp thread first, then retry after about ${cooldownHours} hours.`;
+};
+
+const applyMetaSuppressionBlocks = (items = [], suppressedRecipients = new Map()) => {
+    if (!(suppressedRecipients instanceof Map) || suppressedRecipients.size === 0) {
+        return Array.isArray(items) ? items : [];
+    }
+
+    return (Array.isArray(items) ? items : []).map((item) => {
+        if (!item?.eligible) {
+            return item;
+        }
+
+        const suppression = suppressedRecipients.get(normalizeE164Phone(item.recipient_number || item.phone));
+        if (!suppression) {
+            return item;
+        }
+
+        return {
+            ...item,
+            eligible: false,
+            reason: buildMetaSuppressionBlockReason(suppression),
+        };
+    });
+};
+
 const runWithConcurrency = async (items, concurrency, worker) => {
     const queue = Array.isArray(items) ? items : [];
     if (queue.length === 0) return;
@@ -579,20 +631,24 @@ router.post('/reminders/preview', auth, saasMiddleware, async (req, res) => {
             return fail(res, 400, 'REMINDER_MEMBERS_NOT_FOUND', 'No valid members were found for this reminder request.');
         }
 
-        const memberMap = new Map(members.map((member) => [Number(member.id), member]));
-
         const previewItems = buildReminderPreviewItems({
             members,
             approvedTemplates,
             requestedTemplateKey,
             gymName: gymConfig.name || 'GymVault',
         });
+        const recentMetaSuppressionRecipients = await getRecentMetaSuppressionRecipients(
+            gymId,
+            previewItems.filter((item) => item.eligible).map((item) => item.recipient_number),
+            META_SUPPRESSION_COOLDOWN_HOURS
+        );
+        const filteredPreviewItems = applyMetaSuppressionBlocks(previewItems, recentMetaSuppressionRecipients);
 
         return ok(res, {
-            preview_items: previewItems,
-            eligible_count: previewItems.filter((item) => item.eligible).length,
-            blocked_count: previewItems.filter((item) => !item.eligible).length,
-            template_keys_used: Array.from(new Set(previewItems.filter((item) => item.eligible).map((item) => item.template_key))),
+            preview_items: filteredPreviewItems,
+            eligible_count: filteredPreviewItems.filter((item) => item.eligible).length,
+            blocked_count: filteredPreviewItems.filter((item) => !item.eligible).length,
+            template_keys_used: Array.from(new Set(filteredPreviewItems.filter((item) => item.eligible).map((item) => item.template_key))),
         });
     } catch (err) {
         console.error('REMINDER PREVIEW ERROR:', err.message);
@@ -668,8 +724,14 @@ router.post('/reminders/send', auth, saasMiddleware, reminderRequestLimiter, asy
             requestedTemplateKey,
             gymName: gymConfig.name || 'GymVault',
         });
+        const recentMetaSuppressionRecipients = await getRecentMetaSuppressionRecipients(
+            gymId,
+            previewItems.filter((item) => item.eligible).map((item) => item.recipient_number),
+            META_SUPPRESSION_COOLDOWN_HOURS
+        );
+        const filteredPreviewItems = applyMetaSuppressionBlocks(previewItems, recentMetaSuppressionRecipients);
 
-        const eligibleReminderCount = previewItems.filter((item) => item.eligible).length;
+        const eligibleReminderCount = filteredPreviewItems.filter((item) => item.eligible).length;
         const reminderUsageRes = await pool.query(
             `SELECT COUNT(*)::INT AS sent_last_hour
              FROM whatsapp_delivery_logs
@@ -708,7 +770,7 @@ router.post('/reminders/send', auth, saasMiddleware, reminderRequestLimiter, asy
         const failures = [];
         const templateKeysUsed = new Set();
 
-        await runWithConcurrency(previewItems, WHATSAPP_SEND_CONCURRENCY, async (previewItem) => {
+        await runWithConcurrency(filteredPreviewItems, WHATSAPP_SEND_CONCURRENCY, async (previewItem) => {
             if (!previewItem.eligible) {
                 failedCount += 1;
                 failures.push({
@@ -1046,9 +1108,26 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
         let successCount = 0;
         let failedCount = 0;
         const failures = [];
+        const recentMetaSuppressionRecipients = await getRecentMetaSuppressionRecipients(
+            gymId,
+            targetMembers.map((member) => member.phone),
+            META_SUPPRESSION_COOLDOWN_HOURS
+        );
 
         await runWithConcurrency(targetMembers, WHATSAPP_SEND_CONCURRENCY, async (member) => {
             const toPhone = normalizeLocalIndianPhone(member.phone);
+            const suppressedRecipient = recentMetaSuppressionRecipients.get(normalizeE164Phone(member.phone));
+            if (suppressedRecipient) {
+                failedCount += 1;
+                failures.push({
+                    member_id: member.id,
+                    full_name: member.full_name,
+                    phone: member.phone,
+                    reason: buildMetaSuppressionBlockReason(suppressedRecipient),
+                });
+                return;
+            }
+
             try {
                 await sendTrackedWhatsAppTemplate({
                     gymId,

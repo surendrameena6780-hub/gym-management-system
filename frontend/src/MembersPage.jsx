@@ -3,12 +3,13 @@ import axios from 'axios';
 import {
   Search, Edit2, Plus, X, Zap, RefreshCw, Trash2, Ban, Calendar,
   CreditCard, Clock, AlertTriangle, CheckCircle, Flame, TrendingUp,
-  MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail, Snowflake,
+  MessageSquare, ListChecks, UserPlus, Phone, Download, Users, Mail, Snowflake, Copy,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import { buildUpiCollectionUri, copyCollectionText, describeCollectionLinkDelivery, formatCollectionAmount, openCollectionLink } from './utils/memberCollection';
 import { buildReminderPreviewDialog, getReminderPreviewBlockReason, previewWhatsAppReminders, sendWhatsAppReminders, summarizeReminderResult } from './utils/whatsappReminders';
+import { buildWhatsAppConversationUrl, openWhatsAppConversation } from './utils/externalNavigation';
 import PageLoader from './PageLoader';
 import { reportClientError } from './utils/clientErrorReporter';
 import PaginationControls from './components/PaginationControls';
@@ -394,6 +395,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [reminderPreviewLoading, setReminderPreviewLoading] = useState(false);
   const [reminderPreviewError, setReminderPreviewError] = useState('');
   const [reminderSending, setReminderSending] = useState(false);
+  const [gymWhatsAppStarter, setGymWhatsAppStarter] = useState({ number: '', displayName: '', ready: false });
+  const [gymWhatsAppStarterLoading, setGymWhatsAppStarterLoading] = useState(false);
 
   const isExistingMemberOnboarding = String(addFormData.onboarding_mode || 'FRESH').toUpperCase() === 'EXISTING';
 
@@ -745,8 +748,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       fetchMemberDocs(selectedMember.id);
       fetchMemberWaivers(selectedMember.id);
       loadMemberDetails(selectedMember.id).catch(() => {});
+      fetchGymWhatsAppStarter().catch(() => {});
     }
-  }, [fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal]);
+  }, [fetchGymWhatsAppStarter, fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal]);
 
   const openAddMemberModal = useCallback(() => {
     if (!canWriteMembers) {
@@ -1584,6 +1588,72 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     return templates;
   }, [reminderTemplates, token]);
 
+  const fetchGymWhatsAppStarter = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      setGymWhatsAppStarterLoading(true);
+      const response = await axios.get('/api/settings/integrations', {
+        headers: { 'x-auth-token': token },
+      });
+      const payload = unwrapMembersApiData(response.data);
+      const number = String(payload.whatsapp_number || '').trim();
+      setGymWhatsAppStarter({
+        number,
+        displayName: String(payload.whatsapp_display_name || '').trim(),
+        ready: String(payload.whatsapp_status || '').trim().toUpperCase() === 'CONNECTED' && Boolean(number),
+      });
+    } catch (_err) {
+      setGymWhatsAppStarter({ number: '', displayName: '', ready: false });
+    } finally {
+      setGymWhatsAppStarterLoading(false);
+    }
+  }, [token]);
+
+  const memberWhatsAppStarterMessage = useMemo(() => {
+    const fullName = String(selectedMember?.full_name || 'Member').trim() || 'Member';
+    return `Hi, this is ${fullName}. Please keep this WhatsApp thread active for my membership updates and renewal support.`;
+  }, [selectedMember?.full_name]);
+
+  const memberWhatsAppStarterUrl = useMemo(() => {
+    if (!gymWhatsAppStarter.ready) return '';
+    return buildWhatsAppConversationUrl({
+      phone: gymWhatsAppStarter.number,
+      message: memberWhatsAppStarterMessage,
+    });
+  }, [gymWhatsAppStarter.number, gymWhatsAppStarter.ready, memberWhatsAppStarterMessage]);
+
+  const handleOpenMemberWhatsAppStarter = useCallback(() => {
+    if (!gymWhatsAppStarter.ready) {
+      toast?.('Connect the gym business WhatsApp number in Settings first.', 'warning');
+      return;
+    }
+
+    const launched = openWhatsAppConversation({
+      phone: gymWhatsAppStarter.number,
+      message: memberWhatsAppStarterMessage,
+    });
+
+    if (!launched) {
+      toast?.('Unable to open WhatsApp on this device right now.', 'error');
+    }
+  }, [gymWhatsAppStarter.number, gymWhatsAppStarter.ready, memberWhatsAppStarterMessage, toast]);
+
+  const handleCopyMemberWhatsAppStarterLink = useCallback(async () => {
+    if (!memberWhatsAppStarterUrl) {
+      toast?.('Connect the gym business WhatsApp number in Settings first.', 'warning');
+      return;
+    }
+
+    const copied = await copyCollectionText(memberWhatsAppStarterUrl);
+    if (copied) {
+      toast?.('WhatsApp starter link copied.', 'success');
+      return;
+    }
+
+    toast?.('Copy failed on this device. Long-press and copy it manually.', 'warning');
+  }, [memberWhatsAppStarterUrl, toast]);
+
   useEffect(() => {
     if (!token) return;
 
@@ -2204,6 +2274,50 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider leading-none mb-0.5">Email</p>
                   <p className="text-xs font-bold text-slate-900 truncate">{selectedMember.email || '—'}</p>
                 </div>
+              </div>
+            </div>
+
+            <div className={`rounded-2xl border p-3.5 ${gymWhatsAppStarter.ready ? 'border-emerald-100 bg-emerald-50/70' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600/80">WhatsApp Starter</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">Start the member thread once from the customer phone</p>
+                  <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                    This opens a real WhatsApp conversation before future reminders. It is the cleanest way to reduce Meta 131049 suppression without using fallback channels.
+                  </p>
+                  {gymWhatsAppStarterLoading ? (
+                    <p className="mt-2 text-[11px] font-bold text-slate-500">Loading your connected gym WhatsApp...</p>
+                  ) : gymWhatsAppStarter.ready ? (
+                    <p className="mt-2 text-[11px] font-bold text-emerald-700">
+                      Opens {gymWhatsAppStarter.displayName || 'your gym WhatsApp'} with a professional onboarding message from this member.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-[11px] font-bold text-amber-700">Connect the gym business WhatsApp number in Settings to use this thread starter.</p>
+                  )}
+                </div>
+                {memberWhatsAppStarterUrl ? (
+                  <div className="mx-auto rounded-[20px] border border-emerald-100 bg-white p-2.5 shadow-sm sm:mx-0">
+                    <QRCodeCanvas value={memberWhatsAppStarterUrl} size={94} includeMargin level="M" bgColor="#ffffff" fgColor="#0f172a" />
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenMemberWhatsAppStarter}
+                  disabled={gymWhatsAppStarterLoading || !gymWhatsAppStarter.ready}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-white transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <MessageSquare size={14} fill="currentColor" /> Start Thread
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyMemberWhatsAppStarterLink}
+                  disabled={gymWhatsAppStarterLoading || !memberWhatsAppStarterUrl}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-slate-700 transition-all hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Copy size={14} /> Copy Invite Link
+                </button>
               </div>
             </div>
 

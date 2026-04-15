@@ -8,6 +8,8 @@ const {
 } = require('./msg91');
 
 const MSG91_WHATSAPP_WEBHOOK_DOC_URL = 'https://msg91.com/help/whatsapp/how-to-get-reports-of-whatsapp-messages-on-webhook';
+const META_HEALTHY_ECOSYSTEM_FAILURE_CODE = '131049';
+const DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS = Math.max(1, Math.min(Number.parseInt(process.env.WHATSAPP_META_SUPPRESSION_COOLDOWN_HOURS || '24', 10) || 24, 168));
 const STATUS_PRIORITY = {
     UNKNOWN: -1,
     QUEUED: 0,
@@ -1122,10 +1124,62 @@ const getRecentWhatsAppDeliveryLogs = async (gymId, limit = 20) => {
     return result.rows;
 };
 
+const getRecentMetaSuppressionRecipients = async (gymId, recipientNumbers = [], cooldownHours = DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS) => {
+    await ensureWhatsAppDeliverySchema();
+
+    const normalizedRecipients = Array.from(new Set(
+        (Array.isArray(recipientNumbers) ? recipientNumbers : [recipientNumbers])
+            .map((value) => normalizeE164Phone(value))
+            .filter(Boolean)
+    ));
+
+    if (!gymId || normalizedRecipients.length === 0) {
+        return new Map();
+    }
+
+    const safeCooldownHours = Math.max(1, Math.min(Number.parseInt(cooldownHours, 10) || DEFAULT_META_SUPPRESSION_COOLDOWN_HOURS, 168));
+    const result = await pool.query(
+        `SELECT DISTINCT ON (recipient_number)
+            recipient_number,
+            status_detail,
+            failed_at,
+            updated_at,
+            created_at
+         FROM whatsapp_delivery_logs
+         WHERE gym_id = $1
+           AND recipient_number = ANY($2::text[])
+           AND current_status = 'FAILED'
+           AND COALESCE(failed_at, updated_at, created_at) >= NOW() - ($3::int * INTERVAL '1 hour')
+           AND (
+                COALESCE(status_detail, '') ILIKE '%' || $4 || '%'
+                OR COALESCE(last_provider_payload::text, '') ILIKE '%' || $4 || '%'
+           )
+         ORDER BY recipient_number ASC, COALESCE(failed_at, updated_at, created_at) DESC`,
+        [gymId, normalizedRecipients, safeCooldownHours, META_HEALTHY_ECOSYSTEM_FAILURE_CODE]
+    );
+
+    return new Map(
+        (result.rows || []).map((row) => {
+            const normalizedRecipientNumber = normalizeE164Phone(row.recipient_number);
+            return [
+                normalizedRecipientNumber,
+                {
+                    recipientNumber: normalizedRecipientNumber,
+                    failureCode: META_HEALTHY_ECOSYSTEM_FAILURE_CODE,
+                    statusDetail: toTrimmedString(row.status_detail),
+                    lastFailedAt: row.failed_at || row.updated_at || row.created_at || null,
+                    cooldownHours: safeCooldownHours,
+                },
+            ];
+        })
+    );
+};
+
 module.exports = {
     MSG91_WHATSAPP_WEBHOOK_DOC_URL,
     ensureWhatsAppDeliverySchema,
     extractSendAcceptanceMeta,
+    getRecentMetaSuppressionRecipients,
     getRecentWhatsAppDeliveryLogs,
     getWhatsAppDeliverySummary,
     normalizeDeliveryStatus,

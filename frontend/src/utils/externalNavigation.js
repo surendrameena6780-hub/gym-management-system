@@ -12,14 +12,30 @@ const shouldLaunchInSameContext = () => {
   return isStandaloneMode() || /iphone|ipad|ipod|android/.test(userAgent);
 };
 
+const normalizeWhatsAppTarget = (phone, countryCode = '91') => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+
+  const normalizedCountryCode = String(countryCode || '').replace(/\D/g, '');
+  if (!normalizedCountryCode) return digits;
+  if (digits.length === 10) return `${normalizedCountryCode}${digits}`;
+  if (digits.startsWith(normalizedCountryCode)) return digits;
+  return digits;
+};
+
+export const buildWhatsAppConversationUrl = ({ phone, message, countryCode = '91' }) => {
+  const target = normalizeWhatsAppTarget(phone, countryCode);
+  if (!target) return '';
+
+  const encodedMessage = encodeURIComponent(String(message || ''));
+  return `https://wa.me/${target}${encodedMessage ? `?text=${encodedMessage}` : ''}`;
+};
+
 export const openWhatsAppConversation = ({ phone, message, countryCode = '91' }) => {
   if (typeof window === 'undefined') return false;
 
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (!digits) return false;
-
-  const encodedMessage = encodeURIComponent(String(message || ''));
-  const url = `https://wa.me/${countryCode}${digits}${encodedMessage ? `?text=${encodedMessage}` : ''}`;
+  const url = buildWhatsAppConversationUrl({ phone, message, countryCode });
+  if (!url) return false;
 
   if (shouldLaunchInSameContext()) {
     window.location.assign(url);
