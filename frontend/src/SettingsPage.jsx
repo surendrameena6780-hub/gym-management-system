@@ -4186,7 +4186,7 @@ const loadRazorpayScript = () => {
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-4">
                     <div>
                       <h3 className="font-bold text-slate-800">Bulk Member Import</h3>
-                      <p className="text-xs text-slate-500 mt-1">Upload a <span className="font-bold">.csv file</span> or paste CSV rows with <span className="font-bold">full_name, phone</span>. Optional columns: <span className="font-bold">email, branch_name or branch_id, plan_name or plan_id, membership_start_date, membership_end_date, joining_date, last_visit_date</span>. Use plan + expiry columns to migrate existing active members without charging them again.</p>
+                      <p className="text-xs text-slate-500 mt-1">Upload a <span className="font-bold">.csv file</span> or paste CSV rows with <span className="font-bold">full_name, phone</span>. Optional columns: <span className="font-bold">email, branch_name or branch_id, plan_name or plan_id, membership_start_date, membership_end_date, joining_date, last_visit_date</span>. Dates can be in <span className="font-bold">YYYY-MM-DD</span> or <span className="font-bold">DD-MM-YYYY</span>. Use plan + expiry columns to migrate existing active members without charging them again.</p>
                     </div>
                     <div className="flex gap-2 shrink-0">
                       <label className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-100 transition-all cursor-pointer flex items-center gap-2">

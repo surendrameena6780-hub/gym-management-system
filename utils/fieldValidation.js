@@ -221,6 +221,63 @@ const ensureTimestamp = (value, {
     return parsed.toISOString();
 };
 
+const buildDateOnlyValue = (year, month, day) => {
+    const normalizedYear = Number.parseInt(year, 10);
+    const normalizedMonth = Number.parseInt(month, 10);
+    const normalizedDay = Number.parseInt(day, 10);
+
+    if (!Number.isInteger(normalizedYear) || !Number.isInteger(normalizedMonth) || !Number.isInteger(normalizedDay)) {
+        return null;
+    }
+
+    if (normalizedMonth < 1 || normalizedMonth > 12 || normalizedDay < 1 || normalizedDay > 31) {
+        return null;
+    }
+
+    const normalized = `${String(normalizedYear).padStart(4, '0')}-${String(normalizedMonth).padStart(2, '0')}-${String(normalizedDay).padStart(2, '0')}`;
+    const parsed = new Date(`${normalized}T00:00:00.000Z`);
+
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    if (
+        parsed.getUTCFullYear() !== normalizedYear
+        || parsed.getUTCMonth() + 1 !== normalizedMonth
+        || parsed.getUTCDate() !== normalizedDay
+    ) {
+        return null;
+    }
+
+    return normalized;
+};
+
+const parseDateOnlyString = (value) => {
+    const raw = String(value).trim();
+
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+        return buildDateOnlyValue(isoMatch[1], isoMatch[2], isoMatch[3]);
+    }
+
+    const yearFirstMatch = raw.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+    if (yearFirstMatch) {
+        return buildDateOnlyValue(yearFirstMatch[1], yearFirstMatch[2], yearFirstMatch[3]);
+    }
+
+    const dayFirstMatch = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (dayFirstMatch) {
+        return buildDateOnlyValue(dayFirstMatch[3], dayFirstMatch[2], dayFirstMatch[1]);
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed.toISOString().slice(0, 10);
+};
+
 const ensureDateOnly = (value, {
     field = 'value',
     required = false,
@@ -236,14 +293,10 @@ const ensureDateOnly = (value, {
     }
 
     const raw = String(value).trim();
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) {
+    const normalized = parseDateOnlyString(raw);
+    if (!normalized) {
         throw new ValidationError(`${field} must be a valid date.`);
     }
-
-    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw)
-        ? raw
-        : parsed.toISOString().slice(0, 10);
 
     const dateOnly = new Date(`${normalized}T00:00:00.000Z`);
     const today = new Date();
