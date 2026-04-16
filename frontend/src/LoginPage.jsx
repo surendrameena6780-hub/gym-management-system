@@ -387,7 +387,6 @@ function PasswordResetModal({
 function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMemberChange }) {
   const qrScannerRef = useRef(null);
   const qrScannerBusyRef = useRef(false);
-  const autoGeoAttemptRef = useRef(false);
   const [attendance, setAttendance] = useState([]);
   const [loadingAtt, setLoadingAtt] = useState(true);
   const [memberQr, setMemberQr] = useState(null);
@@ -691,48 +690,6 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
   const checkedInToday = todayCheckins > 0;
 
   const lastVisitLabel = attendance[0]?.date ? formatPortalDate(attendance[0].date) : 'No recent check-in';
-
-  useEffect(() => {
-    if (!attendanceOptions.self_checkin_available) return;
-    if (autoGeoAttemptRef.current) return;
-    if (loadingAtt) return;
-    if (checkedInToday) return;
-    if (!navigator?.permissions?.query) return;
-
-    const storageKey = `gymvault:auto-self-check:${member.id}:${todayStr}`;
-    try {
-      if (window.localStorage.getItem(storageKey)) {
-        autoGeoAttemptRef.current = true;
-        return;
-      }
-    } catch (_err) {
-      // ignore storage access errors
-    }
-
-    autoGeoAttemptRef.current = true;
-
-    const run = async () => {
-      try {
-        const permission = await navigator.permissions.query({ name: 'geolocation' });
-        if (permission.state !== 'granted') {
-          return;
-        }
-
-        const success = await submitLocationSelfCheckin({ auto: true });
-        if (success) {
-          try {
-            window.localStorage.setItem(storageKey, String(Date.now()));
-          } catch (_err) {
-            // ignore storage access errors
-          }
-        }
-      } catch (_err) {
-        // permissions api not available or rejected, stay manual
-      }
-    };
-
-    run();
-  }, [attendanceOptions.self_checkin_available, checkedInToday, loadingAtt, member.id, submitLocationSelfCheckin, todayStr]);
 
   const last14 = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
