@@ -234,8 +234,14 @@ const notifyStaffAccessAlert = async ({ gym_id, title, message, url = '/attendan
 const notifyBlockedMembershipAttempt = async ({ gym, member, method, membershipStatus }) => {
     const membershipLabel = String(membershipStatus || member?.membership_status || 'UNKNOWN').toUpperCase();
     const methodLabel = METHOD_LABELS[normalizeMethod(method)] || 'attendance';
-    const title = 'Attendance Access Alert';
-    const message = `${member.full_name} tried ${methodLabel} at ${gym.name}, but membership is ${membershipLabel}. Staff should review or override at the desk.`;
+    const title = membershipLabel === 'EXPIRED'
+        ? 'Expired Member Trying To Check In'
+        : membershipLabel === 'UNPAID'
+            ? 'Unpaid Member Trying To Check In'
+            : membershipLabel === 'FROZEN'
+                ? 'Frozen Member Trying To Check In'
+                : 'Membership Check-In Blocked';
+    const message = `${member.full_name} tried ${methodLabel} at ${gym.name}. Membership status is ${membershipLabel}. Stop entry or renew membership at the desk.`;
     await notifyStaffAccessAlert({ gym_id: gym.id, title, message });
 };
 
