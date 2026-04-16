@@ -540,7 +540,8 @@ const parseCsvLine = (line) => {
 };
 
 const parseCsvText = (value) => String(value || '')
-    .split(/\r?\n/)
+    .replace(/^\uFEFF/, '')
+    .split(/\r\n|\n|\r|\u2028|\u2029/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map(parseCsvLine);
