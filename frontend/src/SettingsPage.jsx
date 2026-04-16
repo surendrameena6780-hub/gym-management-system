@@ -594,6 +594,7 @@ const loadRazorpayScript = () => {
     whatsapp_display_name: '',
     whatsapp_category: '',
     whatsapp_status: 'NOT_CONFIGURED',
+    connected_hello_numbers: 0,
     whatsapp_connected_at: null,
     whatsapp_last_checked_at: null,
     whatsapp_last_error: '',
@@ -827,10 +828,37 @@ const loadRazorpayScript = () => {
 
   const announceMessagingTemplateStateChanged = useCallback(() => {
     if (typeof window === 'undefined') return;
+    const at = Date.now();
+    window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at);
+    try {
+      window.sessionStorage.setItem('gymvault:data-change-at', String(at));
+    } catch {
+      // Ignore storage write failures; the in-memory event is enough.
+    }
+
     window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
       detail: {
         source: 'settings-integrations',
         scope: 'messaging-templates',
+        at,
+      },
+    }));
+  }, []);
+
+  const announceSettingsDataChanged = useCallback((detail = {}) => {
+    if (typeof window === 'undefined') return;
+    const at = Number(detail.at || Date.now());
+    window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at);
+    try {
+      window.sessionStorage.setItem('gymvault:data-change-at', String(at));
+    } catch {
+      // Ignore storage write failures; the in-memory event is enough.
+    }
+
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+      detail: {
+        ...detail,
+        at,
       },
     }));
   }, []);
@@ -962,6 +990,23 @@ const loadRazorpayScript = () => {
         applyEffectiveLimitsPayload(res.data.effective_limits);
       }
 
+      if (res.data.messaging_summary) {
+        setIntegrationData((prev) => {
+          const nextMonthlyLimit = Number(res.data.messaging_summary.bulk_monthly_limit ?? prev.bulk_monthly_limit ?? 500);
+          const nextMonthlyUsage = Number(res.data.messaging_summary.monthly_usage || 0);
+          return {
+            ...prev,
+            whatsapp_status: String(res.data.messaging_summary.whatsapp_status || prev.whatsapp_status || 'NOT_CONFIGURED').toUpperCase(),
+            whatsapp_mode: String(res.data.messaging_summary.whatsapp_mode || res.data.messaging_summary.whatsapp_status || prev.whatsapp_mode || 'NOT_CONFIGURED').toUpperCase(),
+            whatsapp_ready: Boolean(res.data.messaging_summary.whatsapp_ready),
+            connected_hello_numbers: Number(res.data.messaging_summary.connected_hello_numbers || 0),
+            bulk_monthly_limit: nextMonthlyLimit,
+            monthly_usage: nextMonthlyUsage,
+            monthly_remaining: Number(res.data.messaging_summary.monthly_remaining ?? Math.max(0, nextMonthlyLimit - nextMonthlyUsage)),
+          };
+        });
+      }
+
     } catch (err) {
       reportClientError('Settings fetch', err);
       toast("Failed to load settings. Please check backend terminal.", "error");
@@ -1027,6 +1072,7 @@ const loadRazorpayScript = () => {
         whatsapp_display_name: payload.whatsapp_display_name || '',
         whatsapp_category: payload.whatsapp_category || '',
         whatsapp_status: String(payload.whatsapp_status || payload.whatsapp_mode || 'NOT_CONFIGURED').toUpperCase(),
+        connected_hello_numbers: Number(payload.connected_hello_numbers ?? (String(payload.whatsapp_status || payload.whatsapp_mode || '').toUpperCase() === 'CONNECTED' ? 1 : 0)),
         whatsapp_connected_at: payload.whatsapp_connected_at || null,
         whatsapp_last_checked_at: payload.whatsapp_last_checked_at || null,
         whatsapp_last_error: payload.whatsapp_last_error || '',
@@ -1185,6 +1231,13 @@ const loadRazorpayScript = () => {
       }));
       toast(payload.message || 'Branch controls saved successfully.', 'success');
       await fetchSettings();
+      announceSettingsDataChanged({
+        source: 'settings-branch-save',
+        scope: 'branches',
+        branches_count: nextBranchesCount,
+        branch_directory: nextBranchDirectory,
+        preferred_branch_id: appRuntime?.operationsBranchId || '',
+      });
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to save branch controls.', 'error');
     } finally {
@@ -2252,13 +2305,10 @@ const loadRazorpayScript = () => {
         headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' }
       });
       await axios.put('/api/settings/gym', gymData, headers);
-      window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
-        detail: {
-          source: 'settings-profile-save',
-          scope: 'account-gym',
-          at: Date.now(),
-        },
-      }));
+      announceSettingsDataChanged({
+        source: 'settings-profile-save',
+        scope: 'account-gym',
+      });
       if (accountRes.data?.profile_pic) {
         setPreviewUrl(normalizeProfileImageUrl(accountRes.data.profile_pic));
       } else if (removeProfileImage) {
@@ -3082,7 +3132,7 @@ const loadRazorpayScript = () => {
                       />
                       <ProgressBar 
                           label="Connected Hello Number" 
-                          current={isWhatsAppConnected ? 1 : 0} 
+                          current={integrationData.connected_hello_numbers} 
                           max={eLimits.hello ?? 'Unlimited'} 
                           icon={Phone} 
                       />

@@ -286,6 +286,35 @@ const toPositiveInt = (value, fallback) => {
     return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
+const getMonthlyWhatsAppUsage = async (db, gymId) => {
+    const usageRes = await db.query(
+        `SELECT COALESCE(SUM(sent_to_count), 0)::INT AS monthly_sent
+         FROM broadcast_logs
+         WHERE gym_id = $1
+           AND created_at >= DATE_TRUNC('month', NOW())`,
+        [gymId]
+    );
+
+    return Math.max(0, Number.parseInt(usageRes.rows[0]?.monthly_sent || 0, 10) || 0);
+};
+
+const buildMessagingUsageSummary = ({ whatsappStatus = '', monthlyLimit = 500, monthlyUsage = 0 } = {}) => {
+    const normalizedStatus = String(whatsappStatus || 'NOT_CONFIGURED').toUpperCase();
+    const resolvedLimit = toPositiveInt(monthlyLimit, 500);
+    const resolvedUsage = Math.max(0, Number.parseInt(monthlyUsage || 0, 10) || 0);
+    const isConnected = normalizedStatus === 'CONNECTED';
+
+    return {
+        whatsapp_status: normalizedStatus,
+        whatsapp_mode: normalizedStatus,
+        whatsapp_ready: isConnected,
+        connected_hello_numbers: isConnected ? 1 : 0,
+        bulk_monthly_limit: resolvedLimit,
+        monthly_usage: resolvedUsage,
+        monthly_remaining: Math.max(0, resolvedLimit - resolvedUsage),
+    };
+};
+
 const normalizeMessagingPhone = (value) => normalizeE164Phone(value);
 
 const normalizeWhatsAppNumber = (value) => {
@@ -1137,9 +1166,9 @@ const discardUploadedProfile = async (req) => {
 
 router.get('/', auth, async (req, res) => {
     try {
-        await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema(), ensureBillingAddonSchema()]);
+        await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema(), ensureBillingAddonSchema(), ensureMessagingSchema()]);
 
-        const [userRes, gymRes, billingConfig, usageSnapshot] = await Promise.all([
+        const [userRes, gymRes, billingConfig, usageSnapshot, monthlyWhatsAppUsage] = await Promise.all([
             pool.query(
                 'SELECT full_name, email, phone, profile_pic FROM users WHERE id = $1 LIMIT 1',
                 [req.user.id]
@@ -1166,6 +1195,7 @@ router.get('/', auth, async (req, res) => {
                     COALESCE(g.addon_extra_members, 0)  AS addon_extra_members,
                     COALESCE(g.addon_extra_branches, 0) AS addon_extra_branches,
                     COALESCE(g.addon_extra_hello, 0)    AS addon_extra_hello,
+                    COALESCE(g.messaging_whatsapp_status, 'NOT_CONFIGURED') AS messaging_whatsapp_status,
                     COALESCE(g.interface_reduce_motion, FALSE) AS interface_reduce_motion,
                     COALESCE(g.interface_compact_mode, FALSE) AS interface_compact_mode,
                     COALESCE(g.interface_dark_mode, TRUE) AS interface_dark_mode,
@@ -1192,12 +1222,18 @@ router.get('/', auth, async (req, res) => {
             ),
             getBillingConfig(),
             getGymUsageSnapshot(pool, req.user.gym_id),
+            getMonthlyWhatsAppUsage(pool, req.user.gym_id),
         ]);
 
         const gym = gymRes.rows[0] || {};
         const branchesCount = Math.max(1, toPositiveInt(gym.branches_count, 1));
         const branchDirectory = normalizeBranchDirectory(gym.branch_directory, branchesCount);
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gym.current_plan, gym);
+        const messagingSummary = buildMessagingUsageSummary({
+            whatsappStatus: gym.messaging_whatsapp_status,
+            monthlyLimit: effectiveLimits.whatsapp ?? 500,
+            monthlyUsage: monthlyWhatsAppUsage,
+        });
 
         res.json({
             account: userRes.rows[0] || {},
@@ -1228,6 +1264,7 @@ router.get('/', auth, async (req, res) => {
             },
             billing_catalog: serializeBillingConfig(billingConfig, { includeCurrentPlan: gym.current_plan }),
             effective_limits: effectiveLimits,
+            messaging_summary: messagingSummary,
             support_profile: {
                 whatsapp: gym.whatsapp,
                 about_mission: gym.about_mission,
@@ -1287,23 +1324,17 @@ router.get('/integrations', auth, async (req, res) => {
             ? await syncGymWhatsAppState(gymId)
             : await loadMessagingState(gymId);
 
-        const usageRes = await pool.query(
-            `SELECT COALESCE(SUM(sent_to_count), 0)::INT AS monthly_sent
-             FROM broadcast_logs
-             WHERE gym_id = $1
-               AND created_at >= DATE_TRUNC('month', NOW())`,
-            [gymId]
-        );
-
         const row = messagingState.gym || {};
         const templates = messagingState.templates || [];
         const gymPlan = String(row.current_plan || 'basic').toLowerCase();
         const billingConfig = await getBillingConfig();
         const effectiveLimits = computeEffectiveBillingLimits(billingConfig, gymPlan, row);
-        const planWhatsAppLimit = effectiveLimits.whatsapp ?? 500;
-        // Always derive monthly limit from plan — plan-locked, not user-editable
-        const monthlyLimit = planWhatsAppLimit || 500;
-        const monthlySent = toPositiveInt(usageRes.rows[0]?.monthly_sent, 0);
+        const monthlySent = await getMonthlyWhatsAppUsage(pool, gymId);
+        const messagingSummary = buildMessagingUsageSummary({
+            whatsappStatus: row.messaging_whatsapp_status,
+            monthlyLimit: effectiveLimits.whatsapp ?? 500,
+            monthlyUsage: monthlySent,
+        });
         const templateSummary = summarizeTemplateSyncStatus(templates);
         const platformOtpMode = getMsg91OtpMode().toLowerCase();
 
@@ -1314,9 +1345,9 @@ router.get('/integrations', auth, async (req, res) => {
             whatsapp_category: row.messaging_whatsapp_category || '',
             whatsapp_onboarding: getMsg91WhatsAppOnboardingConfig(),
             gateway_connected: isMsg91WhatsAppConfigured(),
-            whatsapp_mode: String(row.messaging_whatsapp_status || 'NOT_CONFIGURED').toUpperCase(),
-            whatsapp_status: String(row.messaging_whatsapp_status || 'NOT_CONFIGURED').toUpperCase(),
-            whatsapp_ready: String(row.messaging_whatsapp_status || '').toUpperCase() === 'CONNECTED',
+            whatsapp_mode: messagingSummary.whatsapp_mode,
+            whatsapp_status: messagingSummary.whatsapp_status,
+            whatsapp_ready: messagingSummary.whatsapp_ready,
             whatsapp_connected_at: row.messaging_whatsapp_connected_at || null,
             whatsapp_last_checked_at: row.messaging_whatsapp_last_checked_at || null,
             whatsapp_last_error: row.messaging_whatsapp_last_error || '',
@@ -1326,11 +1357,12 @@ router.get('/integrations', auth, async (req, res) => {
             platform_otp_ready: true,
             sms_ready: platformOtpMode === 'msg91',
             bulk_enabled: row.bulk_enabled !== false,
-            bulk_monthly_limit: monthlyLimit,
+            bulk_monthly_limit: messagingSummary.bulk_monthly_limit,
             bulk_per_campaign_limit: toPositiveInt(row.bulk_per_campaign_limit, 50),
             bulk_channels: row.bulk_channels || { whatsapp: true, sms: false },
-            monthly_usage: monthlySent,
-            monthly_remaining: Math.max(0, monthlyLimit - monthlySent),
+            monthly_usage: messagingSummary.monthly_usage,
+            monthly_remaining: messagingSummary.monthly_remaining,
+            connected_hello_numbers: messagingSummary.connected_hello_numbers,
             approved_template_count: templates.filter((template) => normalizeTemplateStatus(template.whatsapp_template_status) === 'APPROVED').length,
             templates,
             member_payments: {
