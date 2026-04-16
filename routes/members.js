@@ -34,6 +34,7 @@ const {
     getGymUsageSnapshot,
 } = require('../utils/platformSettings');
 const { getRecentFailedDeliveryForMember, getRecentFailedDeliveryForMembers } = require('../utils/whatsappDelivery');
+const { sendMemberWelcomeEmail } = require('../utils/memberWelcomeEmail');
 
 const getGymIdFromRequest = (req) => {
     const rawGymId = req?.user?.gym_id ?? req?.user?.gymId;
@@ -740,8 +741,11 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
             ]
         );
 
+        let createdMembershipStatus = memberStatus;
+
         if (onboardingPayload.onboarding_mode === 'EXISTING') {
             const membershipStatus = isDateOnlyOnOrAfterToday(onboardingPayload.membership_end_date) ? 'ACTIVE' : 'EXPIRED';
+            createdMembershipStatus = membershipStatus;
 
             await client.query(
                 `INSERT INTO memberships (gym_id, member_id, plan_id, start_date, end_date, status, branch_id)
@@ -753,6 +757,17 @@ router.post('/add', auth, saasMiddleware, requirePermission('members:write'), up
         await client.query('COMMIT');
 
         const [member] = appendMemberBranchMeta(newMember.rows, branchScope.branchDirectory);
+        sendMemberWelcomeEmail({
+            gymId: gym_id,
+            memberEmail: member.email,
+            memberName: member.full_name,
+            memberPhone: member.phone,
+            membershipStatus: createdMembershipStatus,
+            membershipEndDate: onboardingPayload.onboarding_mode === 'EXISTING' ? onboardingPayload.membership_end_date : null,
+            planName: importedMembershipPlan?.name || '',
+        }).catch((emailErr) => {
+            console.error('MEMBER WELCOME EMAIL ERROR:', emailErr.message);
+        });
         res.json(member);
     } catch (err) {
         console.error("ADD MEMBER ERROR:", err.message);

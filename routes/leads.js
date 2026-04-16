@@ -21,6 +21,7 @@ const {
 const { DEFAULT_BRANCH_ID, resolveBranchReadScope, resolveBranchWriteScope } = require('../utils/branchAccess');
 const { buildTemplateBodyVariables, normalizeLocalIndianPhone } = require('../utils/msg91');
 const { ensureWhatsAppDeliverySchema, sendTrackedWhatsAppTemplate } = require('../utils/whatsappDelivery');
+const { sendMemberWelcomeEmail } = require('../utils/memberWelcomeEmail');
 
 const LEAD_REPLY_TEMPLATE = {
     template_key: 'LEAD_REPLY',
@@ -737,6 +738,17 @@ router.post('/:id/convert', requirePermission('members:write'), async (req, res)
         );
 
         await client.query('COMMIT');
+        if (createdNewMember) {
+            sendMemberWelcomeEmail({
+                gymId,
+                memberEmail: member.email,
+                memberName: member.full_name,
+                memberPhone: member.phone,
+                membershipStatus: member.status || 'UNPAID',
+            }).catch((emailErr) => {
+                console.error('LEAD MEMBER WELCOME EMAIL ERROR:', emailErr.message);
+            });
+        }
         return res.json({
             lead: updatedLead.rows[0],
             member,
