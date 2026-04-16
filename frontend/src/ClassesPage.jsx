@@ -10,37 +10,37 @@ import { getBranchLabel, getBranchRequestValue, getDefaultBranchId, normalizeBra
 
 const COLOR_THEMES = {
   indigo: {
-    panel: 'border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-white',
+    panel: 'border-indigo-100 bg-indigo-50',
     icon: 'bg-indigo-100 text-indigo-600',
     badge: 'bg-indigo-100 text-indigo-700 border border-indigo-200',
     button: 'bg-indigo-600 text-white hover:bg-indigo-700',
   },
   emerald: {
-    panel: 'border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-white',
+    panel: 'border-emerald-100 bg-emerald-50',
     icon: 'bg-emerald-100 text-emerald-600',
     badge: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     button: 'bg-emerald-600 text-white hover:bg-emerald-700',
   },
   amber: {
-    panel: 'border-amber-100 bg-gradient-to-br from-amber-50 via-white to-white',
+    panel: 'border-amber-100 bg-amber-50',
     icon: 'bg-amber-100 text-amber-600',
     badge: 'bg-amber-100 text-amber-700 border border-amber-200',
     button: 'bg-amber-500 text-white hover:bg-amber-600',
   },
   rose: {
-    panel: 'border-rose-100 bg-gradient-to-br from-rose-50 via-white to-white',
+    panel: 'border-rose-100 bg-rose-50',
     icon: 'bg-rose-100 text-rose-600',
     badge: 'bg-rose-100 text-rose-700 border border-rose-200',
     button: 'bg-rose-500 text-white hover:bg-rose-600',
   },
   cyan: {
-    panel: 'border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-white',
+    panel: 'border-cyan-100 bg-cyan-50',
     icon: 'bg-cyan-100 text-cyan-600',
     badge: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
     button: 'bg-cyan-600 text-white hover:bg-cyan-700',
   },
   slate: {
-    panel: 'border-slate-200 bg-gradient-to-br from-slate-50 via-white to-white',
+    panel: 'border-slate-200 bg-slate-50',
     icon: 'bg-slate-100 text-slate-600',
     badge: 'bg-slate-100 text-slate-700 border border-slate-200',
     button: 'bg-slate-800 text-white hover:bg-slate-700',
