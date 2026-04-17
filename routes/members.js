@@ -1305,6 +1305,7 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
         const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
 
         await client.query('BEGIN');
+        await client.query('DELETE FROM member_waivers WHERE member_id=$1 AND gym_id=$2', [memberId, gid]);
         await client.query(
             `INSERT INTO member_waivers (${columns.join(', ')}, signed_at) VALUES (${placeholders}, NOW())`,
             values

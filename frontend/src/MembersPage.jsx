@@ -2830,12 +2830,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               <div className="space-y-3">
                 {canWriteMembers && (
                   <button onClick={() => { setWaiverAgreed(false); setSignedWaiverData(null); setShowWaiverModal(true); }} className="w-full py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">
-                    + Sign New Waiver
+                    {memberWaivers.length > 0 ? 'Re-sign Waiver' : '+ Sign Waiver'}
                   </button>
                 )}
                 {memberWaivers.length === 0 ? (
                   <p className="text-sm text-slate-400 text-center py-4">No waivers signed yet</p>
-                ) : memberWaivers.map(w => (
+                ) : memberWaivers.slice(0, 1).map(w => (
                   <div key={w.id} className="bg-emerald-50 rounded-xl p-3 border border-emerald-100 flex items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-1.5 mb-0.5">
@@ -2844,15 +2844,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                       </div>
                       <p className="text-xs text-emerald-600">Signed: {w.signed_at ? new Date(w.signed_at).toLocaleDateString('en-GB') : 'N/A'}</p>
                     </div>
-                    {w.signature_data && (
-                      <button
-                        onClick={() => {
-                          setSignedWaiverData({ signature: w.signature_data, signedAt: new Date(w.signed_at), memberName: selectedMember.full_name, waiverText: w.waiver_text });
-                          setShowWaiverModal(true);
-                        }}
-                        className="shrink-0 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black rounded-lg hover:bg-emerald-700 transition-all"
-                      >View</button>
-                    )}
+                    <button
+                      onClick={() => {
+                        setSignedWaiverData({ signature: w.signature_data || null, signedAt: new Date(w.signed_at), memberName: selectedMember.full_name, waiverText: w.waiver_text });
+                        setShowWaiverModal(true);
+                      }}
+                      className="shrink-0 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black rounded-lg hover:bg-emerald-700 transition-all"
+                    >View</button>
                   </div>
                 ))}
               </div>
@@ -3307,7 +3305,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           className="fixed inset-0 z-[140] bg-slate-900/80 backdrop-blur-md overflow-y-auto"
           onClick={closeWaiverModal}
         >
-          <div className="flex min-h-full items-center justify-center p-4">
+          <div className="flex min-h-full items-start justify-center px-4 py-6 sm:items-center sm:py-4">
           <div
             className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 dark:border-white/10 animate-in zoom-in-95 duration-200"
             onClick={(event) => event.stopPropagation()}
@@ -3345,7 +3343,11 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                     <div className="border-t border-emerald-100 pt-3 space-y-2">
                       <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Member's Signature</p>
                       <div className="bg-white rounded-xl border-2 border-slate-200 p-3 flex items-center justify-center min-h-[80px]">
-                        <img src={signedWaiverData.signature} alt="Member signature" className="max-h-16 w-auto object-contain" />
+                        {signedWaiverData.signature ? (
+                          <img src={signedWaiverData.signature} alt="Member signature" className="max-h-16 w-auto object-contain" />
+                        ) : (
+                          <p className="text-xs text-slate-400 italic">Signature not available</p>
+                        )}
                       </div>
                       <p className="text-[10px] text-slate-400 text-center leading-relaxed">
                         Signed digitally on{' '}
