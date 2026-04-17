@@ -1377,17 +1377,20 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 <head>
   <meta charset="UTF-8">
   <title>Invoice - ${esc(gymName)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anonymous+Pro:wght@400;700&family=HK+Modular:wght@700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Courier New', Courier, monospace; background: #f0f0f0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .page { background: #fff; width: 600px; margin: 24px auto; padding: 44px 48px; }
-    .header { display: flex; align-items: center; gap: 22px; padding-bottom: 16px; border-bottom: 2px solid #222; margin-bottom: 20px; }
-    .header-text { flex: 1; }
-    .gym-name { font-family: Arial, Helvetica, sans-serif; font-size: 30px; font-weight: 900; color: #1a1a1a; letter-spacing: 3px; text-transform: uppercase; line-height: 1.1; }
-    .gym-address { font-size: 11.5px; color: #555; margin-top: 6px; line-height: 1.6; }
-    .gym-phone { font-size: 11px; color: #777; margin-top: 2px; }
-    .invoice-title-wrap { text-align: center; margin-bottom: 20px; }
-    .invoice-title { font-size: 15px; font-weight: 900; letter-spacing: 5px; text-transform: uppercase; padding: 0; border: none; }
+    .header { display: flex; align-items: center; gap: 22px; padding-bottom: 16px; border-bottom: 2px solid #222; margin-bottom: 0; }
+    .header-text { flex: 1; text-align: center; }
+    .gym-name { font-family: 'HK Modular', Arial, sans-serif; font-size: 26.3px; font-weight: 700; color: #1a1a1a; letter-spacing: 2px; text-transform: uppercase; line-height: 1.15; text-align: center; }
+    .gym-address { font-family: 'Anonymous Pro', 'Courier New', monospace; font-weight: 400; font-size: 18px; color: #555; margin-top: 5px; line-height: 1.5; text-align: center; }
+    .gym-phone { font-family: 'Anonymous Pro', 'Courier New', monospace; font-weight: 400; font-size: 18px; color: #555; margin-top: 1px; text-align: center; }
+    .invoice-title-wrap { border-top: 1.5px solid #222; border-bottom: 1.5px solid #222; text-align: center; padding: 10px 0; margin: 20px 0; }
+    .invoice-title { font-family: 'Anonymous Pro', 'Courier New', monospace; font-size: 25px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase; }
     .info-section { padding: 0 0 18px 0; margin-bottom: 20px; border-bottom: 1px solid #ddd; }
     .info-row { display: flex; align-items: baseline; margin-bottom: 8px; font-size: 12.5px; }
     .info-row:last-child { margin-bottom: 0; }
