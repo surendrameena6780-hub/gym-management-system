@@ -1379,37 +1379,37 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   <title>Invoice - ${esc(gymName)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Courier New', Courier, monospace; background: #e8e8e8; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .page { background: #fff; width: 600px; margin: 24px auto; padding: 40px; border: 3px solid #c8a800; position: relative; }
-    .header { display: flex; align-items: center; gap: 20px; padding-bottom: 18px; border-bottom: 2.5px solid #222; margin-bottom: 18px; }
-    .header-text { flex: 1; text-align: center; }
-    .gym-name { font-size: 28px; font-weight: 900; color: #1a1a1a; letter-spacing: 2px; text-transform: uppercase; line-height: 1.1; }
-    .gym-address { font-size: 12px; color: #555; margin-top: 6px; line-height: 1.5; }
-    .gym-phone { font-size: 11px; color: #888; margin-top: 3px; }
-    .invoice-title-wrap { text-align: center; margin-bottom: 18px; }
-    .invoice-title { display: inline-block; font-size: 16px; font-weight: 900; letter-spacing: 4px; padding: 10px 40px; border: 2.5px solid #222; text-transform: uppercase; }
-    .info-box { border: 1.5px solid #ccc; padding: 14px 18px; margin-bottom: 20px; }
-    .info-row { display: flex; align-items: baseline; margin-bottom: 7px; font-size: 13px; }
+    body { font-family: 'Courier New', Courier, monospace; background: #f0f0f0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { background: #fff; width: 600px; margin: 24px auto; padding: 44px 48px; }
+    .header { display: flex; align-items: center; gap: 22px; padding-bottom: 16px; border-bottom: 2px solid #222; margin-bottom: 20px; }
+    .header-text { flex: 1; }
+    .gym-name { font-family: Arial, Helvetica, sans-serif; font-size: 30px; font-weight: 900; color: #1a1a1a; letter-spacing: 3px; text-transform: uppercase; line-height: 1.1; }
+    .gym-address { font-size: 11.5px; color: #555; margin-top: 6px; line-height: 1.6; }
+    .gym-phone { font-size: 11px; color: #777; margin-top: 2px; }
+    .invoice-title-wrap { text-align: center; margin-bottom: 20px; }
+    .invoice-title { font-size: 15px; font-weight: 900; letter-spacing: 5px; text-transform: uppercase; padding: 0; border: none; }
+    .info-section { padding: 0 0 18px 0; margin-bottom: 20px; border-bottom: 1px solid #ddd; }
+    .info-row { display: flex; align-items: baseline; margin-bottom: 8px; font-size: 12.5px; }
     .info-row:last-child { margin-bottom: 0; }
-    .info-label { font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; width: 140px; flex-shrink: 0; }
-    .info-sep { font-weight: 900; margin: 0 10px 0 0; }
+    .info-label { font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; width: 130px; flex-shrink: 0; }
+    .info-sep { font-weight: 900; margin: 0 12px 0 0; }
     .info-val { font-weight: 700; color: #1a1a1a; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th { background: #f5c518; color: #1a1a1a; font-size: 11px; font-weight: 900; text-align: center; padding: 10px 8px; text-transform: uppercase; letter-spacing: 0.5px; border: 1.5px solid #c8a000; }
-    td { font-size: 12.5px; padding: 12px 10px; border: 1.5px solid #ddd; text-align: center; font-weight: 700; color: #1a1a1a; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    th { background: #f5c518; color: #1a1a1a; font-size: 11px; font-weight: 900; text-align: center; padding: 11px 8px; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #e0aa00; }
+    td { font-size: 12.5px; padding: 12px 10px; border: 1px solid #ddd; text-align: center; font-weight: 600; color: #1a1a1a; }
     .td-left { text-align: left; }
-    .td-total-label { text-align: right; font-weight: 900; background: #fafafa; }
-    .td-total-val { font-weight: 900; color: #1a1a1a; font-size: 14px; }
+    .td-total-label { text-align: right; font-weight: 900; border: none; background: transparent; }
+    .td-total-val { font-weight: 900; color: #1a1a1a; font-size: 13px; }
     .td-empty { border: none; background: transparent; }
-    .sig-section { margin-top: 36px; text-align: right; }
+    .sig-section { margin-top: 40px; text-align: right; }
     .sig-img-wrap { display: inline-block; text-align: center; }
-    .sig-line { border-top: 2px solid #333; margin-top: 4px; }
-    .sig-label { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; color: #333; }
-    .footer { text-align: center; margin-top: 22px; font-size: 10px; color: #999; font-weight: 600; border-top: 1px dashed #ccc; padding-top: 10px; }
-    ${taxId ? `.tax-id { font-size: 10px; color: #888; text-align: center; margin-top: 6px; font-weight: 700; letter-spacing: 0.5px; }` : ''}
+    .sig-line { border-top: 1.5px solid #333; margin-top: 2px; width: 220px; }
+    .sig-label { font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 5px; color: #333; line-height: 1.6; }
+    .footer { text-align: center; margin-top: 28px; font-size: 10px; color: #aaa; font-weight: 600; border-top: 1px dashed #ddd; padding-top: 12px; }
+    ${taxId ? `.tax-id { font-size: 10px; color: #999; text-align: center; margin-top: 8px; font-weight: 700; }` : ''}
     @media print {
       body { background: white; }
-      .page { margin: 0; border: 3px solid #c8a800; width: 100%; max-width: 600px; }
+      .page { margin: 0; width: 100%; max-width: 600px; padding: 32px 40px; }
     }
   </style>
 </head>
@@ -1426,7 +1426,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
     <div class="invoice-title-wrap"><span class="invoice-title">Invoice</span></div>
 
-    <div class="info-box">
+    <div class="info-section">
       <div class="info-row"><span class="info-label">Invoice No.</span><span class="info-sep">:</span><span class="info-val">${esc(invoiceNo)}</span></div>
       <div class="info-row"><span class="info-label">Invoice Date</span><span class="info-sep">:</span><span class="info-val">${formattedDate}</span></div>
       <div class="info-row"><span class="info-label">Invoice To</span><span class="info-sep">:</span><span class="info-val">${esc(receiptData.memberName)}</span></div>
