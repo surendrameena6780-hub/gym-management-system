@@ -741,7 +741,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
         signature_data: signatureData,
       }, { headers: { 'x-auth-token': token } });
       toast?.('Waiver signed successfully', 'success');
-      setSignedWaiverData({ signature: signatureData, signedAt: new Date(), memberName: selectedMember.full_name });
+      setSignedWaiverData({ signature: signatureData, signedAt: new Date(), memberName: selectedMember.full_name, waiverText: WAIVER_TERMS_TEXT });
       setWaiverAgreed(false);
       fetchMemberWaivers(selectedMember.id);
     } catch (err) {
@@ -2826,20 +2826,31 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             {/* ── Waivers Tab ── */}
             {drawerTab === 'waivers' && (
               <div className="space-y-3">
-                {canWriteMembers && !memberWaivers.length && (
-                  <button onClick={() => { setWaiverAgreed(false); setShowWaiverModal(true); }} className="w-full py-3 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">
-                    Sign Standard Waiver
+                {canWriteMembers && (
+                  <button onClick={() => { setWaiverAgreed(false); setSignedWaiverData(null); setShowWaiverModal(true); }} className="w-full py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">
+                    + Sign New Waiver
                   </button>
                 )}
                 {memberWaivers.length === 0 ? (
                   <p className="text-sm text-slate-400 text-center py-4">No waivers signed yet</p>
                 ) : memberWaivers.map(w => (
-                  <div key={w.id} className="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <CheckCircle size={12} className="text-emerald-600" />
-                      <p className="text-sm font-bold text-emerald-700">{w.waiver_type || 'General'} Waiver</p>
+                  <div key={w.id} className="bg-emerald-50 rounded-xl p-3 border border-emerald-100 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <CheckCircle size={12} className="text-emerald-600" />
+                        <p className="text-sm font-bold text-emerald-700 capitalize">{(w.waiver_type || 'General').replace(/_/g,' ')} Waiver</p>
+                      </div>
+                      <p className="text-xs text-emerald-600">Signed: {w.signed_at ? new Date(w.signed_at).toLocaleDateString('en-GB') : 'N/A'}</p>
                     </div>
-                    <p className="text-xs text-emerald-600">Signed: {w.signed_at ? new Date(w.signed_at).toLocaleDateString('en-GB') : 'N/A'}</p>
+                    {w.signature_data && (
+                      <button
+                        onClick={() => {
+                          setSignedWaiverData({ signature: w.signature_data, signedAt: new Date(w.signed_at), memberName: selectedMember.full_name, waiverText: w.waiver_text });
+                          setShowWaiverModal(true);
+                        }}
+                        className="shrink-0 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black rounded-lg hover:bg-emerald-700 transition-all"
+                      >View</button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3291,11 +3302,12 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
       {/* ── Waiver Signing Modal ── */}
       {showWaiverModal && selectedMember && (
         <div
-          className="fixed inset-0 z-[140] bg-slate-900/75 backdrop-blur-md overflow-y-auto flex items-start justify-center px-4 py-6"
+          className="fixed inset-0 z-[140] bg-slate-900/80 backdrop-blur-md overflow-y-auto"
           onClick={closeWaiverModal}
         >
+          <div className="flex min-h-full items-center justify-center p-4">
           <div
-            className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 dark:border-white/10 animate-in zoom-in-95 duration-200 my-auto"
+            className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 dark:border-white/10 animate-in zoom-in-95 duration-200"
             onClick={(event) => event.stopPropagation()}
           >
             {signedWaiverData ? (
@@ -3326,7 +3338,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                       </span>
                     </div>
                     <div className="bg-white rounded-xl p-3 text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap border border-slate-200 max-h-36 overflow-y-auto">
-                      {WAIVER_TERMS_TEXT}
+                      {signedWaiverData.waiverText || WAIVER_TERMS_TEXT}
                     </div>
                     <div className="border-t border-emerald-100 pt-3 space-y-2">
                       <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Member's Signature</p>
@@ -3344,7 +3356,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
                   </div>
                   <button
                     onClick={closeWaiverModal}
-                    className="w-full py-3 bg-emerald-600 text-white text-xs font-black rounded-xl hover:bg-emerald-700 transition-all"
+                    className="w-full py-3.5 bg-emerald-600 text-white text-sm font-black rounded-2xl hover:bg-emerald-700 transition-all"
                   >
                     Done
                   </button>
@@ -3353,46 +3365,48 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             ) : (
               /* ── Signing Form ── */
               <>
-                <div className="p-5 text-white flex justify-between items-start" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
+                <div className="px-5 py-4 text-white flex justify-between items-center" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
                   <div>
-                    <h2 className="text-lg font-black">Sign Liability Waiver</h2>
-                    <p className="text-white/60 text-xs mt-1">{selectedMember.full_name}</p>
+                    <h2 className="text-base font-black tracking-tight">Sign Liability Waiver</h2>
+                    <p className="text-indigo-200 text-xs mt-0.5">{selectedMember.full_name}</p>
                   </div>
-                  <button onClick={closeWaiverModal} className="rounded-full p-1.5 hover:bg-white/10 transition-colors flex-shrink-0"><X size={18} /></button>
+                  <button onClick={closeWaiverModal} className="rounded-full p-1.5 hover:bg-white/10 transition-colors flex-shrink-0 ml-4"><X size={18} /></button>
                 </div>
-                <div className="p-5 space-y-4">
-                  <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap font-medium max-h-48 overflow-y-auto border border-slate-200 dark:border-white/10">
+                <div className="p-4 space-y-3">
+                  <div className="bg-slate-800 rounded-2xl p-3.5 text-[11.5px] text-slate-200 leading-relaxed whitespace-pre-wrap font-medium max-h-40 overflow-y-auto">
                     {WAIVER_TERMS_TEXT}
                   </div>
-                  <label className="flex items-start gap-2.5 cursor-pointer">
-                    <input type="checkbox" checked={waiverAgreed} onChange={(e) => setWaiverAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">I have read and agree to all terms and conditions above</span>
+                  <label className="flex items-start gap-3 cursor-pointer bg-slate-50 rounded-2xl px-3 py-3 border border-slate-200">
+                    <input type="checkbox" checked={waiverAgreed} onChange={(e) => setWaiverAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0" />
+                    <span className="text-xs font-bold text-slate-700">I have read and agree to all terms and conditions above</span>
                   </label>
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Signature</p>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Signature</p>
                       <button type="button" onClick={clearWaiverSignature} className="text-[10px] font-bold text-indigo-500 hover:text-indigo-700 transition-colors">Clear</button>
                     </div>
-                    <div className="rounded-xl border-2 border-slate-300 overflow-hidden shadow-inner">
+                    <div className="rounded-2xl border-2 border-slate-200 overflow-hidden">
                       <canvas
                         ref={initWaiverCanvas}
                         width={400}
-                        height={160}
-                        className="w-full h-[130px] cursor-crosshair touch-none block"
+                        height={150}
+                        className="w-full h-[120px] cursor-crosshair touch-none block"
                         style={{ background: '#ffffff' }}
                       />
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-1.5">Draw your signature above using finger or mouse</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Draw your signature above using finger or mouse</p>
                   </div>
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={closeWaiverModal} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-black rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">Cancel</button>
-                    <button onClick={handleSignWaiver} disabled={!waiverAgreed || waiverSigning} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
-                      {waiverSigning ? <><RefreshCw size={12} className="animate-spin" /> Signing...</> : <><CheckCircle size={12} /> Sign Waiver</>}
+                  <div className="flex gap-2">
+                    <button onClick={closeWaiverModal} className="flex-1 py-3 bg-slate-100 text-slate-700 text-xs font-black rounded-2xl hover:bg-slate-200 transition-all">Cancel</button>
+                    <button onClick={handleSignWaiver} disabled={!waiverAgreed || waiverSigning} className="flex-1 py-3 bg-indigo-600 text-white text-xs font-black rounded-2xl hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                      {waiverSigning ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                      {waiverSigning ? 'Signing...' : 'Sign Waiver'}
                     </button>
                   </div>
                 </div>
               </>
             )}
+          </div>
           </div>
         </div>
       )}
