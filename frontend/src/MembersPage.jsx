@@ -3158,8 +3158,8 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
       {/* ── Waiver Signing Modal ── */}
       {showWaiverModal && selectedMember && (
-        <div className="app-modal-shell z-[70] bg-slate-900/60 backdrop-blur-sm">
-          <div className="app-modal-panel bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 dark:border-white/10">
+        <div className="fixed inset-0 z-[140] bg-slate-900/72 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowWaiverModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 dark:border-white/10 max-h-[min(85vh,42rem)] flex flex-col animate-in zoom-in-95 duration-200" onClick={(event) => event.stopPropagation()}>
             <div className="p-5 text-white flex justify-between items-start" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
               <div>
                 <h2 className="text-lg font-black">Sign Liability Waiver</h2>
@@ -3167,7 +3167,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               </div>
               <button onClick={() => setShowWaiverModal(false)} className="rounded-full p-1.5 hover:bg-white/10 transition-colors"><X size={18} /></button>
             </div>
-            <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
+            <div className="p-5 space-y-4 overflow-y-auto min-h-0">
               <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap font-medium max-h-48 overflow-y-auto border border-slate-200 dark:border-white/10">
                 {WAIVER_TERMS_TEXT}
               </div>
