@@ -590,6 +590,9 @@ const connectDB = async () => {
             ALTER TABLE members ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10) DEFAULT '';
             ALTER TABLE members ADD COLUMN IF NOT EXISTS medical_notes TEXT DEFAULT '';
 
+            ALTER TABLE member_waivers ADD COLUMN IF NOT EXISTS waiver_type VARCHAR(40) DEFAULT 'general';
+            ALTER TABLE member_waivers ADD COLUMN IF NOT EXISTS signature_data TEXT;
+
             ALTER TABLE memberships ADD COLUMN IF NOT EXISTS grace_end_date DATE;
             ALTER TABLE memberships ADD COLUMN IF NOT EXISTS cancellation_reason TEXT DEFAULT '';
             ALTER TABLE memberships ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
@@ -629,7 +632,9 @@ const connectDB = async () => {
                 id          SERIAL PRIMARY KEY,
                 gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
                 member_id   INTEGER REFERENCES members(id) ON DELETE CASCADE,
+                waiver_type VARCHAR(40) DEFAULT 'general',
                 waiver_text TEXT DEFAULT '',
+                signature_data TEXT,
                 signed_at   TIMESTAMPTZ,
                 ip_address  VARCHAR(60) DEFAULT '',
                 created_at  TIMESTAMPTZ DEFAULT NOW()

@@ -85,6 +85,25 @@ const tableHasColumn = async (tableName, columnName) => {
     return columns.has(columnName);
 };
 
+let ensureMemberWaiverSchemaPromise;
+
+const ensureMemberWaiverSchema = async () => {
+    if (!ensureMemberWaiverSchemaPromise) {
+        ensureMemberWaiverSchemaPromise = pool.query(`
+            ALTER TABLE IF EXISTS member_waivers ADD COLUMN IF NOT EXISTS waiver_type VARCHAR(40) DEFAULT 'general';
+            ALTER TABLE IF EXISTS member_waivers ADD COLUMN IF NOT EXISTS signature_data TEXT;
+            ALTER TABLE IF EXISTS member_waivers ADD COLUMN IF NOT EXISTS ip_address VARCHAR(60) DEFAULT '';
+        `).then(() => {
+            memberSchemaCache.delete('member_waivers');
+        }).catch((error) => {
+            ensureMemberWaiverSchemaPromise = null;
+            throw error;
+        });
+    }
+
+    await ensureMemberWaiverSchemaPromise;
+};
+
 const normalizeDocumentUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
@@ -1280,6 +1299,7 @@ router.post('/:id/waiver', auth, saasMiddleware, requirePermission('members:writ
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
         const access = await assertMemberBranchAccess(pool, req, memberId);
         if (!access.member) return res.status(404).json({ error: 'Member not found' });
+        await ensureMemberWaiverSchema();
         const payload = normalizeMemberWaiverPayload(req.body || {});
         client = await pool.connect();
         const [hasWaiverTypeColumn, hasSignatureColumn, hasIpAddressColumn] = await Promise.all([
@@ -1341,6 +1361,7 @@ router.get('/:id/waivers', auth, saasMiddleware, requirePermission('members:read
         const memberId = ensureInteger(req.params.id, { field: 'member id', required: true, min: 1 });
         const access = await assertMemberBranchAccess(pool, req, memberId);
         if (!access.member) return res.status(404).json({ error: 'Member not found' });
+        await ensureMemberWaiverSchema();
         const result = await pool.query('SELECT * FROM member_waivers WHERE member_id=$1 AND gym_id=$2 ORDER BY signed_at DESC', [memberId, gid]);
         res.json(result.rows);
     } catch(err) {

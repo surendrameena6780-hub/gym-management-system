@@ -218,7 +218,9 @@ CREATE TABLE IF NOT EXISTS member_waivers (
     id          SERIAL PRIMARY KEY,
     gym_id      INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
     member_id   INTEGER REFERENCES members(id) ON DELETE CASCADE,
+    waiver_type VARCHAR(40) DEFAULT 'general',
     waiver_text TEXT DEFAULT '',
+    signature_data TEXT,
     signed_at   TIMESTAMPTZ,
     ip_address  VARCHAR(60) DEFAULT '',
     created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -544,6 +546,9 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS date_of_birth DATE;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS blood_group VARCHAR(10) DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS medical_notes TEXT DEFAULT '';
+
+ALTER TABLE member_waivers ADD COLUMN IF NOT EXISTS waiver_type VARCHAR(40) DEFAULT 'general';
+ALTER TABLE member_waivers ADD COLUMN IF NOT EXISTS signature_data TEXT;
 
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS joining_fee DECIMAL(10,2) DEFAULT 0;
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS freeze_allowance_days INTEGER DEFAULT 0;
