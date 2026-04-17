@@ -7,7 +7,7 @@ import {
   CheckCircle, Plus, Download, Smartphone,
   Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
   RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
-  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon, Upload
+  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon, Upload, X
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
@@ -1597,6 +1597,9 @@ const loadRazorpayScript = () => {
   };
 
   const handleConnectRazorpay = async () => {
+    setLinkedAccountForm({
+      account_id: integrationData.member_payments?.connected_account_id || '',
+    });
     setShowLinkedAccountForm(true);
   };
 
@@ -3268,7 +3271,7 @@ const loadRazorpayScript = () => {
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
                               <button type="button" onClick={handleConnectRazorpay} disabled={connectingGateway}
                                 className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connect Razorpay' : 'Enter Account ID'}
+                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Update Account ID' : 'Enter Account ID'}
                               </button>
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
                                 <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}
@@ -3282,34 +3285,6 @@ const loadRazorpayScript = () => {
                             <CreditCard size={22} className="text-indigo-300" />
                           </div>
                         </div>
-                      </div>
-
-                      {/* Paste acc_ manually */}
-                      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-                        <button type="button" onClick={() => setShowLinkedAccountForm(v => !v)} aria-expanded={showLinkedAccountForm} aria-controls="settings-linked-account-panel"
-                          className="w-full flex items-center justify-between p-5 text-left hover:bg-slate-50 transition-colors">
-                          <div>
-                            <p className="font-bold text-slate-800 text-sm">Already have a Razorpay Account ID?</p>
-                            <p className="text-xs text-slate-500 mt-0.5">Paste acc_... to connect directly without OAuth</p>
-                          </div>
-                          <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${showLinkedAccountForm ? 'rotate-180' : ''}`} />
-                        </button>
-                        {showLinkedAccountForm && (
-                          <div id="settings-linked-account-panel" className="px-5 pb-5 space-y-3 animate-in fade-in duration-200">
-                            <div className="h-px bg-slate-100" />
-                            <p className="text-xs text-slate-500 font-medium break-words">Go to <strong>Razorpay &gt; Route &gt; Accounts</strong> and copy your Account ID (starts with <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">acc_</code>)</p>
-                            <input
-                              value={linkedAccountForm.account_id || ''}
-                              onChange={(e) => setLinkedAccountForm(p => ({ ...p, account_id: e.target.value }))}
-                              placeholder="acc_XXXXXXXXXXXXXXXXX"
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-mono font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                            />
-                            <button type="button" onClick={handleCreateLinkedAccount} disabled={linkedAccountSaving}
-                              className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60">
-                              {linkedAccountSaving ? 'Saving...' : 'Connect Account'}
-                            </button>
-                          </div>
-                        )}
                       </div>
 
                       {/* Manual API Keys */}
@@ -4667,6 +4642,77 @@ const loadRazorpayScript = () => {
                     className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800 disabled:opacity-50"
                   >
                     {billingCheckout.submitting || isProcessingPayment ? <><RefreshCw size={15} className="animate-spin" /> Preparing checkout...</> : <>Continue to Razorpay</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLinkedAccountForm && (
+        <div className="app-modal-shell z-[89] bg-slate-950/70 backdrop-blur-sm">
+          <div className="app-modal-panel" style={{ width: 'min(100%, 31rem)' }}>
+            <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Razorpay Route</p>
+                  <h3 className="mt-2 text-xl font-black text-slate-900">Enter Account ID</h3>
+                  <p className="mt-2 text-sm font-medium text-slate-500">
+                    Paste your Razorpay Route Account ID to connect member online collections directly to your account.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinkedAccountForm(false);
+                    setLinkedAccountForm({ account_id: '' });
+                  }}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                  aria-label="Close Razorpay account popup"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4 px-5 py-5 sm:px-6 sm:py-6">
+                <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+                  <p className="text-xs font-semibold leading-5 text-indigo-700 break-words">
+                    Go to <strong>Razorpay &gt; Route &gt; Accounts</strong> and copy your Account ID. It always starts with <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-indigo-700 shadow-sm">acc_</span>.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-xs font-black uppercase tracking-[0.22em] text-slate-500">
+                    Razorpay Account ID
+                  </label>
+                  <input
+                    autoFocus
+                    value={linkedAccountForm.account_id || ''}
+                    onChange={(e) => setLinkedAccountForm((p) => ({ ...p, account_id: e.target.value }))}
+                    placeholder="acc_XXXXXXXXXXXXXXXXX"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-mono font-semibold text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </div>
+
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLinkedAccountForm(false);
+                      setLinkedAccountForm({ account_id: '' });
+                    }}
+                    className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold text-sm hover:bg-slate-50 active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateLinkedAccount}
+                    disabled={linkedAccountSaving}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {linkedAccountSaving ? <><RefreshCw size={14} className="animate-spin" /> Connecting...</> : 'Connect Account'}
                   </button>
                 </div>
               </div>
