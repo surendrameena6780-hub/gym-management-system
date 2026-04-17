@@ -128,6 +128,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
   const [attendanceHeatmap, setAttendanceHeatmap] = useState([]);
   const [todayCheckins, setTodayCheckins] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [chartDays, setChartDays] = useState(7);
   const [isAutomating, setIsAutomating] = useState(false);
 
@@ -382,6 +383,10 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         toast?.('Server is waking up. Dashboard will retry automatically.', 'warning');
       }
 
+      if (successfulCalls > 0) {
+        setFetchError(null);
+      }
+
       if (successfulCalls === 0 && warmupRetryCountRef.current < MAX_WARMUP_RETRIES) {
         warmupRetryCountRef.current += 1;
         setIsWarmupRetrying(true);
@@ -402,6 +407,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       }
     } catch (err) {
       reportClientError('Dashboard fetch', err);
+      setFetchError(err);
     } finally {
       dashboardLastSyncAtRef.current = Date.now();
       dashboardFetchInFlightRef.current = false;
@@ -1971,9 +1977,138 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         sub: 'Today\'s floor traffic',
         action: () => { setCheckinQuery(''); setShowCheckinModal(true); },
       }),
+      // ─── Additional rotating smart tips ───
+      // 7: Weekend/weekday opportunity
+      members.length >= 3 && buildRecommendation({
+        id: 'INSIGHT_WEEKEND_OFFER',
+        title: 'Run a weekend promotion',
+        reason: 'Members are more likely to bring friends on weekends. Offer a free trial class on Saturday or Sunday to attract walk-ins and referrals.',
+        count: members.length,
+        impact: Math.round(avgPlanPrice * 2),
+        confidence: 72,
+        urgency: 'This week',
+        priority: 'P3',
+        cta: 'View Plans',
+        sub: 'Weekend promotion idea',
+        action: () => navigateTo('Plans'),
+      }),
+      // 8: Personal touch
+      active.length >= 3 && buildRecommendation({
+        id: 'INSIGHT_PERSONAL_TOUCH',
+        title: 'Call your top 3 members',
+        reason: 'A quick "thank you" call to your top members builds loyalty. Members who feel valued stay 2x longer. Pick your top 3 by attendance and call them today.',
+        count: 3,
+        impact: Math.round(avgPlanPrice * 3),
+        confidence: 75,
+        urgency: 'Today',
+        priority: 'P3',
+        cta: 'View Attendance',
+        sub: 'Retention through personal touch',
+        action: () => navigateTo('Attendance'),
+      }),
+      // 9: Expired member recovery
+      expired.length > 0 && buildRecommendation({
+        id: 'INSIGHT_EXPIRED_RECOVERY',
+        title: `${expired.length} expired — win them back`,
+        reason: `${expired.length} member${expired.length === 1 ? ' has' : 's have'} expired. Offer a small discount or free week to bring them back. It costs 5x more to get a new member than to retain one.`,
+        count: expired.length,
+        impact: Math.round(expired.length * avgPlanPrice * 0.7),
+        confidence: Math.min(85, 65 + expired.length * 2),
+        urgency: 'This week',
+        priority: 'P2',
+        cta: 'View Members',
+        sub: 'Win-back opportunity',
+        action: () => navigateTo('Members', 'Expired'),
+      }),
+      // 10: Social media post
+      members.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_SOCIAL_POST',
+        title: 'Post a member success story',
+        reason: 'Gyms that share member transformations on social media see 30% more walk-in enquiries. Ask a member for their permission and post their journey this week.',
+        count: members.length,
+        impact: Math.round(avgPlanPrice * 1.5),
+        confidence: 68,
+        urgency: 'This week',
+        priority: 'P3',
+        cta: 'View Members',
+        sub: 'Social media growth tip',
+        action: () => navigateTo('Members'),
+      }),
+      // 11: Referral program
+      active.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_REFERRAL',
+        title: 'Start a referral program',
+        reason: 'Offer existing members a free week or discount for every friend they refer who joins. Word-of-mouth is the cheapest and most trusted marketing for gyms.',
+        count: active.length,
+        impact: Math.round(avgPlanPrice * 3),
+        confidence: 74,
+        urgency: 'This week',
+        priority: 'P3',
+        cta: 'Broadcast Offer',
+        sub: 'Member referral strategy',
+        action: () => navigateTo('Members'),
+      }),
+      // 12: Collect feedback
+      active.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_FEEDBACK',
+        title: 'Collect member feedback',
+        reason: 'Ask your members what they want improved — equipment, timing, cleanliness. Members who feel heard stay longer. Send a quick WhatsApp poll this week.',
+        count: active.length,
+        impact: Math.round(avgPlanPrice * 2),
+        confidence: 70,
+        urgency: 'This week',
+        priority: 'P3',
+        cta: 'Send Broadcast',
+        sub: 'Member satisfaction pulse',
+        action: () => navigateTo('Members'),
+      }),
+      // 13: Early morning/late evening batches
+      members.length >= 5 && buildRecommendation({
+        id: 'INSIGHT_NEW_BATCH',
+        title: 'Consider adding a new batch',
+        reason: 'If your gym is crowded during peak hours, adding an early morning or late evening batch can attract working professionals who cannot come during regular hours.',
+        count: members.length,
+        impact: Math.round(avgPlanPrice * 4),
+        confidence: 66,
+        urgency: 'This week',
+        priority: 'P3',
+        cta: 'View Classes',
+        sub: 'Capacity optimization',
+        action: () => navigateTo('Classes'),
+      }),
+      // 14: Unpaid follow-up
+      unpaid.length > 0 && buildRecommendation({
+        id: 'INSIGHT_UNPAID_FOLLOWUP',
+        title: `${unpaid.length} unpaid — collect today`,
+        reason: `${unpaid.length} member${unpaid.length === 1 ? ' has' : 's have'} unpaid registrations. Call them today to close the payment. Longer you wait, less likely they join.`,
+        count: unpaid.length,
+        impact: Math.round(unpaid.length * avgPlanPrice),
+        confidence: Math.min(88, 70 + unpaid.length * 3),
+        urgency: 'Today',
+        priority: 'P1',
+        cta: 'View Members',
+        sub: 'Unpaid collection reminder',
+        action: () => navigateTo('Members', 'Unpaid'),
+      }),
+      // 15: WhatsApp broadcast
+      active.length >= 3 && buildRecommendation({
+        id: 'INSIGHT_BROADCAST',
+        title: 'Send a motivation broadcast',
+        reason: 'A weekly fitness tip or motivational message on WhatsApp keeps your gym top-of-mind. Members who receive regular communication are 40% more likely to renew.',
+        count: active.length,
+        impact: Math.round(avgPlanPrice * 1.5),
+        confidence: 71,
+        urgency: 'This week',
+        priority: 'P3',
+        cta: 'Send Broadcast',
+        sub: 'Member engagement boost',
+        action: () => navigateTo('Members'),
+      }),
     ].filter(Boolean).sort(sortRecommendationCandidates);
 
     // Smart tips: exclude anything already in action rows, prefer insights
+    // Use day-of-week rotation to vary tips across the week
+    const dayOfWeek = new Date().getDay(); // 0-6
     const actionRowIds = new Set(mergedActionRows.map(r => r.id));
     const smartTipPool = [
       ...insightCandidates,
@@ -1981,15 +2116,25 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
       ...fillerActionRows.filter(c => !actionRowIds.has(c.id)),
     ].filter(Boolean).sort(sortRecommendationCandidates);
 
+    // Rotate: always show the highest-priority tip first, then pick 2 more based on day rotation
     const recommendations = [];
     const seenRecommendationIds = new Set();
-    smartTipPool.forEach((candidate) => {
-      if (!candidate || recommendations.length >= 3 || seenRecommendationIds.has(candidate.id)) {
-        return;
+    // First slot: always highest priority
+    if (smartTipPool[0]) {
+      recommendations.push(smartTipPool[0]);
+      seenRecommendationIds.add(smartTipPool[0].id);
+    }
+    // Remaining slots: offset by day-of-week so tips rotate daily
+    const rotatedPool = smartTipPool.filter(c => !seenRecommendationIds.has(c.id));
+    const rotationOffset = dayOfWeek * 2;
+    for (let i = 0; i < rotatedPool.length && recommendations.length < 3; i++) {
+      const idx = (i + rotationOffset) % rotatedPool.length;
+      const candidate = rotatedPool[idx];
+      if (candidate && !seenRecommendationIds.has(candidate.id)) {
+        recommendations.push(candidate);
+        seenRecommendationIds.add(candidate.id);
       }
-      recommendations.push(candidate);
-      seenRecommendationIds.add(candidate.id);
-    });
+    }
     const primary = recommendations[0] || {
       id: 'BASELINE',
       title: 'Keep the gym running strong',
@@ -2184,6 +2329,8 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
     closePaymentModal,
     dashboardData,
     displayChartData,
+    fetchError,
+    retryDashboard: fetchData,
     gymName,
     handleAddMember,
     handleBroadcast,

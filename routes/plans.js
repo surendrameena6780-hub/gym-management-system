@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
 const { requireOwner } = require('../middleware/rbac');
+const { sendPushToGym } = require('./push');
 const {
     ensureTrimmedString,
     ensureInteger,
@@ -195,7 +196,24 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ msg: "Plan not found" });
         }
 
-        res.json(normalizePlanRow(updatePlan.rows[0]));
+        const updatedPlan = updatePlan.rows[0];
+
+        // Send push notification to members when discount is enabled
+        if (updatedPlan.discount_percent > 0) {
+            const discountValid = !updatedPlan.discount_valid_until || new Date(updatedPlan.discount_valid_until) >= new Date(new Date().toDateString());
+            if (discountValid) {
+                const originalPrice = Number(updatedPlan.price) || 0;
+                const discountedPrice = Math.round(originalPrice * (1 - updatedPlan.discount_percent / 100));
+                const pushPayload = JSON.stringify({
+                    title: `${updatedPlan.discount_percent}% OFF on ${updatedPlan.name}!`,
+                    body: `Now ₹${discountedPrice.toLocaleString()} instead of ₹${originalPrice.toLocaleString()}. Limited time offer — renew or upgrade now!`,
+                    tag: `plan-discount-${updatedPlan.id}`,
+                });
+                sendPushToGym(req.user.gym_id, pushPayload, ['MEMBER']).catch(() => {});
+            }
+        }
+
+        res.json(normalizePlanRow(updatedPlan));
     } catch (err) {
         if (isValidationError(err)) {
             return res.status(err.statusCode).json({ error: err.message });

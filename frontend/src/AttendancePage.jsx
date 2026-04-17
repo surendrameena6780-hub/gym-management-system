@@ -204,6 +204,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
   useEffect(() => { peakHoursDaysRef.current = peakHoursDays; }, [peakHoursDays]);
   const [inactiveDays, setInactiveDays] = useState(7);
   const [inactiveMembers, setInactiveMembers] = useState([]);
+  const [remindedMemberIds, setRemindedMemberIds] = useState(new Set());
   const [leaderboard, setLeaderboard] = useState([]);
   const [reminderLoadingId, setReminderLoadingId] = useState(null);
 
@@ -901,6 +902,9 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
           });
           const summary = summarizeReminderResult(payload, 'Reminder');
           toast?.(summary.message, summary.tone);
+          if (summary.tone === 'success') {
+            setRemindedMemberIds((prev) => new Set([...prev, member.id]));
+          }
         } catch (err) {
           const payload = asObject(err?.response?.data, {});
           toast?.(payload.message || payload.error || 'Failed to queue WhatsApp reminder.', 'error');
@@ -1408,10 +1412,10 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
         </div>
 
         <div className="max-h-[24rem] overflow-y-auto overscroll-contain lg:max-h-none lg:overflow-y-visible no-scrollbar grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {inactiveMembers.length === 0 ? (
+          {inactiveMembers.filter((m) => !remindedMemberIds.has(m.id)).length === 0 ? (
             <div className="col-span-full py-8 text-center text-slate-400 font-bold">No inactive active-members in this range.</div>
           ) : (
-            inactiveMembers.map((m) => (
+            inactiveMembers.filter((m) => !remindedMemberIds.has(m.id)).map((m) => (
               <div key={m.id} className="p-3 rounded-xl border border-slate-100 bg-white flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-black text-slate-900 truncate">{m.full_name}</p>

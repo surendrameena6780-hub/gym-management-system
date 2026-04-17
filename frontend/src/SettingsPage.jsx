@@ -1597,34 +1597,7 @@ const loadRazorpayScript = () => {
   };
 
   const handleConnectRazorpay = async () => {
-    setConnectingGateway(true);
-    try {
-      const res = await axios.get('/api/memberships/online/connect-url', headers);
-      const connectUrl = String(res.data?.connect_url || '').trim();
-      if (!connectUrl) {
-        toast('Failed to prepare Razorpay connect URL.', 'error');
-        return;
-      }
-
-      const popup = window.open(connectUrl, 'razorpay_connect', 'width=540,height=760');
-      if (!popup) {
-        window.location.href = connectUrl;
-        return;
-      }
-
-      const poll = setInterval(async () => {
-        if (popup.closed) {
-          clearInterval(poll);
-          await loadIntegrations();
-        }
-      }, 1200);
-
-      toast('Complete onboarding on Razorpay page. Status will auto-refresh after closing.', 'info');
-    } catch (err) {
-      toast(err?.response?.data?.error || 'Failed to start Razorpay onboarding.', 'error');
-    } finally {
-      setConnectingGateway(false);
-    }
+    setShowLinkedAccountForm(true);
   };
 
   const handleDisconnectRazorpay = async () => {
@@ -3290,12 +3263,12 @@ const loadRazorpayScript = () => {
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Razorpay Connected' : 'Connect with Razorpay'}
                             </h3>
                             <p className="text-xs font-medium text-slate-300 mb-4 break-all">
-                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? `Account: ${integrationData.member_payments.connected_account_id}` : 'Members pay membership fees directly to your account. GymVault auto-collects its platform fee via Route.'}
+                              {integrationData.member_payments?.onboarding_status === 'CONNECTED' ? `Account: ${integrationData.member_payments.connected_account_id}` : 'Enter your Razorpay Route Account ID to connect. Members pay directly to your account and GymVault auto-collects its platform fee via Route.'}
                             </p>
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
                               <button type="button" onClick={handleConnectRazorpay} disabled={connectingGateway}
                                 className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : 'Connect Razorpay'}
+                                {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Connect Razorpay' : 'Enter Account ID'}
                               </button>
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
                                 <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}

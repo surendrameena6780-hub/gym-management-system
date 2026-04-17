@@ -29,6 +29,26 @@ const AVATAR_GRADIENTS = [
 const getInitials = (name) => name?.split(' ').filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
 const getAvatarGradient = (name) => AVATAR_GRADIENTS[(name?.charCodeAt(0) || 0) % AVATAR_GRADIENTS.length];
 
+const WAIVER_TERMS_TEXT = `GYM LIABILITY WAIVER AND RELEASE
+
+I, the undersigned, acknowledge and agree to the following terms:
+
+1. ASSUMPTION OF RISK: I understand that physical exercise involves inherent risks including but not limited to injury, illness, or death. I voluntarily assume all such risks.
+
+2. HEALTH DECLARATION: I confirm that I am physically fit and have no medical conditions that would prevent safe exercise. I will consult a physician if unsure.
+
+3. FACILITY RULES: I agree to follow all gym rules, use equipment properly, and maintain appropriate conduct at all times.
+
+4. PERSONAL BELONGINGS: The gym is not responsible for any lost, stolen, or damaged personal belongings.
+
+5. RELEASE OF LIABILITY: I release the gym, its owners, staff, and trainers from any claims, damages, or liability arising from my use of the facility or participation in any activities.
+
+6. EMERGENCY CONSENT: In case of emergency, I authorize the gym staff to seek medical attention on my behalf.
+
+7. PHOTO/VIDEO CONSENT: I consent to the gym using photos or videos taken on premises for promotional purposes unless I opt out in writing.
+
+By signing below, I confirm that I have read, understood, and agree to all terms above.`;
+
 const GradientAvatar = ({ name, src, sizePx = 36, onClick, className = '', imageFit = 'object-cover', ariaLabel }) => {
   const [imgError, setImgError] = useState(false);
   useEffect(() => {
@@ -456,6 +476,11 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [newNote, setNewNote] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [showWaiverModal, setShowWaiverModal] = useState(false);
+  const [waiverAgreed, setWaiverAgreed] = useState(false);
+  const [waiverSigning, setWaiverSigning] = useState(false);
+  const waiverCanvasRef = useRef(null);
+  const waiverDrawingRef = useRef(false);
   const [docForm, setDocForm] = useState({ doc_type: 'ID Proof', doc_url: '', doc_name: '', notes: '' });
   const [docSaving, setDocSaving] = useState(false);
   const [savingOnboarding, setSavingOnboarding] = useState(false);
@@ -696,14 +721,63 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     } catch { toast?.('Failed to cancel member', 'error'); }
   };
   const handleSignWaiver = async () => {
-    if (!selectedMember) return;
+    if (!selectedMember || !waiverAgreed) return;
+    const canvas = waiverCanvasRef.current;
+    const signatureData = canvas ? canvas.toDataURL('image/png') : '';
+    if (!signatureData || !canvas) { toast?.('Please provide your signature', 'error'); return; }
+    // Check if canvas has any drawing (not blank)
+    const ctx = canvas.getContext('2d');
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let hasDrawing = false;
+    for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] > 0) { hasDrawing = true; break; } }
+    if (!hasDrawing) { toast?.('Please draw your signature before signing', 'error'); return; }
+    setWaiverSigning(true);
     try {
-      await axios.post(`/api/members/${selectedMember.id}/waiver`, { waiver_type: 'general', waiver_text: 'Standard gym liability waiver' }, { headers: { 'x-auth-token': token } });
-      toast?.('Waiver signed', 'success');
+      await axios.post(`/api/members/${selectedMember.id}/waiver`, {
+        waiver_type: 'general',
+        waiver_text: WAIVER_TERMS_TEXT,
+        signature_data: signatureData,
+      }, { headers: { 'x-auth-token': token } });
+      toast?.('Waiver signed successfully', 'success');
+      setShowWaiverModal(false);
+      setWaiverAgreed(false);
       fetchMemberWaivers(selectedMember.id);
     } catch (err) {
       toast?.(getApiErrorMessage(err, 'Failed to sign waiver'), 'error');
+    } finally {
+      setWaiverSigning(false);
     }
+  };
+
+  const initWaiverCanvas = useCallback((canvas) => {
+    if (!canvas) return;
+    waiverCanvasRef.current = canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1e293b';
+    const getPos = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches?.[0];
+      const clientX = touch ? touch.clientX : e.clientX;
+      const clientY = touch ? touch.clientY : e.clientY;
+      return { x: (clientX - rect.left) * (canvas.width / rect.width), y: (clientY - rect.top) * (canvas.height / rect.height) };
+    };
+    const start = (e) => { e.preventDefault(); waiverDrawingRef.current = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+    const move = (e) => { if (!waiverDrawingRef.current) return; e.preventDefault(); const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+    const end = () => { waiverDrawingRef.current = false; };
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', end);
+    canvas.addEventListener('mouseleave', end);
+    canvas.addEventListener('touchstart', start, { passive: false });
+    canvas.addEventListener('touchmove', move, { passive: false });
+    canvas.addEventListener('touchend', end);
+  }, []);
+
+  const clearWaiverSignature = () => {
+    const canvas = waiverCanvasRef.current;
+    if (canvas) { const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); }
   };
 
   const renderOnboardingCard = () => (
@@ -2621,7 +2695,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
             {drawerTab === 'waivers' && (
               <div className="space-y-3">
                 {canWriteMembers && !memberWaivers.length && (
-                  <button onClick={handleSignWaiver} className="w-full py-3 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">
+                  <button onClick={() => { setWaiverAgreed(false); setShowWaiverModal(true); }} className="w-full py-3 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">
                     Sign Standard Waiver
                   </button>
                 )}
@@ -3076,6 +3150,46 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               <div className="flex gap-2">
                 <button onClick={() => { setShowCancelModal(false); setCancelReason(''); }} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Back</button>
                 <button onClick={handleCancelMember} className="flex-1 py-2.5 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-all">Confirm Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Waiver Signing Modal ── */}
+      {showWaiverModal && selectedMember && (
+        <div className="app-modal-shell z-[70] bg-slate-900/60 backdrop-blur-sm">
+          <div className="app-modal-panel bg-white dark:bg-slate-900 rounded-[28px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 dark:border-white/10">
+            <div className="p-5 text-white flex justify-between items-start" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
+              <div>
+                <h2 className="text-lg font-black">Sign Liability Waiver</h2>
+                <p className="text-white/60 text-xs mt-1">{selectedMember.full_name}</p>
+              </div>
+              <button onClick={() => setShowWaiverModal(false)} className="rounded-full p-1.5 hover:bg-white/10 transition-colors"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
+              <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4 text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap font-medium max-h-48 overflow-y-auto border border-slate-200 dark:border-white/10">
+                {WAIVER_TERMS_TEXT}
+              </div>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={waiverAgreed} onChange={(e) => setWaiverAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">I have read and agree to all terms and conditions above</span>
+              </label>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Signature</p>
+                  <button type="button" onClick={clearWaiverSignature} className="text-[10px] font-bold text-indigo-500 hover:text-indigo-700 transition-colors">Clear</button>
+                </div>
+                <div className="rounded-xl border-2 border-dashed border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 overflow-hidden">
+                  <canvas ref={initWaiverCanvas} width={400} height={150} className="w-full h-[120px] cursor-crosshair touch-none" />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">Draw your signature above using mouse or touch</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setShowWaiverModal(false)} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-black rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">Cancel</button>
+                <button onClick={handleSignWaiver} disabled={!waiverAgreed || waiverSigning} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                  {waiverSigning ? <><RefreshCw size={12} className="animate-spin" /> Signing...</> : <><CheckCircle size={12} /> Sign Waiver</>}
+                </button>
               </div>
             </div>
           </div>

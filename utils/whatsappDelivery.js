@@ -287,7 +287,7 @@ const mergeDeliveryStatus = (currentStatus, incomingStatus) => {
     const incoming = normalizeDeliveryStatus(incomingStatus || 'UNKNOWN');
 
     if (incoming === 'UNKNOWN') return current === 'UNKNOWN' ? 'QUEUED' : current;
-    if (incoming === 'FAILED') return ['DELIVERED', 'READ'].includes(current) ? current : 'FAILED';
+    if (incoming === 'FAILED') return ['SENT', 'DELIVERED', 'READ'].includes(current) ? current : 'FAILED';
 
     return (STATUS_PRIORITY[incoming] ?? -1) >= (STATUS_PRIORITY[current] ?? -1)
         ? incoming
@@ -724,7 +724,7 @@ const sendTrackedWhatsAppTemplate = async ({
         });
 
         const acceptance = extractSendAcceptanceMeta(providerPayload);
-        if (!acceptance.hasConfirmedReceipt) {
+        if (!acceptance.hasConfirmedReceipt && !['SENT', 'SUBMITTED', 'DELIVERED', 'READ'].includes(acceptance.normalizedStatus)) {
             const error = new Error(acceptance.statusDetail || 'MSG91 did not confirm this recipient send.');
             error.payload = providerPayload;
             throw error;

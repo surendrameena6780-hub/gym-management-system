@@ -34,68 +34,114 @@ const QUICK_PROBLEMS = [
   'Staff login not working',
   'Check-in is not working',
   'I need my billing invoice',
-  'Get my deleted member back',
+  'How to send WhatsApp messages?',
+  'How to manage leads?',
+  'How to create a plan?',
   'Reset staff password',
 ];
 
 const fallbackAssistantReply = (message) => {
   const lower = String(message || '').toLowerCase();
 
-  if (lower.includes('add member') || lower.includes('new member') || lower.includes('register member')) {
+  if (lower.includes('add member') || lower.includes('new member') || lower.includes('register member') || lower.includes('create member')) {
     return {
-      answer: 'To add a member, open Members, tap Add Member, fill the name, phone, and email, then save. If it fails, check if the phone number is already used.',
-      category: 'GENERAL',
-      priority: 'MEDIUM',
-      suggested_subject: 'Unable to add member',
-      actions: ['Open Members page', 'Raise support ticket'],
+      answer: 'To add a member:\n1. Go to Members page from the bottom navigation.\n2. Tap "+ Add Member" at the top.\n3. Fill in name, phone number, and email.\n4. Select a plan and start date.\n5. Click Save.\n\nIf it fails, check if the phone number is already used by another member.',
+      category: 'GENERAL', priority: 'MEDIUM', suggested_subject: 'How to add a member',
+      actions: ['Open Members page'],
     };
   }
 
-  if (lower.includes('staff') && lower.includes('login')) {
+  if (lower.includes('staff') && (lower.includes('login') || lower.includes('password'))) {
     return {
-      answer: 'If staff cannot log in, check that the staff account is active, the role is assigned correctly, and the password is right. You can also reset the password from staff settings.',
-      category: 'ACCOUNT',
-      priority: 'MEDIUM',
-      suggested_subject: 'Staff login issue',
-      actions: ['Open Settings → Staff & Roles', 'Reset staff password', 'Raise support ticket'],
+      answer: 'To reset a staff password:\n1. Go to Settings → Staff & Roles.\n2. Find the staff member.\n3. Click Edit and enter a new password (min 8 chars).\n4. Click Save.\n\nThe staff member can log in with their email and the new password.',
+      category: 'ACCOUNT', priority: 'MEDIUM', suggested_subject: 'Staff password reset',
+      actions: ['Open Settings → Staff & Roles'],
     };
   }
 
-  if (lower.includes('attendance') || lower.includes('check in') || lower.includes('check-in') || lower.includes('checkin')) {
+  if (lower.includes('attendance') || lower.includes('check in') || lower.includes('check-in') || lower.includes('checkin') || lower.includes('qr') || lower.includes('scan')) {
     return {
-      answer: 'For check-in issues, first check the attendance mode, then confirm the member plan is active, and try again. If it still fails, send the member name and time in a ticket.',
-      category: 'TECHNICAL',
-      priority: 'HIGH',
-      suggested_subject: 'Attendance check-in issue',
-      actions: ['Verify attendance mode', 'Retry check-in', 'Raise support ticket'],
+      answer: 'To check in a member:\n1. Go to Attendance → Check-In tab.\n2. Search by name or phone.\n3. Select and tap Check In.\n\nIf it fails:\n• Member must have an active plan.\n• Check attendance mode in Settings.\n• For QR, ensure camera permission is granted.\n• For RFID, the member needs a paired tag.',
+      category: 'TECHNICAL', priority: 'HIGH', suggested_subject: 'Check-in help',
+      actions: ['Open Attendance page'],
     };
   }
 
-  if (lower.includes('bill') || lower.includes('invoice') || lower.includes('subscription') || lower.includes('payment')) {
+  if (lower.includes('bill') || lower.includes('invoice') || lower.includes('subscription')) {
     return {
-      answer: 'For billing help, open Settings and go to Billing. There you can check your current plan, validity, and download the invoice from billing history.',
-      category: 'BILLING',
-      priority: 'MEDIUM',
-      suggested_subject: 'Billing or invoice issue',
-      actions: ['Open Billing settings', 'Raise support ticket'],
+      answer: 'To manage billing:\n1. Go to Settings → Billing & Subscriptions.\n2. View current plan, validity, and payment history.\n3. To download an invoice, find the payment and tap Download.\n4. To change plans, tap Upgrade or Change Plan.',
+      category: 'BILLING', priority: 'MEDIUM', suggested_subject: 'Billing help',
+      actions: ['Open Billing settings'],
     };
   }
 
-  if (lower.includes('delete') && lower.includes('member')) {
+  if (lower.includes('payment') || lower.includes('collect') || lower.includes('razorpay') || lower.includes('payment link')) {
     return {
-      answer: 'Deleted members can usually be recovered. Send the member name, phone number, and approximate delete time in a ticket.',
-      category: 'DATA',
-      priority: 'HIGH',
-      suggested_subject: 'Recover deleted member',
-      actions: ['Raise support ticket'],
+      answer: 'To collect a payment:\n1. Go to Payments page.\n2. Tap "+ New Payment".\n3. Select plan, amount, and method.\n4. Click Record Payment.\n\nFor online payments via Razorpay:\n1. Go to Settings → Integrations → Payments.\n2. Enter your Razorpay Account ID.\n3. Once connected, send payment links to members via WhatsApp.',
+      category: 'BILLING', priority: 'MEDIUM', suggested_subject: 'Payment collection help',
+      actions: ['Open Payments page'],
+    };
+  }
+
+  if (lower.includes('whatsapp') || lower.includes('message') || lower.includes('broadcast') || lower.includes('reminder')) {
+    return {
+      answer: 'To send WhatsApp messages:\n1. Go to Settings → Integrations → Messaging.\n2. Connect MSG91 with your API key and Hello number.\n3. Once connected, you can:\n   - Send reminders from member profiles\n   - Send broadcasts from Members page\n   - Auto-reminders for expiring/expired members run daily\n\nIf a message shows "Failed":\n• Check member has valid WhatsApp number.\n• Check MSG91 account balance.\n• Ensure template is approved by Meta.',
+      category: 'TECHNICAL', priority: 'MEDIUM', suggested_subject: 'WhatsApp messaging help',
+      actions: ['Open Settings → Integrations'],
+    };
+  }
+
+  if (lower.includes('plan') || lower.includes('pricing') || lower.includes('create plan')) {
+    return {
+      answer: 'To create a plan:\n1. Go to Plans page.\n2. Tap "+ New Plan".\n3. Set name, duration, price, and discounts.\n4. Click Save.\n\nTo edit, tap the edit icon on any plan card.\n\nTips:\n• 2-3 plans gives members good choice.\n• Add a premium plan for higher revenue.\n• Enable discounts for special offers.',
+      category: 'GENERAL', priority: 'MEDIUM', suggested_subject: 'Plan management help',
+      actions: ['Open Plans page'],
+    };
+  }
+
+  if (lower.includes('lead') || lower.includes('enquir') || lower.includes('follow up') || lower.includes('convert')) {
+    return {
+      answer: 'To manage leads:\n1. Go to Leads page from More menu.\n2. Tap "+ Add Lead" for a new enquiry.\n3. Fill name, phone, source, and priority.\n4. Set a follow-up date.\n\nTo follow up:\n• Tap Call to phone them.\n• Tap Chat to WhatsApp them.\n• When they join, tap Convert to create their member profile.\n\nTip: Reply within 5 minutes for best conversion.',
+      category: 'GENERAL', priority: 'MEDIUM', suggested_subject: 'Lead management help',
+      actions: ['Open Leads page'],
+    };
+  }
+
+  if (lower.includes('class') || lower.includes('batch') || lower.includes('schedule') || lower.includes('trainer')) {
+    return {
+      answer: 'To manage classes:\n1. Go to Classes page from More menu.\n2. Create class types (Yoga, CrossFit, etc.).\n3. Add sessions with time, trainer, and capacity.\n4. Enroll members into sessions.\n\nTips:\n• Set capacity limits to avoid overcrowding.\n• Assign trainers for accountability.',
+      category: 'GENERAL', priority: 'MEDIUM', suggested_subject: 'Class scheduling help',
+      actions: ['Open Classes page'],
+    };
+  }
+
+  if ((lower.includes('delete') && lower.includes('member')) || lower.includes('recover member') || lower.includes('restore member')) {
+    return {
+      answer: 'Deleted members are soft-deleted and can be recovered.\n\nTo recover:\n1. Go to Members page and check for deleted members.\n2. If not visible, raise a support ticket with:\n   - Member name\n   - Phone number\n   - Approximate deletion time\n\nOur team will restore the member safely.',
+      category: 'DATA', priority: 'HIGH', suggested_subject: 'Recover deleted member',
+      actions: ['Raise recovery ticket'],
+    };
+  }
+
+  if (lower.includes('report') || lower.includes('insight') || lower.includes('analytics') || lower.includes('revenue') || lower.includes('dashboard')) {
+    return {
+      answer: 'To view analytics:\n1. Go to Insights page from More menu.\n2. Choose a time range (1M, 3M, 6M, 1Y).\n3. View revenue trends, retention rate, renewals due, and attendance heatmap.\n\nThe Dashboard shows daily smart tips and action items to grow your gym.',
+      category: 'GENERAL', priority: 'LOW', suggested_subject: 'Reports and analytics help',
+      actions: ['Open Insights page'],
+    };
+  }
+
+  if (lower.includes('branch') || lower.includes('location') || lower.includes('multi branch')) {
+    return {
+      answer: 'To set up branches:\n1. Go to Settings → Branches.\n2. Tap Add Branch with name and address.\n3. Assign staff to each branch.\n\nUse the branch selector in the header to switch between branches. Each branch has its own members, attendance, and reports.',
+      category: 'GENERAL', priority: 'MEDIUM', suggested_subject: 'Branch management help',
+      actions: ['Open Settings → Branches'],
     };
   }
 
   return {
-    answer: 'I can help with member add issues, staff login, check-in issues, billing, and deleted data. Tap a quick issue below or raise a ticket.',
-    category: 'GENERAL',
-    priority: 'LOW',
-    suggested_subject: 'General support assistance',
+    answer: 'I can help you with:\n• Adding members and managing profiles\n• Payment collection and billing\n• WhatsApp messaging and broadcasts\n• Attendance and check-in setup\n• Plans and pricing\n• Lead management and follow-ups\n• Staff roles and permissions\n• Class scheduling\n• Reports and analytics\n• Branch management\n\nTell me what you need help with, or tap a quick issue above.',
+    category: 'GENERAL', priority: 'LOW', suggested_subject: 'General support assistance',
     actions: ['Raise support ticket'],
   };
 };

@@ -461,10 +461,8 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
       setChatMessage('');
       toast?.('WhatsApp reply sent from GymVault.', 'success');
       requestDataRefresh('lead-chat');
-      await Promise.all([
-        fetchLeadChat(chatLead, { soft: true }),
-        fetchLeadsData({ soft: true }),
-      ]);
+      fetchLeadChat(chatLead, { soft: true });
+      fetchLeadsData({ soft: true });
     } catch (err) {
       toast?.(err?.response?.data?.error || 'Unable to send WhatsApp reply.', 'error');
     } finally {
@@ -677,6 +675,11 @@ const LeadsPage = ({ appRuntime, canManage = false }) => {
                       {canManage && (
                         <button type="button" aria-label={`Edit ${lead.full_name}`} onClick={() => openEditModal(lead)} className="w-11 h-11 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 flex items-center justify-center hover:bg-slate-700 transition-all">
                           <Pencil size={14} />
+                        </button>
+                      )}
+                      {canManage && (
+                        <button type="button" aria-label={`Delete ${lead.full_name}`} onClick={() => handleDeleteLead(lead)} className="w-11 h-11 rounded-xl bg-slate-800 text-rose-300 border border-slate-700 flex items-center justify-center hover:bg-rose-500/20 hover:border-rose-500/40 transition-all">
+                          <Trash2 size={14} />
                         </button>
                       )}
                     </div>
