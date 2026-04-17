@@ -1358,17 +1358,15 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
     const logoHtml = gymLogo
-      ? `<img src="${gymLogo}" alt="Gym Logo" style="width:90px;height:90px;object-fit:contain;" />`
-      : `<div style="width:90px;height:90px;background:#1a1a1a;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#f5c518;font-size:22px;font-weight:900;text-align:center;line-height:1.1;padding:8px;box-sizing:border-box;">${esc(gymName.split(' ').map((w) => w[0]).join('').slice(0, 2))}</div>`;
+      ? `<img src="${gymLogo}" alt="Gym Logo" style="width:80px;height:80px;object-fit:contain;" />`
+      : `<div style="width:80px;height:80px;background:#1a1a1a;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#f5c518;font-size:22px;font-weight:900;text-align:center;line-height:1.1;padding:8px;box-sizing:border-box;">${esc(gymName.split(' ').map((w) => w[0]).join('').slice(0, 2))}</div>`;
 
-    const signatureHtml = ownerSignature
-      ? `<img src="${ownerSignature}" alt="Authorized Signature" style="max-height:70px;display:inline-block;" />`
-      : `<div style="width:200px;height:60px;display:inline-block;"></div>`;
+    // Auto-generate cursive signature from gym owner name
+    const ownerName = gym.owner_name || gym.name || 'GymVault';
+    const signatureHtml = `<div style="font-family:'Dancing Script',cursive;font-size:32px;color:#1a1a1a;font-style:italic;display:inline-block;padding:0 10px 2px;">${esc(ownerName)}</div>`;
 
     const addressLines = gymAddress.split(/\n|,/).map((l) => l.trim()).filter(Boolean);
-    const addressHtml = addressLines.length > 1
-      ? `${esc(addressLines.slice(0, -1).join(', '))},<br/>${esc(addressLines[addressLines.length - 1])}`
-      : esc(gymAddress);
+    const addressHtml = addressLines.length > 0 ? esc(addressLines.join(', ')) : '';
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) { toast?.('Popup blocked — please allow popups for this site.', 'warning'); return; }
@@ -1379,40 +1377,41 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   <title>Invoice - ${esc(gymName)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Anonymous+Pro:wght@400;700&family=HK+Modular:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Anonymous+Pro:wght@400;700&family=Montserrat:wght@400;500;600&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Courier New', Courier, monospace; background: #f0f0f0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .page { background: #fff; width: 600px; margin: 24px auto; padding: 44px 48px; }
-    .header { display: flex; align-items: center; gap: 22px; padding-bottom: 16px; border-bottom: 2px solid #222; margin-bottom: 0; }
+    body { font-family: 'Courier New', Courier, monospace; background: #e8e8e8; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { background: #f6f6f6; width: 600px; margin: 24px auto; padding: 44px 48px; }
+    .header { display: flex; align-items: center; gap: 14px; padding-bottom: 14px; margin-bottom: 0; }
     .header-text { flex: 1; text-align: center; }
-    .gym-name { font-family: 'HK Modular', Arial, sans-serif; font-size: 26.3px; font-weight: 700; color: #1a1a1a; letter-spacing: 2px; text-transform: uppercase; line-height: 1.15; text-align: center; }
-    .gym-address { font-family: 'Anonymous Pro', 'Courier New', monospace; font-weight: 400; font-size: 18px; color: #555; margin-top: 5px; line-height: 1.5; text-align: center; }
-    .gym-phone { font-family: 'Anonymous Pro', 'Courier New', monospace; font-weight: 400; font-size: 18px; color: #555; margin-top: 1px; text-align: center; }
-    .invoice-title-wrap { border-top: 1.5px solid #222; border-bottom: 1.5px solid #222; text-align: center; padding: 10px 0; margin: 20px 0; }
+    .gym-name { font-family: 'Anonymous Pro', 'Courier New', monospace; font-size: 26.3px; font-weight: 700; color: #1a1a1a; letter-spacing: 1px; text-transform: uppercase; line-height: 1.15; text-align: center; }
+    .gym-address { font-family: 'Montserrat', Arial, sans-serif; font-weight: 500; font-size: 13px; color: #555; margin-top: 4px; line-height: 1.5; text-align: center; letter-spacing: 0.2px; }
+    .gym-phone { font-family: 'Montserrat', Arial, sans-serif; font-weight: 500; font-size: 13px; color: #555; margin-top: 1px; text-align: center; letter-spacing: 0.2px; }
+    .invoice-title-wrap { border-top: 1.5px solid #222; border-bottom: 1.5px solid #222; text-align: center; padding: 8px 0; margin: 14px -48px 18px -48px; }
     .invoice-title { font-family: 'Anonymous Pro', 'Courier New', monospace; font-size: 25px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase; }
-    .info-section { padding: 0 0 18px 0; margin-bottom: 20px; border-bottom: 1px solid #ddd; }
-    .info-row { display: flex; align-items: baseline; margin-bottom: 8px; font-size: 12.5px; }
+    .info-section { padding: 0 0 16px 0; margin-bottom: 18px; }
+    .info-row { display: flex; align-items: baseline; margin-bottom: 6px; font-size: 12.5px; }
     .info-row:last-child { margin-bottom: 0; }
-    .info-label { font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; width: 130px; flex-shrink: 0; }
-    .info-sep { font-weight: 900; margin: 0 12px 0 0; }
-    .info-val { font-weight: 700; color: #1a1a1a; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-    th { background: #f5c518; color: #1a1a1a; font-size: 11px; font-weight: 900; text-align: center; padding: 11px 8px; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #e0aa00; }
-    td { font-size: 12.5px; padding: 12px 10px; border: 1px solid #ddd; text-align: center; font-weight: 600; color: #1a1a1a; }
+    .info-label { font-weight: 900; text-transform: uppercase; letter-spacing: 0.3px; width: 130px; flex-shrink: 0; }
+    .info-sep { font-weight: 900; margin: 0 10px 0 0; }
+    .info-val { font-weight: 600; color: #1a1a1a; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
+    th { background: #f5c518; color: #1a1a1a; font-size: 11px; font-weight: 900; text-align: center; padding: 10px 8px; text-transform: uppercase; letter-spacing: 0.3px; border: 1px solid #e0aa00; }
+    td { font-size: 12px; padding: 11px 10px; border: 1px solid #ddd; text-align: center; font-weight: 600; color: #1a1a1a; }
     .td-left { text-align: left; }
     .td-total-label { text-align: right; font-weight: 900; border: none; background: transparent; }
     .td-total-val { font-weight: 900; color: #1a1a1a; font-size: 13px; }
     .td-empty { border: none; background: transparent; }
-    .sig-section { margin-top: 40px; text-align: right; }
+    .sig-section { margin-top: 44px; text-align: right; }
     .sig-img-wrap { display: inline-block; text-align: center; }
-    .sig-line { border-top: 1.5px solid #333; margin-top: 2px; width: 220px; }
-    .sig-label { font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 5px; color: #333; line-height: 1.6; }
+    .sig-line { border-top: 1.5px solid #333; margin-top: 0; width: 220px; }
+    .sig-label { font-family: 'Courier New', Courier, monospace; font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 5px; color: #333; line-height: 1.6; }
     .footer { text-align: center; margin-top: 28px; font-size: 10px; color: #aaa; font-weight: 600; border-top: 1px dashed #ddd; padding-top: 12px; }
     ${taxId ? `.tax-id { font-size: 10px; color: #999; text-align: center; margin-top: 8px; font-weight: 700; }` : ''}
     @media print {
       body { background: white; }
-      .page { margin: 0; width: 100%; max-width: 600px; padding: 32px 40px; }
+      .page { margin: 0; width: 100%; max-width: 600px; padding: 32px 40px; background: #f6f6f6; }
+      .invoice-title-wrap { margin-left: -40px; margin-right: -40px; }
     }
   </style>
 </head>
@@ -1471,7 +1470,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     </div>
 
     ${taxId ? `<div class="tax-id">GST / Tax ID: ${esc(taxId)}</div>` : ''}
-    <div class="footer">This is a computer-generated invoice.${ownerSignature ? '' : ' No physical signature required.'}</div>
+    <div class="footer">This is a computer-generated invoice.</div>
   </div>
   <script>window.onload = function() { window.print(); }</script>
 </body>

@@ -1914,44 +1914,92 @@ const loadRazorpayScript = () => {
 
   const generateSaaSInvoice = (invoice) => {
     if (!invoice) return;
+    const esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const fmt = (n) => Number(n).toLocaleString('en-IN');
+    const invDate = new Date(invoice.date);
+    const formattedDate = `${String(invDate.getDate()).padStart(2, '0')}.${String(invDate.getMonth() + 1).padStart(2, '0')}.${invDate.getFullYear()}`;
+    const ownerName = accountData.full_name || 'GymVault';
     const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>GymVault Invoice - ${invoice.id}</title>
-          <style>
-            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; background: #f8fafc; }
-            .receipt-box { background: white; border: 1px solid #e2e8f0; padding: 40px; border-radius: 24px; max-width: 500px; margin: auto; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-            .logo { font-size: 28px; font-weight: 900; text-align: center; color: #0f172a; margin-bottom: 5px; }
-            .sub-logo { font-size: 10px; font-weight: 700; text-align: center; color: #6366f1; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 30px; }
-            .divider { border-top: 2px dashed #e2e8f0; margin: 20px 0; }
-            .info-row { display: flex; justify-content: space-between; margin-bottom: 12px; }
-            .label { color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-            .value { font-weight: 700; color: #0f172a; font-size: 14px; }
-            .total-row { background: #f1f5f9; padding: 20px; border-radius: 12px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
-            .footer { text-align: center; margin-top: 30px; font-size: 10px; color: #94a3b8; font-weight: 600; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt-box">
-            <div class="logo">GymVault HQ</div>
-            <div class="sub-logo">Official SaaS Subscription Receipt</div>
-            <div class="info-row"><span class="label">Date</span><span class="value">${new Date(invoice.date).toLocaleDateString('en-GB')}</span></div>
-            <div class="info-row"><span class="label">Billed To</span><span class="value">${gymData.name || accountData.full_name}</span></div>
-            ${gymData.tax_id ? `<div class="info-row"><span class="label">GST/Tax ID</span><span class="value">${gymData.tax_id}</span></div>` : ''}
-            <div class="info-row"><span class="label">Plan</span><span class="value">${invoice.plan}</span></div>
-            <div class="info-row"><span class="label">Transaction ID</span><span class="value" style="font-size: 11px;">${invoice.id}</span></div>
-            <div class="divider"></div>
-            <div class="total-row">
-              <span class="label" style="color: #0f172a; font-size: 14px;">Total Paid</span>
-              <span style="font-weight: 900; font-size: 24px; color: #10b981;">&#8377;${invoice.amount}</span>
-            </div>
-            <div class="footer">This is a computer generated tax invoice and does not require a physical signature.</div>
-          </div>
-          <script>window.onload = function() { window.print(); window.close(); }</script>
-        </body>
-      </html>
-    `);
+    if (!printWindow) return;
+    printWindow.document.write(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>GymVault Invoice - ${esc(invoice.id)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anonymous+Pro:wght@400;700&family=Montserrat:wght@400;500;600;700&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Courier New',Courier,monospace;background:#e8e8e8;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{background:#f6f6f6;width:600px;margin:24px auto;padding:44px 48px}
+.inv-title{font-family:'Anonymous Pro','Courier New',monospace;font-size:36px;font-weight:700;letter-spacing:4px;text-transform:uppercase;margin-bottom:22px}
+.meta{display:flex;justify-content:space-between;margin-bottom:18px;font-size:12px;font-weight:700}
+.meta-left{text-transform:uppercase;letter-spacing:0.3px}
+.meta-right{text-align:right}
+.section{margin-bottom:16px;font-size:12px;line-height:1.8}
+.section-label{font-weight:900;font-size:11px;text-transform:uppercase;margin-bottom:2px}
+.section-val{font-weight:500;color:#333}
+table{width:100%;border-collapse:collapse;margin:20px 0}
+th{background:#1a1a1a;color:#fff;font-size:11px;font-weight:700;text-align:center;padding:10px 8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #333}
+td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;font-weight:600;color:#1a1a1a;vertical-align:middle}
+.td-left{text-align:left}
+.td-right{text-align:right}
+.td-empty{border:none;background:transparent}
+.td-label{text-align:right;font-weight:900;border:none;background:transparent;text-transform:uppercase;font-size:11px;letter-spacing:0.3px}
+.td-total{font-weight:900;font-size:12.5px}
+.sig-section{margin-top:40px;text-align:right}
+.sig-text{font-family:'Dancing Script',cursive;font-size:32px;color:#1a1a1a;font-style:italic;display:inline-block;padding:0 10px 2px}
+.sig-line{border-top:1.5px solid #333;width:220px;margin:0 0 0 auto}
+.sig-label{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;margin-top:5px;color:#333;line-height:1.6;text-align:right}
+@media print{body{background:white}.page{margin:0;width:100%;max-width:600px;padding:32px 40px;background:#f6f6f6}}
+</style></head>
+<body><div class="page">
+<div class="inv-title">INVOICE</div>
+<div class="meta">
+  <div class="meta-left">Invoice No: ${esc(invoice.id)}</div>
+  <div class="meta-right">Date : ${formattedDate}</div>
+</div>
+<div class="section">
+  <div class="section-label">Bill To:</div>
+  <div class="section-val">Name: Mr. ${esc(ownerName)}</div>
+  ${gymData.address ? `<div class="section-val">Address: ${esc(gymData.address)}</div>` : ''}
+  ${gymData.phone ? `<div class="section-val">Mobile No.: ${esc(gymData.phone)}</div>` : ''}
+  ${gymData.tax_id ? `<div class="section-val">GST/Tax ID: ${esc(gymData.tax_id)}</div>` : ''}
+</div>
+<div class="section">
+  <div class="section-label">From:</div>
+  <div class="section-val" style="font-weight:700">GYMVAULT</div>
+  <div class="section-val">Website : gymvault.tech</div>
+  <div class="section-val">Email : team@gymvault.tech</div>
+  <div class="section-val">Mobile No. : +91 8826973799</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:35px">No</th>
+    <th>Description</th>
+    <th>Plan</th>
+    <th>Rate</th>
+    <th>Total</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td class="td-left">APP SUBSCRIPTION</td>
+      <td>${esc(invoice.plan)}</td>
+      <td>&#8377;${fmt(invoice.amount)}</td>
+      <td>&#8377;${fmt(invoice.amount)}</td>
+    </tr>
+    <tr><td class="td-empty"></td><td class="td-empty"></td><td class="td-empty"></td>
+      <td class="td-label">Grand Total (INR)</td>
+      <td class="td-total">&#8377;${fmt(invoice.amount)}</td>
+    </tr>
+  </tbody>
+</table>
+<div class="sig-section">
+  <div class="sig-text">Surendra Meena</div>
+  <div class="sig-line"></div>
+  <div class="sig-label">Authorized Signature<br/>TEAM@GYMVAULT</div>
+</div>
+</div>
+<script>window.onload=function(){window.print();}</script>
+</body></html>`);
     printWindow.document.close();
   };
 

@@ -10,6 +10,7 @@ const { requireOwner, requirePermission } = require('../middleware/rbac');
 const { decryptSecret } = require('../utils/secretCrypto');
 const { recordRuntimeEvent } = require('../utils/runtimeTelemetry');
 const { DEFAULT_BRANCH_ID } = require('../utils/branchAccess');
+const { isEmailTransportConfigured, sendTransactionalEmail } = require('../utils/email');
 const {
     ensureInteger,
     ensureNumber,
@@ -813,6 +814,59 @@ const verifySignedState = (stateValue) => {
     }
 };
 
+// ── Invoice email helper (fire-and-forget after activation) ──
+const sendInvoiceEmail = async ({ gymId, memberId, planName, amount, paymentId, paymentMode }) => {
+    try {
+        if (!isEmailTransportConfigured()) return;
+        const [memberRes, gymRes] = await Promise.all([
+            pool.query('SELECT full_name, email, phone FROM members WHERE id=$1 AND gym_id=$2 LIMIT 1', [memberId, gymId]),
+            pool.query('SELECT name, address, phone, currency, tax_id FROM gyms WHERE id=$1 LIMIT 1', [gymId]),
+        ]);
+        const member = memberRes.rows[0];
+        const gym = gymRes.rows[0];
+        if (!member?.email) return;
+        const gymName = (gym?.name || 'GymVault').toUpperCase();
+        const esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const now = new Date();
+        const formattedDate = `${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.${now.getFullYear()}`;
+        const invoiceNo = String(paymentId || '').replace(/[^A-Z0-9-]/gi, '').toUpperCase().slice(0, 20) || `INV-${Date.now().toString(36).toUpperCase()}`;
+        const fmt = (n) => Number(n).toLocaleString('en-IN');
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>body{font-family:'Courier New',monospace;background:#f6f6f6;margin:0;padding:20px;color:#1a1a1a}
+.page{background:#f6f6f6;max-width:560px;margin:0 auto;padding:36px 40px}
+.gym-name{text-align:center;font-size:22px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.gym-info{text-align:center;font-size:12px;color:#555;margin-top:4px;line-height:1.5}
+.inv-title{border-top:1.5px solid #222;border-bottom:1.5px solid #222;text-align:center;padding:8px 0;margin:14px 0 16px;font-size:20px;font-weight:700;letter-spacing:5px;text-transform:uppercase}
+.info-row{margin-bottom:5px;font-size:12px}.info-label{font-weight:900;text-transform:uppercase;display:inline-block;width:120px}
+.info-sep{font-weight:900;margin-right:8px}table{width:100%;border-collapse:collapse;margin:18px 0}
+th{background:#f5c518;color:#1a1a1a;font-size:10px;font-weight:900;text-align:center;padding:9px 6px;text-transform:uppercase;border:1px solid #e0aa00}
+td{font-size:11px;padding:10px 8px;border:1px solid #ddd;text-align:center;font-weight:600}
+.footer{text-align:center;margin-top:20px;font-size:9px;color:#aaa;border-top:1px dashed #ddd;padding-top:10px}</style></head>
+<body><div class="page">
+<div class="gym-name">${esc(gymName)}</div>
+${gym?.address ? `<div class="gym-info">${esc(gym.address)}</div>` : ''}
+${gym?.phone ? `<div class="gym-info">${esc(gym.phone)}</div>` : ''}
+<div class="inv-title">Invoice</div>
+<div class="info-row"><span class="info-label">Invoice No.</span><span class="info-sep">:</span>${esc(invoiceNo)}</div>
+<div class="info-row"><span class="info-label">Invoice Date</span><span class="info-sep">:</span>${formattedDate}</div>
+<div class="info-row"><span class="info-label">Invoice To</span><span class="info-sep">:</span>${esc(member.full_name)}</div>
+${member.phone ? `<div class="info-row"><span class="info-label">Mobile No.</span><span class="info-sep">:</span>${esc(member.phone)}</div>` : ''}
+<table><thead><tr><th>No.</th><th>Description</th><th>Rate</th><th>Total (${esc(gym?.currency || 'INR')})</th></tr></thead>
+<tbody><tr><td>1</td><td style="text-align:left">${esc(planName)}</td><td>${fmt(amount)}</td><td>${fmt(amount)}</td></tr>
+<tr><td colspan="2" style="border:none"></td><td style="text-align:right;font-weight:900;border:none">Total</td><td style="font-weight:900">${fmt(amount)}</td></tr></tbody></table>
+<div class="footer">This is a computer-generated invoice from ${esc(gymName)}.</div>
+</div></body></html>`;
+        await sendTransactionalEmail({
+            to: member.email,
+            subject: `Invoice from ${gym?.name || 'GymVault'} — ${planName}`,
+            text: `Hi ${member.full_name}, your subscription for ${planName} (${gym?.currency || '₹'}${amount}) has been activated. Invoice No: ${invoiceNo}. Date: ${formattedDate}. Thank you!`,
+            html,
+        });
+    } catch (emailErr) {
+        console.error('INVOICE_EMAIL:', emailErr.message);
+    }
+};
+
 const activateMembershipTransaction = async ({ gymId, memberId, planId, paymentMode, paymentId }) => {
     const client = await pool.connect();
 
@@ -979,6 +1033,15 @@ router.post('/activate', auth, saasMiddleware, requirePermission('payments:write
         });
         if (!result.ok) return res.status(result.status).json({ error: result.error });
         res.json(result.data);
+
+        // Fire-and-forget invoice email
+        if (!result.data?.duplicate) {
+            sendInvoiceEmail({
+                gymId: gym_id, memberId, planName: result.data?.plan_name,
+                amount: result.data?.amount, paymentId: result.data?.transaction_id,
+                paymentMode: result.data?.payment_mode,
+            }).catch(() => {});
+        }
 
     } catch (err) {
         if (isValidationError(err)) {

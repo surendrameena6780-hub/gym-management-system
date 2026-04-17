@@ -1295,17 +1295,25 @@ router.get('/', auth, async (req, res) => {
 router.get('/receipt-info', auth, async (req, res) => {
     try {
         await ensurePreferenceSchema();
-        const gymRes = await pool.query(
-            'SELECT name, address, phone, gym_logo, owner_signature, tax_id, COALESCE(currency, \'₹\') AS currency FROM gyms WHERE id = $1 LIMIT 1',
-            [req.user.gym_id]
-        );
+        const [gymRes, ownerRes] = await Promise.all([
+            pool.query(
+                'SELECT name, address, phone, gym_logo, owner_signature, tax_id, COALESCE(currency, \'₹\') AS currency FROM gyms WHERE id = $1 LIMIT 1',
+                [req.user.gym_id]
+            ),
+            pool.query(
+                "SELECT full_name FROM users WHERE gym_id = $1 AND role = 'owner' ORDER BY id ASC LIMIT 1",
+                [req.user.gym_id]
+            ),
+        ]);
         const gym = gymRes.rows[0] || {};
+        const owner = ownerRes.rows[0];
         res.json({
             name: gym.name || '',
             address: gym.address || '',
             phone: gym.phone || '',
             gym_logo: gym.gym_logo || null,
             owner_signature: gym.owner_signature || null,
+            owner_name: owner?.full_name || '',
             tax_id: gym.tax_id || '',
             currency: gym.currency || '₹',
         });
