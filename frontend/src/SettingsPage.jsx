@@ -560,7 +560,14 @@ const loadRazorpayScript = () => {
     addon_extra_members: 0,
     addon_extra_branches: 0,
     addon_extra_hello: 0,
+    gym_logo: '',
+    owner_signature: '',
   });
+
+  // Receipt branding canvas
+  const ownerSigCanvasRef = useRef(null);
+  const ownerSigDrawingRef = useRef(false);
+  const [showOwnerSigCanvas, setShowOwnerSigCanvas] = useState(false);
 
   const [usageData, setUsageData] = useState({
       members: 0,
@@ -988,6 +995,8 @@ const loadRazorpayScript = () => {
             addon_extra_members: Number(res.data.gym.addon_extra_members || 0),
             addon_extra_branches: Number(res.data.gym.addon_extra_branches || 0),
             addon_extra_hello: Number(res.data.gym.addon_extra_hello || 0),
+            gym_logo: res.data.gym.gym_logo || prev.gym_logo || '',
+            owner_signature: res.data.gym.owner_signature || prev.owner_signature || '',
           }));
           setPlatformData((prev) => ({
             ...prev,
@@ -1309,6 +1318,71 @@ const loadRazorpayScript = () => {
     } catch {
       toast('Failed to copy rate card. Copy it manually from the popup.', 'warning');
     }
+  };
+
+  // ── Gym Logo upload handler ──
+  const handleGymLogoUpload = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 500 * 1024) { toast('Logo image must be under 500 KB.', 'warning'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => setGymData((prev) => ({ ...prev, gym_logo: e.target.result }));
+    reader.readAsDataURL(file);
+  };
+
+  // ── Owner Signature canvas ──
+  const initOwnerSigCanvas = useCallback((canvas) => {
+    if (!canvas) return;
+    ownerSigCanvasRef.current = canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#000000';
+    const getPos = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches?.[0];
+      const clientX = touch ? touch.clientX : e.clientX;
+      const clientY = touch ? touch.clientY : e.clientY;
+      return { x: (clientX - rect.left) * (canvas.width / rect.width), y: (clientY - rect.top) * (canvas.height / rect.height) };
+    };
+    const start = (e) => { e.preventDefault(); ownerSigDrawingRef.current = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+    const move = (e) => { if (!ownerSigDrawingRef.current) return; e.preventDefault(); const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+    const end = () => { ownerSigDrawingRef.current = false; };
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', end);
+    canvas.addEventListener('mouseleave', end);
+    canvas.addEventListener('touchstart', start, { passive: false });
+    canvas.addEventListener('touchmove', move, { passive: false });
+    canvas.addEventListener('touchend', end);
+  }, []);
+
+  const clearOwnerSigCanvas = () => {
+    const canvas = ownerSigCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  };
+
+  const saveOwnerSigCanvas = () => {
+    const canvas = ownerSigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let hasDrawing = false;
+    for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] > 10) { hasDrawing = true; break; } }
+    if (!hasDrawing) { toast('Please draw your signature first.', 'warning'); return; }
+    const dataUrl = canvas.toDataURL('image/png');
+    setGymData((prev) => ({ ...prev, owner_signature: dataUrl }));
+    setShowOwnerSigCanvas(false);
+    toast('Signature saved. Click "Save All Changes" to persist it.', 'success');
   };
 
   const createApiKey = async () => {
@@ -2325,7 +2399,11 @@ const loadRazorpayScript = () => {
       const accountRes = await axios.put('/api/settings/account', formData, {
         headers: { 'x-auth-token': token, 'Content-Type': 'multipart/form-data' }
       });
-      await axios.put('/api/settings/gym', gymData, headers);
+      await axios.put('/api/settings/gym', {
+        ...gymData,
+        gym_logo: gymData.gym_logo || '',
+        owner_signature: gymData.owner_signature || '',
+      }, headers);
       announceSettingsDataChanged({
         source: 'settings-profile-save',
         scope: 'account-gym',
@@ -2525,6 +2603,58 @@ const loadRazorpayScript = () => {
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Website / Instagram</label><div className="relative"><Link size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" value={gymData.website} onChange={e => setGymData({...gymData, website: e.target.value})} placeholder="instagram.com/yourgym" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-400 transition-all" /></div></div>
                     <div><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">GST / Tax ID (Optional)</label><div className="relative"><FileDigit size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" value={gymData.tax_id || ''} onChange={e => setGymData({...gymData, tax_id: e.target.value})} placeholder="22AAAAA0000A1Z5" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-400 transition-all" /></div></div>
                     <div className="md:col-span-2"><label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Full Gym Address</label><div className="relative"><MapPin size={16} className="absolute left-4 top-4 text-slate-400" /><textarea value={gymData.address} onChange={e => setGymData({...gymData, address: e.target.value})} rows="3" placeholder="123 Fitness Street, City, State..." className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-400 transition-all resize-none" /></div></div>
+
+                    {/* Receipt Branding */}
+                    <div className="md:col-span-2 space-y-5 pt-1">
+                      <h4 className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2 border-b border-indigo-50 pb-2"><FileText size={12} /> Receipt &amp; Invoice Branding</h4>
+
+                      {/* Gym Logo */}
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Gym Logo (shown on invoices)</label>
+                        <div className="flex items-center gap-4 flex-wrap">
+                          {gymData.gym_logo ? (
+                            <div className="relative">
+                              <img src={gymData.gym_logo} alt="Gym logo" className="w-20 h-20 object-contain rounded-2xl border-2 border-indigo-100 bg-white shadow-sm p-1" />
+                            </div>
+                          ) : (
+                            <div className="w-20 h-20 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-slate-400">
+                              <Camera size={22} />
+                            </div>
+                          )}
+                          <div className="flex flex-col gap-2">
+                            <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 hover:bg-slate-100 transition-all">
+                              <Upload size={13} /> {gymData.gym_logo ? 'Change Logo' : 'Upload Logo'}
+                              <input type="file" accept="image/*" className="hidden" onChange={handleGymLogoUpload} />
+                            </label>
+                            {gymData.gym_logo && (
+                              <button type="button" onClick={() => setGymData((p) => ({ ...p, gym_logo: '' }))} className="text-[11px] font-bold text-rose-500 hover:text-rose-700 text-left">Remove</button>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 max-w-xs">PNG or JPG, max 500 KB. Shown top-left on member payment invoices.</p>
+                        </div>
+                      </div>
+
+                      {/* Owner Signature */}
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">Authorized Signature (Gym Owner)</label>
+                        {gymData.owner_signature ? (
+                          <div className="flex items-start gap-4 flex-wrap">
+                            <div className="rounded-2xl border-2 border-slate-200 bg-white p-3 shadow-sm">
+                              <img src={gymData.owner_signature} alt="Owner signature" className="max-h-16 w-auto object-contain" />
+                            </div>
+                            <div className="flex flex-col gap-2 justify-center">
+                              <button type="button" onClick={() => setShowOwnerSigCanvas(true)} className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-700 hover:bg-slate-100 transition-all"><RefreshCw size={12} /> Redraw</button>
+                              <button type="button" onClick={() => setGymData((p) => ({ ...p, owner_signature: '' }))} className="text-[11px] font-bold text-rose-500 hover:text-rose-700 text-left">Remove</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setShowOwnerSigCanvas(true)} className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-black text-indigo-700 hover:bg-indigo-100 transition-all">
+                            <FileText size={14} /> Draw Signature
+                          </button>
+                        )}
+                        <p className="text-[10px] text-slate-400 mt-1.5">Displayed at the bottom of every member payment invoice.</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -4704,6 +4834,37 @@ const loadRazorpayScript = () => {
 
       {showRazorpayRateCard && (
         <div className="fixed inset-0 z-[91] bg-slate-950/70 backdrop-blur-sm overflow-y-auto px-3 sm:px-6 animate-in fade-in duration-200" onClick={() => setShowRazorpayRateCard(false)}>
+
+      {/* ── Owner Signature Canvas Modal ── */}
+      {showOwnerSigCanvas && (
+        <div className="fixed inset-0 z-[96] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowOwnerSigCanvas(false)}>
+          <div className="bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
+              <div>
+                <h3 className="text-base font-black text-white">Draw Your Signature</h3>
+                <p className="text-indigo-200 text-xs mt-0.5">Will appear on member payment invoices</p>
+              </div>
+              <button onClick={() => setShowOwnerSigCanvas(false)} className="rounded-full p-1.5 hover:bg-white/10 text-white transition-colors"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="rounded-xl border-2 border-slate-300 overflow-hidden shadow-inner">
+                <canvas
+                  ref={initOwnerSigCanvas}
+                  width={400}
+                  height={160}
+                  className="w-full h-[140px] cursor-crosshair touch-none block"
+                  style={{ background: '#ffffff' }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400">Draw using finger or mouse. This will be embedded in invoices.</p>
+            </div>
+            <div className="px-5 pb-5 flex gap-2">
+              <button type="button" onClick={clearOwnerSigCanvas} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Clear</button>
+              <button type="button" onClick={saveOwnerSigCanvas} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">Save Signature</button>
+            </div>
+          </div>
+        </div>
+      )}
           <div className="mx-auto flex w-full max-w-5xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl my-3 sm:my-6" onClick={(event) => event.stopPropagation()}>
             <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.24),_transparent_38%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_60%,#312e81_100%)] px-5 py-5 text-white sm:px-6">
               <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -4886,6 +5047,37 @@ const loadRazorpayScript = () => {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Owner Signature Canvas Modal ── */}
+      {showOwnerSigCanvas && (
+        <div className="fixed inset-0 z-[96] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowOwnerSigCanvas(false)}>
+          <div className="bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
+              <div>
+                <h3 className="text-base font-black text-white">Draw Your Signature</h3>
+                <p className="text-indigo-200 text-xs mt-0.5">Will appear on member payment invoices</p>
+              </div>
+              <button onClick={() => setShowOwnerSigCanvas(false)} className="rounded-full p-1.5 hover:bg-white/10 text-white transition-colors"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="rounded-xl border-2 border-slate-300 overflow-hidden shadow-inner">
+                <canvas
+                  ref={initOwnerSigCanvas}
+                  width={400}
+                  height={160}
+                  className="w-full h-[140px] cursor-crosshair touch-none block"
+                  style={{ background: '#ffffff' }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400">Draw using finger or mouse. This will be embedded in invoices.</p>
+            </div>
+            <div className="px-5 pb-5 flex gap-2">
+              <button type="button" onClick={clearOwnerSigCanvas} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Clear</button>
+              <button type="button" onClick={saveOwnerSigCanvas} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">Save Signature</button>
             </div>
           </div>
         </div>

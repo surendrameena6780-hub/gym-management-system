@@ -402,6 +402,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [showSuccessAnim, setShowSuccessAnim] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
+  const [gymReceiptInfo, setGymReceiptInfo] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [addMemberSubmitting, setAddMemberSubmitting] = useState(false);
   const [activatingMode, setActivatingMode] = useState('');
@@ -987,7 +988,16 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
     if (canWriteAttendance) {
       await axios.put(`/api/members/${selectedMember.id}/check-in`, {}, { headers: { 'x-auth-token': token } });
     }
-    setReceiptData({ memberName: selectedMember.full_name, planName: plan.name, amount: plan.price, payId: paymentId });
+    setReceiptData({
+      memberName: selectedMember.full_name,
+      memberPhone: selectedMember.phone || '',
+      planName: plan.name,
+      amount: plan.price,
+      durationDays: plan.duration_days || 30,
+      payId: paymentId,
+      paymentDate: new Date(),
+      gymInfo: gymReceiptInfo,
+    });
     closeActivateModal();
     setShowSuccessAnim(true);
   };
@@ -1227,6 +1237,10 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   useEffect(() => {
     if (!token || !isActive) return;
     fetchPlans();
+    // Fetch gym receipt info once for invoice generation
+    axios.get('/api/settings/receipt-info', { headers: { 'x-auth-token': token } })
+      .then((res) => setGymReceiptInfo(res.data))
+      .catch(() => {});
   }, [fetchPlans, isActive, token]);
 
   useEffect(() => {
@@ -1319,43 +1333,146 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
   const downloadReceipt = () => {
     if (!receiptData) return;
+    const gym = receiptData.gymInfo || {};
+    const gymName = String(gym.name || 'GymVault').toUpperCase();
+    const gymAddress = gym.address || '';
+    const gymPhone = gym.phone || '';
+    const taxId = gym.tax_id || '';
+    const gymLogo = gym.gym_logo || null;
+    const ownerSignature = gym.owner_signature || null;
+
+    const durationDays = Number(receiptData.durationDays || 30);
+    const months = Math.max(1, Math.round(durationDays / 30));
+    const totalAmount = Number(receiptData.amount || 0);
+    const unitPrice = months > 1 ? Math.round(totalAmount / months) : totalAmount;
+
+    const payDate = receiptData.paymentDate instanceof Date ? receiptData.paymentDate : new Date();
+    const dd = String(payDate.getDate()).padStart(2, '0');
+    const mm = String(payDate.getMonth() + 1).padStart(2, '0');
+    const yyyy = payDate.getFullYear();
+    const formattedDate = `${dd}.${mm}.${yyyy}`;
+
+    const invoiceNo = String(receiptData.payId || '').replace(/[^A-Z0-9-]/gi, '').toUpperCase().slice(0, 20) || `INV-${Date.now().toString(36).toUpperCase()}`;
+
+    const esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+    const logoHtml = gymLogo
+      ? `<img src="${gymLogo}" alt="Gym Logo" style="width:90px;height:90px;object-fit:contain;" />`
+      : `<div style="width:90px;height:90px;background:#1a1a1a;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#f5c518;font-size:22px;font-weight:900;text-align:center;line-height:1.1;padding:8px;box-sizing:border-box;">${esc(gymName.split(' ').map((w) => w[0]).join('').slice(0, 2))}</div>`;
+
+    const signatureHtml = ownerSignature
+      ? `<img src="${ownerSignature}" alt="Authorized Signature" style="max-height:70px;display:inline-block;" />`
+      : `<div style="width:200px;height:60px;display:inline-block;"></div>`;
+
+    const addressLines = gymAddress.split(/\n|,/).map((l) => l.trim()).filter(Boolean);
+    const addressHtml = addressLines.length > 1
+      ? `${esc(addressLines.slice(0, -1).join(', '))},<br/>${esc(addressLines[addressLines.length - 1])}`
+      : esc(gymAddress);
+
     const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Receipt - ${receiptData.memberName}</title>
-          <style>
-            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; background: #f8fafc; }
-            .receipt-box { background: white; border: 1px solid #e2e8f0; padding: 40px; border-radius: 24px; max-width: 450px; margin: auto; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-            .logo { font-size: 24px; font-weight: 900; text-align: center; margin-bottom: 5px; color: #0f172a; }
-            .sub-logo { font-size: 10px; font-weight: 700; text-align: center; color: #64748b; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 30px; }
-            .divider { border-top: 2px dashed #e2e8f0; margin: 20px 0; }
-            .info-row { display: flex; justify-content: space-between; margin-bottom: 12px; }
-            .label { color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-            .value { font-weight: 700; color: #0f172a; font-size: 14px; }
-            .total-row { background: #f1f5f9; padding: 15px; border-radius: 12px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
-            .footer { text-align: center; margin-top: 30px; font-size: 10px; color: #94a3b8; font-weight: 600; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt-box">
-            <div class="logo">GymVault</div>
-            <div class="sub-logo">Official Payment Receipt</div>
-            <div class="info-row"><span class="label">Receipt Date</span><span class="value">${new Date().toLocaleDateString('en-GB')}</span></div>
-            <div class="info-row"><span class="label">Member Name</span><span class="value">${receiptData.memberName}</span></div>
-            <div class="info-row"><span class="label">Plan Activated</span><span class="value">${receiptData.planName}</span></div>
-            <div class="info-row"><span class="label">Payment ID</span><span class="value" style="font-size: 10px;">${receiptData.payId}</span></div>
-            <div class="divider"></div>
-            <div class="total-row">
-              <span class="label" style="color: #0f172a; font-size: 14px;">Total Amount</span>
-              <span style="font-weight: 900; font-size: 20px; color: #10b981;">&#8377;${receiptData.amount}</span>
-            </div>
-            <div class="footer">This is a computer generated receipt.</div>
-          </div>
-          <script>window.onload = function() { window.print(); window.close(); }</script>
-        </body>
-      </html>
-    `);
+    if (!printWindow) { toast?.('Popup blocked — please allow popups for this site.', 'warning'); return; }
+    printWindow.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Invoice - ${esc(gymName)}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Courier New', Courier, monospace; background: #e8e8e8; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { background: #fff; width: 600px; margin: 24px auto; padding: 40px; border: 3px solid #c8a800; position: relative; }
+    .header { display: flex; align-items: center; gap: 20px; padding-bottom: 18px; border-bottom: 2.5px solid #222; margin-bottom: 18px; }
+    .header-text { flex: 1; text-align: center; }
+    .gym-name { font-size: 28px; font-weight: 900; color: #1a1a1a; letter-spacing: 2px; text-transform: uppercase; line-height: 1.1; }
+    .gym-address { font-size: 12px; color: #555; margin-top: 6px; line-height: 1.5; }
+    .gym-phone { font-size: 11px; color: #888; margin-top: 3px; }
+    .invoice-title-wrap { text-align: center; margin-bottom: 18px; }
+    .invoice-title { display: inline-block; font-size: 16px; font-weight: 900; letter-spacing: 4px; padding: 10px 40px; border: 2.5px solid #222; text-transform: uppercase; }
+    .info-box { border: 1.5px solid #ccc; padding: 14px 18px; margin-bottom: 20px; }
+    .info-row { display: flex; align-items: baseline; margin-bottom: 7px; font-size: 13px; }
+    .info-row:last-child { margin-bottom: 0; }
+    .info-label { font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; width: 140px; flex-shrink: 0; }
+    .info-sep { font-weight: 900; margin: 0 10px 0 0; }
+    .info-val { font-weight: 700; color: #1a1a1a; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th { background: #f5c518; color: #1a1a1a; font-size: 11px; font-weight: 900; text-align: center; padding: 10px 8px; text-transform: uppercase; letter-spacing: 0.5px; border: 1.5px solid #c8a000; }
+    td { font-size: 12.5px; padding: 12px 10px; border: 1.5px solid #ddd; text-align: center; font-weight: 700; color: #1a1a1a; }
+    .td-left { text-align: left; }
+    .td-total-label { text-align: right; font-weight: 900; background: #fafafa; }
+    .td-total-val { font-weight: 900; color: #1a1a1a; font-size: 14px; }
+    .td-empty { border: none; background: transparent; }
+    .sig-section { margin-top: 36px; text-align: right; }
+    .sig-img-wrap { display: inline-block; text-align: center; }
+    .sig-line { border-top: 2px solid #333; margin-top: 4px; }
+    .sig-label { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; color: #333; }
+    .footer { text-align: center; margin-top: 22px; font-size: 10px; color: #999; font-weight: 600; border-top: 1px dashed #ccc; padding-top: 10px; }
+    ${taxId ? `.tax-id { font-size: 10px; color: #888; text-align: center; margin-top: 6px; font-weight: 700; letter-spacing: 0.5px; }` : ''}
+    @media print {
+      body { background: white; }
+      .page { margin: 0; border: 3px solid #c8a800; width: 100%; max-width: 600px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      ${logoHtml}
+      <div class="header-text">
+        <div class="gym-name">${esc(gymName)}</div>
+        ${gymAddress ? `<div class="gym-address">${addressHtml}</div>` : ''}
+        ${gymPhone ? `<div class="gym-phone">${esc(gymPhone)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="invoice-title-wrap"><span class="invoice-title">Invoice</span></div>
+
+    <div class="info-box">
+      <div class="info-row"><span class="info-label">Invoice No.</span><span class="info-sep">:</span><span class="info-val">${esc(invoiceNo)}</span></div>
+      <div class="info-row"><span class="info-label">Invoice Date</span><span class="info-sep">:</span><span class="info-val">${formattedDate}</span></div>
+      <div class="info-row"><span class="info-label">Invoice To</span><span class="info-sep">:</span><span class="info-val">${esc(receiptData.memberName)}</span></div>
+      ${receiptData.memberPhone ? `<div class="info-row"><span class="info-label">Mobile No.</span><span class="info-sep">:</span><span class="info-val">${esc(receiptData.memberPhone)}</span></div>` : ''}
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px">No.</th>
+          <th>Description</th>
+          <th style="width:75px">Months</th>
+          <th style="width:115px">Unit Price (INR)</th>
+          <th style="width:105px">Total (INR)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td class="td-left">${esc(receiptData.planName)}</td>
+          <td>${months}</td>
+          <td>${fmt(unitPrice)}</td>
+          <td>${fmt(totalAmount)}</td>
+        </tr>
+        <tr>
+          <td colspan="2" class="td-empty"></td>
+          <td colspan="2" class="td-total-label">Total (INR)</td>
+          <td class="td-total-val">${fmt(totalAmount)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="sig-section">
+      <div class="sig-img-wrap" style="min-width:200px;">
+        ${signatureHtml}
+        <div class="sig-line" style="width:220px;"></div>
+        <div class="sig-label">Authorized Signature<br/>(Gym Owner)</div>
+      </div>
+    </div>
+
+    ${taxId ? `<div class="tax-id">GST / Tax ID: ${esc(taxId)}</div>` : ''}
+    <div class="footer">This is a computer-generated invoice.${ownerSignature ? '' : ' No physical signature required.'}</div>
+  </div>
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`);
     printWindow.document.close();
   };
 

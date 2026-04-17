@@ -1104,6 +1104,9 @@ const ensurePreferenceSchema = async () => {
                 ALTER TABLE users
                 ALTER COLUMN profile_pic TYPE TEXT;
             `);
+            // Receipt branding columns
+            await pool.query(`ALTER TABLE gyms ADD COLUMN IF NOT EXISTS gym_logo TEXT;`);
+            await pool.query(`ALTER TABLE gyms ADD COLUMN IF NOT EXISTS owner_signature TEXT;`);
         })();
     }
     await ensurePreferenceSchemaPromise;
@@ -1199,6 +1202,8 @@ router.get('/', auth, async (req, res) => {
                     COALESCE(g.interface_reduce_motion, FALSE) AS interface_reduce_motion,
                     COALESCE(g.interface_compact_mode, FALSE) AS interface_compact_mode,
                     COALESCE(g.interface_dark_mode, TRUE) AS interface_dark_mode,
+                    g.gym_logo,
+                    g.owner_signature,
                     sp.whatsapp,
                     sp.about_mission,
                     sp.support_window,
@@ -1261,6 +1266,8 @@ router.get('/', auth, async (req, res) => {
                 interface_reduce_motion: false,
                 interface_compact_mode: false,
                 interface_dark_mode: gym.interface_dark_mode,
+                gym_logo: gym.gym_logo || null,
+                owner_signature: gym.owner_signature || null,
             },
             billing_catalog: serializeBillingConfig(billingConfig, { includeCurrentPlan: gym.current_plan }),
             effective_limits: effectiveLimits,
@@ -1281,6 +1288,30 @@ router.get('/', auth, async (req, res) => {
     } catch (err) {
         console.error('SETTINGS ROOT ERROR:', err.message);
         res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// --- Lightweight receipt profile endpoint ---
+router.get('/receipt-info', auth, async (req, res) => {
+    try {
+        await ensurePreferenceSchema();
+        const gymRes = await pool.query(
+            'SELECT name, address, phone, gym_logo, owner_signature, tax_id, COALESCE(currency, \'₹\') AS currency FROM gyms WHERE id = $1 LIMIT 1',
+            [req.user.gym_id]
+        );
+        const gym = gymRes.rows[0] || {};
+        res.json({
+            name: gym.name || '',
+            address: gym.address || '',
+            phone: gym.phone || '',
+            gym_logo: gym.gym_logo || null,
+            owner_signature: gym.owner_signature || null,
+            tax_id: gym.tax_id || '',
+            currency: gym.currency || '₹',
+        });
+    } catch (err) {
+        console.error('RECEIPT INFO ERROR:', err.message);
+        res.status(500).json({ error: 'Server Error' });
     }
 });
 
@@ -2709,10 +2740,25 @@ router.put('/gym', auth, async (req, res) => {
         const support_sla = ensureTrimmedString(req.body?.support_sla, { field: 'support_sla', max: 500 });
         const support_about_mission = ensureTrimmedString(req.body?.support_about_mission, { field: 'support_about_mission', max: 4000 });
 
-        await pool.query(
-            'UPDATE gyms SET name = $1, phone = $2, support_email = $3, address = $4, tax_id = $5, website = $6 WHERE id = $7',
-            [name, phone || null, email || null, address || null, tax_id || null, website || null, req.user.gym_id]
-        );
+        // Receipt branding: gym_logo and owner_signature stored as base64 data URLs
+        const hasGymLogo = 'gym_logo' in (req.body || {});
+        const hasOwnerSignature = 'owner_signature' in (req.body || {});
+        const rawGymLogo = req.body?.gym_logo;
+        const rawOwnerSignature = req.body?.owner_signature;
+        const gym_logo = hasGymLogo
+            ? (rawGymLogo && String(rawGymLogo).startsWith('data:') ? String(rawGymLogo).slice(0, 524288) : null)
+            : undefined;
+        const owner_signature = hasOwnerSignature
+            ? (rawOwnerSignature && String(rawOwnerSignature).startsWith('data:') ? String(rawOwnerSignature).slice(0, 524288) : null)
+            : undefined;
+
+        const setClauses = ['name = $1', 'phone = $2', 'support_email = $3', 'address = $4', 'tax_id = $5', 'website = $6'];
+        const params = [name, phone || null, email || null, address || null, tax_id || null, website || null];
+        let nextParam = 7;
+        if (gym_logo !== undefined) { setClauses.push(`gym_logo = $${nextParam++}`); params.push(gym_logo); }
+        if (owner_signature !== undefined) { setClauses.push(`owner_signature = $${nextParam++}`); params.push(owner_signature); }
+        params.push(req.user.gym_id);
+        await pool.query(`UPDATE gyms SET ${setClauses.join(', ')} WHERE id = $${nextParam}`, params);
 
         await pool.query(
             `INSERT INTO gym_support_profiles (gym_id, whatsapp, about_mission, support_window, sla, updated_at)
