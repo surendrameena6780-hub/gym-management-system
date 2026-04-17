@@ -133,6 +133,38 @@ const createWebhookDraft = () => ({
   is_active: true,
 });
 
+const formatRazorpayRateCardMoney = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const buildRazorpayRateCardRow = (amount) => {
+  const gatewayFee = amount * 0.02;
+  const gstOnFee = gatewayFee * 0.18;
+  const totalDeduction = gatewayFee + gstOnFee;
+  return {
+    amount,
+    gatewayFee,
+    gstOnFee,
+    totalDeduction,
+    gymGets: amount - totalDeduction,
+  };
+};
+
+const RAZORPAY_RATE_CARD_ROWS = Array.from({ length: 15 }, (_item, index) => buildRazorpayRateCardRow((index + 1) * 1000));
+const RAZORPAY_RATE_CARD_EXAMPLES = [1500, 2000, 5000, 10000].map(buildRazorpayRateCardRow);
+const RAZORPAY_RATE_CARD_COPY = [
+  'Razorpay Standard Domestic Rate Card',
+  'Base gateway fee: 2%',
+  'GST on Razorpay fee: 18%',
+  'Effective deduction: 2.36%',
+  'Standard settlement: T+2 working days',
+  'Same-day settlements: extra 0.15% to 0.20%',
+  'On-demand instant settlements: extra 0.20% to 0.30%',
+  '',
+  'Amount | Razorpay Fee | GST on Fee | Total Cut | Gym Gets',
+  ...RAZORPAY_RATE_CARD_ROWS.map((row) => `${formatRazorpayRateCardMoney(row.amount)} | ${formatRazorpayRateCardMoney(row.gatewayFee)} | ${formatRazorpayRateCardMoney(row.gstOnFee)} | ${formatRazorpayRateCardMoney(row.totalDeduction)} | ${formatRazorpayRateCardMoney(row.gymGets)}`),
+  '',
+  'Note: This is based on Razorpay standard domestic pricing. Custom pricing, international cards, refunds, disputes, or platform fees can change the final amount.',
+].join('\n');
+
 const IMPORT_SAMPLE_CSV = 'full_name,phone,email,plan_name,membership_end_date,last_visit_date,branch_name\nAarav Singh,9876543210,aarav@example.com,Gold Plan,2026-05-14,2026-04-13,Main Branch\nMeera Patel,9123456780,,Silver Plan,2026-04-28,,Main Branch\nRohit Das,9988776655,, , , ,Main Branch';
 
 const DEFAULT_MESSAGE_TEMPLATES = [
@@ -574,6 +606,8 @@ const loadRazorpayScript = () => {
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [revealedApiKey, setRevealedApiKey] = useState('');
   const [copiedApiKey, setCopiedApiKey] = useState(false);
+  const [showRazorpayRateCard, setShowRazorpayRateCard] = useState(false);
+  const [copiedRazorpayRateCard, setCopiedRazorpayRateCard] = useState(false);
   const [deliveryLogFilter, setDeliveryLogFilter] = useState('ALL');
   const [webhookForm, setWebhookForm] = useState(() => createWebhookDraft());
   const [webhookSaving, setWebhookSaving] = useState(false);
@@ -1263,6 +1297,17 @@ const loadRazorpayScript = () => {
       toast('API key copied to clipboard.', 'success');
     } catch {
       toast('Failed to copy API key. Copy it manually.', 'warning');
+    }
+  };
+
+  const copyRazorpayRateCardToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(RAZORPAY_RATE_CARD_COPY);
+      setCopiedRazorpayRateCard(true);
+      window.setTimeout(() => setCopiedRazorpayRateCard(false), 1600);
+      toast('Razorpay rate card copied to clipboard.', 'success');
+    } catch {
+      toast('Failed to copy rate card. Copy it manually from the popup.', 'warning');
     }
   };
 
@@ -3273,6 +3318,13 @@ const loadRazorpayScript = () => {
                                 className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
                                 {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Update Account ID' : 'Enter Account ID'}
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setShowRazorpayRateCard(true)}
+                                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-100 font-bold text-sm hover:bg-white/10 active:scale-95 transition-all flex items-center justify-center gap-2"
+                              >
+                                <FileText size={14} /> Rate Card
+                              </button>
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
                                 <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}
                                   className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-200 font-bold text-sm hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-200 active:scale-95 transition-all disabled:opacity-60">
@@ -4643,6 +4695,195 @@ const loadRazorpayScript = () => {
                   >
                     {billingCheckout.submitting || isProcessingPayment ? <><RefreshCw size={15} className="animate-spin" /> Preparing checkout...</> : <>Continue to Razorpay</>}
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRazorpayRateCard && (
+        <div className="fixed inset-0 z-[91] bg-slate-950/70 backdrop-blur-sm p-3 sm:p-6 animate-in fade-in duration-200" onClick={() => setShowRazorpayRateCard(false)}>
+          <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.24),_transparent_38%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_60%,#312e81_100%)] px-5 py-5 text-white sm:px-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 shadow-sm">
+                      <CreditCard size={22} className="text-indigo-200" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-200/80">Copy-Paste Rate Card</p>
+                      <h3 className="mt-1 text-xl font-black text-white sm:text-2xl">Razorpay Payment Charges</h3>
+                    </div>
+                  </div>
+                  <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-slate-200">
+                    Simple pricing for gym owners: Razorpay keeps a small processing fee, GST is charged on that fee, and the rest goes to the gym owner's bank account.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white">2% gateway fee</span>
+                    <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white">18% GST on fee</span>
+                    <span className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100">T+2 working days</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => setShowRazorpayRateCard(false)}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-black text-slate-100 transition-colors hover:bg-white/10"
+                  >
+                    <X size={16} /> Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyRazorpayRateCardToClipboard}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-black text-slate-900 transition-colors hover:bg-slate-100"
+                  >
+                    {copiedRazorpayRateCard ? <Check size={16} /> : <Download size={16} />} {copiedRazorpayRateCard ? 'Copied' : 'Copy Rate Card'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.98fr,1.02fr]">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="rounded-[24px] border border-indigo-100 bg-indigo-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Base Fee</p>
+                      <p className="mt-2 text-2xl font-black text-slate-900">2%</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Razorpay's standard domestic processing charge.</p>
+                    </div>
+                    <div className="rounded-[24px] border border-amber-100 bg-amber-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-500">GST On Fee</p>
+                      <p className="mt-2 text-2xl font-black text-slate-900">18%</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">GST is charged on Razorpay's fee, not on the full payment.</p>
+                    </div>
+                    <div className="rounded-[24px] border border-emerald-100 bg-emerald-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-500">Effective Cut</p>
+                      <p className="mt-2 text-2xl font-black text-slate-900">2.36%</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">This is the usual total deduction on standard domestic payments.</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                        <Zap size={16} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-slate-900">How settlement works</p>
+                        <p className="text-xs font-medium text-slate-500">Simple version for gym owners</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Standard Settlement</p>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">Money usually reaches the gym owner in <span className="font-black text-slate-900">T+2 working days</span>. If a payment is captured today, it usually arrives after 2 bank-working days.</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-indigo-100 bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Same-Day Option</p>
+                          <p className="mt-2 text-sm font-black text-slate-900">Extra 0.15% to 0.20%</p>
+                          <p className="mt-1 text-xs font-medium text-slate-500">Auto-settlement on the same working day.</p>
+                        </div>
+                        <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-500">Instant Option</p>
+                          <p className="mt-2 text-sm font-black text-slate-900">Extra 0.20% to 0.30%</p>
+                          <p className="mt-1 text-xs font-medium text-slate-500">On-demand settlement in seconds, even on holidays.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">Quick examples</p>
+                        <p className="text-xs font-medium text-slate-500">Popular membership amounts gym owners ask about</p>
+                      </div>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Standard domestic pricing</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {RAZORPAY_RATE_CARD_EXAMPLES.map((row) => (
+                        <div key={`razorpay-rate-example-${row.amount}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Member Pays</p>
+                              <p className="mt-2 text-xl font-black text-slate-900">{formatRazorpayRateCardMoney(row.amount)}</p>
+                            </div>
+                            <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-rose-500 shadow-sm">Cut {formatRazorpayRateCardMoney(row.totalDeduction)}</span>
+                          </div>
+                          <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
+                            <div className="rounded-xl bg-white px-3 py-2">Fee<br /><span className="text-sm font-black text-slate-900">{formatRazorpayRateCardMoney(row.gatewayFee)}</span></div>
+                            <div className="rounded-xl bg-white px-3 py-2">GST<br /><span className="text-sm font-black text-slate-900">{formatRazorpayRateCardMoney(row.gstOnFee)}</span></div>
+                          </div>
+                          <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600">Gym Owner Gets</p>
+                            <p className="mt-1 text-lg font-black text-emerald-700">{formatRazorpayRateCardMoney(row.gymGets)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">Full rate table</p>
+                        <p className="text-xs font-medium text-slate-500">Every {formatRazorpayRateCardMoney(1000)} step from {formatRazorpayRateCardMoney(1000)} to {formatRazorpayRateCardMoney(15000)}</p>
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-400">Fee = 2% | GST = 18% on fee</span>
+                    </div>
+                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                      <div className="max-h-[28rem] overflow-auto">
+                        <table className="min-w-full text-left text-sm">
+                          <thead className="sticky top-0 z-10 bg-slate-900 text-white">
+                            <tr>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Amount</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Fee</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">GST</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Total Cut</th>
+                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Gym Gets</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {RAZORPAY_RATE_CARD_ROWS.map((row, index) => (
+                              <tr key={`razorpay-rate-row-${row.amount}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                                <td className="px-4 py-3 font-black text-slate-900">{formatRazorpayRateCardMoney(row.amount)}</td>
+                                <td className="px-4 py-3 font-semibold text-slate-600">{formatRazorpayRateCardMoney(row.gatewayFee)}</td>
+                                <td className="px-4 py-3 font-semibold text-slate-600">{formatRazorpayRateCardMoney(row.gstOnFee)}</td>
+                                <td className="px-4 py-3 font-black text-rose-600">{formatRazorpayRateCardMoney(row.totalDeduction)}</td>
+                                <td className="px-4 py-3 font-black text-emerald-600">{formatRazorpayRateCardMoney(row.gymGets)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">Copy-ready note</p>
+                        <p className="text-xs font-medium text-slate-500">Use this when owners ask how much Razorpay will cut</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={copyRazorpayRateCardToClipboard}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition-colors hover:bg-slate-100"
+                      >
+                        {copiedRazorpayRateCard ? <Check size={14} /> : <Download size={14} />} {copiedRazorpayRateCard ? 'Copied' : 'Copy Text'}
+                      </button>
+                    </div>
+                    <pre className="mt-4 max-h-[18rem] overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-4 text-[12px] font-medium leading-6 text-slate-700">{RAZORPAY_RATE_CARD_COPY}</pre>
+                    <p className="mt-3 text-[11px] font-medium leading-5 text-slate-500">
+                      Note: This reflects Razorpay's standard domestic pricing and standard domestic settlement cycle. Custom plans, international cards, refunds, disputes, or other platform fees can change the final numbers.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
