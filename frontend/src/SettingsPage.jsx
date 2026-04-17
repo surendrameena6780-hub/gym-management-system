@@ -4703,10 +4703,10 @@ const loadRazorpayScript = () => {
       )}
 
       {showRazorpayRateCard && (
-        <div className="fixed inset-0 z-[91] bg-slate-950/70 backdrop-blur-sm p-3 sm:p-6 animate-in fade-in duration-200" onClick={() => setShowRazorpayRateCard(false)}>
-          <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-[91] bg-slate-950/70 backdrop-blur-sm overflow-y-auto px-3 sm:px-6 animate-in fade-in duration-200" onClick={() => setShowRazorpayRateCard(false)}>
+          <div className="mx-auto flex w-full max-w-5xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl my-3 sm:my-6" onClick={(event) => event.stopPropagation()}>
             <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.24),_transparent_38%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_60%,#312e81_100%)] px-5 py-5 text-white sm:px-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-3">
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 shadow-sm">
@@ -4717,7 +4717,7 @@ const loadRazorpayScript = () => {
                       <h3 className="mt-1 text-xl font-black text-white sm:text-2xl">Razorpay Payment Charges</h3>
                     </div>
                   </div>
-                  <p className="mt-4 max-w-3xl text-sm font-medium leading-6 text-slate-200">
+                  <p className="hidden sm:block mt-4 max-w-3xl text-sm font-medium leading-6 text-slate-200">
                     Simple pricing for gym owners: Razorpay keeps a small processing fee, GST is charged on that fee, and the rest goes to the gym owner's bank account.
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -4726,7 +4726,7 @@ const loadRazorpayScript = () => {
                     <span className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100">T+2 working days</span>
                   </div>
                 </div>
-                <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row">
+                <div className="flex shrink-0 flex-row flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => setShowRazorpayRateCard(false)}
@@ -4745,24 +4745,24 @@ const loadRazorpayScript = () => {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+            <div className="px-4 py-4 sm:px-6 sm:py-6">
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.98fr,1.02fr]">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div className="rounded-[24px] border border-indigo-100 bg-indigo-50 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Base Fee</p>
-                      <p className="mt-2 text-2xl font-black text-slate-900">2%</p>
-                      <p className="mt-1 text-xs font-medium text-slate-500">Razorpay's standard domestic processing charge.</p>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    <div className="rounded-[20px] border border-indigo-100 bg-indigo-50 p-3 sm:p-4">
+                      <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Base Fee</p>
+                      <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">2%</p>
+                      <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">Standard domestic charge.</p>
                     </div>
-                    <div className="rounded-[24px] border border-amber-100 bg-amber-50 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-500">GST On Fee</p>
-                      <p className="mt-2 text-2xl font-black text-slate-900">18%</p>
-                      <p className="mt-1 text-xs font-medium text-slate-500">GST is charged on Razorpay's fee, not on the full payment.</p>
+                    <div className="rounded-[20px] border border-amber-100 bg-amber-50 p-3 sm:p-4">
+                      <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-amber-500">GST On Fee</p>
+                      <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">18%</p>
+                      <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">On fee only, not full amount.</p>
                     </div>
-                    <div className="rounded-[24px] border border-emerald-100 bg-emerald-50 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-500">Effective Cut</p>
-                      <p className="mt-2 text-2xl font-black text-slate-900">2.36%</p>
-                      <p className="mt-1 text-xs font-medium text-slate-500">This is the usual total deduction on standard domestic payments.</p>
+                    <div className="rounded-[20px] border border-emerald-100 bg-emerald-50 p-3 sm:p-4">
+                      <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-emerald-500">Effective</p>
+                      <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">2.36%</p>
+                      <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">Total usual deduction.</p>
                     </div>
                   </div>
 
