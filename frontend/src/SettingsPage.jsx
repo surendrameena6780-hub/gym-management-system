@@ -37,6 +37,14 @@ const TABS = [
 ];
 
 const SETTINGS_GROUPS = ['Personal & Business', 'System', 'Customization', 'Advanced', 'Danger'];
+const SETTINGS_BOOTSTRAP_TIMEOUT_MS = 12000;
+
+const isTimedOutAxiosError = (error) => (
+  axios.isAxiosError(error) && (
+    error.code === 'ECONNABORTED'
+    || error.code === 'ETIMEDOUT'
+  )
+);
 
 const normalizeSettingsTab = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -994,7 +1002,10 @@ const loadRazorpayScript = () => {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await axios.get('/api/settings', headers);
+      const res = await axios.get('/api/settings', {
+        ...headers,
+        timeout: SETTINGS_BOOTSTRAP_TIMEOUT_MS,
+      });
 
       if (res.data.account) {
         setAccountData((prev) => ({
@@ -1094,7 +1105,11 @@ const loadRazorpayScript = () => {
       }
     } catch (err) {
       reportClientError('Settings fetch', err);
-      toast('Failed to load settings. Please check backend terminal.', 'error');
+      if (isTimedOutAxiosError(err)) {
+        toast('Settings are taking too long to load. The page opened without waiting for the full response.', 'warning');
+      } else {
+        toast('Failed to load settings. Please check backend terminal.', 'error');
+      }
     } finally {
       setIsLoading(false);
     }

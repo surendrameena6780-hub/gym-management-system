@@ -1169,7 +1169,10 @@ const discardUploadedProfile = async (req) => {
 
 router.get('/', auth, async (req, res) => {
     try {
-        await Promise.all([ensureSupportProfileTable(), ensurePreferenceSchema(), ensureBillingAddonSchema(), ensureMessagingSchema()]);
+        await ensureSupportProfileTable();
+        await ensurePreferenceSchema();
+        await ensureBillingAddonSchema();
+        await ensureMessagingSchema();
 
         const [userRes, gymRes, billingConfig, usageSnapshot, monthlyWhatsAppUsage] = await Promise.all([
             pool.query(
@@ -1207,18 +1210,7 @@ router.get('/', auth, async (req, res) => {
                     sp.whatsapp,
                     sp.about_mission,
                     sp.support_window,
-                    sp.sla,
-                    COALESCE((
-                        SELECT COUNT(*)::INTEGER
-                        FROM members m
-                        WHERE m.gym_id = g.id AND m.deleted_at IS NULL
-                    ), 0) AS member_count,
-                    COALESCE((
-                        SELECT COUNT(*)::INTEGER
-                        FROM users u
-                        WHERE u.gym_id = g.id
-                          AND COALESCE(UPPER(u.role), 'STAFF') <> 'OWNER'
-                    ), 0) AS staff_count
+                    sp.sla
                  FROM gyms g
                  LEFT JOIN gym_support_profiles sp ON sp.gym_id = g.id
                  WHERE g.id = $1
