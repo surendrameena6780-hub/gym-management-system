@@ -4,6 +4,7 @@ const memberAuth = require('../middleware/memberAuthMiddleware');
 const {
     ensureInteger,
     ensureNumber,
+    ensureDateOnly,
     ensureTrimmedString,
     ensurePhone10,
     ensureEmail,
@@ -45,6 +46,19 @@ const uploadMemberProfilePic = createProfileUploadMiddleware({
     getActorId: (req) => req.member?.id || req.user?.id || 'member',
 });
 
+const tableHasColumn = async (tableName, columnName) => {
+    const result = await pool.query(
+        `SELECT 1
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = $1
+           AND column_name = $2
+         LIMIT 1`,
+        [tableName, columnName]
+    );
+    return result.rows.length > 0;
+};
+
 const toIsoDate = (value) => {
     if (!value) return '';
     const date = new Date(value);
@@ -61,6 +75,59 @@ const daysUntilDate = (value) => {
 
 const normalizeOptionalMemberEmail = (value) => ensureEmail(value, { field: 'email', max: 100 });
 const normalizeOptionalMemberPhone = (value) => ensurePhone10(value, { field: 'phone' });
+
+const normalizeDocumentUrl = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (/^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=\s]+$/i.test(raw)) {
+        return raw;
+    }
+
+    const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+
+    try {
+        const parsed = new URL(withProtocol);
+        if (!/^https?:$/i.test(parsed.protocol)) return '';
+        return parsed.toString();
+    } catch (_err) {
+        return '';
+    }
+};
+
+const normalizeMemberDocumentPayload = (payload = {}) => ({
+    doc_type: ensureTrimmedString(payload.doc_type, { field: 'doc_type', required: true, max: 60 }),
+    doc_name: ensureTrimmedString(payload.doc_name, { field: 'doc_name', max: 120 }),
+    notes: ensureTrimmedString(payload.notes, { field: 'notes', max: 1000 }),
+});
+
+const normalizeOnboardingPatch = (payload = {}) => {
+    const updates = {};
+
+    if (payload.onboarding_complete !== undefined) {
+        updates.onboarding_complete = Boolean(payload.onboarding_complete);
+    }
+    if (payload.emergency_contact !== undefined) {
+        updates.emergency_contact = ensureTrimmedString(payload.emergency_contact, { field: 'emergency_contact', max: 120 });
+    }
+    if (payload.gender !== undefined) {
+        updates.gender = ensureTrimmedString(payload.gender, { field: 'gender', max: 20 });
+    }
+    if (payload.date_of_birth !== undefined) {
+        updates.date_of_birth = ensureDateOnly(payload.date_of_birth, { field: 'date_of_birth', allowFuture: false });
+    }
+    if (payload.address !== undefined) {
+        updates.address = ensureTrimmedString(payload.address, { field: 'address', max: 500 });
+    }
+    if (payload.blood_group !== undefined) {
+        updates.blood_group = ensureTrimmedString(payload.blood_group, { field: 'blood_group', max: 20, uppercase: true });
+    }
+    if (payload.medical_notes !== undefined) {
+        updates.medical_notes = ensureTrimmedString(payload.medical_notes, { field: 'medical_notes', max: 2000 });
+    }
+
+    return updates;
+};
 
 const buildCurrentMembership = (row) => {
     if (!row?.membership_id) {
@@ -106,6 +173,13 @@ const serializeMemberSummary = (row) => ({
     joining_date: row.joining_date || null,
     status: row.member_status || row.status || 'UNPAID',
     gym_name: row.gym_name || '',
+    onboarding_complete: Boolean(row.onboarding_complete),
+    emergency_contact: row.emergency_contact || '',
+    gender: row.gender || '',
+    date_of_birth: row.date_of_birth || null,
+    address: row.address || '',
+    blood_group: row.blood_group || '',
+    medical_notes: row.medical_notes || '',
 });
 
 const mapPlanOption = (plan) => ({
@@ -206,6 +280,13 @@ const loadMemberContext = async (db, gymId, memberId, { lock = false } = {}) => 
             COALESCE(m.profile_pic, '') AS profile_pic,
             m.joining_date,
             COALESCE(m.status, 'UNPAID') AS member_status,
+            COALESCE(m.onboarding_complete, FALSE) AS onboarding_complete,
+            COALESCE(m.emergency_contact, '') AS emergency_contact,
+            COALESCE(m.gender, '') AS gender,
+            m.date_of_birth,
+            COALESCE(m.address, '') AS address,
+            COALESCE(m.blood_group, '') AS blood_group,
+            COALESCE(m.medical_notes, '') AS medical_notes,
             g.name AS gym_name,
             ms.id AS membership_id,
             ms.plan_id,
@@ -293,7 +374,7 @@ const loadDashboardData = async (gymId, memberId) => {
         return null;
     }
 
-    const [planRows, dueSummary, bookingSummary, recentPayments, upcomingBookings, paymentCapabilities] = await Promise.all([
+    const [planRows, dueSummary, bookingSummary, recentPayments, upcomingBookings, paymentCapabilities, receiptInfo, ownerInfo] = await Promise.all([
         pool.query(
             `SELECT id, name, price, duration_days, duration_months, color_theme, is_popular, description
              FROM plans
@@ -402,7 +483,33 @@ const loadDashboardData = async (gymId, memberId) => {
             [gymId, memberId, ACTIVE_BOOKING_STATUSES]
         ),
         getPaymentCapabilitySummary(gymId),
+        pool.query(
+            `SELECT
+                COALESCE(name, '') AS name,
+                COALESCE(address, '') AS address,
+                COALESCE(phone, '') AS phone,
+                gym_logo,
+                owner_signature,
+                COALESCE(tax_id, '') AS tax_id,
+                COALESCE(currency, '₹') AS currency
+             FROM gyms
+             WHERE id = $1
+             LIMIT 1`,
+            [gymId]
+        ),
+        pool.query(
+            `SELECT full_name
+             FROM users
+             WHERE gym_id = $1
+               AND LOWER(COALESCE(role, '')) = 'owner'
+             ORDER BY id ASC
+             LIMIT 1`,
+            [gymId]
+        ),
     ]);
+
+    const receiptRow = receiptInfo.rows[0] || {};
+    const ownerRow = ownerInfo.rows[0] || {};
 
     return {
         member: serializeMemberSummary(memberRow),
@@ -418,6 +525,16 @@ const loadDashboardData = async (gymId, memberId) => {
             upcoming_bookings: upcomingBookings.rows.map(mapBookingRow),
         },
         payment_capabilities: paymentCapabilities,
+        receipt_info: {
+            name: receiptRow.name || '',
+            address: receiptRow.address || '',
+            phone: receiptRow.phone || '',
+            gym_logo: receiptRow.gym_logo || null,
+            owner_signature: receiptRow.owner_signature || null,
+            owner_name: ownerRow.full_name || '',
+            tax_id: receiptRow.tax_id || '',
+            currency: receiptRow.currency || '₹',
+        },
     };
 };
 
@@ -703,6 +820,153 @@ router.put('/profile', uploadMemberProfilePic, async (req, res) => {
         }
         console.error('MEMBER PROFILE UPDATE ERROR:', err.message);
         return res.status(500).json({ error: 'Failed to update profile.' });
+    }
+});
+
+router.patch('/onboarding', async (req, res) => {
+    try {
+        const payload = normalizeOnboardingPatch(req.body || {});
+        const updates = [];
+        const values = [];
+        let nextIndex = 3;
+
+        if (payload.onboarding_complete !== undefined) {
+            updates.push(`onboarding_complete = $${nextIndex++}`);
+            values.push(payload.onboarding_complete);
+        }
+        if (payload.emergency_contact !== undefined) {
+            updates.push(`emergency_contact = $${nextIndex++}`);
+            values.push(payload.emergency_contact);
+        }
+        if (payload.gender !== undefined) {
+            updates.push(`gender = $${nextIndex++}`);
+            values.push(payload.gender);
+        }
+        if (payload.date_of_birth !== undefined) {
+            updates.push(`date_of_birth = $${nextIndex++}`);
+            values.push(payload.date_of_birth || null);
+        }
+        if (payload.address !== undefined) {
+            updates.push(`address = $${nextIndex++}`);
+            values.push(payload.address);
+        }
+        if (payload.blood_group !== undefined) {
+            updates.push(`blood_group = $${nextIndex++}`);
+            values.push(payload.blood_group);
+        }
+        if (payload.medical_notes !== undefined) {
+            updates.push(`medical_notes = $${nextIndex++}`);
+            values.push(payload.medical_notes);
+        }
+
+        if (!updates.length) {
+            return res.status(400).json({ error: 'No onboarding fields to update.' });
+        }
+
+        const updateResult = await pool.query(
+            `UPDATE members
+             SET ${updates.join(', ')}
+             WHERE id = $1 AND gym_id = $2 AND deleted_at IS NULL
+             RETURNING id`,
+            [req.member.id, req.member.gym_id, ...values]
+        );
+
+        if (updateResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Member not found.' });
+        }
+
+        const refreshedContext = await loadMemberContext(pool, req.member.gym_id, req.member.id);
+        return res.json({
+            member: serializeMemberSummary(refreshedContext),
+            message: 'Onboarding details updated successfully.',
+        });
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('MEMBER ONBOARDING UPDATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to update onboarding details.' });
+    }
+});
+
+router.get('/documents', async (req, res) => {
+    try {
+        const [hasNotesColumn, hasUploadedAtColumn] = await Promise.all([
+            tableHasColumn('member_documents', 'notes'),
+            tableHasColumn('member_documents', 'uploaded_at'),
+        ]);
+        const notesSelect = hasNotesColumn ? 'md.notes' : 'NULL';
+        const uploadedAtSelect = hasUploadedAtColumn ? 'md.uploaded_at' : 'md.created_at';
+        const result = await pool.query(
+            `SELECT md.*, ${notesSelect} AS notes, ${uploadedAtSelect} AS uploaded_at
+             FROM member_documents md
+             WHERE md.member_id = $1 AND md.gym_id = $2
+             ORDER BY ${uploadedAtSelect} DESC`,
+            [req.member.id, req.member.gym_id]
+        );
+        return res.json(result.rows);
+    } catch (err) {
+        console.error('MEMBER DOCUMENT LIST ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to load documents.' });
+    }
+});
+
+router.post('/documents', async (req, res) => {
+    try {
+        const payload = normalizeMemberDocumentPayload(req.body || {});
+        const normalizedDocUrl = normalizeDocumentUrl(req.body?.doc_url);
+        if (!normalizedDocUrl) {
+            return res.status(400).json({ error: 'doc_type and a valid document are required.' });
+        }
+
+        const [hasNotesColumn, hasDocNameColumn] = await Promise.all([
+            tableHasColumn('member_documents', 'notes'),
+            tableHasColumn('member_documents', 'doc_name'),
+        ]);
+        const columns = ['gym_id', 'member_id', 'doc_type', 'doc_url'];
+        const values = [req.member.gym_id, req.member.id, payload.doc_type, normalizedDocUrl];
+
+        if (hasNotesColumn) {
+            columns.push('notes');
+            values.push(payload.notes || null);
+        }
+        if (hasDocNameColumn) {
+            columns.push('doc_name');
+            values.push(payload.doc_name || payload.doc_type);
+        }
+
+        const result = await pool.query(
+            `INSERT INTO member_documents (${columns.join(', ')})
+             VALUES (${columns.map((_, index) => `$${index + 1}`).join(', ')})
+             RETURNING *`,
+            values
+        );
+
+        return res.status(201).json(result.rows[0]);
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('MEMBER DOCUMENT CREATE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to save document.' });
+    }
+});
+
+router.delete('/documents/:id', async (req, res) => {
+    try {
+        const documentId = ensureInteger(req.params.id, { field: 'document id', required: true, min: 1 });
+        await pool.query(
+            `DELETE FROM member_documents
+             WHERE id = $1 AND member_id = $2 AND gym_id = $3`,
+            [documentId, req.member.id, req.member.gym_id]
+        );
+        return res.json({ message: 'Document deleted.' });
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(err.statusCode).json({ error: err.message });
+        }
+        console.error('MEMBER DOCUMENT DELETE ERROR:', err.message);
+        return res.status(500).json({ error: 'Failed to delete document.' });
     }
 });
 

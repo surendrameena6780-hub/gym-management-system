@@ -5,12 +5,60 @@ import {
   CalendarDays, DollarSign, AlertTriangle, Clock, TrendingUp, UserCheck,
   BarChart3, Dumbbell, ShieldCheck, Bell, ChevronRight, RefreshCw,
   CheckCircle, Activity, Zap, Sparkles, Wallet, ArrowUpRight, ArrowRight, Send,
+  Camera, FileText, XCircle,
 } from 'lucide-react';
 import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
 import { getApiOrigin } from './utils/apiUrl';
+import { INLINE_IMAGE_ACCEPT, filesToInlineImageDataUrls } from './utils/inlineImageUpload';
 
 const API = getApiOrigin();
+const STAFF_TASK_MAX_PHOTOS = 4;
+
+const formatTaskDateTime = (value) => {
+  if (!value) return 'No deadline';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'No deadline';
+  return parsed.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const formatTaskLabel = (value, fallback = 'Task') => {
+  const normalized = String(value || '').trim();
+  if (!normalized) return fallback;
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const getTaskStatusTone = (task = {}) => {
+  const rawStatus = String(task.status || 'OPEN').trim().toUpperCase();
+  if (rawStatus === 'COMPLETED') return 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100';
+  if (rawStatus === 'CANCELLED') return 'border-white/10 bg-white/5 text-white/60';
+  if (task.is_overdue) return 'border-rose-300/20 bg-rose-500/10 text-rose-100';
+  if (rawStatus === 'IN_PROGRESS') return 'border-amber-300/20 bg-amber-500/10 text-amber-100';
+  return 'border-indigo-300/20 bg-indigo-500/10 text-indigo-100';
+};
+
+const getTaskPriorityTone = (priority) => {
+  switch (String(priority || '').trim().toUpperCase()) {
+    case 'URGENT':
+      return 'border-rose-300/20 bg-rose-500/10 text-rose-100';
+    case 'HIGH':
+      return 'border-amber-300/20 bg-amber-500/10 text-amber-100';
+    case 'LOW':
+      return 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100';
+    default:
+      return 'border-white/10 bg-white/5 text-white/70';
+  }
+};
 
 // ─── Animated Counter ────────────────────────────────────────────────────────
 function AnimatedNumber({ value, prefix = '', suffix = '' }) {
@@ -35,6 +83,13 @@ function StaffDashboard({ appRuntime, isActive = true }) {
   });
   const [loading, setLoading] = useState(true);
   const [reminderLoadingId, setReminderLoadingId] = useState(null);
+  const [tasks, setTasks] = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [taskBusyId, setTaskBusyId] = useState('');
+  const [activeTask, setActiveTask] = useState(null);
+  const [taskCompletionNotes, setTaskCompletionNotes] = useState('');
+  const [taskCompletionPhotos, setTaskCompletionPhotos] = useState([]);
+  const [taskCompletionError, setTaskCompletionError] = useState('');
 
   const staffRole = String(currentUser?.staff_role || '').toUpperCase();
   const perms = useMemo(() => Array.isArray(currentUser?.permissions) ? currentUser.permissions : [], [currentUser?.permissions]);
@@ -104,14 +159,30 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     } finally { setLoading(false); }
   }, [token, canMembers, canAttendance, canPayments]);
 
+  const fetchTasks = useCallback(async () => {
+    if (!token) return;
+    try {
+      setTasksLoading(true);
+      const res = await axios.get(`${API}/api/users/tasks`, {
+        headers: { 'x-auth-token': token },
+        params: { include_completed: '1', limit: 12 },
+      });
+      setTasks(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      reportClientError('Staff tasks fetch', err);
+    } finally {
+      setTasksLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     if (!token || !isActive) return undefined;
 
-    fetchStats();
+    Promise.all([fetchStats(), fetchTasks()]);
 
     const refreshStats = () => {
       if (document.visibilityState && document.visibilityState === 'hidden') return;
-      fetchStats();
+      Promise.all([fetchStats(), fetchTasks()]);
     };
     window.addEventListener('gymvault:data-changed', refreshStats);
     window.addEventListener('gymvault:app-resumed', refreshStats);
@@ -120,7 +191,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       window.removeEventListener('gymvault:data-changed', refreshStats);
       window.removeEventListener('gymvault:app-resumed', refreshStats);
     };
-  }, [fetchStats, isActive, token]);
+  }, [fetchStats, fetchTasks, isActive, token]);
 
   const sendExpiryReminder = useCallback(async (memberId) => {
     if (!token || reminderLoadingId) return;
@@ -136,6 +207,80 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       setReminderLoadingId(null);
     }
   }, [token, reminderLoadingId]);
+
+  const closeTaskModal = useCallback(() => {
+    setActiveTask(null);
+    setTaskCompletionNotes('');
+    setTaskCompletionPhotos([]);
+    setTaskCompletionError('');
+  }, []);
+
+  const openTaskModal = useCallback((task) => {
+    setActiveTask(task || null);
+    setTaskCompletionNotes(task?.completion_notes || '');
+    setTaskCompletionPhotos([]);
+    setTaskCompletionError('');
+  }, []);
+
+  const updateTaskStatus = useCallback(async (task, status) => {
+    if (!task?.id || !token) return;
+    setTaskBusyId(`status-${task.id}`);
+    try {
+      await axios.patch(`${API}/api/users/tasks/${task.id}/status`, { status }, { headers: { 'x-auth-token': token } });
+      await fetchTasks();
+    } catch (err) {
+      reportClientError('Staff task status update', err);
+    } finally {
+      setTaskBusyId('');
+    }
+  }, [fetchTasks, token]);
+
+  const handleTaskPhotoSelection = useCallback(async (event) => {
+    const nextFiles = Array.from(event.target.files || []);
+    if (!nextFiles.length) return;
+    if (nextFiles.length > STAFF_TASK_MAX_PHOTOS) {
+      setTaskCompletionError(`Upload up to ${STAFF_TASK_MAX_PHOTOS} proof photos.`);
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      setTaskCompletionError('');
+      const dataUrls = await filesToInlineImageDataUrls(nextFiles.slice(0, STAFF_TASK_MAX_PHOTOS));
+      setTaskCompletionPhotos(dataUrls);
+    } catch (err) {
+      setTaskCompletionError(err?.message || 'Could not read the selected photos.');
+    } finally {
+      event.target.value = '';
+    }
+  }, []);
+
+  const removeTaskProofPhoto = useCallback((photoIndex) => {
+    setTaskCompletionPhotos((current) => current.filter((_photo, index) => index !== photoIndex));
+  }, []);
+
+  const submitTaskCompletion = useCallback(async () => {
+    if (!activeTask?.id || !token) return;
+    if (taskCompletionPhotos.length === 0) {
+      setTaskCompletionError('Add at least one proof photo before submitting.');
+      return;
+    }
+
+    setTaskBusyId(`complete-${activeTask.id}`);
+    try {
+      setTaskCompletionError('');
+      await axios.post(`${API}/api/users/tasks/${activeTask.id}/complete`, {
+        completion_notes: taskCompletionNotes,
+        completion_photos: taskCompletionPhotos,
+      }, { headers: { 'x-auth-token': token } });
+      closeTaskModal();
+      await fetchTasks();
+    } catch (err) {
+      setTaskCompletionError(err?.response?.data?.error || 'Could not submit task completion.');
+    } finally {
+      setTaskBusyId('');
+    }
+  }, [activeTask, closeTaskModal, fetchTasks, taskCompletionNotes, taskCompletionPhotos, token]);
 
   const isReception = ['RECEPTION', 'MANAGER'].includes(staffRole) || hasPerm('members:write');
   const isTrainer = staffRole === 'TRAINER' || hasPerm('attendance:write');
@@ -158,6 +303,31 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     if (canMembers) actions.push({ label: 'Members', icon: Users, gradient: 'linear-gradient(135deg, #3b82f6, #2563eb)', action: () => navigateTo('Members') });
     return actions.slice(0, 8);
   }, [canAttendance, canMembers, canPayments, canLeads, canClasses, canSupport, isReception, hasPerm, navigateTo]);
+
+  const taskCounts = useMemo(() => {
+    return tasks.reduce((counts, task) => {
+      counts.total += 1;
+      if (task.status === 'COMPLETED') {
+        counts.completed += 1;
+      } else if (task.is_overdue) {
+        counts.overdue += 1;
+      } else if (task.status === 'IN_PROGRESS') {
+        counts.inProgress += 1;
+      } else if (task.status === 'CANCELLED') {
+        counts.cancelled += 1;
+      } else {
+        counts.open += 1;
+      }
+      return counts;
+    }, {
+      total: 0,
+      open: 0,
+      inProgress: 0,
+      overdue: 0,
+      completed: 0,
+      cancelled: 0,
+    });
+  }, [tasks]);
 
   // ── Role section config ──
   const roleSection = useMemo(() => {
@@ -234,6 +404,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         .sd-card-5 { animation-delay: 400ms; }
         .sd-card-6 { animation-delay: 480ms; }
         .sd-card-7 { animation-delay: 560ms; }
+        .sd-card-8 { animation-delay: 640ms; }
       `}</style>
 
       <div className="min-h-full dashboard-content-safe space-y-4">
@@ -432,9 +603,158 @@ function StaffDashboard({ appRuntime, isActive = true }) {
           </div>
         )}
 
+        <div className="sd-card sd-card-6 rounded-[20px] border p-4 sm:p-5"
+          style={{
+            background: 'linear-gradient(145deg, #0f172a 0%, #111827 48%, #1e293b 100%)',
+            borderColor: 'rgba(148,163,184,0.18)',
+            boxShadow: '0 20px 55px -24px rgba(15,23,42,0.45)',
+          }}>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-200">My Tasks</p>
+              <p className="text-[11px] font-semibold text-white/45 mt-1">Owner-assigned work with deadlines and proof photo submission.</p>
+            </div>
+            <button
+              type="button"
+              onClick={fetchTasks}
+              disabled={tasksLoading}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-white/75 transition-colors hover:bg-white/10 disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={tasksLoading ? 'animate-spin' : ''} /> Refresh
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+            {[
+              { label: 'Open', value: taskCounts.open, tone: 'rgba(99,102,241,0.14)', color: '#c7d2fe' },
+              { label: 'In Progress', value: taskCounts.inProgress, tone: 'rgba(245,158,11,0.14)', color: '#fde68a' },
+              { label: 'Overdue', value: taskCounts.overdue, tone: 'rgba(244,63,94,0.14)', color: '#fecdd3' },
+              { label: 'Completed', value: taskCounts.completed, tone: 'rgba(16,185,129,0.14)', color: '#bbf7d0' },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border px-3 py-3" style={{ background: item.tone, borderColor: 'rgba(255,255,255,0.08)' }}>
+                <p className="text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: item.color }}>{item.label}</p>
+                <p className="mt-1 text-2xl font-black text-white">{item.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {tasksLoading ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-10 text-center text-sm font-semibold text-white/45">
+              Loading your assigned tasks...
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-10 text-center">
+              <p className="text-sm font-black text-white">No tasks assigned yet.</p>
+              <p className="mt-1 text-[11px] font-semibold text-white/45">When the owner assigns work from Staff & Roles, it will show up here automatically.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {tasks.map((task) => {
+                const canStartTask = task.status === 'OPEN';
+                const canCompleteTask = task.status === 'OPEN' || task.status === 'IN_PROGRESS';
+                return (
+                  <div key={task.id} className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0 flex-1 space-y-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${getTaskStatusTone(task)}`}>
+                            {task.status_label || formatTaskLabel(task.status, 'Open')}
+                          </span>
+                          <span className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${getTaskPriorityTone(task.priority)}`}>
+                            {formatTaskLabel(task.priority, 'Medium')}
+                          </span>
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/65">
+                            {formatTaskLabel(task.category, 'Task')}
+                          </span>
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-black text-white">{task.title || 'Untitled task'}</p>
+                          <p className="mt-1 text-[12px] font-medium leading-6 text-white/70">{task.description || 'No additional instructions added by the owner.'}</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 text-[11px] font-semibold text-white/65">
+                          <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
+                            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Deadline</p>
+                            <p className="mt-1 text-sm font-black text-white">{formatTaskDateTime(task.due_at)}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
+                            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Branch</p>
+                            <p className="mt-1 text-sm font-black text-white">{task.branch_name || 'Main Branch'}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
+                            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Assigned By</p>
+                            <p className="mt-1 text-sm font-black text-white">{task.created_by_name || 'Gym Owner'}</p>
+                          </div>
+                        </div>
+
+                        {task.completion_notes ? (
+                          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3">
+                            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-200">Completion Notes</p>
+                            <p className="mt-2 text-sm font-medium leading-6 text-emerald-50">{task.completion_notes}</p>
+                          </div>
+                        ) : null}
+
+                        {Array.isArray(task.completion_photos) && task.completion_photos.length > 0 ? (
+                          <div>
+                            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Proof Photos</p>
+                            <div className="mt-3 flex flex-wrap gap-3">
+                              {task.completion_photos.map((photo, photoIndex) => (
+                                <a key={`${task.id}-completed-${photoIndex}`} href={photo} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                                  <img src={photo} alt={`${task.title || 'Task'} proof ${photoIndex + 1}`} className="h-20 w-20 object-cover" loading="lazy" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-row flex-wrap gap-2 xl:w-[11rem] xl:flex-col xl:items-stretch">
+                        {canStartTask ? (
+                          <button
+                            type="button"
+                            onClick={() => updateTaskStatus(task, 'IN_PROGRESS')}
+                            disabled={taskBusyId === `status-${task.id}`}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-amber-100 transition-colors hover:bg-amber-500/15 disabled:opacity-50"
+                          >
+                            <Clock size={13} /> Start
+                          </button>
+                        ) : null}
+
+                        {canCompleteTask ? (
+                          <button
+                            type="button"
+                            onClick={() => openTaskModal(task)}
+                            disabled={Boolean(taskBusyId) && taskBusyId !== `complete-${task.id}`}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100 transition-colors hover:bg-emerald-500/15 disabled:opacity-50"
+                          >
+                            <CheckCircle size={13} /> Complete
+                          </button>
+                        ) : null}
+
+                        {task.status === 'COMPLETED' && task.completed_at ? (
+                          <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100 text-center">
+                            Done {formatTaskDateTime(task.completed_at)}
+                          </div>
+                        ) : null}
+
+                        {task.status === 'CANCELLED' ? (
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-white/60 text-center">
+                            Cancelled by owner
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {/* ════════════ ROLE SECTION ════════════ */}
         {roleSection.items.length > 0 && (
-          <div className="sd-card sd-card-6">
+          <div className="sd-card sd-card-7">
             <p className="text-[9px] font-black uppercase tracking-[0.2em] mb-2.5 px-1" style={{ color: roleSection.color }}>{roleSection.title}</p>
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
               {roleSection.items.map((item) => (
@@ -452,7 +772,7 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         )}
 
         {/* ════════════ FOOTER TIP ════════════ */}
-        <div className="sd-card sd-card-7 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 p-4 shadow-sm">
+        <div className="sd-card sd-card-8 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 p-4 shadow-sm">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
               style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
@@ -466,6 +786,113 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         </div>
 
       </div>
+
+      {activeTask && (
+        <div className="app-modal-shell z-[92] bg-slate-950/70 backdrop-blur-sm" onClick={closeTaskModal}>
+          <div className="app-modal-panel" style={{ width: 'min(100%, 34rem)' }} onClick={(event) => event.stopPropagation()}>
+            <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[#0f172a] shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5 sm:px-6">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">Complete Task</p>
+                  <h3 className="mt-2 text-lg font-black text-white">{activeTask.title || 'Assigned task'}</h3>
+                  <p className="mt-1 text-sm font-medium text-white/55">Submit proof photos and a short summary for the owner.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeTaskModal}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  aria-label="Close task completion popup"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+
+              <div className="app-modal-scroll px-5 py-5 sm:px-6 sm:py-6">
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-[12px] font-semibold text-white/70">
+                    Deadline: <span className="font-black text-white">{formatTaskDateTime(activeTask.due_at)}</span>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-white/45">What did you complete?</span>
+                    <textarea
+                      rows={4}
+                      value={taskCompletionNotes}
+                      onChange={(event) => setTaskCompletionNotes(event.target.value)}
+                      placeholder="Add a short note for the owner. Mention what was done, what was counted, or anything they should verify."
+                      className="w-full resize-none rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white outline-none transition-colors focus:border-emerald-300/30 focus:ring-2 focus:ring-emerald-400/10"
+                    />
+                  </label>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">Proof Photos</p>
+                        <p className="text-[11px] font-semibold text-white/45 mt-1">Upload at least one image. Up to {STAFF_TASK_MAX_PHOTOS} photos are allowed.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('staff-task-proof-input')?.click()}
+                        className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-white/10"
+                      >
+                        <Camera size={13} /> Add Photos
+                      </button>
+                    </div>
+                    <input id="staff-task-proof-input" type="file" accept={INLINE_IMAGE_ACCEPT} multiple className="hidden" onChange={handleTaskPhotoSelection} />
+
+                    {taskCompletionPhotos.length > 0 ? (
+                      <div className="flex flex-wrap gap-3">
+                        {taskCompletionPhotos.map((photo, photoIndex) => (
+                          <div key={`proof-upload-${photoIndex}`} className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                            <img src={photo} alt={`Task proof ${photoIndex + 1}`} className="h-24 w-24 object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => removeTaskProofPhoto(photoIndex)}
+                              className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-950/75 text-white transition-colors hover:bg-slate-950"
+                              aria-label={`Remove proof photo ${photoIndex + 1}`}
+                            >
+                              <XCircle size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center">
+                        <FileText size={18} className="mx-auto text-white/35" />
+                        <p className="mt-2 text-sm font-semibold text-white/55">No proof photos added yet.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {taskCompletionError ? (
+                    <div className="rounded-2xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-100">
+                      {taskCompletionError}
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={closeTaskModal}
+                      className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-white/10"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitTaskCompletion}
+                      disabled={taskBusyId === `complete-${activeTask.id}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 transition-colors hover:bg-emerald-400 disabled:opacity-60"
+                    >
+                      <CheckCircle size={15} /> {taskBusyId === `complete-${activeTask.id}` ? 'Submitting...' : 'Submit Completion'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

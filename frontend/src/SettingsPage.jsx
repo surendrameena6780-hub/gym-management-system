@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
-import { 
-  User, Building2, Users, Bell, CreditCard, Blocks, 
-  ShieldCheck, Database, Sliders, Palette, Zap, 
+import {
+  User, Building2, Users, Bell, CreditCard, Blocks,
+  ShieldCheck, Database, Sliders, Palette, Zap,
   FileText, AlertOctagon, Save, Lock, Trash2,
   CheckCircle, Plus, Download, Smartphone,
-  Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera, 
+  Mail, Phone, MapPin, Link, FileDigit, Fingerprint, Camera,
   RefreshCw, Check, HardDrive, AlertTriangle, ToggleRight, ToggleLeft, Star, Crown,
-  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon, Upload, X
+  MessageSquare, Send, ChevronDown, ChevronRight, ArrowLeft, Moon, Upload, X,
 } from 'lucide-react';
 import { normalizeProfileImageUrl } from './utils/profileImage';
 import PageLoader from './PageLoader';
@@ -66,6 +66,100 @@ const STAFF_ROLE_OPTIONS = [
   'ACCOUNTANT',
   'STAFF',
 ];
+
+const STAFF_TASK_CATEGORY_OPTIONS = [
+  { value: 'CLEANING', label: 'Cleaning' },
+  { value: 'COUNT', label: 'Count & Audit' },
+  { value: 'MAINTENANCE', label: 'Maintenance' },
+  { value: 'INVENTORY', label: 'Inventory' },
+  { value: 'FOLLOW_UP', label: 'Follow-up' },
+  { value: 'FRONT_DESK', label: 'Front Desk' },
+  { value: 'TRAINING', label: 'Training' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+const STAFF_TASK_PRIORITY_OPTIONS = [
+  { value: 'LOW', label: 'Low' },
+  { value: 'MEDIUM', label: 'Medium' },
+  { value: 'HIGH', label: 'High' },
+  { value: 'URGENT', label: 'Urgent' },
+];
+
+const STAFF_TASK_FILTER_OPTIONS = [
+  { value: 'ALL', label: 'All Tasks' },
+  { value: 'OPEN', label: 'Open' },
+  { value: 'IN_PROGRESS', label: 'In Progress' },
+  { value: 'OVERDUE', label: 'Overdue' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+];
+
+const buildDefaultStaffTaskDeadline = () => {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  next.setHours(18, 0, 0, 0);
+
+  const year = next.getFullYear();
+  const month = String(next.getMonth() + 1).padStart(2, '0');
+  const day = String(next.getDate()).padStart(2, '0');
+  const hours = String(next.getHours()).padStart(2, '0');
+  const minutes = String(next.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const createStaffTaskDraft = (assignedTo = '') => ({
+  assigned_to: assignedTo ? String(assignedTo) : '',
+  title: '',
+  description: '',
+  category: 'CLEANING',
+  priority: 'MEDIUM',
+  due_at: buildDefaultStaffTaskDeadline(),
+});
+
+const formatSettingsDateTime = (value, fallback = 'No deadline') => {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return parsed.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const formatTaskEnumLabel = (value, fallback = 'Task') => {
+  const normalized = String(value || '').trim();
+  if (!normalized) return fallback;
+  return normalized
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const getStaffTaskStatusClasses = (task = {}) => {
+  const rawStatus = String(task.status || 'OPEN').trim().toUpperCase();
+  if (rawStatus === 'COMPLETED') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (rawStatus === 'CANCELLED') return 'border-slate-200 bg-slate-100 text-slate-600';
+  if (task.is_overdue) return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (rawStatus === 'IN_PROGRESS') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+};
+
+const getStaffTaskPriorityClasses = (priority) => {
+  switch (String(priority || '').trim().toUpperCase()) {
+    case 'URGENT':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'HIGH':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
+    case 'LOW':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    default:
+      return 'border-slate-200 bg-slate-100 text-slate-600';
+  }
+};
 
 const API_SCOPE_OPTIONS = [
   'members:read',
@@ -713,6 +807,14 @@ const loadRazorpayScript = () => {
     branch_id: 'branch-1',
   });
   const [staffPasswordReset, setStaffPasswordReset] = useState({});
+  const [staffTasks, setStaffTasks] = useState([]);
+  const [loadingStaffTasks, setLoadingStaffTasks] = useState(false);
+  const [staffTaskFilter, setStaffTaskFilter] = useState('ALL');
+  const [showStaffTaskModal, setShowStaffTaskModal] = useState(false);
+  const [staffTaskForm, setStaffTaskForm] = useState(() => createStaffTaskDraft());
+  const [savingStaffTask, setSavingStaffTask] = useState(false);
+  const [updatingStaffTaskId, setUpdatingStaffTaskId] = useState(null);
+  const [deletingStaffTaskId, setDeletingStaffTaskId] = useState(null);
 
   const headers = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
   const branchOptions = useMemo(
@@ -832,6 +934,39 @@ const loadRazorpayScript = () => {
     });
   }, []);
   const defaultStaffBranchId = branchScopeValue || defaultBranchId || branchOptions[0]?.id || 'branch-1';
+  const assignableStaffMembers = useMemo(
+    () => staffMembers.filter((staff) => String(staff.role || '').trim().toUpperCase() !== 'OWNER' && staff.is_active !== false),
+    [staffMembers]
+  );
+  const staffTaskCounts = useMemo(() => {
+    return staffTasks.reduce((counts, task) => {
+      counts.ALL += 1;
+      if (task.status === 'COMPLETED') {
+        counts.COMPLETED += 1;
+      } else if (task.status === 'CANCELLED') {
+        counts.CANCELLED += 1;
+      } else if (task.is_overdue) {
+        counts.OVERDUE += 1;
+      } else if (task.status === 'IN_PROGRESS') {
+        counts.IN_PROGRESS += 1;
+      } else {
+        counts.OPEN += 1;
+      }
+      return counts;
+    }, {
+      ALL: 0,
+      OPEN: 0,
+      IN_PROGRESS: 0,
+      OVERDUE: 0,
+      COMPLETED: 0,
+      CANCELLED: 0,
+    });
+  }, [staffTasks]);
+  const filteredStaffTasks = useMemo(() => {
+    if (staffTaskFilter === 'ALL') return staffTasks;
+    if (staffTaskFilter === 'OVERDUE') return staffTasks.filter((task) => task.is_overdue);
+    return staffTasks.filter((task) => task.status === staffTaskFilter);
+  }, [staffTaskFilter, staffTasks]);
 
   useEffect(() => {
     const fallbackBranchId = defaultStaffBranchId;
@@ -854,6 +989,16 @@ const loadRazorpayScript = () => {
   }, [branchOptions, defaultStaffBranchId]);
 
   useEffect(() => {
+    setStaffTaskForm((prev) => {
+      const hasSelectedStaff = assignableStaffMembers.some((staff) => String(staff.id) === String(prev.assigned_to || ''));
+      if (hasSelectedStaff || assignableStaffMembers.length === 0) {
+        return prev;
+      }
+      return { ...prev, assigned_to: String(assignableStaffMembers[0]?.id || '') };
+    });
+  }, [assignableStaffMembers]);
+
+  useEffect(() => {
     setWhatsAppNumberEditorOpen(!isWhatsAppConnected);
   }, [isWhatsAppConnected]);
 
@@ -870,232 +1015,17 @@ const loadRazorpayScript = () => {
   const announceMessagingTemplateStateChanged = useCallback(() => {
     if (typeof window === 'undefined') return;
     const at = Date.now();
-    window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at);
     try {
-      window.sessionStorage.setItem('gymvault:data-change-at', String(at));
-    } catch {
-      // Ignore storage write failures; the in-memory event is enough.
+      window.localStorage.setItem('gymvault:messaging-template-state', String(at));
+    } catch (_err) {
+      // Ignore storage failures in private browsing or restricted environments.
     }
-
-    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
-      detail: {
-        source: 'settings-integrations',
-        scope: 'messaging-templates',
-        at,
-      },
-    }));
+    window.dispatchEvent(new CustomEvent('gymvault:messaging-template-state-changed', { detail: { at } }));
   }, []);
 
-  const announceSettingsDataChanged = useCallback((detail = {}) => {
-    if (typeof window === 'undefined') return;
-    const at = Number(detail.at || Date.now());
-    window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at);
-    try {
-      window.sessionStorage.setItem('gymvault:data-change-at', String(at));
-    } catch {
-      // Ignore storage write failures; the in-memory event is enough.
-    }
-
-    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
-      detail: {
-        ...detail,
-        at,
-      },
-    }));
-  }, []);
-
-  const normalizeAfterExternalCheckoutReturn = useCallback(() => {
-    if (typeof window === 'undefined') return;
-
-    // Razorpay JS checkout sets body { position:fixed; top:-Xpx; overflow:hidden }
-    // on iOS to prevent background scroll. If these styles linger after the modal
-    // closes (race condition, quick dismiss, etc.) the entire page appears shifted.
-    // Explicitly reset them before anything else.
-    document.body.style.removeProperty('position');
-    document.body.style.removeProperty('top');
-    document.body.style.removeProperty('overflow');
-    document.body.style.removeProperty('width');
-    document.documentElement.style.removeProperty('overflow');
-    document.body.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
-
-    document.documentElement.classList.remove('app-modal-open');
-    document.activeElement?.blur?.();
-    window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
-
-    window.requestAnimationFrame(() => {
-      window.scrollTo(0, 0);
-      scrollSettingsShellToTop();
-    });
-
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
-      scrollSettingsShellToTop();
-    }, 220);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-
-    const handleCheckoutReturn = () => {
-      if (!razorpayReturnPendingRef.current) return;
-      razorpayReturnPendingRef.current = false;
-      normalizeAfterExternalCheckoutReturn();
-    };
-
-    window.addEventListener('gymvault:app-resumed', handleCheckoutReturn);
-    return () => {
-      window.removeEventListener('gymvault:app-resumed', handleCheckoutReturn);
-    };
-  }, [normalizeAfterExternalCheckoutReturn]);
-
-  const fetchSettings = useCallback(async () => {
-    try {
-      const res = await axios.get('/api/settings', headers);
-      
-      if (res.data.account) {
-          setAccountData(prev => ({ 
-            ...prev, 
-            full_name: res.data.account.full_name || prev.full_name, 
-            email: res.data.account.email || prev.email,
-            phone: res.data.account.phone || prev.phone
-          }));
-          if (res.data.account.profile_pic) {
-              setPreviewUrl(normalizeProfileImageUrl(res.data.account.profile_pic));
-          } else {
-            setPreviewUrl(null);
-          }
-          setRemoveProfileImage(false);
-      }
-
-      if (res.data.gym) {
-          const resolvedBranchesCount = Math.max(1, Math.min(25, Number.parseInt(res.data.gym.branches_count, 10) || 1));
-          const resolvedBranchDirectory = buildBranchDirectoryState(
-            resolvedBranchesCount,
-            Array.isArray(res.data.gym.branch_directory) ? res.data.gym.branch_directory : []
-          );
-          setGymData(prev => ({
-            ...prev,
-            name: res.data.gym.name || prev.name,
-            phone: res.data.gym.phone || prev.phone,
-            address: res.data.gym.address || prev.address,
-            currency: res.data.gym.currency || prev.currency,
-            timezone: res.data.gym.timezone || prev.timezone,
-            tax_id: res.data.gym.tax_id || prev.tax_id,
-            website: res.data.gym.website || prev.website,
-            email: res.data.gym.support_email || prev.email,
-            saas_status: res.data.gym.saas_status || 'FREE_TRIAL',
-            saas_valid_until: res.data.gym.saas_valid_until || '',
-            current_plan: res.data.gym.current_plan || 'basic',
-            saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly',
-            grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3),
-            branches_count: resolvedBranchesCount,
-            addon_extra_whatsapp: Number(res.data.gym.addon_extra_whatsapp || 0),
-            addon_extra_staff: Number(res.data.gym.addon_extra_staff || 0),
-            addon_extra_members: Number(res.data.gym.addon_extra_members || 0),
-            addon_extra_branches: Number(res.data.gym.addon_extra_branches || 0),
-            addon_extra_hello: Number(res.data.gym.addon_extra_hello || 0),
-            gym_logo: res.data.gym.gym_logo || prev.gym_logo || '',
-            owner_signature: res.data.gym.owner_signature || prev.owner_signature || '',
-          }));
-          setPlatformData((prev) => ({
-            ...prev,
-            branches_count: resolvedBranchesCount,
-            branch_directory: resolvedBranchDirectory,
-          }));
-
-          const nextInterfacePreferences = {
-            reduce_motion: false,
-            compact_mode: false,
-            dark_mode: Boolean(res.data.gym.interface_dark_mode ?? true),
-          };
-          setInterfacePreferences(nextInterfacePreferences);
-          applyInterfacePreferences(nextInterfacePreferences);
-          saveInterfacePreferencesLocal(nextInterfacePreferences);
-          
-          if (res.data.gym.saas_billing_cycle) {
-              setBillingCycle(res.data.gym.saas_billing_cycle);
-          }
-      }
-
-      if (res.data.usage) {
-          setUsageData((prev) => ({
-            ...prev,
-            ...res.data.usage,
-          }));
-      }
-
-      if (res.data.billing_catalog) {
-        setBillingCatalog(normalizeFrontendBillingCatalog(res.data.billing_catalog));
-      }
-
-      if (res.data.effective_limits) {
-        applyEffectiveLimitsPayload(res.data.effective_limits);
-      }
-
-      if (res.data.messaging_summary) {
-        setIntegrationData((prev) => {
-          const nextMonthlyLimit = Number(res.data.messaging_summary.bulk_monthly_limit ?? prev.bulk_monthly_limit ?? 500);
-          const nextMonthlyUsage = Number(res.data.messaging_summary.monthly_usage || 0);
-          return {
-            ...prev,
-            whatsapp_status: String(res.data.messaging_summary.whatsapp_status || prev.whatsapp_status || 'NOT_CONFIGURED').toUpperCase(),
-            whatsapp_mode: String(res.data.messaging_summary.whatsapp_mode || res.data.messaging_summary.whatsapp_status || prev.whatsapp_mode || 'NOT_CONFIGURED').toUpperCase(),
-            whatsapp_ready: Boolean(res.data.messaging_summary.whatsapp_ready),
-            connected_hello_numbers: Number(res.data.messaging_summary.connected_hello_numbers || 0),
-            bulk_monthly_limit: nextMonthlyLimit,
-            monthly_usage: nextMonthlyUsage,
-            monthly_remaining: Number(res.data.messaging_summary.monthly_remaining ?? Math.max(0, nextMonthlyLimit - nextMonthlyUsage)),
-          };
-        });
-      }
-
-    } catch (err) {
-      reportClientError('Settings fetch', err);
-      toast("Failed to load settings. Please check backend terminal.", "error");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [applyEffectiveLimitsPayload, headers, toast]);
-
-  useEffect(() => {
-    if (!token || !isActive || !isOwner) {
-      setIsLoading(false);
-      return;
-    }
-    setIsLoading(true);
-    fetchSettings();
-  }, [fetchSettings, isActive, isOwner, token]);
-
-  const effectiveStaffBranch = branchScopeValue || defaultBranchId || 'branch-1';
-
-  const fetchStaff = useCallback(async () => {
+  const loadIntegrations = useCallback(async ({ refresh = false, showLoader = true } = {}) => {
     if (!token) return;
-    setLoadingStaff(true);
-    try {
-      const res = await axios.get('/api/users/staff', {
-        ...headers,
-        params: { branch_id: effectiveStaffBranch },
-      });
-      setStaffMembers(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      toast(err?.response?.data?.error || 'Failed to load staff members.', 'error');
-    } finally {
-      setLoadingStaff(false);
-    }
-  }, [effectiveStaffBranch, headers, toast, token]);
-
-  useEffect(() => {
-    if (!isActive || !isOwner) return;
-    if (activeTab === 'staff') {
-      fetchStaff();
-    }
-  }, [activeTab, fetchStaff, isActive, isOwner, effectiveStaffBranch]);
-
-  const loadIntegrations = useCallback(async (options = {}) => {
-    if (!token) return;
-    const shouldRefresh = options.refresh === true;
-    const showLoader = options.showLoader !== false;
+    const shouldRefresh = Boolean(refresh);
 
     if (showLoader) {
       setIntegrationLoading(true);
@@ -1771,7 +1701,7 @@ const loadRazorpayScript = () => {
       await axios.post('/api/users/staff', staffForm, headers);
       toast('Staff member created successfully.', 'success');
       setStaffForm({ full_name: '', email: '', password: '', staff_role: 'TRAINER', branch_id: defaultStaffBranchId });
-      await Promise.all([fetchStaff(), fetchSettings()]);
+      await Promise.all([fetchStaff(), fetchStaffTasks(), fetchSettings()]);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to add staff member.', 'error');
     } finally {
@@ -1790,7 +1720,7 @@ const loadRazorpayScript = () => {
         permissions: Array.isArray(overrides.permissions) ? overrides.permissions : (staff.permissions || []),
       }, headers);
       toast(successMessage, 'success');
-      await Promise.all([fetchStaff(), fetchSettings()]);
+      await Promise.all([fetchStaff(), fetchStaffTasks(), fetchSettings()]);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to update staff member.', 'error');
     } finally {
@@ -1846,11 +1776,99 @@ const loadRazorpayScript = () => {
         delete next[staff.id];
         return next;
       });
-      await Promise.all([fetchStaff(), fetchSettings()]);
+      await Promise.all([fetchStaff(), fetchStaffTasks(), fetchSettings()]);
     } catch (err) {
       toast(err?.response?.data?.error || 'Failed to delete staff member.', 'error');
     } finally {
       setSavingStaffId(null);
+    }
+  };
+
+  const resetStaffTaskDraft = useCallback(() => {
+    setStaffTaskForm(createStaffTaskDraft(String(assignableStaffMembers[0]?.id || '')));
+  }, [assignableStaffMembers]);
+
+  const openStaffTaskModal = useCallback(() => {
+    if (assignableStaffMembers.length === 0) {
+      toast('Add an active staff member first, then assign tasks from here.', 'warning');
+      return;
+    }
+    resetStaffTaskDraft();
+    setShowStaffTaskModal(true);
+  }, [assignableStaffMembers, resetStaffTaskDraft, toast]);
+
+  const closeStaffTaskModal = useCallback(() => {
+    setShowStaffTaskModal(false);
+    resetStaffTaskDraft();
+  }, [resetStaffTaskDraft]);
+
+  const handleCreateStaffTask = async (event) => {
+    event.preventDefault();
+    if (!String(staffTaskForm.assigned_to || '').trim()) {
+      toast('Choose a staff member for this task.', 'warning');
+      return;
+    }
+    if (!String(staffTaskForm.title || '').trim()) {
+      toast('Enter a task title.', 'warning');
+      return;
+    }
+    if (!String(staffTaskForm.due_at || '').trim()) {
+      toast('Choose a deadline for this task.', 'warning');
+      return;
+    }
+
+    const parsedDeadline = new Date(staffTaskForm.due_at);
+    if (Number.isNaN(parsedDeadline.getTime())) {
+      toast('Deadline is invalid.', 'warning');
+      return;
+    }
+
+    setSavingStaffTask(true);
+    try {
+      await axios.post('/api/users/tasks', {
+        ...staffTaskForm,
+        assigned_to: Number(staffTaskForm.assigned_to),
+        due_at: parsedDeadline.toISOString(),
+      }, headers);
+      toast('Task assigned successfully.', 'success');
+      closeStaffTaskModal();
+      await fetchStaffTasks();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to assign task.', 'error');
+    } finally {
+      setSavingStaffTask(false);
+    }
+  };
+
+  const updateStaffTaskStatus = async (task, status, successMessage) => {
+    if (!task?.id) return;
+    setUpdatingStaffTaskId(task.id);
+    try {
+      await axios.patch(`/api/users/tasks/${task.id}/status`, { status }, headers);
+      toast(successMessage, 'success');
+      await fetchStaffTasks();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to update task.', 'error');
+    } finally {
+      setUpdatingStaffTaskId(null);
+    }
+  };
+
+  const deleteStaffTask = async (task) => {
+    if (!task?.id) return;
+    if (!window.confirm(`Delete the task \"${task.title || 'Untitled task'}\"?`)) {
+      return;
+    }
+
+    setDeletingStaffTaskId(task.id);
+    try {
+      await axios.delete(`/api/users/tasks/${task.id}`, headers);
+      toast('Task deleted successfully.', 'success');
+      await fetchStaffTasks();
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to delete task.', 'error');
+    } finally {
+      setDeletingStaffTaskId(null);
     }
   };
 
@@ -2988,6 +3006,190 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                 </table>
                   </div>
               </div>
+
+              <div className="border border-slate-200 rounded-[28px] bg-white max-w-5xl mt-5 p-5 sm:p-6 space-y-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-500">Operations</p>
+                    <h3 className="mt-2 text-lg font-black text-slate-900">Staff Task Board</h3>
+                    <p className="mt-1 text-sm font-medium text-slate-500">
+                      Assign work with deadlines and review proof photos from the same staff section.
+                    </p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={fetchStaffTasks}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-100"
+                    >
+                      <RefreshCw size={14} /> Refresh Tasks
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openStaffTaskModal}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-slate-800"
+                    >
+                      <Plus size={14} /> Add Task
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Open', value: staffTaskCounts.OPEN, tone: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
+                    { label: 'In Progress', value: staffTaskCounts.IN_PROGRESS, tone: 'text-amber-700 bg-amber-50 border-amber-200' },
+                    { label: 'Overdue', value: staffTaskCounts.OVERDUE, tone: 'text-rose-700 bg-rose-50 border-rose-200' },
+                    { label: 'Completed', value: staffTaskCounts.COMPLETED, tone: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+                  ].map((item) => (
+                    <div key={item.label} className={`rounded-2xl border px-4 py-4 ${item.tone}`}>
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em]">{item.label}</p>
+                      <p className="mt-2 text-2xl font-black">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {STAFF_TASK_FILTER_OPTIONS.map((filterOption) => {
+                    const isActiveFilter = staffTaskFilter === filterOption.value;
+                    return (
+                      <button
+                        key={filterOption.value}
+                        type="button"
+                        onClick={() => setStaffTaskFilter(filterOption.value)}
+                        className={`rounded-full px-3.5 py-2 text-xs font-black uppercase tracking-[0.18em] transition-colors ${isActiveFilter ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      >
+                        {filterOption.label} <span className="ml-1">{staffTaskCounts[filterOption.value] ?? staffTaskCounts.ALL}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {loadingStaffTasks ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-12 text-center text-sm font-semibold text-slate-400">
+                    Loading task board...
+                  </div>
+                ) : filteredStaffTasks.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-12 text-center">
+                    <p className="text-sm font-black text-slate-700">No tasks in this view yet.</p>
+                    <p className="mt-1 text-xs font-medium text-slate-500">
+                      {assignableStaffMembers.length > 0
+                        ? 'Create the first task and it will appear here and on the staff dashboard.'
+                        : 'Add an active staff member first, then assign the task from this section.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredStaffTasks.map((task) => {
+                      const isTaskBusy = updatingStaffTaskId === task.id || deletingStaffTaskId === task.id;
+                      const canReopenTask = task.status === 'COMPLETED' || task.status === 'CANCELLED';
+                      const canCancelTask = task.status !== 'COMPLETED' && task.status !== 'CANCELLED';
+                      return (
+                        <div key={task.id} className="rounded-[24px] border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+                          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                            <div className="min-w-0 flex-1 space-y-4">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] ${getStaffTaskStatusClasses(task)}`}>
+                                  {task.status_label || formatTaskEnumLabel(task.status, 'Open')}
+                                </span>
+                                <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] ${getStaffTaskPriorityClasses(task.priority)}`}>
+                                  {formatTaskEnumLabel(task.priority, 'Medium')}
+                                </span>
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
+                                  {formatTaskEnumLabel(task.category, 'Task')}
+                                </span>
+                              </div>
+
+                              <div>
+                                <h4 className="text-base font-black text-slate-900">{task.title || 'Untitled task'}</h4>
+                                <p className="mt-1 text-sm font-medium leading-6 text-slate-600">
+                                  {task.description || 'No task instructions added yet.'}
+                                </p>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Assigned To</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{task.assigned_staff_name || 'Unassigned'}</p>
+                                  <p className="mt-1 text-xs font-semibold text-slate-500">{formatTaskEnumLabel(task.assigned_staff_role, 'Staff')}</p>
+                                </div>
+                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Branch</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{task.branch_name || 'Main Branch'}</p>
+                                  <p className="mt-1 text-xs font-semibold text-slate-500">Task scope</p>
+                                </div>
+                                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Deadline</p>
+                                  <p className="mt-1 text-sm font-black text-slate-900">{formatSettingsDateTime(task.due_at)}</p>
+                                  <p className={`mt-1 text-xs font-semibold ${task.is_overdue ? 'text-rose-500' : 'text-slate-500'}`}>
+                                    {task.is_overdue ? 'Past deadline' : 'Owner-set deadline'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {task.completion_notes ? (
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600">Completion Notes</p>
+                                  <p className="mt-2 text-sm font-medium leading-6 text-emerald-800">{task.completion_notes}</p>
+                                </div>
+                              ) : null}
+
+                              {Array.isArray(task.completion_photos) && task.completion_photos.length > 0 ? (
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Proof Photos</p>
+                                  <div className="mt-3 flex flex-wrap gap-3">
+                                    {task.completion_photos.map((photo, photoIndex) => (
+                                      <a
+                                        key={`${task.id}-proof-${photoIndex}`}
+                                        href={photo}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="block overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                                      >
+                                        <img src={photo} alt={`${task.title || 'Task'} proof ${photoIndex + 1}`} className="h-20 w-20 object-cover" loading="lazy" />
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="flex flex-row flex-wrap gap-2 xl:w-[11rem] xl:flex-col xl:items-stretch">
+                              {canReopenTask ? (
+                                <button
+                                  type="button"
+                                  onClick={() => updateStaffTaskStatus(task, 'OPEN', 'Task reopened.')}
+                                  disabled={isTaskBusy}
+                                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60"
+                                >
+                                  <RefreshCw size={13} /> Reopen
+                                </button>
+                              ) : null}
+                              {canCancelTask ? (
+                                <button
+                                  type="button"
+                                  onClick={() => updateStaffTaskStatus(task, 'CANCELLED', 'Task cancelled.')}
+                                  disabled={isTaskBusy}
+                                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-100 disabled:opacity-60"
+                                >
+                                  <AlertTriangle size={13} /> Cancel
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => deleteStaffTask(task)}
+                                disabled={isTaskBusy}
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-black uppercase tracking-[0.18em] text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-60"
+                              >
+                                <Trash2 size={13} /> {deletingStaffTaskId === task.id ? 'Deleting' : 'Delete'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -3496,13 +3698,6 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                                 className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
                                 {connectingGateway ? <><RefreshCw size={14} className="animate-spin" />Connecting...</> : integrationData.member_payments?.onboarding_status === 'CONNECTED' ? 'Update Account ID' : 'Enter Account ID'}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setShowRazorpayRateCard(true)}
-                                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-100 font-bold text-sm hover:bg-white/10 active:scale-95 transition-all flex items-center justify-center gap-2"
-                              >
-                                <FileText size={14} /> Rate Card
-                              </button>
                               {integrationData.member_payments?.onboarding_status === 'CONNECTED' && (
                                 <button type="button" onClick={handleDisconnectRazorpay} disabled={disconnectingGateway}
                                   className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-200 font-bold text-sm hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-200 active:scale-95 transition-all disabled:opacity-60">
@@ -3548,6 +3743,23 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                               autoComplete="new-password" name="razorpay_secret_field"
                               className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none" />
                           </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Reference</p>
+                            <h4 className="mt-2 text-sm font-black text-slate-900">Razorpay Rate Card</h4>
+                            <p className="mt-1 text-xs font-medium text-slate-500">Open the charge table here without crowding the connection card.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowRazorpayRateCard(true)}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition-colors hover:bg-slate-100"
+                          >
+                            <FileText size={14} /> View Rate Card
+                          </button>
                         </div>
                       </div>
 
@@ -4880,218 +5092,312 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
         </div>
       )}
 
-      {showRazorpayRateCard && (
-        <div className="fixed inset-0 z-[91] bg-slate-950/70 backdrop-blur-sm overflow-y-auto px-3 sm:px-6 animate-in fade-in duration-200" onClick={() => setShowRazorpayRateCard(false)}>
-
-      {/* ── Owner Signature Canvas Modal ── */}
-      {showOwnerSigCanvas && (
-        <div className="fixed inset-0 z-[96] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowOwnerSigCanvas(false)}>
-          <div className="bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
-              <div>
-                <h3 className="text-base font-black text-white">Draw Your Signature</h3>
-                <p className="text-indigo-200 text-xs mt-0.5">Will appear on member payment invoices</p>
-              </div>
-              <button onClick={() => setShowOwnerSigCanvas(false)} className="rounded-full p-1.5 hover:bg-white/10 text-white transition-colors"><X size={18} /></button>
-            </div>
-            <div className="p-5 space-y-3">
-              <div className="rounded-xl border-2 border-slate-300 overflow-hidden shadow-inner">
-                <canvas
-                  ref={initOwnerSigCanvas}
-                  width={400}
-                  height={160}
-                  className="w-full h-[140px] cursor-crosshair touch-none block"
-                  style={{ background: '#ffffff' }}
-                />
-              </div>
-              <p className="text-[10px] text-slate-400">Draw using finger or mouse. This will be embedded in invoices.</p>
-            </div>
-            <div className="px-5 pb-5 flex gap-2">
-              <button type="button" onClick={clearOwnerSigCanvas} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Clear</button>
-              <button type="button" onClick={saveOwnerSigCanvas} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">Save Signature</button>
-            </div>
-          </div>
-        </div>
-      )}
-          <div className="mx-auto flex w-full max-w-5xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl my-3 sm:my-6" onClick={(event) => event.stopPropagation()}>
-            <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.24),_transparent_38%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_60%,#312e81_100%)] px-5 py-5 text-white sm:px-6">
-              <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 shadow-sm">
-                      <CreditCard size={22} className="text-indigo-200" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-200/80">Copy-Paste Rate Card</p>
-                      <h3 className="mt-1 text-xl font-black text-white sm:text-2xl">Razorpay Payment Charges</h3>
-                    </div>
-                  </div>
-                  <p className="hidden sm:block mt-4 max-w-3xl text-sm font-medium leading-6 text-slate-200">
-                    Simple pricing for gym owners: Razorpay keeps a small processing fee, GST is charged on that fee, and the rest goes to the gym owner's bank account.
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white">2% gateway fee</span>
-                    <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white">18% GST on fee</span>
-                    <span className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100">T+2 working days</span>
-                  </div>
+      {showStaffTaskModal && (
+        <div className="app-modal-shell z-[93] bg-slate-950/70 backdrop-blur-sm" onClick={closeStaffTaskModal}>
+          <div className="app-modal-panel" style={{ width: 'min(100%, 38rem)' }} onClick={(event) => event.stopPropagation()}>
+            <div className="flex flex-col min-h-0 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-500">Staff Task</p>
+                  <h3 className="mt-2 text-xl font-black text-slate-900">Assign a new task</h3>
+                  <p className="mt-2 text-sm font-medium text-slate-500">This will appear directly on the assigned staff member's dashboard with its deadline and completion proof requirement.</p>
                 </div>
-                <div className="flex shrink-0 flex-row flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowRazorpayRateCard(false)}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-black text-slate-100 transition-colors hover:bg-white/10"
-                  >
-                    <X size={16} /> Close
-                  </button>
-                  <button
-                    type="button"
-                    onClick={copyRazorpayRateCardToClipboard}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-black text-slate-900 transition-colors hover:bg-slate-100"
-                  >
-                    {copiedRazorpayRateCard ? <Check size={16} /> : <Download size={16} />} {copiedRazorpayRateCard ? 'Copied' : 'Copy Rate Card'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={closeStaffTaskModal}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                  aria-label="Close staff task popup"
+                >
+                  <X size={18} />
+                </button>
               </div>
-            </div>
 
-            <div className="px-4 py-4 sm:px-6 sm:py-6">
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.98fr,1.02fr]">
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                    <div className="rounded-[20px] border border-indigo-100 bg-indigo-50 p-3 sm:p-4">
-                      <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Base Fee</p>
-                      <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">2%</p>
-                      <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">Standard domestic charge.</p>
-                    </div>
-                    <div className="rounded-[20px] border border-amber-100 bg-amber-50 p-3 sm:p-4">
-                      <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-amber-500">GST On Fee</p>
-                      <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">18%</p>
-                      <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">On fee only, not full amount.</p>
-                    </div>
-                    <div className="rounded-[20px] border border-emerald-100 bg-emerald-50 p-3 sm:p-4">
-                      <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-emerald-500">Effective</p>
-                      <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">2.36%</p>
-                      <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">Total usual deduction.</p>
-                    </div>
-                  </div>
+              <div className="app-modal-scroll px-5 py-5 sm:px-6 sm:py-6">
+                <form onSubmit={handleCreateStaffTask} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <label className="block sm:col-span-2">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Task Title</span>
+                      <input
+                        type="text"
+                        value={staffTaskForm.title}
+                        onChange={(event) => setStaffTaskForm((prev) => ({ ...prev, title: event.target.value }))}
+                        placeholder="Example: Deep clean gym floor before evening batch"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      />
+                    </label>
 
-                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-white">
-                        <Zap size={16} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-slate-900">How settlement works</p>
-                        <p className="text-xs font-medium text-slate-500">Simple version for gym owners</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Standard Settlement</p>
-                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">Money usually reaches the gym owner in <span className="font-black text-slate-900">T+2 working days</span>. If a payment is captured today, it usually arrives after 2 bank-working days.</p>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="rounded-2xl border border-indigo-100 bg-white px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Same-Day Option</p>
-                          <p className="mt-2 text-sm font-black text-slate-900">Extra 0.15% to 0.20%</p>
-                          <p className="mt-1 text-xs font-medium text-slate-500">Auto-settlement on the same working day.</p>
-                        </div>
-                        <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-500">Instant Option</p>
-                          <p className="mt-2 text-sm font-black text-slate-900">Extra 0.20% to 0.30%</p>
-                          <p className="mt-1 text-xs font-medium text-slate-500">On-demand settlement in seconds, even on holidays.</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-black text-slate-900">Quick examples</p>
-                        <p className="text-xs font-medium text-slate-500">Popular membership amounts gym owners ask about</p>
-                      </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Standard domestic pricing</span>
-                    </div>
-                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {RAZORPAY_RATE_CARD_EXAMPLES.map((row) => (
-                        <div key={`razorpay-rate-example-${row.amount}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Member Pays</p>
-                              <p className="mt-2 text-xl font-black text-slate-900">{formatRazorpayRateCardMoney(row.amount)}</p>
-                            </div>
-                            <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-rose-500 shadow-sm">Cut {formatRazorpayRateCardMoney(row.totalDeduction)}</span>
-                          </div>
-                          <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
-                            <div className="rounded-xl bg-white px-3 py-2">Fee<br /><span className="text-sm font-black text-slate-900">{formatRazorpayRateCardMoney(row.gatewayFee)}</span></div>
-                            <div className="rounded-xl bg-white px-3 py-2">GST<br /><span className="text-sm font-black text-slate-900">{formatRazorpayRateCardMoney(row.gstOnFee)}</span></div>
-                          </div>
-                          <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3">
-                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600">Gym Owner Gets</p>
-                            <p className="mt-1 text-lg font-black text-emerald-700">{formatRazorpayRateCardMoney(row.gymGets)}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                      <div>
-                        <p className="text-sm font-black text-slate-900">Full rate table</p>
-                        <p className="text-xs font-medium text-slate-500">Every {formatRazorpayRateCardMoney(1000)} step from {formatRazorpayRateCardMoney(1000)} to {formatRazorpayRateCardMoney(15000)}</p>
-                      </div>
-                      <span className="text-[11px] font-semibold text-slate-400">Fee = 2% | GST = 18% on fee</span>
-                    </div>
-                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-                      <div className="max-h-[28rem] overflow-auto">
-                        <table className="min-w-full text-left text-sm">
-                          <thead className="sticky top-0 z-10 bg-slate-900 text-white">
-                            <tr>
-                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Amount</th>
-                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Fee</th>
-                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">GST</th>
-                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Total Cut</th>
-                              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Gym Gets</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 bg-white">
-                            {RAZORPAY_RATE_CARD_ROWS.map((row, index) => (
-                              <tr key={`razorpay-rate-row-${row.amount}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                                <td className="px-4 py-3 font-black text-slate-900">{formatRazorpayRateCardMoney(row.amount)}</td>
-                                <td className="px-4 py-3 font-semibold text-slate-600">{formatRazorpayRateCardMoney(row.gatewayFee)}</td>
-                                <td className="px-4 py-3 font-semibold text-slate-600">{formatRazorpayRateCardMoney(row.gstOnFee)}</td>
-                                <td className="px-4 py-3 font-black text-rose-600">{formatRazorpayRateCardMoney(row.totalDeduction)}</td>
-                                <td className="px-4 py-3 font-black text-emerald-600">{formatRazorpayRateCardMoney(row.gymGets)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-black text-slate-900">Copy-ready note</p>
-                        <p className="text-xs font-medium text-slate-500">Use this when owners ask how much Razorpay will cut</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={copyRazorpayRateCardToClipboard}
-                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition-colors hover:bg-slate-100"
+                    <label className="block">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Assign To</span>
+                      <select
+                        value={staffTaskForm.assigned_to}
+                        onChange={(event) => setStaffTaskForm((prev) => ({ ...prev, assigned_to: event.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
                       >
-                        {copiedRazorpayRateCard ? <Check size={14} /> : <Download size={14} />} {copiedRazorpayRateCard ? 'Copied' : 'Copy Text'}
-                      </button>
+                        <option value="">Select staff member</option>
+                        {assignableStaffMembers.map((staff) => (
+                          <option key={`staff-task-assignee-${staff.id}`} value={staff.id}>{staff.full_name} • {formatTaskEnumLabel(staff.staff_role, 'Staff')}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Deadline</span>
+                      <input
+                        type="datetime-local"
+                        value={staffTaskForm.due_at}
+                        onChange={(event) => setStaffTaskForm((prev) => ({ ...prev, due_at: event.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Category</span>
+                      <select
+                        value={staffTaskForm.category}
+                        onChange={(event) => setStaffTaskForm((prev) => ({ ...prev, category: event.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      >
+                        {STAFF_TASK_CATEGORY_OPTIONS.map((option) => (
+                          <option key={`staff-task-category-${option.value}`} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Priority</span>
+                      <select
+                        value={staffTaskForm.priority}
+                        onChange={(event) => setStaffTaskForm((prev) => ({ ...prev, priority: event.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      >
+                        {STAFF_TASK_PRIORITY_OPTIONS.map((option) => (
+                          <option key={`staff-task-priority-${option.value}`} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block sm:col-span-2">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Instructions</span>
+                      <textarea
+                        rows={4}
+                        value={staffTaskForm.description}
+                        onChange={(event) => setStaffTaskForm((prev) => ({ ...prev, description: event.target.value }))}
+                        placeholder="Add smart instructions, checkpoints, or what proof the staff member should upload after completion."
+                        className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700">
+                    Staff completion will ask for notes plus at least one proof photo, so owners can verify work without extra follow-up.
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={closeStaffTaskModal}
+                      className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingStaffTask}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      <Plus size={15} /> {savingStaffTask ? 'Assigning...' : 'Assign Task'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRazorpayRateCard && (
+        <div className="app-modal-shell z-[91] bg-slate-950/70 backdrop-blur-sm" onClick={() => setShowRazorpayRateCard(false)}>
+          <div className="app-modal-panel app-modal-panel--xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex flex-col min-h-0 overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl">
+              <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.24),_transparent_38%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_60%,#312e81_100%)] px-5 py-5 text-white sm:px-6">
+                <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 shadow-sm">
+                        <CreditCard size={22} className="text-indigo-200" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-200/80">Copy-Paste Rate Card</p>
+                        <h3 className="mt-1 text-xl font-black text-white sm:text-2xl">Razorpay Payment Charges</h3>
+                      </div>
                     </div>
-                    <pre className="mt-4 max-h-[18rem] overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-4 text-[12px] font-medium leading-6 text-slate-700">{RAZORPAY_RATE_CARD_COPY}</pre>
-                    <p className="mt-3 text-[11px] font-medium leading-5 text-slate-500">
-                      Note: This reflects Razorpay's standard domestic pricing and standard domestic settlement cycle. Custom plans, international cards, refunds, disputes, or other platform fees can change the final numbers.
+                    <p className="hidden sm:block mt-4 max-w-3xl text-sm font-medium leading-6 text-slate-200">
+                      Simple pricing for gym owners: Razorpay keeps a small processing fee, GST is charged on that fee, and the rest goes to the gym owner's bank account.
                     </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white">2% gateway fee</span>
+                      <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-white">18% GST on fee</span>
+                      <span className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100">T+2 working days</span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-row flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowRazorpayRateCard(false)}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-black text-slate-100 transition-colors hover:bg-white/10"
+                    >
+                      <X size={16} /> Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={copyRazorpayRateCardToClipboard}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-black text-slate-900 transition-colors hover:bg-slate-100"
+                    >
+                      {copiedRazorpayRateCard ? <Check size={16} /> : <Download size={16} />} {copiedRazorpayRateCard ? 'Copied' : 'Copy Rate Card'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="app-modal-scroll px-4 py-4 sm:px-6 sm:py-6">
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.98fr,1.02fr]">
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                      <div className="rounded-[20px] border border-indigo-100 bg-indigo-50 p-3 sm:p-4">
+                        <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Base Fee</p>
+                        <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">2%</p>
+                        <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">Standard domestic charge.</p>
+                      </div>
+                      <div className="rounded-[20px] border border-amber-100 bg-amber-50 p-3 sm:p-4">
+                        <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-amber-500">GST On Fee</p>
+                        <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">18%</p>
+                        <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">On fee only, not full amount.</p>
+                      </div>
+                      <div className="rounded-[20px] border border-emerald-100 bg-emerald-50 p-3 sm:p-4">
+                        <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.22em] text-emerald-500">Effective</p>
+                        <p className="mt-1.5 text-xl sm:text-2xl font-black text-slate-900">2.36%</p>
+                        <p className="mt-1 text-[10px] sm:text-xs font-medium text-slate-500">Total usual deduction.</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                          <Zap size={16} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-slate-900">How settlement works</p>
+                          <p className="text-xs font-medium text-slate-500">Simple version for gym owners</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Standard Settlement</p>
+                          <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">Money usually reaches the gym owner in <span className="font-black text-slate-900">T+2 working days</span>. If a payment is captured today, it usually arrives after 2 bank-working days.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="rounded-2xl border border-indigo-100 bg-white px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">Same-Day Option</p>
+                            <p className="mt-2 text-sm font-black text-slate-900">Extra 0.15% to 0.20%</p>
+                            <p className="mt-1 text-xs font-medium text-slate-500">Auto-settlement on the same working day.</p>
+                          </div>
+                          <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-500">Instant Option</p>
+                            <p className="mt-2 text-sm font-black text-slate-900">Extra 0.20% to 0.30%</p>
+                            <p className="mt-1 text-xs font-medium text-slate-500">On-demand settlement in seconds, even on holidays.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-900">Quick examples</p>
+                          <p className="text-xs font-medium text-slate-500">Popular membership amounts gym owners ask about</p>
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Standard domestic pricing</span>
+                      </div>
+                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {RAZORPAY_RATE_CARD_EXAMPLES.map((row) => (
+                          <div key={`razorpay-rate-example-${row.amount}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Member Pays</p>
+                                <p className="mt-2 text-xl font-black text-slate-900">{formatRazorpayRateCardMoney(row.amount)}</p>
+                              </div>
+                              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-rose-500 shadow-sm">Cut {formatRazorpayRateCardMoney(row.totalDeduction)}</span>
+                            </div>
+                            <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
+                              <div className="rounded-xl bg-white px-3 py-2">Fee<br /><span className="text-sm font-black text-slate-900">{formatRazorpayRateCardMoney(row.gatewayFee)}</span></div>
+                              <div className="rounded-xl bg-white px-3 py-2">GST<br /><span className="text-sm font-black text-slate-900">{formatRazorpayRateCardMoney(row.gstOnFee)}</span></div>
+                            </div>
+                            <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3">
+                              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-600">Gym Owner Gets</p>
+                              <p className="mt-1 text-lg font-black text-emerald-700">{formatRazorpayRateCardMoney(row.gymGets)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                          <p className="text-sm font-black text-slate-900">Full rate table</p>
+                          <p className="text-xs font-medium text-slate-500">Every {formatRazorpayRateCardMoney(1000)} step from {formatRazorpayRateCardMoney(1000)} to {formatRazorpayRateCardMoney(15000)}</p>
+                        </div>
+                        <span className="text-[11px] font-semibold text-slate-400">Fee = 2% | GST = 18% on fee</span>
+                      </div>
+                      <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                        <div className="max-h-[28rem] overflow-auto">
+                          <table className="min-w-full text-left text-sm">
+                            <thead className="sticky top-0 z-10 bg-slate-900 text-white">
+                              <tr>
+                                <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Amount</th>
+                                <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Fee</th>
+                                <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">GST</th>
+                                <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Total Cut</th>
+                                <th className="px-4 py-3 text-[10px] font-black uppercase tracking-[0.22em]">Gym Gets</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                              {RAZORPAY_RATE_CARD_ROWS.map((row, index) => (
+                                <tr key={`razorpay-rate-row-${row.amount}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                                  <td className="px-4 py-3 font-black text-slate-900">{formatRazorpayRateCardMoney(row.amount)}</td>
+                                  <td className="px-4 py-3 font-semibold text-slate-600">{formatRazorpayRateCardMoney(row.gatewayFee)}</td>
+                                  <td className="px-4 py-3 font-semibold text-slate-600">{formatRazorpayRateCardMoney(row.gstOnFee)}</td>
+                                  <td className="px-4 py-3 font-black text-rose-600">{formatRazorpayRateCardMoney(row.totalDeduction)}</td>
+                                  <td className="px-4 py-3 font-black text-emerald-600">{formatRazorpayRateCardMoney(row.gymGets)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-900">Copy-ready note</p>
+                          <p className="text-xs font-medium text-slate-500">Use this when owners ask how much Razorpay will cut</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={copyRazorpayRateCardToClipboard}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          {copiedRazorpayRateCard ? <Check size={14} /> : <Download size={14} />} {copiedRazorpayRateCard ? 'Copied' : 'Copy Text'}
+                        </button>
+                      </div>
+                      <pre className="mt-4 max-h-[18rem] overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-4 text-[12px] font-medium leading-6 text-slate-700">{RAZORPAY_RATE_CARD_COPY}</pre>
+                      <p className="mt-3 text-[11px] font-medium leading-5 text-slate-500">
+                        Note: This reflects Razorpay's standard domestic pricing and standard domestic settlement cycle. Custom plans, international cards, refunds, disputes, or other platform fees can change the final numbers.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5102,30 +5408,32 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
 
       {/* ── Owner Signature Canvas Modal ── */}
       {showOwnerSigCanvas && (
-        <div className="fixed inset-0 z-[96] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowOwnerSigCanvas(false)}>
-          <div className="bg-white rounded-[28px] w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
-              <div>
-                <h3 className="text-base font-black text-white">Draw Your Signature</h3>
-                <p className="text-indigo-200 text-xs mt-0.5">Will appear on member payment invoices</p>
+        <div className="app-modal-shell z-[96] bg-slate-900/80 backdrop-blur-md" onClick={() => setShowOwnerSigCanvas(false)}>
+          <div className="app-modal-panel" style={{ width: 'min(100%, 26rem)' }} onClick={(event) => event.stopPropagation()}>
+            <div className="overflow-hidden rounded-[28px] bg-white shadow-2xl">
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}>
+                <div>
+                  <h3 className="text-base font-black text-white">Draw Your Signature</h3>
+                  <p className="text-indigo-200 text-xs mt-0.5">Will appear on member payment invoices</p>
+                </div>
+                <button onClick={() => setShowOwnerSigCanvas(false)} className="rounded-full p-1.5 hover:bg-white/10 text-white transition-colors"><X size={18} /></button>
               </div>
-              <button onClick={() => setShowOwnerSigCanvas(false)} className="rounded-full p-1.5 hover:bg-white/10 text-white transition-colors"><X size={18} /></button>
-            </div>
-            <div className="p-5 space-y-3">
-              <div className="rounded-xl border-2 border-slate-300 overflow-hidden shadow-inner">
-                <canvas
-                  ref={initOwnerSigCanvas}
-                  width={400}
-                  height={160}
-                  className="w-full h-[140px] cursor-crosshair touch-none block"
-                  style={{ background: '#ffffff' }}
-                />
+              <div className="p-5 space-y-3">
+                <div className="rounded-xl border-2 border-slate-300 overflow-hidden shadow-inner">
+                  <canvas
+                    ref={initOwnerSigCanvas}
+                    width={400}
+                    height={160}
+                    className="w-full h-[140px] cursor-crosshair touch-none block"
+                    style={{ background: '#ffffff' }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400">Draw using finger or mouse. This will be embedded in invoices.</p>
               </div>
-              <p className="text-[10px] text-slate-400">Draw using finger or mouse. This will be embedded in invoices.</p>
-            </div>
-            <div className="px-5 pb-5 flex gap-2">
-              <button type="button" onClick={clearOwnerSigCanvas} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Clear</button>
-              <button type="button" onClick={saveOwnerSigCanvas} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">Save Signature</button>
+              <div className="px-5 pb-5 flex gap-2">
+                <button type="button" onClick={clearOwnerSigCanvas} className="flex-1 py-2.5 bg-slate-100 text-slate-700 text-xs font-black rounded-xl hover:bg-slate-200 transition-all">Clear</button>
+                <button type="button" onClick={saveOwnerSigCanvas} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-black rounded-xl hover:bg-indigo-700 transition-all">Save Signature</button>
+              </div>
             </div>
           </div>
         </div>

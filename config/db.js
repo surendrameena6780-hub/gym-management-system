@@ -639,6 +639,24 @@ const connectDB = async () => {
                 ip_address  VARCHAR(60) DEFAULT '',
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             );
+            CREATE TABLE IF NOT EXISTS staff_tasks (
+                id                SERIAL PRIMARY KEY,
+                gym_id            INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
+                branch_id         VARCHAR(60) DEFAULT 'branch-1',
+                assigned_to       INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                title             VARCHAR(160) NOT NULL,
+                description       TEXT DEFAULT '',
+                category          VARCHAR(40) DEFAULT 'OTHER',
+                priority          VARCHAR(20) DEFAULT 'MEDIUM',
+                status            VARCHAR(20) DEFAULT 'OPEN',
+                due_at            TIMESTAMPTZ,
+                completion_notes  TEXT DEFAULT '',
+                completion_photos JSONB DEFAULT '[]'::jsonb,
+                completed_at      TIMESTAMPTZ,
+                created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at        TIMESTAMPTZ DEFAULT NOW(),
+                updated_at        TIMESTAMPTZ DEFAULT NOW()
+            );
             CREATE TABLE IF NOT EXISTS expenses (
                 id              SERIAL PRIMARY KEY,
                 gym_id          INTEGER REFERENCES gyms(id) ON DELETE CASCADE,
@@ -869,6 +887,9 @@ const connectDB = async () => {
             CREATE INDEX IF NOT EXISTS idx_member_documents_member ON member_documents(member_id);
             CREATE INDEX IF NOT EXISTS idx_member_notes_member ON member_notes(member_id);
             CREATE INDEX IF NOT EXISTS idx_member_waivers_member ON member_waivers(member_id);
+            CREATE INDEX IF NOT EXISTS idx_staff_tasks_gym_id ON staff_tasks(gym_id);
+            CREATE INDEX IF NOT EXISTS idx_staff_tasks_assigned_to ON staff_tasks(assigned_to);
+            CREATE INDEX IF NOT EXISTS idx_staff_tasks_due_at ON staff_tasks(due_at);
             CREATE INDEX IF NOT EXISTS idx_expenses_gym_id ON expenses(gym_id);
             CREATE INDEX IF NOT EXISTS idx_expenses_bill_date ON expenses(bill_date);
             CREATE INDEX IF NOT EXISTS idx_payroll_entries_gym_id ON payroll_entries(gym_id);

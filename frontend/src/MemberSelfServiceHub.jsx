@@ -10,12 +10,14 @@ import {
   Clock3,
   Copy,
   CreditCard,
+  FileText,
   Mail,
   MapPin,
   Phone,
   RefreshCw,
   Sparkles,
   Ticket,
+  Trash2,
   Upload,
   User,
   XCircle,
@@ -29,6 +31,7 @@ import {
   openCollectionLink,
 } from './utils/memberCollection';
 import { normalizeProfileImageUrl } from './utils/profileImage';
+import { INLINE_IMAGE_ACCEPT, fileToInlineImageDataUrl } from './utils/inlineImageUpload';
 
 const TABS = [
   { key: 'overview', label: 'Overview', Icon: Sparkles },
@@ -38,6 +41,14 @@ const TABS = [
 ];
 
 const TERMINAL_RAZORPAY_LINK_STATUSES = new Set(['PAID', 'EXPIRED', 'CANCELLED', 'FAILED', 'NOT_FOUND']);
+const MEMBER_DOCUMENT_TYPES = [
+  'Aadhaar Card',
+  'PAN Card',
+  'Photo ID',
+  'Address Proof',
+  'Medical Certificate',
+  'Other',
+];
 
 const getRazorpayLinkStatus = (paymentLink) => String(paymentLink?.status || '').trim().toUpperCase();
 
@@ -97,6 +108,13 @@ const buildMemberSnapshot = (member, dashboard) => {
     gym_id: nextMember?.gym_id || member?.gym_id || null,
     phone: nextMember?.phone || member?.phone || '',
     email: nextMember?.email || member?.email || '',
+    onboarding_complete: Boolean(nextMember?.onboarding_complete ?? member?.onboarding_complete),
+    emergency_contact: nextMember?.emergency_contact || member?.emergency_contact || '',
+    gender: nextMember?.gender || member?.gender || '',
+    date_of_birth: nextMember?.date_of_birth || member?.date_of_birth || '',
+    address: nextMember?.address || member?.address || '',
+    blood_group: nextMember?.blood_group || member?.blood_group || '',
+    medical_notes: nextMember?.medical_notes || member?.medical_notes || '',
   };
 };
 
@@ -113,6 +131,13 @@ const hasMemberSnapshotChanged = (currentMember, nextMember) => (
     'membership_end',
     'membership_status',
     'status',
+    'onboarding_complete',
+    'emergency_contact',
+    'gender',
+    'date_of_birth',
+    'address',
+    'blood_group',
+    'medical_notes',
   ].some((field) => String(currentMember?.[field] || '') !== String(nextMember?.[field] || ''))
 );
 
@@ -121,6 +146,173 @@ const createEmptyProfileForm = (member) => ({
   email: String(member?.email || ''),
   phone: String(member?.phone || ''),
 });
+
+const createEmptyOnboardingForm = (member) => ({
+  onboarding_complete: Boolean(member?.onboarding_complete),
+  emergency_contact: String(member?.emergency_contact || ''),
+  gender: String(member?.gender || ''),
+  date_of_birth: member?.date_of_birth ? String(member.date_of_birth).slice(0, 10) : '',
+  address: String(member?.address || ''),
+  blood_group: String(member?.blood_group || ''),
+  medical_notes: String(member?.medical_notes || ''),
+});
+
+const createEmptyDocumentForm = () => ({
+  doc_type: '',
+  doc_name: '',
+  notes: '',
+});
+
+const escapeInvoiceHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+const formatInvoiceMoney = (value) => Number(value || 0).toLocaleString('en-IN', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
+
+const openMemberInvoiceWindow = ({ entry, receiptInfo, memberSummary }) => {
+  const invoiceWindow = window.open('', '_blank');
+  if (!invoiceWindow) return false;
+
+  const gymName = String(receiptInfo?.name || memberSummary?.gym_name || 'GymVault').trim() || 'GymVault';
+  const invoiceNumber = String(entry?.invoice_id || entry?.transaction_id || `INV-${Date.now()}`).trim();
+  const paymentDate = entry?.payment_date ? new Date(entry.payment_date) : new Date();
+  const formattedDate = Number.isNaN(paymentDate.getTime())
+    ? formatDateTime(new Date().toISOString())
+    : paymentDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const logoMarkup = receiptInfo?.gym_logo
+    ? `<img src="${receiptInfo.gym_logo}" alt="Gym logo" style="width:76px;height:76px;object-fit:contain;border-radius:18px;" />`
+    : `<div style="width:76px;height:76px;border-radius:18px;background:linear-gradient(135deg,#111827,#312e81);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:900;">${escapeInvoiceHtml(gymName.slice(0, 1).toUpperCase())}</div>`;
+  const signatureMarkup = receiptInfo?.owner_signature
+    ? `<img src="${receiptInfo.owner_signature}" alt="Owner signature" style="height:48px;object-fit:contain;max-width:190px;" />`
+    : `<div style="font-family:'Brush Script MT','Segoe Script',cursive;font-size:34px;color:#111827;line-height:1;">${escapeInvoiceHtml(receiptInfo?.owner_name || gymName)}</div>`;
+
+  invoiceWindow.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Invoice ${escapeInvoiceHtml(invoiceNumber)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef2ff; color: #0f172a; }
+    .page { max-width: 840px; margin: 28px auto; background: #ffffff; border-radius: 28px; overflow: hidden; box-shadow: 0 28px 70px rgba(15, 23, 42, 0.18); }
+    .toolbar { padding: 16px 22px; display: flex; justify-content: flex-end; background: #111827; }
+    .toolbar button { border: none; background: #ffffff; color: #111827; padding: 11px 18px; border-radius: 999px; font-weight: 800; cursor: pointer; }
+    .hero { padding: 30px 32px 24px; background: linear-gradient(135deg, #0f172a 0%, #312e81 100%); color: #ffffff; display: flex; gap: 18px; align-items: center; }
+    .hero-copy { flex: 1; }
+    .eyebrow { font-size: 11px; font-weight: 900; letter-spacing: 0.22em; text-transform: uppercase; color: #c7d2fe; }
+    .hero h1 { margin: 10px 0 0; font-size: 32px; line-height: 1.05; }
+    .hero p { margin: 8px 0 0; color: #cbd5e1; font-size: 14px; }
+    .content { padding: 28px 32px 34px; }
+    .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .meta-card { border: 1px solid #e2e8f0; border-radius: 22px; padding: 14px 16px; background: #f8fafc; }
+    .meta-label { font-size: 11px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; color: #64748b; }
+    .meta-value { margin-top: 8px; font-size: 18px; font-weight: 900; color: #0f172a; }
+    .meta-sub { margin-top: 4px; font-size: 12px; color: #475569; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; overflow: hidden; border-radius: 24px; }
+    thead th { background: #e0e7ff; color: #312e81; text-transform: uppercase; letter-spacing: 0.18em; font-size: 10px; padding: 14px 16px; text-align: left; }
+    tbody td { border-bottom: 1px solid #e2e8f0; padding: 15px 16px; font-size: 14px; font-weight: 600; color: #0f172a; }
+    tbody tr:last-child td { border-bottom: none; }
+    .summary { margin-top: 24px; display: flex; justify-content: space-between; gap: 18px; align-items: flex-end; }
+    .summary-note { max-width: 54%; font-size: 13px; line-height: 1.6; color: #475569; }
+    .summary-total { min-width: 230px; border-radius: 24px; background: #0f172a; color: #ffffff; padding: 18px 20px; }
+    .summary-total p { margin: 0; }
+    .summary-total .label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #cbd5e1; font-weight: 900; }
+    .summary-total .amount { margin-top: 10px; font-size: 30px; font-weight: 900; }
+    .signature { margin-top: 34px; display: flex; justify-content: flex-end; }
+    .signature-box { min-width: 220px; text-align: center; }
+    .signature-line { border-top: 1.5px solid #0f172a; margin-top: 6px; }
+    .signature-label { margin-top: 8px; font-size: 11px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; color: #475569; }
+    .footer { margin-top: 26px; font-size: 12px; color: #64748b; text-align: center; }
+    @media print {
+      body { background: #ffffff; }
+      .page { margin: 0; max-width: none; border-radius: 0; box-shadow: none; }
+      .toolbar { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="toolbar"><button onclick="window.print()">Print Invoice</button></div>
+    <div class="hero">
+      ${logoMarkup}
+      <div class="hero-copy">
+        <div class="eyebrow">Membership Invoice</div>
+        <h1>${escapeInvoiceHtml(gymName)}</h1>
+        <p>${escapeInvoiceHtml(receiptInfo?.address || '')}${receiptInfo?.phone ? ` • ${escapeInvoiceHtml(receiptInfo.phone)}` : ''}</p>
+      </div>
+    </div>
+    <div class="content">
+      <div class="meta">
+        <div class="meta-card">
+          <div class="meta-label">Invoice Number</div>
+          <div class="meta-value">${escapeInvoiceHtml(invoiceNumber)}</div>
+          <div class="meta-sub">Generated for your recorded membership payment</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Invoice Date</div>
+          <div class="meta-value">${escapeInvoiceHtml(formattedDate)}</div>
+          <div class="meta-sub">Payment mode: ${escapeInvoiceHtml(entry?.payment_mode || 'Offline')}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Billed To</div>
+          <div class="meta-value">${escapeInvoiceHtml(memberSummary?.full_name || 'Member')}</div>
+          <div class="meta-sub">${escapeInvoiceHtml(memberSummary?.phone || memberSummary?.email || '')}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Entry Type</div>
+          <div class="meta-value">${escapeInvoiceHtml(entry?.entry_type === 'DUE_COLLECTION' ? 'Due Collection' : 'Membership Payment')}</div>
+          <div class="meta-sub">Tax ID: ${escapeInvoiceHtml(receiptInfo?.tax_id || 'Not provided')}</div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Reference</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>${escapeInvoiceHtml(entry?.plan_name || 'Membership')}</td>
+            <td>${escapeInvoiceHtml(entry?.transaction_id || entry?.invoice_id || 'Recorded payment')}</td>
+            <td>₹${formatInvoiceMoney(entry?.amount_paid || 0)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="summary">
+        <div class="summary-note">
+          This invoice reflects the payment currently recorded in your gym account. For corrections, refunds, or membership duration questions, contact the gym front desk directly.
+        </div>
+        <div class="summary-total">
+          <p class="label">Total Paid</p>
+          <p class="amount">₹${formatInvoiceMoney(entry?.amount_paid || 0)}</p>
+        </div>
+      </div>
+
+      <div class="signature">
+        <div class="signature-box">
+          ${signatureMarkup}
+          <div class="signature-line"></div>
+          <div class="signature-label">Authorized Signature</div>
+        </div>
+      </div>
+
+      <div class="footer">This is a computer-generated invoice.</div>
+    </div>
+  </div>
+</body>
+</html>`);
+  invoiceWindow.document.close();
+  return true;
+};
 
 const NoticeBanner = ({ notice }) => {
   if (!notice) return null;
@@ -348,10 +540,19 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
   const [dueBusyKey, setDueBusyKey] = useState('');
   const [dueContext, setDueContext] = useState(null);
   const [profileForm, setProfileForm] = useState(() => createEmptyProfileForm(member));
+  const [onboardingForm, setOnboardingForm] = useState(() => createEmptyOnboardingForm(member));
   const [profileSaving, setProfileSaving] = useState(false);
+  const [onboardingSaving, setOnboardingSaving] = useState(false);
   const [profileFile, setProfileFile] = useState(null);
   const [profilePreviewUrl, setProfilePreviewUrl] = useState('');
   const [removeProfilePic, setRemoveProfilePic] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const [documentDeletingId, setDocumentDeletingId] = useState('');
+  const [documentForm, setDocumentForm] = useState(() => createEmptyDocumentForm());
+  const [documentDataUrl, setDocumentDataUrl] = useState('');
+  const [documentFileName, setDocumentFileName] = useState('');
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -372,6 +573,7 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
 
       const mergedMember = buildMemberSnapshot(member, res.data);
       setProfileForm(createEmptyProfileForm(mergedMember));
+      setOnboardingForm(createEmptyOnboardingForm(mergedMember));
       setRemoveProfilePic(false);
       setProfileFile(null);
       setProfilePreviewUrl('');
@@ -440,6 +642,18 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
       setNotice((current) => current || { type: 'error', message: err?.response?.data?.error || 'Could not load class schedule.' });
     } finally {
       setScheduleLoading(false);
+    }
+  }, [memberHeaders]);
+
+  const loadDocuments = useCallback(async () => {
+    setDocumentsLoading(true);
+    try {
+      const res = await axios.get('/api/member/documents', memberHeaders);
+      setDocuments(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      setNotice((current) => current || { type: 'error', message: err?.response?.data?.error || 'Could not load your uploaded documents.' });
+    } finally {
+      setDocumentsLoading(false);
     }
   }, [memberHeaders]);
 
@@ -680,6 +894,94 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
     }
   }, [loadDashboard, profileFile, profileForm.email, profileForm.full_name, profileForm.phone, removeProfilePic, token]);
 
+  const handleSaveOnboarding = useCallback(async () => {
+    setOnboardingSaving(true);
+    setNotice(null);
+    try {
+      await axios.patch('/api/member/onboarding', onboardingForm, memberHeaders);
+      setNotice({ type: 'success', message: 'Onboarding details updated successfully.' });
+      await loadDashboard({ silent: true });
+    } catch (err) {
+      setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not update onboarding details.' });
+    } finally {
+      setOnboardingSaving(false);
+    }
+  }, [loadDashboard, memberHeaders, onboardingForm]);
+
+  const handleDocumentFileChange = useCallback(async (event) => {
+    const nextFile = event.target.files?.[0] || null;
+    if (!nextFile) return;
+
+    try {
+      const inlineImage = await fileToInlineImageDataUrl(nextFile);
+      setDocumentDataUrl(inlineImage);
+      setDocumentFileName(nextFile.name || 'document');
+      setNotice(null);
+      setDocumentForm((current) => ({
+        ...current,
+        doc_name: current.doc_name || nextFile.name.replace(/\.[^.]+$/, ''),
+      }));
+    } catch (err) {
+      setNotice({ type: 'error', message: err?.message || 'Could not read the selected document.' });
+      setDocumentDataUrl('');
+      setDocumentFileName('');
+    } finally {
+      event.target.value = '';
+    }
+  }, []);
+
+  const handleSaveDocument = useCallback(async () => {
+    if (!documentForm.doc_type || !documentDataUrl) {
+      setNotice({ type: 'warning', message: 'Select a document type and upload an image before saving.' });
+      return;
+    }
+
+    setDocumentSaving(true);
+    setNotice(null);
+    try {
+      await axios.post('/api/member/documents', {
+        doc_type: documentForm.doc_type,
+        doc_name: documentForm.doc_name,
+        notes: documentForm.notes,
+        doc_url: documentDataUrl,
+      }, memberHeaders);
+      setDocumentForm(createEmptyDocumentForm());
+      setDocumentDataUrl('');
+      setDocumentFileName('');
+      setNotice({ type: 'success', message: 'Document uploaded successfully.' });
+      await loadDocuments();
+    } catch (err) {
+      setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not save this document.' });
+    } finally {
+      setDocumentSaving(false);
+    }
+  }, [documentDataUrl, documentForm, loadDocuments, memberHeaders]);
+
+  const handleDeleteDocument = useCallback(async (documentId) => {
+    setDocumentDeletingId(String(documentId));
+    setNotice(null);
+    try {
+      await axios.delete(`/api/member/documents/${documentId}`, memberHeaders);
+      setNotice({ type: 'success', message: 'Document deleted.' });
+      await loadDocuments();
+    } catch (err) {
+      setNotice({ type: 'error', message: err?.response?.data?.error || 'Could not delete this document.' });
+    } finally {
+      setDocumentDeletingId('');
+    }
+  }, [loadDocuments, memberHeaders]);
+
+  const handleOpenInvoice = useCallback((entry) => {
+    const opened = openMemberInvoiceWindow({
+      entry,
+      receiptInfo: dashboard?.receipt_info || {},
+      memberSummary: buildMemberSnapshot(member, dashboard),
+    });
+    if (!opened) {
+      setNotice({ type: 'warning', message: 'Popup blocked. Allow popups to view your invoice.' });
+    }
+  }, [dashboard, member]);
+
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
@@ -697,6 +999,12 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
       loadSchedule();
     }
   }, [activeTab, loadBookings, loadSchedule]);
+
+  useEffect(() => {
+    if (activeTab === 'profile') {
+      loadDocuments();
+    }
+  }, [activeTab, loadDocuments]);
 
   useEffect(() => {
     if (!profileFile) {
@@ -959,10 +1267,18 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
                     <div>
                       <p className="text-white font-black text-sm">{entry.plan_name || 'Membership'}</p>
                       <p className="text-slate-400 text-xs font-semibold mt-1">{formatDateTime(entry.payment_date)} • {entry.payment_mode || 'Cash'}</p>
+                      <p className="text-slate-500 text-[11px] font-semibold mt-1">Invoice: {entry.invoice_id || entry.transaction_id || 'Generated at desk'}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-white font-black text-sm">₹{formatCollectionAmount(entry.amount_paid)}</p>
                       <p className="text-slate-400 text-[11px] font-semibold mt-1">{entry.entry_type === 'DUE_COLLECTION' ? 'Due collection' : 'Membership payment'}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenInvoice(entry)}
+                        className="mt-3 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-white/10"
+                      >
+                        <FileText size={13} /> View Invoice
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1101,98 +1417,344 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
       )}
 
       {activeTab === 'profile' && (
-        <SectionShell title="Profile settings" subtitle="Update your contact details and member photo used inside your gym workspace.">
-          <div className="flex flex-col sm:flex-row gap-4 items-start">
-            <div className="shrink-0">
-              <MemberAvatar member={summaryMember} previewUrl={removeProfilePic ? '' : profilePreviewUrl} size={82} />
-            </div>
+        <SectionShell title="Profile settings" subtitle="Update your contact details, finish onboarding, and keep your personal documents ready in the same portal.">
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              <div className="shrink-0">
+                <MemberAvatar member={summaryMember} previewUrl={removeProfilePic ? '' : profilePreviewUrl} size={82} />
+              </div>
 
-            <div className="flex-1 w-full space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex-1 w-full space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('member-profile-upload-input')?.click()}
+                    className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white"
+                    style={{ background: 'linear-gradient(135deg, #0ea5e9, #6366f1)' }}
+                  >
+                    <span className="inline-flex items-center gap-2"><Upload size={15} /> Upload Photo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileFile(null);
+                      setProfilePreviewUrl('');
+                      setRemoveProfilePic(true);
+                    }}
+                    className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white"
+                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  >
+                    <span className="inline-flex items-center gap-2"><Camera size={15} /> Remove Photo</span>
+                  </button>
+                </div>
+                <input id="member-profile-upload-input" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" className="hidden" onChange={handleProfileFileChange} />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Full Name</span>
+                    <input
+                      type="text"
+                      value={profileForm.full_name}
+                      onChange={(event) => setProfileForm((current) => ({ ...current, full_name: event.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="Your full name"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Phone</span>
+                    <div className="relative">
+                      <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type="text"
+                        value={profileForm.phone}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, phone: event.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                        className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                        placeholder="10-digit mobile"
+                      />
+                    </div>
+                  </label>
+
+                  <label className="block sm:col-span-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Email</span>
+                    <div className="relative">
+                      <Mail size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type="email"
+                        value={profileForm.email}
+                        onChange={(event) => setProfileForm((current) => ({ ...current, email: event.target.value }))}
+                        className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                        placeholder="your@email.com"
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] font-semibold text-slate-400">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gym</p>
+                    <p className="text-white font-black mt-1">{summaryMember.gym_name || 'GymVault gym'}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Current Plan</p>
+                    <p className="text-white font-black mt-1">{currentMembership?.plan_name || 'None assigned'}</p>
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => document.getElementById('member-profile-upload-input')?.click()}
-                  className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white"
-                  style={{ background: 'linear-gradient(135deg, #0ea5e9, #6366f1)' }}
+                  onClick={handleSaveProfile}
+                  disabled={profileSaving}
+                  className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #10b981, #14b8a6)' }}
                 >
-                  <span className="inline-flex items-center gap-2"><Upload size={15} /> Upload Photo</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileFile(null);
-                    setProfilePreviewUrl('');
-                    setRemoveProfilePic(true);
-                  }}
-                  className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white"
-                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-                >
-                  <span className="inline-flex items-center gap-2"><Camera size={15} /> Remove Photo</span>
+                  {profileSaving ? 'Saving...' : 'Save Profile'}
                 </button>
               </div>
-              <input id="member-profile-upload-input" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" className="hidden" onChange={handleProfileFileChange} />
+            </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <label className="block">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Full Name</span>
+            <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-4">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-white font-black text-base">Onboarding details</p>
+                    <p className="text-slate-400 text-sm font-medium mt-1">Keep your emergency, health, and identity details updated.</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.18em] ${onboardingForm.onboarding_complete ? 'bg-emerald-500/20 text-emerald-100' : 'bg-amber-500/20 text-amber-100'}`}>
+                    {onboardingForm.onboarding_complete ? 'Complete' : 'Pending'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Emergency Contact</span>
+                    <input
+                      type="text"
+                      value={onboardingForm.emergency_contact}
+                      onChange={(event) => setOnboardingForm((current) => ({ ...current, emergency_contact: event.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="Family member or emergency number"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Gender</span>
+                    <select
+                      value={onboardingForm.gender}
+                      onChange={(event) => setOnboardingForm((current) => ({ ...current, gender: event.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                    >
+                      <option value="" className="text-slate-900">Select</option>
+                      <option value="Male" className="text-slate-900">Male</option>
+                      <option value="Female" className="text-slate-900">Female</option>
+                      <option value="Other" className="text-slate-900">Other</option>
+                      <option value="Prefer not to say" className="text-slate-900">Prefer not to say</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Date of Birth</span>
+                    <input
+                      type="date"
+                      value={onboardingForm.date_of_birth}
+                      onChange={(event) => setOnboardingForm((current) => ({ ...current, date_of_birth: event.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Blood Group</span>
+                    <input
+                      type="text"
+                      value={onboardingForm.blood_group}
+                      onChange={(event) => setOnboardingForm((current) => ({ ...current, blood_group: event.target.value.toUpperCase() }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="A+, O-, B+"
+                    />
+                  </label>
+
+                  <label className="block sm:col-span-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Address</span>
+                    <textarea
+                      rows={2}
+                      value={onboardingForm.address}
+                      onChange={(event) => setOnboardingForm((current) => ({ ...current, address: event.target.value }))}
+                      className="w-full resize-none px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="Your current address"
+                    />
+                  </label>
+
+                  <label className="block sm:col-span-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Medical Notes</span>
+                    <textarea
+                      rows={3}
+                      value={onboardingForm.medical_notes}
+                      onChange={(event) => setOnboardingForm((current) => ({ ...current, medical_notes: event.target.value }))}
+                      className="w-full resize-none px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="Mention injuries, restrictions, medications, or other notes your trainer should know."
+                    />
+                  </label>
+                </div>
+
+                <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 gap-3">
+                  <span className="text-sm font-black text-white">Mark onboarding complete</span>
                   <input
-                    type="text"
-                    value={profileForm.full_name}
-                    onChange={(event) => setProfileForm((current) => ({ ...current, full_name: event.target.value }))}
-                    className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
-                    placeholder="Your full name"
+                    type="checkbox"
+                    checked={onboardingForm.onboarding_complete}
+                    onChange={(event) => setOnboardingForm((current) => ({ ...current, onboarding_complete: event.target.checked }))}
                   />
                 </label>
 
-                <label className="block">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Phone</span>
-                  <div className="relative">
-                    <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                <button
+                  type="button"
+                  onClick={handleSaveOnboarding}
+                  disabled={onboardingSaving}
+                  className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
+                >
+                  {onboardingSaving ? 'Saving...' : 'Save Onboarding'}
+                </button>
+              </div>
+
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-white font-black text-base">Documents</p>
+                    <p className="text-slate-400 text-sm font-medium mt-1">Upload your ID and supporting documents so the gym can keep your profile complete.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('member-document-upload-input')?.click()}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-white/10"
+                  >
+                    <Upload size={13} /> Add File
+                  </button>
+                </div>
+
+                <input id="member-document-upload-input" type="file" accept={INLINE_IMAGE_ACCEPT} className="hidden" onChange={handleDocumentFileChange} />
+
+                <div className="grid grid-cols-1 gap-3 text-sm">
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Document Type</span>
+                    <select
+                      value={documentForm.doc_type}
+                      onChange={(event) => setDocumentForm((current) => ({ ...current, doc_type: event.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                    >
+                      <option value="" className="text-slate-900">Select document type</option>
+                      {MEMBER_DOCUMENT_TYPES.map((docType) => (
+                        <option key={docType} value={docType} className="text-slate-900">{docType}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Document Name</span>
                     <input
                       type="text"
-                      value={profileForm.phone}
-                      onChange={(event) => setProfileForm((current) => ({ ...current, phone: event.target.value.replace(/\D/g, '').slice(0, 10) }))}
-                      className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
-                      placeholder="10-digit mobile"
+                      value={documentForm.doc_name}
+                      onChange={(event) => setDocumentForm((current) => ({ ...current, doc_name: event.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="Example: Aadhaar Front"
                     />
-                  </div>
-                </label>
+                  </label>
 
-                <label className="block sm:col-span-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Email</span>
-                  <div className="relative">
-                    <Mail size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                    <input
-                      type="email"
-                      value={profileForm.email}
-                      onChange={(event) => setProfileForm((current) => ({ ...current, email: event.target.value }))}
-                      className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
-                      placeholder="your@email.com"
+                  <label className="block">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Notes</span>
+                    <textarea
+                      rows={2}
+                      value={documentForm.notes}
+                      onChange={(event) => setDocumentForm((current) => ({ ...current, notes: event.target.value }))}
+                      className="w-full resize-none px-4 py-3 rounded-2xl bg-slate-950/40 border border-white/10 text-white font-semibold outline-none"
+                      placeholder="Optional note for the gym team"
                     />
+                  </label>
+                </div>
+
+                {documentDataUrl ? (
+                  <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3">
+                    <div className="flex items-start gap-3">
+                      <img src={documentDataUrl} alt={documentFileName || 'Document preview'} className="h-20 w-20 rounded-2xl object-cover border border-white/10" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-black text-emerald-50 truncate">{documentFileName || 'Selected document'}</p>
+                        <p className="mt-1 text-[11px] font-semibold text-emerald-100/80">Ready to upload to your member profile.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDocumentDataUrl('');
+                            setDocumentFileName('');
+                          }}
+                          className="mt-3 inline-flex items-center gap-2 rounded-xl border border-emerald-200/20 bg-slate-950/25 px-3 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-50"
+                        >
+                          <XCircle size={13} /> Remove
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </label>
-              </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/20 px-4 py-8 text-center">
+                    <FileText size={18} className="mx-auto text-slate-500" />
+                    <p className="mt-2 text-sm font-semibold text-slate-300">No document selected yet.</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-500">Accepted formats: JPG, PNG, WEBP.</p>
+                  </div>
+                )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] font-semibold text-slate-400">
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Gym</p>
-                  <p className="text-white font-black mt-1">{summaryMember.gym_name || 'GymVault gym'}</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Current Plan</p>
-                  <p className="text-white font-black mt-1">{currentMembership?.plan_name || 'None assigned'}</p>
+                <button
+                  type="button"
+                  onClick={handleSaveDocument}
+                  disabled={documentSaving}
+                  className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}
+                >
+                  {documentSaving ? 'Uploading...' : 'Save Document'}
+                </button>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-white font-black text-sm">Uploaded documents</p>
+                    <button
+                      type="button"
+                      onClick={loadDocuments}
+                      disabled={documentsLoading}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-white transition-colors hover:bg-white/10 disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={documentsLoading ? 'animate-spin' : ''} /> Refresh
+                    </button>
+                  </div>
+
+                  {documentsLoading ? (
+                    <PageLoader className="min-h-[20vh]" label="Loading documents..." />
+                  ) : documents.length > 0 ? (
+                    <div className="space-y-2">
+                      {documents.map((doc) => (
+                        <div key={doc.id} className="rounded-2xl border border-white/10 bg-slate-950/25 px-3 py-3 flex items-start gap-3">
+                          <a href={doc.doc_url} target="_blank" rel="noreferrer" className="block shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                            <img src={doc.doc_url} alt={doc.doc_name || doc.doc_type || 'Document'} className="h-16 w-16 object-cover" loading="lazy" />
+                          </a>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-black text-white truncate">{doc.doc_name || doc.doc_type || 'Document'}</p>
+                            <p className="mt-1 text-[11px] font-semibold text-slate-400">{doc.doc_type || 'Document'} • {formatDateTime(doc.uploaded_at || doc.created_at)}</p>
+                            {doc.notes ? <p className="mt-2 text-[12px] font-medium text-slate-300 leading-5">{doc.notes}</p> : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDocument(doc.id)}
+                            disabled={documentDeletingId === String(doc.id)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-300/20 bg-rose-500/10 text-rose-100 transition-colors hover:bg-rose-500/15 disabled:opacity-50"
+                            aria-label={`Delete ${doc.doc_name || doc.doc_type || 'document'}`}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/20 px-4 py-6 text-center text-sm font-semibold text-slate-400">
+                      No documents uploaded yet.
+                    </div>
+                  )}
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={handleSaveProfile}
-                disabled={profileSaving}
-                className="w-full py-3 rounded-2xl text-sm font-black uppercase tracking-[0.18em] text-white disabled:opacity-60"
-                style={{ background: 'linear-gradient(135deg, #10b981, #14b8a6)' }}
-              >
-                {profileSaving ? 'Saving...' : 'Save Profile'}
-              </button>
             </div>
           </div>
         </SectionShell>
