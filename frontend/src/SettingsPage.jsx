@@ -933,6 +933,235 @@ const loadRazorpayScript = () => {
       };
     });
   }, []);
+  const announceSettingsDataChanged = useCallback((detail = {}) => {
+    if (typeof window === 'undefined') return;
+    const at = Number(detail.at || Date.now());
+    window.__gymvaultLastDataChangeAt = Math.max(Number(window.__gymvaultLastDataChangeAt || 0), at);
+    try {
+      window.sessionStorage.setItem('gymvault:data-change-at', String(at));
+    } catch {
+      // Ignore storage write failures; the in-memory event is enough.
+    }
+
+    window.dispatchEvent(new CustomEvent('gymvault:data-changed', {
+      detail: {
+        ...detail,
+        at,
+      },
+    }));
+  }, []);
+
+  const normalizeAfterExternalCheckoutReturn = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    document.body.style.removeProperty('position');
+    document.body.style.removeProperty('top');
+    document.body.style.removeProperty('overflow');
+    document.body.style.removeProperty('width');
+    document.documentElement.style.removeProperty('overflow');
+    document.body.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+
+    document.documentElement.classList.remove('app-modal-open');
+    document.activeElement?.blur?.();
+    window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      scrollSettingsShellToTop();
+    });
+
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('gymvault:force-viewport-sync'));
+      scrollSettingsShellToTop();
+    }, 220);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleCheckoutReturn = () => {
+      if (!razorpayReturnPendingRef.current) return;
+      razorpayReturnPendingRef.current = false;
+      normalizeAfterExternalCheckoutReturn();
+    };
+
+    window.addEventListener('gymvault:app-resumed', handleCheckoutReturn);
+    return () => {
+      window.removeEventListener('gymvault:app-resumed', handleCheckoutReturn);
+    };
+  }, [normalizeAfterExternalCheckoutReturn]);
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/settings', headers);
+
+      if (res.data.account) {
+        setAccountData((prev) => ({
+          ...prev,
+          full_name: res.data.account.full_name || prev.full_name,
+          email: res.data.account.email || prev.email,
+          phone: res.data.account.phone || prev.phone,
+        }));
+        if (res.data.account.profile_pic) {
+          setPreviewUrl(normalizeProfileImageUrl(res.data.account.profile_pic));
+        } else {
+          setPreviewUrl(null);
+        }
+        setRemoveProfileImage(false);
+      }
+
+      if (res.data.gym) {
+        const resolvedBranchesCount = Math.max(1, Math.min(25, Number.parseInt(res.data.gym.branches_count, 10) || 1));
+        const resolvedBranchDirectory = buildBranchDirectoryState(
+          resolvedBranchesCount,
+          Array.isArray(res.data.gym.branch_directory) ? res.data.gym.branch_directory : []
+        );
+        setGymData((prev) => ({
+          ...prev,
+          name: res.data.gym.name || prev.name,
+          phone: res.data.gym.phone || prev.phone,
+          address: res.data.gym.address || prev.address,
+          currency: res.data.gym.currency || prev.currency,
+          timezone: res.data.gym.timezone || prev.timezone,
+          tax_id: res.data.gym.tax_id || prev.tax_id,
+          website: res.data.gym.website || prev.website,
+          email: res.data.gym.support_email || prev.email,
+          saas_status: res.data.gym.saas_status || 'FREE_TRIAL',
+          saas_valid_until: res.data.gym.saas_valid_until || '',
+          current_plan: res.data.gym.current_plan || 'basic',
+          saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly',
+          grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3),
+          branches_count: resolvedBranchesCount,
+          addon_extra_whatsapp: Number(res.data.gym.addon_extra_whatsapp || 0),
+          addon_extra_staff: Number(res.data.gym.addon_extra_staff || 0),
+          addon_extra_members: Number(res.data.gym.addon_extra_members || 0),
+          addon_extra_branches: Number(res.data.gym.addon_extra_branches || 0),
+          addon_extra_hello: Number(res.data.gym.addon_extra_hello || 0),
+          gym_logo: res.data.gym.gym_logo || prev.gym_logo || '',
+          owner_signature: res.data.gym.owner_signature || prev.owner_signature || '',
+        }));
+        setPlatformData((prev) => ({
+          ...prev,
+          branches_count: resolvedBranchesCount,
+          branch_directory: resolvedBranchDirectory,
+        }));
+
+        const nextInterfacePreferences = {
+          reduce_motion: false,
+          compact_mode: false,
+          dark_mode: Boolean(res.data.gym.interface_dark_mode ?? true),
+        };
+        setInterfacePreferences(nextInterfacePreferences);
+        applyInterfacePreferences(nextInterfacePreferences);
+        saveInterfacePreferencesLocal(nextInterfacePreferences);
+
+        if (res.data.gym.saas_billing_cycle) {
+          setBillingCycle(res.data.gym.saas_billing_cycle);
+        }
+      }
+
+      if (res.data.usage) {
+        setUsageData((prev) => ({
+          ...prev,
+          ...res.data.usage,
+        }));
+      }
+
+      if (res.data.billing_catalog) {
+        setBillingCatalog(normalizeFrontendBillingCatalog(res.data.billing_catalog));
+      }
+
+      if (res.data.effective_limits) {
+        applyEffectiveLimitsPayload(res.data.effective_limits);
+      }
+
+      if (res.data.messaging_summary) {
+        setIntegrationData((prev) => {
+          const nextMonthlyLimit = Number(res.data.messaging_summary.bulk_monthly_limit ?? prev.bulk_monthly_limit ?? 500);
+          const nextMonthlyUsage = Number(res.data.messaging_summary.monthly_usage || 0);
+          return {
+            ...prev,
+            whatsapp_status: String(res.data.messaging_summary.whatsapp_status || prev.whatsapp_status || 'NOT_CONFIGURED').toUpperCase(),
+            whatsapp_mode: String(res.data.messaging_summary.whatsapp_mode || res.data.messaging_summary.whatsapp_status || prev.whatsapp_mode || 'NOT_CONFIGURED').toUpperCase(),
+            whatsapp_ready: Boolean(res.data.messaging_summary.whatsapp_ready),
+            connected_hello_numbers: Number(res.data.messaging_summary.connected_hello_numbers || 0),
+            bulk_monthly_limit: nextMonthlyLimit,
+            monthly_usage: nextMonthlyUsage,
+            monthly_remaining: Number(res.data.messaging_summary.monthly_remaining ?? Math.max(0, nextMonthlyLimit - nextMonthlyUsage)),
+          };
+        });
+      }
+    } catch (err) {
+      reportClientError('Settings fetch', err);
+      toast('Failed to load settings. Please check backend terminal.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [applyEffectiveLimitsPayload, headers, toast]);
+
+  useEffect(() => {
+    if (!token || !isActive || !isOwner) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    fetchSettings();
+  }, [fetchSettings, isActive, isOwner, token]);
+
+  const effectiveStaffBranch = branchScopeValue || defaultBranchId || 'branch-1';
+
+  const fetchStaff = useCallback(async () => {
+    if (!token) return;
+    setLoadingStaff(true);
+    try {
+      const res = await axios.get('/api/users/staff', {
+        ...headers,
+        params: { branch_id: effectiveStaffBranch },
+      });
+      setStaffMembers(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to load staff members.', 'error');
+    } finally {
+      setLoadingStaff(false);
+    }
+  }, [effectiveStaffBranch, headers, toast, token]);
+
+  useEffect(() => {
+    if (!isActive || !isOwner) return;
+    if (activeTab === 'staff') {
+      fetchStaff();
+    }
+  }, [activeTab, fetchStaff, isActive, isOwner, effectiveStaffBranch]);
+
+  const fetchStaffTasks = useCallback(async () => {
+    if (!token || !isOwner) return;
+    setLoadingStaffTasks(true);
+    try {
+      const res = await axios.get('/api/users/tasks', {
+        ...headers,
+        params: {
+          branch_id: effectiveStaffBranch,
+          include_completed: '1',
+          include_cancelled: '1',
+          limit: 100,
+        },
+      });
+      setStaffTasks(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      toast(err?.response?.data?.error || 'Failed to load staff tasks.', 'error');
+    } finally {
+      setLoadingStaffTasks(false);
+    }
+  }, [effectiveStaffBranch, headers, isOwner, toast, token]);
+
+  useEffect(() => {
+    if (!isActive || !isOwner) return;
+    if (activeTab === 'staff') {
+      fetchStaffTasks();
+    }
+  }, [activeTab, fetchStaffTasks, isActive, isOwner, effectiveStaffBranch]);
+
   const defaultStaffBranchId = branchScopeValue || defaultBranchId || branchOptions[0]?.id || 'branch-1';
   const assignableStaffMembers = useMemo(
     () => staffMembers.filter((staff) => String(staff.role || '').trim().toUpperCase() !== 'OWNER' && staff.is_active !== false),
