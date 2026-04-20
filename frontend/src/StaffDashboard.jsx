@@ -12,7 +12,7 @@ import { reportClientError } from './utils/clientErrorReporter';
 import { getApiOrigin } from './utils/apiUrl';
 import { INLINE_IMAGE_ACCEPT, filesToInlineImageDataUrls } from './utils/inlineImageUpload';
 import { BroadcastModal } from './dashboard/DashboardPageModals';
-import { getPriorityMeta, resolveBroadcastTemplateSuggestion } from './dashboard/dashboardPageUtils';
+import { resolveBroadcastTemplateSuggestion } from './dashboard/dashboardPageUtils';
 import {
   buildBroadcastActionMeta,
   isDashboardActionCompleted,
@@ -96,6 +96,24 @@ const getTaskPriorityTone = (priority) => {
     default:
       return 'border-white/10 bg-white/5 text-white/70';
   }
+};
+
+const getStaffActionTone = (priority) => {
+  if (priority === 'P0') {
+    return {
+      badgeClass: 'border border-rose-300/25 bg-rose-500/14 text-rose-100',
+      rowClass: 'border-rose-300/18 bg-rose-500/8',
+      buttonClass: 'bg-rose-500 text-white hover:bg-rose-400',
+      label: 'Critical',
+    };
+  }
+
+  return {
+    badgeClass: 'border border-amber-300/22 bg-amber-500/12 text-amber-100',
+    rowClass: 'border-amber-300/16 bg-white/[0.04]',
+    buttonClass: 'bg-amber-400 text-slate-950 hover:bg-amber-300',
+    label: 'Attention',
+  };
 };
 
 // ─── Animated Counter ────────────────────────────────────────────────────────
@@ -573,10 +591,9 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     if (canMessageMembers) actions.push({ label: 'Broadcast', icon: MessageSquare, gradient: 'linear-gradient(135deg, #059669, #10b981)', action: () => openBroadcastDraft('All') });
     if (canPayments) actions.push({ label: 'Payroll', icon: Wallet, gradient: 'linear-gradient(135deg, #ec4899, #db2777)', action: () => navigateTo('Payments', 'All', { section: 'payroll-list' }) });
     if (canLeads) actions.push({ label: 'Leads', icon: Target, gradient: 'linear-gradient(135deg, #f97316, #ea580c)', action: () => navigateTo('Leads') });
-    if (canClasses) actions.push({ label: 'Classes', icon: CalendarDays, gradient: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', action: () => navigateTo('Classes') });
     if (canMembers) actions.push({ label: 'Members', icon: Users, gradient: 'linear-gradient(135deg, #3b82f6, #2563eb)', action: () => navigateTo('Members') });
-    return actions.slice(0, 8);
-  }, [canAttendance, canClasses, canLeads, canMembers, canMessageMembers, canPayments, hasPerm, isReception, navigateTo, openBroadcastDraft]);
+    return actions.slice(0, 4);
+  }, [canAttendance, canLeads, canMembers, canMessageMembers, canPayments, hasPerm, isReception, navigateTo, openBroadcastDraft]);
 
   const taskCounts = useMemo(() => {
     return tasks.reduce((counts, task) => {
@@ -906,22 +923,22 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         {canMessageMembers && (
           <div className="sd-card sd-card-3 rounded-[20px] border p-4 sm:p-5"
             style={{
-              background: 'linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)',
-              borderColor: 'rgba(226,232,240,0.95)',
-              boxShadow: '0 20px 55px -26px rgba(15,23,42,0.18)',
+              background: 'linear-gradient(145deg, #0b1220 0%, #111827 52%, #1f2937 100%)',
+              borderColor: 'rgba(148,163,184,0.18)',
+              boxShadow: '0 24px 60px -28px rgba(15,23,42,0.55)',
             }}>
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Need Attention</p>
-                <p className="mt-1 text-sm font-black text-slate-900">Shared member actions</p>
-                <p className="mt-1 text-[11px] font-semibold text-slate-500">These actions use the same broadcast history as the owner dashboard, so completed rows disappear in both places.</p>
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-200">Need Attention</p>
+                <p className="mt-1 text-sm font-black text-white">Shared member actions</p>
+                <p className="mt-1 text-[11px] font-semibold text-white/55">These actions use the same broadcast history as the owner dashboard, so completed rows disappear in both places.</p>
               </div>
               <div className="text-right shrink-0">
                 <p className="text-[10px] font-black uppercase tracking-widest text-rose-500">{urgentActionCount} urgent</p>
                 <button
                   type="button"
                   onClick={() => openBroadcastDraft('All')}
-                  className="mt-2 inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700 transition-colors hover:bg-emerald-100"
+                  className="mt-2 inline-flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/12 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-100 transition-colors hover:bg-emerald-500/18"
                 >
                   <MessageSquare size={12} /> Open Modal
                 </button>
@@ -929,23 +946,23 @@ function StaffDashboard({ appRuntime, isActive = true }) {
             </div>
 
             {actionRows.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-8 text-center">
-                <p className="text-sm font-black text-slate-800">No member actions pending right now.</p>
-                <p className="mt-1 text-[11px] font-semibold text-slate-500">Renewals, unpaid activations, and winback actions will appear here automatically.</p>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-8 text-center">
+                <p className="text-sm font-black text-white">No member actions pending right now.</p>
+                <p className="mt-1 text-[11px] font-semibold text-white/50">Renewals, unpaid activations, and winback actions will appear here automatically.</p>
               </div>
             ) : (
               <div className="space-y-2.5">
                 {actionRows.map((row) => {
-                  const meta = getPriorityMeta(row.priority);
+                  const meta = getStaffActionTone(row.priority);
                   return (
                     <div key={row.id} className={`rounded-2xl border px-3.5 py-3 flex items-center justify-between gap-3 ${meta.rowClass}`}>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${meta.badgeClass}`}>{meta.label}</span>
-                          <span className="text-sm font-black text-slate-900 leading-none">{row.count}</span>
-                          <span className="text-[13px] leading-tight font-semibold text-slate-700 truncate">{row.title}</span>
+                          <span className="text-sm font-black text-white leading-none">{row.count}</span>
+                          <span className="text-[13px] leading-tight font-semibold text-white truncate">{row.title}</span>
                         </div>
-                        <p className="mt-1 text-[10px] font-semibold text-slate-500">{row.sub} · {row.urgency}</p>
+                        <p className="mt-1 text-[10px] font-semibold text-white/55">{row.sub} · {row.urgency}</p>
                       </div>
                       <button
                         type="button"
@@ -1020,68 +1037,6 @@ function StaffDashboard({ appRuntime, isActive = true }) {
             </button>
           ) : null}
         </div>
-
-        {/* ════════════ EXPIRING MEMBERS ALERT ════════════ */}
-        {canMembers && stats.expiringMembers.length > 0 && (
-          <div className="sd-card sd-card-5 rounded-[20px] border p-4 sm:p-5"
-            style={{
-              background: 'linear-gradient(145deg, #1c1917 0%, #292524 50%, #44403c 100%)',
-              borderColor: 'rgba(251, 146, 60, 0.2)',
-              boxShadow: '0 20px 50px -20px rgba(251,146,60,0.15)',
-            }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-500/20">
-                  <Clock size={15} className="text-white" />
-                </div>
-                <div>
-                  <p className="text-xs font-black text-amber-200 tracking-wide">Expiring Soon</p>
-                  <p className="text-[9px] text-amber-200/40 font-semibold">{stats.expiringMembers.length} member{stats.expiringMembers.length > 1 ? 's' : ''} this week</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => navigateTo('Members', 'Expiring Soon')}
-                className="flex items-center gap-1 text-[10px] font-bold text-amber-300/80 hover:text-amber-200 transition-colors">
-                View All <ArrowRight size={12} />
-              </button>
-            </div>
-            <div className="space-y-2">
-              {stats.expiringMembers.map((member, i) => (
-                <div key={member.id} className="flex items-center justify-between rounded-xl border px-3 py-2.5"
-                  style={{
-                    background: 'rgba(255,255,255,0.04)',
-                    borderColor: 'rgba(255,255,255,0.06)',
-                    opacity: 0,
-                    animation: `sdSlideIn 0.35s ease-out ${100 + i * 60}ms forwards`,
-                  }}>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-white/90 truncate">{member.full_name}</p>
-                    <p className="text-[10px] text-white/30 font-medium truncate">{member.plan_name || 'No plan'}</p>
-                  </div>
-                  <span className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black"
-                    style={{
-                      background: member.days_left <= 2 ? 'rgba(239,68,68,0.15)' : 'rgba(251,146,60,0.12)',
-                      color: member.days_left <= 2 ? '#fca5a5' : '#fdba74',
-                      border: `1px solid ${member.days_left <= 2 ? 'rgba(239,68,68,0.2)' : 'rgba(251,146,60,0.15)'}`,
-                    }}>
-                    {member.days_left}d left
-                  </span>
-                  {canMessageMembers ? (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); sendExpiryReminder(member.id); }}
-                      disabled={reminderLoadingId === member.id}
-                      className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-40"
-                      style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.2)' }}
-                      title="Send Reminder"
-                    >
-                      <Send size={13} className={`text-indigo-300 ${reminderLoadingId === member.id ? 'animate-pulse' : ''}`} />
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="sd-card sd-card-6 rounded-[20px] border p-4 sm:p-5"
           style={{

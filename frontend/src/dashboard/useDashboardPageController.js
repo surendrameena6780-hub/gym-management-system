@@ -897,7 +897,7 @@ export default function useDashboardPageController({ appRuntime, setCurrentPage,
         members: normalizedMembers,
         count,
         completionMeta,
-        isCompleted: false,
+        isCompleted,
         cta: singleCta,
         action: () => navigateTo('Members', singleFilter, {
           memberId: target.id,

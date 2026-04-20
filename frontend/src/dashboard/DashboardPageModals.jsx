@@ -594,12 +594,12 @@ const BroadcastModal = ({ controller }) => {
 
   return (
     <>
-      <div className="fixed inset-0 z-[190] bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBroadcastModal(false)} />
-      <div role="dialog" aria-modal="true" aria-label="Bulk broadcast" className="app-bottom-sheet z-[200] bg-white shadow-2xl">
+      <div className="fixed inset-0 z-[190] bg-slate-950/78 backdrop-blur-md" onClick={() => setShowBroadcastModal(false)} />
+      <div role="dialog" aria-modal="true" aria-label="Bulk broadcast" className="app-bottom-sheet z-[200] overflow-hidden border border-white/10 bg-[#07111f] text-white shadow-2xl shadow-black/50">
         <div className="flex justify-center pt-3 pb-1 shrink-0">
-          <div className="w-10 h-1 rounded-full bg-slate-200" />
+          <div className="w-10 h-1 rounded-full bg-white/20" />
         </div>
-        <div className="px-5 py-3 flex justify-between items-center shrink-0" style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
+        <div className="px-5 py-3 flex justify-between items-center shrink-0 border-b border-white/10" style={{ background: 'linear-gradient(135deg, #0f766e, #0f9f7a)' }}>
           <div className="flex items-center gap-3">
             <MessageSquare size={18} className="text-white" />
             <h2 className="text-base font-black text-white">Bulk Broadcast</h2>
@@ -611,14 +611,14 @@ const BroadcastModal = ({ controller }) => {
         <form onSubmit={handleBroadcast} className="flex min-h-0 flex-1 flex-col">
           <div className="app-modal-scroll dashboard-broadcast-scroll min-h-0 px-4 pb-3 pt-4 space-y-3">
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Search Specific Members</label>
+              <label className="block text-xs font-black text-white/55 uppercase tracking-widest mb-1.5">Search Specific Members</label>
               <input
                 type="text"
                 value={broadcastSearch}
                 onChange={(event) => setBroadcastSearch(event.target.value)}
                 aria-label="Search members for broadcast"
                 placeholder="Search by name, phone, or email"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                className="w-full px-4 py-2.5 bg-white/[0.05] border border-white/10 rounded-xl font-semibold text-white text-sm placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-emerald-300/40 focus:border-emerald-300/30"
               />
               {broadcastSelectedMembers.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -628,7 +628,7 @@ const BroadcastModal = ({ controller }) => {
                       type="button"
                       onClick={() => setBroadcastCustomIds((prev) => prev.filter((id) => Number(id) !== Number(member.id)))}
                       aria-label={`Remove ${member.full_name} from broadcast list`}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black border border-emerald-100"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-100 text-xs font-black border border-emerald-300/20"
                     >
                       <span className="truncate max-w-[200px]">{member.full_name}</span>
                       <X size={12} />
@@ -637,7 +637,7 @@ const BroadcastModal = ({ controller }) => {
                 </div>
               )}
               {broadcastSearchResults.length > 0 && (
-                <div className="mt-2 rounded-2xl border border-slate-200 bg-white max-h-40 sm:max-h-48 overflow-y-auto">
+                <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.04] max-h-40 sm:max-h-48 overflow-y-auto">
                   {broadcastSearchResults.map((member) => (
                     <button
                       key={`broadcast-member-${member.id}`}
@@ -646,23 +646,23 @@ const BroadcastModal = ({ controller }) => {
                         setBroadcastCustomIds((prev) => [...prev, Number(member.id)]);
                         setBroadcastSearch('');
                       }}
-                      className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-emerald-50 border-b border-slate-100 last:border-b-0"
+                      className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-emerald-500/10 border-b border-white/8 last:border-b-0"
                     >
                       <div className="min-w-0">
-                        <p className="text-sm font-black text-slate-900 truncate">{member.full_name}</p>
-                        <p className="text-[11px] text-slate-500 font-semibold truncate">{member.phone}{member.email ? ` · ${member.email}` : ''}</p>
+                        <p className="text-sm font-black text-white truncate">{member.full_name}</p>
+                        <p className="text-[11px] text-white/55 font-semibold truncate">{member.phone}{member.email ? ` · ${member.email}` : ''}</p>
                       </div>
-                      <span className="text-[10px] font-black text-emerald-600 uppercase">Add</span>
+                      <span className="text-[10px] font-black text-emerald-300 uppercase">Add</span>
                     </button>
                   ))}
                 </div>
               )}
-              <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">
+              <p className="text-[10px] text-white/38 mt-1.5 font-semibold">
                 {broadcastSelectedMembers.length > 0 ? 'Custom list selected. Segment buttons below are ignored until you clear these members.' : 'Leave empty to send by audience segment.'}
               </p>
             </div>
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Target Audience</label>
+              <label className="block text-xs font-black text-white/55 uppercase tracking-widest mb-2">Target Audience</label>
               <div className="flex flex-wrap gap-1.5">
                 {audienceOptions.map(({ value, label, count }) => (
                   <button
@@ -676,20 +676,20 @@ const BroadcastModal = ({ controller }) => {
                         setBroadcastTemplateKey(nextTemplate?.template_key || '');
                       }
                     }}
-                    className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-150 ${broadcastSelectedMembers.length === 0 && broadcastAudience === value ? 'bg-emerald-500 text-white shadow shadow-emerald-200' : 'bg-slate-100 text-slate-600 active:bg-slate-200'}`}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-150 border ${broadcastSelectedMembers.length === 0 && broadcastAudience === value ? 'bg-emerald-500 text-white border-emerald-400 shadow shadow-emerald-900/30' : 'bg-white/[0.04] text-white/70 border-white/10 active:bg-white/[0.08]'}`}
                   >
                     {label}{count > 0 ? ` · ${count}` : ''}
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">
+              <p className="text-[10px] text-white/38 mt-1.5 font-semibold">
                 {campaignPreviewLoading ? 'Loading preview...' : `Estimated reach: ${(broadcastSelectedMembers.length || campaignPreviewCount)} member${(broadcastSelectedMembers.length || campaignPreviewCount) !== 1 ? 's' : ''}`}
               </p>
             </div>
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Approved Template</label>
+              <label className="block text-xs font-black text-white/55 uppercase tracking-widest mb-1.5">Approved Template</label>
               <select
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                className="w-full px-4 py-2.5 bg-white/[0.05] border border-white/10 rounded-xl font-semibold text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300/40 focus:border-emerald-300/30"
                 value={broadcastTemplateKey}
                 onChange={(event) => setBroadcastTemplateKey(event.target.value)}
               >
@@ -698,21 +698,21 @@ const BroadcastModal = ({ controller }) => {
                   <option key={template.template_key} value={template.template_key}>{template.title}</option>
                 ))}
               </select>
-              <p className="text-[10px] text-slate-400 mt-1.5 font-semibold">Campaigns use approved WhatsApp templates only. Configure or approve more templates from Settings if this list is empty.</p>
+              <p className="text-[10px] text-white/38 mt-1.5 font-semibold">Campaigns use approved WhatsApp templates only. Configure or approve more templates from Settings if this list is empty.</p>
             </div>
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Template Preview</label>
+              <label className="block text-xs font-black text-white/55 uppercase tracking-widest mb-1.5">Template Preview</label>
               <textarea
                 rows={4}
                 readOnly
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 resize-none"
+                className="w-full px-4 py-3 bg-white/[0.05] border border-white/10 rounded-xl font-medium text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300/40 resize-none placeholder:text-white/30"
                 placeholder={broadcastTemplates.length === 0 ? 'No approved WhatsApp templates available yet.' : 'Select a template to preview it here.'}
                 value={broadcastMessage}
               />
-              <p className="text-[10px] text-slate-400 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name, {'{{plan}}'} fills the plan name, and {'{{gym_name}}'} fills your gym name.</p>
+              <p className="text-[10px] text-white/38 mt-1 font-semibold">{'{{name}}'} auto-fills each member&apos;s name, {'{{plan}}'} fills the plan name, and {'{{gym_name}}'} fills your gym name.</p>
             </div>
           </div>
-          <div className="dashboard-broadcast-footer shrink-0 border-t border-slate-100 bg-white px-4 pt-3">
+          <div className="dashboard-broadcast-footer shrink-0 border-t border-white/10 bg-[#07111f] px-4 pt-3">
             <button
               type="submit"
               disabled={isAutomating || !broadcastTemplateKey || broadcastTemplates.length === 0}
