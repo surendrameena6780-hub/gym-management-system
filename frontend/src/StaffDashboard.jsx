@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import {
   Users, ClipboardCheck, MessageSquare, UserPlus, Target, CreditCard,
@@ -11,9 +11,47 @@ import useCountUp from './utils/useCountUp';
 import { reportClientError } from './utils/clientErrorReporter';
 import { getApiOrigin } from './utils/apiUrl';
 import { INLINE_IMAGE_ACCEPT, filesToInlineImageDataUrls } from './utils/inlineImageUpload';
+import { BroadcastModal } from './dashboard/DashboardPageModals';
+import { getPriorityMeta, resolveBroadcastTemplateSuggestion } from './dashboard/dashboardPageUtils';
+import {
+  buildBroadcastActionMeta,
+  isDashboardActionCompleted,
+  normalizeActionMembers,
+  normalizeBroadcastTemplates,
+} from './dashboard/dashboardActionUtils';
 
 const API = getApiOrigin();
 const STAFF_TASK_MAX_PHOTOS = 4;
+const STAFF_DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
+
+const unwrapApiData = (payload) => {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return unwrapApiData(payload.data);
+  }
+  return payload;
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const asObject = (value, fallback = {}) => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value : fallback
+);
+
+const toMemberItems = (payload) => {
+  const data = unwrapApiData(payload);
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data)) return data;
+  return [];
+};
+
+const audienceToSegment = (audience) => ({
+  All: 'ALL',
+  Active: 'ACTIVE',
+  Expiring: 'EXPIRING_7_DAYS',
+  Expired: 'EXPIRED',
+  Ghosts: 'GHOSTS',
+  HighChurn: 'HIGH_CHURN',
+}[audience] || 'ALL');
 
 const formatTaskDateTime = (value) => {
   if (!value) return 'No deadline';
@@ -67,7 +105,7 @@ function AnimatedNumber({ value, prefix = '', suffix = '' }) {
 }
 
 function StaffDashboard({ appRuntime, isActive = true }) {
-  const { navigateTo, currentUser, canAccessPage, token } = appRuntime;
+  const { navigateTo, currentUser, canAccessPage, token, toast } = appRuntime;
   const displayRole = String(currentUser?.staff_role || currentUser?.role || 'Staff')
     .toLowerCase()
     .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
@@ -77,8 +115,10 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     activeMembers: 0,
     expiringThisWeek: 0,
     pendingDues: 0,
+    expiredMembers: 0,
     expiringMembers: [],
     totalMembers: 0,
+    unpaidMembers: 0,
     recentCheckins: [],
   });
   const [loading, setLoading] = useState(true);
@@ -90,6 +130,20 @@ function StaffDashboard({ appRuntime, isActive = true }) {
   const [taskCompletionNotes, setTaskCompletionNotes] = useState('');
   const [taskCompletionPhotos, setTaskCompletionPhotos] = useState([]);
   const [taskCompletionError, setTaskCompletionError] = useState('');
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [isAutomating, setIsAutomating] = useState(false);
+  const [broadcastAudience, setBroadcastAudience] = useState('All');
+  const [broadcastTemplateKey, setBroadcastTemplateKey] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastSearch, setBroadcastSearch] = useState('');
+  const [broadcastCustomIds, setBroadcastCustomIds] = useState([]);
+  const [broadcastTemplates, setBroadcastTemplates] = useState([]);
+  const [broadcastActionMeta, setBroadcastActionMeta] = useState(null);
+  const [campaignLogs, setCampaignLogs] = useState([]);
+  const [actionMembers, setActionMembers] = useState({ expiring: [], expired: [], unpaid: [] });
+  const [gymName, setGymName] = useState('');
+  const broadcastComposerRequestRef = useRef(null);
+  const broadcastComposerLoadedRef = useRef(false);
 
   const staffRole = String(currentUser?.staff_role || '').toUpperCase();
   const perms = useMemo(() => Array.isArray(currentUser?.permissions) ? currentUser.permissions : [], [currentUser?.permissions]);
@@ -101,6 +155,13 @@ function StaffDashboard({ appRuntime, isActive = true }) {
   const canPayments = canAccessPage?.('Payments') ?? true;
   const canLeads = canAccessPage?.('Leads') ?? true;
   const canClasses = canAccessPage?.('Classes') ?? true;
+  const authHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+  const canMessageMembers = useMemo(() => (
+    ['MANAGER', 'RECEPTION', 'TRAINER', 'ACCOUNTANT'].includes(staffRole)
+    || hasPerm('members:write')
+    || hasPerm('attendance:write')
+    || hasPerm('payments:write')
+  ), [hasPerm, staffRole]);
 
   const fetchStats = useCallback(async () => {
     if (!token) return;
@@ -110,18 +171,14 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       const requests = [];
       if (canMembers) {
         requests.push(axios.get(`${API}/api/members/summary`, { headers }).catch(() => ({ data: {} })));
-        requests.push(axios.get(`${API}/api/members`, {
-          headers,
-          params: {
-            status: 'EXPIRING SOON',
-            paginate: true,
-            page: 1,
-            limit: 5,
-          },
-        }).catch(() => ({ data: { items: [] } })));
+        requests.push(axios.get(`${API}/api/members`, { headers, params: { status: 'EXPIRING SOON' } }).catch(() => ({ data: [] })));
+        requests.push(axios.get(`${API}/api/members`, { headers, params: { status: 'EXPIRED' } }).catch(() => ({ data: [] })));
+        requests.push(axios.get(`${API}/api/members`, { headers, params: { status: 'UNPAID' } }).catch(() => ({ data: [] })));
       } else {
         requests.push(Promise.resolve({ data: {} }));
-        requests.push(Promise.resolve({ data: { items: [] } }));
+        requests.push(Promise.resolve({ data: [] }));
+        requests.push(Promise.resolve({ data: [] }));
+        requests.push(Promise.resolve({ data: [] }));
       }
       if (canAttendance) {
         requests.push(axios.get(`${API}/api/attendance/overview`, { headers }).catch(() => ({ data: {} })));
@@ -133,25 +190,30 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       } else {
         requests.push(Promise.resolve({ data: {} }));
       }
-      const [membersSummaryRes, expiringMembersRes, attendanceRes, payStatsRes] = await Promise.all(requests);
-      const membersSummary = membersSummaryRes.data && typeof membersSummaryRes.data === 'object' ? membersSummaryRes.data : {};
-      const expiringMembers = Array.isArray(expiringMembersRes.data?.items)
-        ? expiringMembersRes.data.items
-        : Array.isArray(expiringMembersRes.data)
-          ? expiringMembersRes.data
-          : [];
-      expiringMembers.sort((left, right) => Number(left?.days_left || 9999) - Number(right?.days_left || 9999));
+      const [membersSummaryRes, expiringMembersRes, expiredMembersRes, unpaidMembersRes, attendanceRes, payStatsRes] = await Promise.all(requests);
+      const membersSummary = asObject(unwrapApiData(membersSummaryRes.data), {});
+      const expiringMembers = normalizeActionMembers(toMemberItems(expiringMembersRes.data))
+        .sort((left, right) => Number(left?.days_left || 9999) - Number(right?.days_left || 9999));
+      const expiredMembers = normalizeActionMembers(toMemberItems(expiredMembersRes.data));
+      const unpaidMembers = normalizeActionMembers(toMemberItems(unpaidMembersRes.data));
       const attendData = attendanceRes.data?.data || attendanceRes.data || {};
       const todayCheckins = Number(attendData.totalToday || attendData.today_count || attendData.total || 0);
       const recentCheckins = Array.isArray(attendData.recent) ? attendData.recent.slice(0, 5) : [];
       const payStats = payStatsRes.data?.data || payStatsRes.data || {};
+      setActionMembers({
+        expiring: expiringMembers,
+        expired: expiredMembers,
+        unpaid: unpaidMembers,
+      });
       setStats({
         todayCheckins,
         activeMembers: Number(membersSummary.active || 0),
         totalMembers: Number(membersSummary.total || 0),
         expiringThisWeek: Number(membersSummary.expiring_soon || expiringMembers.length || 0),
+        expiredMembers: Number(membersSummary.expired || expiredMembers.length || 0),
         pendingDues: Number(payStats.pending_dues || 0),
         expiringMembers: expiringMembers.slice(0, 5),
+        unpaidMembers: Number(membersSummary.unpaid || unpaidMembers.length || 0),
         recentCheckins,
       });
     } catch (err) {
@@ -175,14 +237,70 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     }
   }, [token]);
 
+  const fetchCampaignLogs = useCallback(async () => {
+    if (!token || !canMessageMembers) {
+      setCampaignLogs([]);
+      return;
+    }
+
+    try {
+      const res = await axios.get(`${API}/api/notifications/campaign/logs`, {
+        headers: { 'x-auth-token': token },
+        params: { limit: 100 },
+        timeout: STAFF_DASHBOARD_REQUEST_TIMEOUT_MS,
+      });
+      setCampaignLogs(asArray(unwrapApiData(res.data)));
+    } catch (err) {
+      if (err?.response?.status !== 403) {
+        reportClientError('Staff campaign logs fetch', err);
+      }
+    }
+  }, [canMessageMembers, token]);
+
+  const ensureBroadcastComposer = useCallback(async ({ preferCache = true } = {}) => {
+    if (!token || !canMessageMembers) return [];
+    if (preferCache && broadcastComposerLoadedRef.current) {
+      return broadcastTemplates;
+    }
+    if (broadcastComposerRequestRef.current) {
+      return broadcastComposerRequestRef.current;
+    }
+
+    const request = axios.get(`${API}/api/notifications/campaign/composer`, {
+      ...authHeaders,
+      timeout: STAFF_DASHBOARD_REQUEST_TIMEOUT_MS,
+    }).then((res) => {
+      const payload = asObject(unwrapApiData(res.data), {});
+      const templates = normalizeBroadcastTemplates(payload.templates);
+      const nextGymName = String(payload.gym_name || '').trim();
+
+      setBroadcastTemplates(templates);
+      if (nextGymName) {
+        setGymName(nextGymName);
+      }
+      broadcastComposerLoadedRef.current = true;
+      return templates;
+    }).catch((err) => {
+      if (err?.response?.status !== 403) {
+        reportClientError('Staff broadcast composer fetch', err);
+      }
+      return [];
+    }).finally(() => {
+      broadcastComposerRequestRef.current = null;
+    });
+
+    broadcastComposerRequestRef.current = request;
+    return request;
+  }, [authHeaders, broadcastTemplates, canMessageMembers, token]);
+
   useEffect(() => {
     if (!token || !isActive) return undefined;
 
-    Promise.all([fetchStats(), fetchTasks()]);
+    Promise.all([fetchStats(), fetchTasks(), canMessageMembers ? fetchCampaignLogs() : Promise.resolve()]);
 
     const refreshStats = () => {
       if (document.visibilityState && document.visibilityState === 'hidden') return;
-      Promise.all([fetchStats(), fetchTasks()]);
+      Promise.all([fetchStats(), fetchTasks(), canMessageMembers ? fetchCampaignLogs() : Promise.resolve()]);
     };
     window.addEventListener('gymvault:data-changed', refreshStats);
     window.addEventListener('gymvault:app-resumed', refreshStats);
@@ -191,22 +309,177 @@ function StaffDashboard({ appRuntime, isActive = true }) {
       window.removeEventListener('gymvault:data-changed', refreshStats);
       window.removeEventListener('gymvault:app-resumed', refreshStats);
     };
-  }, [fetchStats, fetchTasks, isActive, token]);
+  }, [canMessageMembers, fetchCampaignLogs, fetchStats, fetchTasks, isActive, token]);
+
+  useEffect(() => {
+    if (!token || !canMessageMembers) return;
+    ensureBroadcastComposer({ preferCache: true }).catch(() => {});
+  }, [canMessageMembers, ensureBroadcastComposer, token]);
+
+  useEffect(() => {
+    if (!showBroadcastModal) return;
+    ensureBroadcastComposer({ preferCache: false }).catch(() => {});
+  }, [ensureBroadcastComposer, showBroadcastModal]);
+
+  useEffect(() => {
+    if (!token || !isActive || !canMessageMembers) return undefined;
+
+    const handleTemplateStateRefresh = (event) => {
+      if (event?.detail?.scope && event.detail.scope !== 'messaging-templates') {
+        return;
+      }
+
+      broadcastComposerLoadedRef.current = false;
+      broadcastComposerRequestRef.current = null;
+      setBroadcastTemplates([]);
+
+      if (showBroadcastModal) {
+        ensureBroadcastComposer({ preferCache: false }).catch(() => {});
+      }
+    };
+
+    window.addEventListener('gymvault:data-changed', handleTemplateStateRefresh);
+    return () => {
+      window.removeEventListener('gymvault:data-changed', handleTemplateStateRefresh);
+    };
+  }, [canMessageMembers, ensureBroadcastComposer, isActive, showBroadcastModal, token]);
+
+  useEffect(() => {
+    if (!showBroadcastModal || broadcastTemplates.length === 0) return;
+
+    const hasCurrentTemplate = broadcastTemplates.some((item) => item.template_key === broadcastTemplateKey);
+    if (broadcastTemplateKey && hasCurrentTemplate) {
+      return;
+    }
+
+    const suggestedKey = resolveBroadcastTemplateSuggestion(broadcastAudience);
+    const nextTemplate = broadcastTemplates.find((item) => item.template_key === suggestedKey) || broadcastTemplates[0] || null;
+    setBroadcastTemplateKey(nextTemplate?.template_key || '');
+  }, [broadcastAudience, broadcastTemplateKey, broadcastTemplates, showBroadcastModal]);
+
+  useEffect(() => {
+    if (!broadcastTemplateKey) {
+      setBroadcastMessage('');
+      return;
+    }
+
+    const selected = broadcastTemplates.find((item) => item.template_key === broadcastTemplateKey);
+    if (!selected) {
+      setBroadcastMessage('');
+      return;
+    }
+
+    let resolved = String(selected.whatsapp_text || '');
+    if (gymName) {
+      resolved = resolved.replace(/\{\{gym_name\}\}/gi, gymName);
+    }
+    setBroadcastMessage(resolved);
+  }, [broadcastTemplateKey, broadcastTemplates, gymName]);
 
   const sendExpiryReminder = useCallback(async (memberId) => {
-    if (!token || reminderLoadingId) return;
+    if (!token || reminderLoadingId || !canMessageMembers) return;
     setReminderLoadingId(memberId);
     try {
-      await axios.post(`${API}/api/notifications/reminders/send`, {
+      const res = await axios.post(`${API}/api/notifications/reminders/send`, {
         member_ids: [memberId],
-        template_key: 'EXPIRY_REMINDER',
       }, { headers: { 'x-auth-token': token } });
-    } catch (_err) {
-      // silent — toast not available in StaffDashboard
+
+      const payload = asObject(unwrapApiData(res.data), {});
+      const delivered = Number(payload.sent_to_count || 0);
+      const failed = Number(payload.failed_count || 0);
+      const firstFailure = asArray(payload.failures)[0];
+
+      if (delivered > 0) {
+        toast?.(
+          failed > 0
+            ? `Reminder sent to ${delivered} member, ${failed} failed.`
+            : `Reminder sent to ${delivered} member.`,
+          failed > 0 ? 'warning' : 'success',
+        );
+      } else {
+        toast?.(firstFailure?.reason || 'Reminder could not be sent.', 'warning');
+      }
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Reminder send failed.', 'error');
     } finally {
       setReminderLoadingId(null);
     }
-  }, [token, reminderLoadingId]);
+  }, [canMessageMembers, reminderLoadingId, toast, token]);
+
+  const openBroadcastDraft = useCallback((audience, actionMeta = null) => {
+    setBroadcastAudience(audience);
+    setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
+    setBroadcastSearch('');
+    setBroadcastCustomIds([]);
+    setBroadcastMessage('');
+    setBroadcastActionMeta(actionMeta || null);
+    setShowBroadcastModal(true);
+    ensureBroadcastComposer({ preferCache: false }).catch(() => {});
+  }, [ensureBroadcastComposer]);
+
+  const openBroadcastDraftForMembers = useCallback(({ memberIds = [], audience = 'All', actionMeta = null }) => {
+    const normalizedIds = Array.from(new Set(
+      asArray(memberIds)
+        .map((id) => Number.parseInt(id, 10))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ));
+
+    setBroadcastAudience(audience);
+    setBroadcastTemplateKey(resolveBroadcastTemplateSuggestion(audience));
+    setBroadcastSearch('');
+    setBroadcastCustomIds(normalizedIds);
+    setBroadcastMessage('');
+    setBroadcastActionMeta(actionMeta || null);
+    setShowBroadcastModal(true);
+    ensureBroadcastComposer({ preferCache: false }).catch(() => {});
+  }, [ensureBroadcastComposer]);
+
+  const handleBroadcast = useCallback(async (event) => {
+    event.preventDefault();
+    if (!broadcastTemplateKey) {
+      toast?.('Select an approved WhatsApp template before sending the broadcast.', 'warning');
+      return;
+    }
+
+    try {
+      setIsAutomating(true);
+      const segment = audienceToSegment(broadcastAudience);
+      const res = await axios.post(`${API}/api/notifications/campaign/run`, {
+        segment,
+        channel: 'WHATSAPP',
+        template_key: broadcastTemplateKey || undefined,
+        message: broadcastMessage,
+        member_ids: broadcastCustomIds,
+        dashboard_action_key: broadcastActionMeta?.actionKey || undefined,
+        dashboard_audience_hash: broadcastActionMeta?.audienceHash || undefined,
+        dashboard_expected_count: broadcastActionMeta?.expectedCount || undefined,
+      }, authHeaders);
+
+      const payload = asObject(unwrapApiData(res.data), {});
+      const failed = Number(payload.failed_count || 0);
+      const delivered = Number(payload.sent_to_count || 0);
+      toast?.(
+        failed > 0
+          ? `Campaign delivered to ${delivered} members, ${failed} failed.`
+          : `Campaign delivered to ${delivered} members.`,
+        failed > 0 ? 'warning' : 'success',
+      );
+
+      setShowBroadcastModal(false);
+      setBroadcastTemplateKey('');
+      setBroadcastMessage('');
+      setBroadcastSearch('');
+      setBroadcastCustomIds([]);
+      setBroadcastActionMeta(null);
+
+      await Promise.all([fetchCampaignLogs(), fetchStats()]);
+      window.dispatchEvent(new CustomEvent('gymvault:data-changed', { detail: { source: 'staff-dashboard-broadcast' } }));
+    } catch (err) {
+      toast?.(err?.response?.data?.error || 'Broadcast send failed.', 'error');
+    } finally {
+      setIsAutomating(false);
+    }
+  }, [API, authHeaders, broadcastActionMeta, broadcastAudience, broadcastCustomIds, broadcastMessage, broadcastTemplateKey, fetchCampaignLogs, fetchStats, toast]);
 
   const closeTaskModal = useCallback(() => {
     setActiveTask(null);
@@ -297,12 +570,13 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     if (canAttendance) actions.push({ label: 'Check-In', icon: CheckCircle, gradient: 'linear-gradient(135deg, #10b981, #059669)', action: () => navigateTo('Attendance') });
     if ((isReception || hasPerm('members:write')) && canMembers) actions.push({ label: 'Add Member', icon: UserPlus, gradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)', action: () => navigateTo('Members', 'All', { action: 'add' }) });
     if (canPayments) actions.push({ label: 'Collect Due', icon: DollarSign, gradient: 'linear-gradient(135deg, #f59e0b, #d97706)', action: () => navigateTo('Payments') });
+    if (canMessageMembers) actions.push({ label: 'Broadcast', icon: MessageSquare, gradient: 'linear-gradient(135deg, #059669, #10b981)', action: () => openBroadcastDraft('All') });
     if (canPayments) actions.push({ label: 'Payroll', icon: Wallet, gradient: 'linear-gradient(135deg, #ec4899, #db2777)', action: () => navigateTo('Payments', 'All', { section: 'payroll-list' }) });
     if (canLeads) actions.push({ label: 'Leads', icon: Target, gradient: 'linear-gradient(135deg, #f97316, #ea580c)', action: () => navigateTo('Leads') });
     if (canClasses) actions.push({ label: 'Classes', icon: CalendarDays, gradient: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', action: () => navigateTo('Classes') });
     if (canMembers) actions.push({ label: 'Members', icon: Users, gradient: 'linear-gradient(135deg, #3b82f6, #2563eb)', action: () => navigateTo('Members') });
     return actions.slice(0, 8);
-  }, [canAttendance, canMembers, canPayments, canLeads, canClasses, canSupport, isReception, hasPerm, navigateTo]);
+  }, [canAttendance, canClasses, canLeads, canMembers, canMessageMembers, canPayments, hasPerm, isReception, navigateTo, openBroadcastDraft]);
 
   const taskCounts = useMemo(() => {
     return tasks.reduce((counts, task) => {
@@ -381,6 +655,184 @@ function StaffDashboard({ appRuntime, isActive = true }) {
     ? 'Use the Quick Check-In button to speed up member arrivals during peak hours.'
     : 'Use the Quick Actions above to navigate to your most-used features efficiently.';
 
+  const broadcastMemberPool = useMemo(() => normalizeActionMembers([
+    ...actionMembers.expiring,
+    ...actionMembers.expired,
+    ...actionMembers.unpaid,
+  ]), [actionMembers]);
+
+  const broadcastSelectedMembers = useMemo(() => {
+    if (broadcastCustomIds.length === 0) return [];
+    const idSet = new Set(broadcastCustomIds.map((id) => Number(id)));
+    return broadcastMemberPool.filter((member) => idSet.has(Number(member.id)));
+  }, [broadcastCustomIds, broadcastMemberPool]);
+
+  const broadcastSearchResults = useMemo(() => {
+    const query = String(broadcastSearch || '').trim().toLowerCase();
+    if (!query) return [];
+
+    return broadcastMemberPool
+      .filter((member) => !broadcastCustomIds.includes(Number(member.id)))
+      .filter((member) => {
+        const name = String(member.full_name || '').toLowerCase();
+        const phone = String(member.phone || '').toLowerCase();
+        const email = String(member.email || '').toLowerCase();
+        return name.includes(query) || phone.includes(query) || email.includes(query);
+      })
+      .slice(0, 8);
+  }, [broadcastCustomIds, broadcastMemberPool, broadcastSearch]);
+
+  const broadcastAudiences = useMemo(() => [
+    { value: 'All', label: 'All Members', count: stats.totalMembers },
+    { value: 'Active', label: 'Active', count: stats.activeMembers },
+    { value: 'Expiring', label: 'Expiring Soon', count: stats.expiringThisWeek },
+    { value: 'Expired', label: 'Expired', count: stats.expiredMembers },
+  ], [stats.activeMembers, stats.expiredMembers, stats.expiringThisWeek, stats.totalMembers]);
+
+  const broadcastDashboardData = useMemo(() => ({
+    active: stats.activeMembers,
+    expiring7: stats.expiringThisWeek,
+    expired: stats.expiredMembers,
+    ghosts: 0,
+    churnHigh: 0,
+  }), [stats.activeMembers, stats.expiredMembers, stats.expiringThisWeek]);
+
+  const campaignPreviewCount = useMemo(() => {
+    if (broadcastCustomIds.length > 0) {
+      return broadcastCustomIds.length;
+    }
+
+    switch (broadcastAudience) {
+      case 'Active':
+        return Number(stats.activeMembers || 0);
+      case 'Expiring':
+        return Number(stats.expiringThisWeek || 0);
+      case 'Expired':
+        return Number(stats.expiredMembers || 0);
+      default:
+        return Number(stats.totalMembers || 0);
+    }
+  }, [broadcastAudience, broadcastCustomIds.length, stats.activeMembers, stats.expiredMembers, stats.expiringThisWeek, stats.totalMembers]);
+
+  const actionRows = useMemo(() => {
+    if (!canMessageMembers) return [];
+
+    const expiringImmediateMembers = actionMembers.expiring.filter((member) => {
+      const daysLeft = Number(member?.days_left || 0);
+      return daysLeft > 0 && daysLeft <= 3;
+    });
+    const expiringFollowupMembers = actionMembers.expiring.filter((member) => {
+      const daysLeft = Number(member?.days_left || 0);
+      return daysLeft > 3 && daysLeft <= 7;
+    });
+
+    const buildRow = ({ id, title, members, audience, cta, priority, sub, urgency, actionKey }) => {
+      const actionMeta = buildBroadcastActionMeta({ actionKey, members });
+      return {
+        id,
+        title,
+        count: members.length,
+        cta,
+        priority,
+        sub,
+        urgency,
+        isCompleted: isDashboardActionCompleted(campaignLogs, actionMeta),
+        action: () => openBroadcastDraftForMembers({
+          memberIds: members.map((member) => member.id),
+          audience,
+          actionMeta,
+        }),
+      };
+    };
+
+    return [
+      buildRow({
+        id: 'EXPIRING_72H',
+        title: 'Renew plans expiring in 72 hours',
+        members: expiringImmediateMembers,
+        audience: 'Expiring',
+        cta: expiringImmediateMembers.length === 1 ? 'Send Renewal' : 'Open Renewal',
+        priority: 'P0',
+        sub: 'Renew these today',
+        urgency: 'Today',
+        actionKey: 'EXPIRING_IMMEDIATE_BROADCAST',
+      }),
+      buildRow({
+        id: 'EXPIRING_7D',
+        title: 'Follow up on memberships expiring this week',
+        members: expiringFollowupMembers,
+        audience: 'Expiring',
+        cta: expiringFollowupMembers.length === 1 ? 'Send Reminder' : 'Open Reminder',
+        priority: 'P1',
+        sub: 'Follow up this week',
+        urgency: 'This week',
+        actionKey: 'EXPIRING_SOON_BROADCAST',
+      }),
+      buildRow({
+        id: 'UNPAID_ACTIVATION',
+        title: 'Start unpaid members',
+        members: actionMembers.unpaid,
+        audience: 'All',
+        cta: actionMembers.unpaid.length === 1 ? 'Send Nudge' : 'Open Broadcast',
+        priority: 'P1',
+        sub: 'Finish pending activations',
+        urgency: 'This week',
+        actionKey: 'UNPAID_ACTIVATION_BROADCAST',
+      }),
+      buildRow({
+        id: 'EXPIRED_WINBACK',
+        title: 'Win back expired members',
+        members: actionMembers.expired,
+        audience: 'Expired',
+        cta: actionMembers.expired.length === 1 ? 'Send Winback' : 'Open Winback',
+        priority: 'P1',
+        sub: 'Bring them back',
+        urgency: 'This week',
+        actionKey: 'EXPIRED_WINBACK_BROADCAST',
+      }),
+    ].filter((row) => row.count > 0 && !row.isCompleted).slice(0, 4);
+  }, [actionMembers, campaignLogs, canMessageMembers, openBroadcastDraftForMembers]);
+
+  const urgentActionCount = useMemo(() => actionRows.filter((row) => row.priority === 'P0' || row.priority === 'P1').length, [actionRows]);
+
+  const broadcastModalController = useMemo(() => ({
+    broadcastAudiences,
+    broadcastAudience,
+    broadcastMessage,
+    broadcastSearch,
+    broadcastSearchResults,
+    broadcastSelectedMembers,
+    broadcastTemplateKey,
+    broadcastTemplates,
+    campaignPreviewCount,
+    campaignPreviewLoading: false,
+    dashboardData: broadcastDashboardData,
+    handleBroadcast,
+    isAutomating,
+    members: broadcastMemberPool,
+    setBroadcastAudience,
+    setBroadcastCustomIds,
+    setBroadcastSearch,
+    setBroadcastTemplateKey,
+    setShowBroadcastModal,
+    showBroadcastModal,
+  }), [
+    broadcastAudiences,
+    broadcastAudience,
+    broadcastDashboardData,
+    broadcastMemberPool,
+    broadcastMessage,
+    broadcastSearch,
+    broadcastSearchResults,
+    broadcastSelectedMembers,
+    broadcastTemplateKey,
+    broadcastTemplates,
+    campaignPreviewCount,
+    handleBroadcast,
+    isAutomating,
+    showBroadcastModal,
+  ]);
+
   return (
     <>
       <style>{`
@@ -450,6 +902,66 @@ function StaffDashboard({ appRuntime, isActive = true }) {
             ))}
           </div>
         </div>
+
+        {canMessageMembers && (
+          <div className="sd-card sd-card-3 rounded-[20px] border p-4 sm:p-5"
+            style={{
+              background: 'linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)',
+              borderColor: 'rgba(226,232,240,0.95)',
+              boxShadow: '0 20px 55px -26px rgba(15,23,42,0.18)',
+            }}>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Need Attention</p>
+                <p className="mt-1 text-sm font-black text-slate-900">Shared member actions</p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-500">These actions use the same broadcast history as the owner dashboard, so completed rows disappear in both places.</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-rose-500">{urgentActionCount} urgent</p>
+                <button
+                  type="button"
+                  onClick={() => openBroadcastDraft('All')}
+                  className="mt-2 inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700 transition-colors hover:bg-emerald-100"
+                >
+                  <MessageSquare size={12} /> Open Modal
+                </button>
+              </div>
+            </div>
+
+            {actionRows.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-8 text-center">
+                <p className="text-sm font-black text-slate-800">No member actions pending right now.</p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-500">Renewals, unpaid activations, and winback actions will appear here automatically.</p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {actionRows.map((row) => {
+                  const meta = getPriorityMeta(row.priority);
+                  return (
+                    <div key={row.id} className={`rounded-2xl border px-3.5 py-3 flex items-center justify-between gap-3 ${meta.rowClass}`}>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${meta.badgeClass}`}>{meta.label}</span>
+                          <span className="text-sm font-black text-slate-900 leading-none">{row.count}</span>
+                          <span className="text-[13px] leading-tight font-semibold text-slate-700 truncate">{row.title}</span>
+                        </div>
+                        <p className="mt-1 text-[10px] font-semibold text-slate-500">{row.sub} · {row.urgency}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={row.action}
+                        disabled={isAutomating || row.count === 0}
+                        className={`shrink-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] rounded-xl transition-all duration-200 ${meta.buttonClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        {row.cta}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ════════════ KPI CARDS ════════════ */}
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
@@ -553,16 +1065,18 @@ function StaffDashboard({ appRuntime, isActive = true }) {
                     }}>
                     {member.days_left}d left
                   </span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); sendExpiryReminder(member.id); }}
-                    disabled={reminderLoadingId === member.id}
-                    className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-40"
-                    style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.2)' }}
-                    title="Send Reminder"
-                  >
-                    <Send size={13} className={`text-indigo-300 ${reminderLoadingId === member.id ? 'animate-pulse' : ''}`} />
-                  </button>
+                  {canMessageMembers ? (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); sendExpiryReminder(member.id); }}
+                      disabled={reminderLoadingId === member.id}
+                      className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-40"
+                      style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.2)' }}
+                      title="Send Reminder"
+                    >
+                      <Send size={13} className={`text-indigo-300 ${reminderLoadingId === member.id ? 'animate-pulse' : ''}`} />
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -738,20 +1252,26 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         )}
 
         {/* ════════════ FOOTER TIP ════════════ */}
-        <div className="sd-card sd-card-8 rounded-2xl border border-indigo-300/70 bg-gradient-to-r from-indigo-100 via-violet-50 to-fuchsia-100 p-4 shadow-sm shadow-indigo-950/10">
+        <div className="sd-card sd-card-8 rounded-2xl border p-4 shadow-[0_20px_55px_-24px_rgba(15,23,42,0.45)]"
+          style={{
+            background: 'linear-gradient(145deg, #111827 0%, #0f172a 50%, #1e293b 100%)',
+            borderColor: 'rgba(250,204,21,0.24)',
+          }}>
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
+              style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>
               <Sparkles size={14} className="text-white" />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-700">Pro Tip</p>
-              <p className="text-[13px] font-semibold text-slate-800 mt-1 leading-relaxed">{tip}</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-amber-300">Pro Tip</p>
+              <p className="text-[13px] font-semibold text-white mt-1 leading-relaxed">{tip}</p>
             </div>
           </div>
         </div>
 
       </div>
+
+      <BroadcastModal controller={broadcastModalController} />
 
       {activeTask && (
         <div className="app-modal-shell z-[92] bg-slate-950/70 backdrop-blur-sm" onClick={closeTaskModal}>

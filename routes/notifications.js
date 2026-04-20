@@ -260,6 +260,16 @@ const canSendManualReminder = (user = {}) => {
         || hasPermission(user, 'payments:write');
 };
 
+const canManageCampaignAutomation = (user = {}) => canSendManualReminder(user);
+
+const requireCampaignAutomationPermission = (req, res, next) => {
+    if (canManageCampaignAutomation(req.user)) {
+        return next();
+    }
+
+    return fail(res, 403, 'FORBIDDEN_CAMPAIGN_SEND', 'You do not have permission to send member campaigns.');
+};
+
 const reminderRequestLimiter = rateLimit({
     windowMs: REMINDER_REQUEST_WINDOW_MS,
     max: REMINDER_REQUEST_LIMIT,
@@ -874,7 +884,7 @@ router.post('/reminders/send', auth, saasMiddleware, reminderRequestLimiter, asy
 });
 
 // --- 6. CAMPAIGN COMPOSER DATA (dashboard modal preload) ---
-router.get('/campaign/composer', auth, saasMiddleware, requireOwner, async (req, res) => {
+router.get('/campaign/composer', auth, saasMiddleware, requireCampaignAutomationPermission, async (req, res) => {
     try {
         await ensureMessagingSchema();
 
@@ -916,7 +926,7 @@ router.get('/campaign/composer', auth, saasMiddleware, requireOwner, async (req,
 });
 
 // --- 7. SEGMENT PREVIEW (automation pipeline) ---
-router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req, res) => {
+router.get('/campaign/segments', auth, saasMiddleware, requireCampaignAutomationPermission, async (req, res) => {
     try {
         const gymId = req.user.gym_id;
         const segment = String(req.query.segment || 'ALL').toUpperCase();
@@ -936,7 +946,7 @@ router.get('/campaign/segments', auth, saasMiddleware, requireOwner, async (req,
 });
 
 // --- 8. RUN CAMPAIGN (returns links + writes audit log) ---
-router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res) => {
+router.post('/campaign/run', auth, saasMiddleware, requireCampaignAutomationPermission, async (req, res) => {
     try {
         await ensureMessagingSchema();
 
@@ -1218,7 +1228,7 @@ router.post('/campaign/run', auth, saasMiddleware, requireOwner, async (req, res
 });
 
 // --- 8. CAMPAIGN HISTORY LOG ---
-router.get('/campaign/logs', auth, saasMiddleware, requireOwner, async (req, res) => {
+router.get('/campaign/logs', auth, saasMiddleware, requireCampaignAutomationPermission, async (req, res) => {
     try {
         await ensureMessagingSchema();
         const gymId = req.user.gym_id;

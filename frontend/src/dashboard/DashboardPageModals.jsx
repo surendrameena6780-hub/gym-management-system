@@ -557,6 +557,7 @@ const PaymentModal = ({ controller }) => {
 
 const BroadcastModal = ({ controller }) => {
   const {
+    broadcastAudiences,
     broadcastAudience,
     broadcastMessage,
     broadcastSearch,
@@ -579,6 +580,17 @@ const BroadcastModal = ({ controller }) => {
   } = controller;
 
   if (!showBroadcastModal) return null;
+
+  const audienceOptions = Array.isArray(broadcastAudiences) && broadcastAudiences.length > 0
+    ? broadcastAudiences
+    : [
+        { value: 'All', label: 'All Members', count: members.length },
+        { value: 'Active', label: 'Active', count: dashboardData.active },
+        { value: 'Expiring', label: 'Expiring Soon', count: dashboardData.expiring7 },
+        { value: 'Expired', label: 'Expired', count: dashboardData.expired },
+        { value: 'Ghosts', label: 'Ghosts', count: dashboardData.ghosts },
+        { value: 'HighChurn', label: 'High Churn', count: dashboardData.churnHigh },
+      ];
 
   return (
     <>
@@ -652,14 +664,7 @@ const BroadcastModal = ({ controller }) => {
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Target Audience</label>
               <div className="flex flex-wrap gap-1.5">
-                {[
-                  { value: 'All', label: 'All Members', count: members.length },
-                  { value: 'Active', label: 'Active', count: dashboardData.active },
-                  { value: 'Expiring', label: 'Expiring Soon', count: dashboardData.expiring7 },
-                  { value: 'Expired', label: 'Expired', count: dashboardData.expired },
-                  { value: 'Ghosts', label: 'Ghosts', count: dashboardData.ghosts },
-                  { value: 'HighChurn', label: 'High Churn', count: dashboardData.churnHigh },
-                ].map(({ value, label, count }) => (
+                {audienceOptions.map(({ value, label, count }) => (
                   <button
                     key={value}
                     type="button"
@@ -854,4 +859,5 @@ const DashboardPageModals = ({ controller }) => (
   </>
 );
 
+export { BroadcastModal };
 export default DashboardPageModals;
