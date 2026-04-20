@@ -358,27 +358,6 @@ const SectionShell = ({ title, subtitle, actions, children }) => (
   </div>
 );
 
-const StatTile = ({ label, value, sublabel, tone = 'indigo' }) => {
-  const palette = {
-    indigo: 'rgba(99,102,241,0.12)',
-    emerald: 'rgba(16,185,129,0.12)',
-    amber: 'rgba(251,191,36,0.12)',
-    rose: 'rgba(244,63,94,0.12)',
-    sky: 'rgba(14,165,233,0.12)',
-  };
-
-  return (
-    <div
-      className="p-3 rounded-2xl"
-      style={{ background: palette[tone] || 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
-    >
-      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</p>
-      <p className="text-white font-black text-xl mt-1">{value}</p>
-      {sublabel ? <p className="text-slate-400 text-[11px] font-semibold mt-1">{sublabel}</p> : null}
-    </div>
-  );
-};
-
 const MemberAvatar = ({ member, previewUrl, size = 68 }) => {
   const resolvedProfile = previewUrl || normalizeProfileImageUrl(member?.profile_pic);
   const initials = String(member?.full_name || 'M').trim().charAt(0).toUpperCase() || 'M';
@@ -1079,34 +1058,7 @@ export default function MemberSelfServiceHub({ member, token, onMemberChange }) 
           </button>
         )}
       >
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <StatTile
-            label="Plan"
-            value={currentMembership?.plan_name || 'None'}
-            sublabel={currentMembership?.end_date ? `Valid till ${formatDate(currentMembership.end_date)}` : 'No active coverage'}
-            tone="indigo"
-          />
-          <StatTile
-            label="Pending Dues"
-            value={`₹${formatCollectionAmount(dashboard?.payments_summary?.pending_total || 0)}`}
-            sublabel={`${dashboard?.payments_summary?.pending_count || 0} record${(dashboard?.payments_summary?.pending_count || 0) === 1 ? '' : 's'} pending`}
-            tone={(dashboard?.payments_summary?.pending_total || 0) > 0 ? 'amber' : 'emerald'}
-          />
-          <StatTile
-            label="Upcoming Classes"
-            value={String(dashboard?.classes_summary?.upcoming_count || 0)}
-            sublabel={canBookClasses ? 'Bookings are open' : 'Requires active membership'}
-            tone="sky"
-          />
-          <StatTile
-            label="Status"
-            value={visibleStatus || 'UNPAID'}
-            sublabel={summaryMember?.status === 'ACTIVE' ? 'Account is in good standing' : 'Attention may be required'}
-            tone={summaryMember?.status === 'ACTIVE' ? 'emerald' : 'rose'}
-          />
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4" role="tablist" aria-label="Member self service sections">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" role="tablist" aria-label="Member self service sections">
           {TABS.map((tab) => (
             <button
               key={tab.key}

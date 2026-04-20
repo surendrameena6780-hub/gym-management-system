@@ -432,40 +432,6 @@ function StaffDashboard({ appRuntime, isActive = true }) {
             <p className="text-lg sm:text-xl font-bold text-white/90 mt-0.5">{currentUser?.full_name || 'Team Member'}</p>
             <p className="text-[11px] font-semibold text-white/30 mt-1.5 sm:hidden">{dateStr}</p>
 
-            {/* Stats row inside hero */}
-            {!loading && (
-              <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {canAttendance && (
-                  <button type="button" onClick={() => navigateTo('Attendance')} className="text-left p-3 rounded-2xl bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] transition-colors backdrop-blur-sm">
-                    <p className="text-2xl sm:text-3xl font-black text-emerald-400"><AnimatedNumber value={stats.todayCheckins} /></p>
-                    <p className="text-[9px] font-black text-white/35 uppercase tracking-[0.18em] mt-1">Check-ins</p>
-                  </button>
-                )}
-                {canMembers && (
-                  <button type="button" onClick={() => navigateTo('Members', 'Active')} className="text-left p-3 rounded-2xl bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] transition-colors backdrop-blur-sm">
-                    <p className="text-2xl sm:text-3xl font-black text-blue-400"><AnimatedNumber value={stats.activeMembers} /></p>
-                    <p className="text-[9px] font-black text-white/35 uppercase tracking-[0.18em] mt-1">Active</p>
-                  </button>
-                )}
-                {canMembers && (
-                  <button type="button" onClick={() => navigateTo('Members', 'Expiring Soon')} className="text-left p-3 rounded-2xl bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] transition-colors backdrop-blur-sm">
-                    <p className="text-2xl sm:text-3xl font-black text-orange-400"><AnimatedNumber value={stats.expiringThisWeek} /></p>
-                    <p className="text-[9px] font-black text-white/35 uppercase tracking-[0.18em] mt-1">Expiring</p>
-                  </button>
-                )}
-                {canPayments ? (
-                  <button type="button" onClick={() => navigateTo('Payments')} className="text-left p-3 rounded-2xl bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] transition-colors backdrop-blur-sm">
-                    <p className="text-2xl sm:text-3xl font-black text-amber-300"><AnimatedNumber value={stats.pendingDues} prefix="₹" /></p>
-                    <p className="text-[9px] font-black text-white/35 uppercase tracking-[0.18em] mt-1">Dues</p>
-                  </button>
-                ) : canMembers ? (
-                  <button type="button" onClick={() => navigateTo('Members')} className="text-left p-3 rounded-2xl bg-white/[0.07] border border-white/[0.08] hover:bg-white/[0.12] transition-colors backdrop-blur-sm">
-                    <p className="text-2xl sm:text-3xl font-black text-violet-300"><AnimatedNumber value={stats.totalMembers} /></p>
-                    <p className="text-[9px] font-black text-white/35 uppercase tracking-[0.18em] mt-1">Total</p>
-                  </button>
-                ) : null}
-              </div>
-            )}
           </div>
         </div>
 
@@ -772,15 +738,15 @@ function StaffDashboard({ appRuntime, isActive = true }) {
         )}
 
         {/* ════════════ FOOTER TIP ════════════ */}
-        <div className="sd-card sd-card-8 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 p-4 shadow-sm">
+        <div className="sd-card sd-card-8 rounded-2xl border border-indigo-300/70 bg-gradient-to-r from-indigo-100 via-violet-50 to-fuchsia-100 p-4 shadow-sm shadow-indigo-950/10">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
               style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
               <Sparkles size={14} className="text-white" />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-600">Pro Tip</p>
-              <p className="text-[13px] font-medium text-slate-700 mt-1 leading-relaxed">{tip}</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-700">Pro Tip</p>
+              <p className="text-[13px] font-semibold text-slate-800 mt-1 leading-relaxed">{tip}</p>
             </div>
           </div>
         </div>

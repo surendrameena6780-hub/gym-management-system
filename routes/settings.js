@@ -193,6 +193,18 @@ const MESSAGE_TEMPLATE_DEFAULTS = [
         sms_text: 'Holiday update from {{gym_name}}: gym timings may change. Contact reception for details.',
     },
     {
+        template_key: 'HOLIDAY_HOURS',
+        title: 'Holiday Timings Update',
+        whatsapp_text: 'Hi {{name}}, {{gym_name}} will follow special holiday timings for the upcoming break. Please check with the front desk before your visit so we can guide you properly.',
+        sms_text: 'Holiday timings update from {{gym_name}}. Please confirm your visit time with the front desk before coming in.',
+    },
+    {
+        template_key: 'HOLIDAY_CLOSURE',
+        title: 'Holiday Closure Notice',
+        whatsapp_text: 'Hi {{name}}, {{gym_name}} will remain closed for the upcoming holiday period. We will be back soon and look forward to seeing you after the break.',
+        sms_text: '{{gym_name}} will remain closed during the upcoming holiday period. Contact reception if you need any help.',
+    },
+    {
         template_key: 'RENEWAL_REMINDER',
         title: 'Renewal Reminder',
         whatsapp_text: 'Friendly reminder, {{name}}: your current plan is due for renewal. Confirm today to continue uninterrupted access at {{gym_name}} today.',
@@ -210,14 +222,37 @@ const MESSAGE_TEMPLATE_DEFAULTS = [
         whatsapp_text: 'Hi {{name}}, {{message}} Reply here if you want the team at {{gym_name}} to continue helping you.',
         sms_text: 'Hi {{name}}, {{message}} Reply here if you need help from {{gym_name}}.',
     },
+    {
+        template_key: 'CLASS_REMINDER',
+        title: 'Class Reminder',
+        whatsapp_text: 'Hi {{name}}, this is a quick reminder from {{gym_name}} about your upcoming class. Please arrive a little early so the session can start on time.',
+        sms_text: 'Reminder from {{gym_name}}: your class is coming up soon. Please arrive a little early.',
+    },
 ];
 
+const normalizeTemplateTitleKey = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const BUILT_IN_TEMPLATES_BY_KEY = new Map(MESSAGE_TEMPLATE_DEFAULTS.map((template) => [template.template_key, template]));
+const BUILT_IN_TEMPLATES_BY_TITLE = new Map(MESSAGE_TEMPLATE_DEFAULTS.map((template) => [normalizeTemplateTitleKey(template.title), template]));
 const MESSAGE_TEMPLATE_KEYS = MESSAGE_TEMPLATE_DEFAULTS.map((template) => template.template_key);
 const MAX_MESSAGE_TEMPLATES = 50;
 const MESSAGE_TEMPLATE_KEY_SET = new Set(MESSAGE_TEMPLATE_KEYS);
 const CUSTOM_TEMPLATE_KEY_PREFIX = 'CUSTOM_';
 
 const isBuiltInTemplateKey = (value) => MESSAGE_TEMPLATE_KEY_SET.has(String(value || '').trim().toUpperCase());
+
+const getBuiltInTemplateDefinition = (template = {}) => {
+    const normalizedKey = String(template?.template_key || '').trim().toUpperCase();
+    if (normalizedKey && BUILT_IN_TEMPLATES_BY_KEY.has(normalizedKey)) {
+        return BUILT_IN_TEMPLATES_BY_KEY.get(normalizedKey) || null;
+    }
+
+    const normalizedTitle = normalizeTemplateTitleKey(template?.title);
+    if (normalizedTitle && BUILT_IN_TEMPLATES_BY_TITLE.has(normalizedTitle)) {
+        return BUILT_IN_TEMPLATES_BY_TITLE.get(normalizedTitle) || null;
+    }
+
+    return null;
+};
 
 const normalizeTemplateKey = (value, field = 'template_key') => {
     const key = ensureTrimmedString(value, {
@@ -265,10 +300,12 @@ const buildCustomTemplateKey = (title, rawText) => {
 };
 
 const sortTemplatesForSettings = (templates = []) => [...templates].sort((left, right) => {
-    const leftKey = String(left?.template_key || '').trim().toUpperCase();
-    const rightKey = String(right?.template_key || '').trim().toUpperCase();
-    const leftBuiltIn = isBuiltInTemplateKey(leftKey);
-    const rightBuiltIn = isBuiltInTemplateKey(rightKey);
+    const leftBuiltInTemplate = getBuiltInTemplateDefinition(left);
+    const rightBuiltInTemplate = getBuiltInTemplateDefinition(right);
+    const leftKey = String(leftBuiltInTemplate?.template_key || left?.template_key || '').trim().toUpperCase();
+    const rightKey = String(rightBuiltInTemplate?.template_key || right?.template_key || '').trim().toUpperCase();
+    const leftBuiltIn = Boolean(leftBuiltInTemplate);
+    const rightBuiltIn = Boolean(rightBuiltInTemplate);
 
     if (leftBuiltIn && rightBuiltIn) {
         return MESSAGE_TEMPLATE_KEYS.indexOf(leftKey) - MESSAGE_TEMPLATE_KEYS.indexOf(rightKey);
@@ -665,7 +702,53 @@ const areTemplateDefinitionsEquivalent = (currentTemplate, nextTemplate) => {
 };
 
 const seedMessageTemplates = async (gymId, db = pool) => {
+    const existingTemplatesRes = await db.query(
+        `SELECT template_key, title
+         FROM gym_message_templates
+         WHERE gym_id = $1`,
+        [gymId]
+    );
+
+    const existingTemplates = Array.isArray(existingTemplatesRes.rows) ? existingTemplatesRes.rows : [];
+    const existingKeys = new Set(existingTemplates.map((template) => String(template.template_key || '').trim().toUpperCase()).filter(Boolean));
+
     for (const template of MESSAGE_TEMPLATE_DEFAULTS) {
+        if (existingKeys.has(template.template_key)) {
+            continue;
+        }
+
+        const legacyTemplate = existingTemplates.find((item) => {
+            const currentKey = String(item?.template_key || '').trim().toUpperCase();
+            if (!currentKey || isBuiltInTemplateKey(currentKey)) {
+                return false;
+            }
+            return normalizeTemplateTitleKey(item?.title) === normalizeTemplateTitleKey(template.title);
+        });
+
+        if (legacyTemplate) {
+            await db.query(
+                `UPDATE gym_message_templates
+                 SET template_key = $1,
+                     title = $2,
+                     whatsapp_text = $3,
+                     sms_text = $4,
+                     whatsapp_template_category = $5,
+                     updated_at = NOW()
+                 WHERE gym_id = $6 AND template_key = $7`,
+                [
+                    template.template_key,
+                    template.title,
+                    template.whatsapp_text,
+                    template.sms_text,
+                    pickTemplateCategory(template.template_key, template.whatsapp_text),
+                    gymId,
+                    legacyTemplate.template_key,
+                ]
+            );
+            existingKeys.add(template.template_key);
+            continue;
+        }
+
         const templateName = buildTemplateName(gymId, template.template_key, template.whatsapp_text);
         const templateCategory = pickTemplateCategory(template.template_key, template.whatsapp_text);
 
@@ -688,6 +771,8 @@ const seedMessageTemplates = async (gymId, db = pool) => {
              DO NOTHING`,
             [gymId, template.template_key, template.title, template.whatsapp_text, template.sms_text, templateName, templateCategory]
         );
+
+        existingKeys.add(template.template_key);
     }
 };
 
@@ -752,7 +837,7 @@ const loadMessagingState = async (gymId) => {
         gym: gymRes.rows[0] || {},
         templates: sortTemplatesForSettings((templatesRes.rows || []).map((template) => ({
             ...template,
-            is_custom: !isBuiltInTemplateKey(template.template_key),
+            is_custom: !getBuiltInTemplateDefinition(template),
         }))),
     };
 };
