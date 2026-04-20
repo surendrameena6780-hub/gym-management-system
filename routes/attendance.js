@@ -25,7 +25,6 @@ const ATTENDANCE_SUMMARY_TTL = 15; // seconds
 const CHECKIN_METHODS = new Set(['STAFF', 'QR', 'SELF', 'RFID']);
 const RFID_DEVICE_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DISABLED']);
 const MEMBER_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_MEMBER_QR_TTL_MS || `${12 * 60 * 60 * 1000}`, 10);
-const GYM_QR_TTL_MS = Number.parseInt(process.env.ATTENDANCE_GYM_QR_TTL_MS || `${5 * 60 * 1000}`, 10);
 const RFID_DUPLICATE_WINDOW_SECONDS = Number.parseInt(process.env.RFID_DUPLICATE_WINDOW_SECONDS || '10', 10);
 const RFID_EVENT_MAX_AGE_MS = Number.parseInt(process.env.RFID_EVENT_MAX_AGE_MS || `${5 * 60 * 1000}`, 10);
 const RFID_EVENT_MAX_FUTURE_SKEW_MS = Number.parseInt(process.env.RFID_EVENT_MAX_FUTURE_SKEW_MS || '60000', 10);
@@ -653,13 +652,32 @@ const buildMemberQrPayload = (gym_id, member_id) => {
     };
 };
 
-const buildGymQrPayload = (gym_id) => {
-    const issuedAt = Date.now();
+const getGymQrDayWindow = async (gym_id, db = pool) => {
+    const timezone = await getGymTimezone(db, gym_id);
+    const result = await db.query(
+        `SELECT
+            TO_CHAR(NOW() AT TIME ZONE $1, 'YYYY-MM-DD') AS local_date,
+            (EXTRACT(EPOCH FROM (date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1)) * 1000)::BIGINT AS starts_at_ms,
+            ((EXTRACT(EPOCH FROM ((date_trunc('day', NOW() AT TIME ZONE $1) + interval '1 day') AT TIME ZONE $1)) * 1000)::BIGINT - 1) AS expires_at_ms`,
+        [timezone]
+    );
+
+    return {
+        timezone,
+        local_date: String(result.rows[0]?.local_date || ''),
+        starts_at_ms: Number(result.rows[0]?.starts_at_ms || Date.now()),
+        expires_at_ms: Number(result.rows[0]?.expires_at_ms || Date.now()),
+    };
+};
+
+const buildGymQrPayload = async (gym_id, db = pool) => {
+    const dayWindow = await getGymQrDayWindow(gym_id, db);
     return {
         type: 'GYM_QR',
         gym_id,
-        issued_at: issuedAt,
-        expires_at: issuedAt + GYM_QR_TTL_MS,
+        issued_at: dayWindow.starts_at_ms,
+        expires_at: dayWindow.expires_at_ms,
+        valid_for_date: dayWindow.local_date,
     };
 };
 
@@ -784,10 +802,12 @@ router.get('/qr/gym', auth, saasMiddleware, requirePermission('attendance:write'
             return res.status(404).json({ error: 'Gym not found.' });
         }
 
-        const token = signAttendanceToken(buildGymQrPayload(gym.id));
+        const qrPayload = await buildGymQrPayload(gym.id);
+        const token = signAttendanceToken(qrPayload);
         res.json({
             token,
-            expires_at: Date.now() + GYM_QR_TTL_MS,
+            expires_at: qrPayload.expires_at,
+            valid_for_date: qrPayload.valid_for_date,
             gym: {
                 id: gym.id,
                 name: gym.name,

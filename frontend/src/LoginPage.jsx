@@ -23,6 +23,14 @@ const iBase  = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(2
 
 const PORTAL_MODE_STORAGE_KEY = 'gymvault_last_portal_mode';
 const MEMBER_AUTO_RESTORE_STORAGE_KEY = 'gymvault_member_portal_restore';
+const MEMBER_CAMERA_PERMISSION_STORAGE_KEY = 'gymvault_member_camera_permission';
+const MEMBER_LOCATION_PERMISSION_STORAGE_KEY = 'gymvault_member_location_permission';
+
+const normalizeStoredPermissionState = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'granted' || normalized === 'denied') return normalized;
+  return 'prompt';
+};
 
 const normalizeMemberPhoneInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
 
@@ -107,6 +115,31 @@ const writeMemberAutoRestoreHint = (enabled) => {
     }
   } catch {
     // Ignore storage failures for auth hints.
+  }
+};
+
+const readStoredPermissionState = (storageKey) => {
+  if (typeof window === 'undefined') return 'prompt';
+
+  try {
+    return normalizeStoredPermissionState(window.localStorage.getItem(storageKey));
+  } catch {
+    return 'prompt';
+  }
+};
+
+const writeStoredPermissionState = (storageKey, state) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const normalized = normalizeStoredPermissionState(state);
+    if (normalized === 'prompt') {
+      window.localStorage.removeItem(storageKey);
+    } else {
+      window.localStorage.setItem(storageKey, normalized);
+    }
+  } catch {
+    // Ignore storage failures for permission hints.
   }
 };
 
@@ -406,8 +439,24 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     gym_qr_available: true,
   });
   const [portalNotice, setPortalNotice] = useState(null);
+  const [cameraPermissionState, setCameraPermissionState] = useState(() => readStoredPermissionState(MEMBER_CAMERA_PERMISSION_STORAGE_KEY));
+  const [locationPermissionState, setLocationPermissionState] = useState(() => readStoredPermissionState(MEMBER_LOCATION_PERMISSION_STORAGE_KEY));
 
   const memberHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+
+  const updateCameraPermissionState = useCallback((nextState) => {
+    const normalized = normalizeStoredPermissionState(nextState);
+    setCameraPermissionState(normalized);
+    writeStoredPermissionState(MEMBER_CAMERA_PERMISSION_STORAGE_KEY, normalized);
+    return normalized;
+  }, []);
+
+  const updateLocationPermissionState = useCallback((nextState) => {
+    const normalized = normalizeStoredPermissionState(nextState);
+    setLocationPermissionState(normalized);
+    writeStoredPermissionState(MEMBER_LOCATION_PERMISSION_STORAGE_KEY, normalized);
+    return normalized;
+  }, []);
 
   const loadAttendance = useCallback(async () => {
     setLoadingAtt(true);
@@ -449,6 +498,87 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     }
   }, [member.gym_name, memberHeaders]);
 
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return undefined;
+
+    let cancelled = false;
+    const cleanupFns = [];
+
+    const watchPermission = async (name, applyState) => {
+      try {
+        const status = await navigator.permissions.query({ name });
+        if (cancelled) return;
+
+        applyState(status.state);
+
+        const handleChange = () => applyState(status.state);
+        if (typeof status.addEventListener === 'function') {
+          status.addEventListener('change', handleChange);
+          cleanupFns.push(() => status.removeEventListener('change', handleChange));
+        } else {
+          status.onchange = handleChange;
+          cleanupFns.push(() => {
+            status.onchange = null;
+          });
+        }
+      } catch {
+        // Ignore unsupported permission names/browsers.
+      }
+    };
+
+    watchPermission('camera', updateCameraPermissionState);
+    watchPermission('geolocation', updateLocationPermissionState);
+
+    return () => {
+      cancelled = true;
+      cleanupFns.forEach((cleanup) => cleanup());
+    };
+  }, [updateCameraPermissionState, updateLocationPermissionState]);
+
+  const getMemberPosition = useCallback(async () => {
+    if (!navigator.geolocation) {
+      const error = new Error('Location is not supported on this device.');
+      error.code = 0;
+      throw error;
+    }
+
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          updateLocationPermissionState('granted');
+          resolve(position);
+        },
+        (error) => {
+          if (typeof error?.code === 'number' && error.code === 1) {
+            updateLocationPermissionState('denied');
+          }
+          reject(error);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: locationPermissionState === 'granted' ? 120000 : 45000,
+        }
+      );
+    });
+  }, [locationPermissionState, updateLocationPermissionState]);
+
+  const openScanModal = useCallback(async () => {
+    if (selfCheckinBusy || geoCheckinBusy) return;
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setPortalNotice({ type: 'error', message: 'Camera is not supported on this device.' });
+      return;
+    }
+
+    if (cameraPermissionState === 'denied') {
+      setPortalNotice({ type: 'error', message: 'Camera permission is blocked. Enable it once in browser settings to use QR self check-in.' });
+      return;
+    }
+
+    setScanModalOpen(true);
+  }, [cameraPermissionState, geoCheckinBusy, selfCheckinBusy]);
+
   const submitGymQr = useCallback(async (decodedText) => {
     setSelfCheckinBusy(true);
     try {
@@ -476,13 +606,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
 
     setGeoCheckinBusy(true);
     try {
-      const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          resolve,
-          reject,
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 45000 }
-        );
-      });
+      const position = await getMemberPosition();
 
       const res = await axios.post('/api/attendance/member/checkin/self', {
         latitude: position.coords.latitude,
@@ -500,7 +624,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     } catch (err) {
       if (typeof err?.code === 'number') {
         const geoMessage = err.code === 1
-          ? 'Location permission is required for geo self check-in.'
+          ? 'Location permission is required for geo self check-in. Allow it once in browser settings and supported devices will remember it.'
           : err.code === 2
             ? 'Could not detect your location right now. Move closer to the entrance and try again.'
             : 'Location request timed out. Try again while standing near the gym entrance.';
@@ -516,7 +640,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     } finally {
       setGeoCheckinBusy(false);
     }
-  }, [loadAttendance, memberHeaders]);
+  }, [getMemberPosition, loadAttendance, memberHeaders]);
 
   useEffect(() => {
     loadAttendance();
@@ -632,11 +756,16 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
         );
 
         if (!cancelled) {
+          updateCameraPermissionState('granted');
           setScannerBooting(false);
         }
       } catch (_err) {
         await stopScanner();
         if (!cancelled) {
+          const errorText = String(_err?.message || _err?.name || '').toLowerCase();
+          if (errorText.includes('permission') || errorText.includes('denied') || errorText.includes('notallowed')) {
+            updateCameraPermissionState('denied');
+          }
           setScannerBooting(false);
           setScanModalOpen(false);
           setPortalNotice({ type: 'error', message: 'Could not start the camera. Please check permission and try again.' });
@@ -652,7 +781,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
       setScannerBooting(false);
       stopScanner();
     };
-  }, [scanModalOpen, submitGymQr]);
+  }, [scanModalOpen, submitGymQr, updateCameraPermissionState]);
 
   const copyMemberQr = async () => {
     if (!memberQr?.token) return;
@@ -884,7 +1013,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
 
               <button
                 type="button"
-                onClick={() => setScanModalOpen(true)}
+                onClick={openScanModal}
                 disabled={selfCheckinBusy || geoCheckinBusy}
                 className="w-full mt-4 flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl text-sm font-black text-white transition-all duration-200 active:scale-[0.985] disabled:opacity-60"
                 style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>

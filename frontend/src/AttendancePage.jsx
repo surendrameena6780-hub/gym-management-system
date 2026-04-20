@@ -111,6 +111,14 @@ const formatDateTime = (value) => {
   return `${date.toLocaleDateString('en-GB')} · ${date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
 };
 
+const formatDateOnly = (value) => {
+  if (!value) return '—';
+  const rawValue = typeof value === 'string' && !value.includes('T') ? `${value}T00:00:00` : value;
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-GB');
+};
+
 const unwrapApiData = (payload) => {
   if (payload && typeof payload === 'object' && 'data' in payload) {
     return unwrapApiData(payload.data);
@@ -559,9 +567,10 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
       setQrModalState({
         type: 'gym',
         title: 'Gym Self Check-In QR',
-        subtitle: 'Members can scan this from the member portal to check in without reception help.',
+        subtitle: 'Members can scan this from the member portal to check in without reception help. The code stays the same for the full day and rotates on the next gym day.',
         token: payload.token || '',
         expiresAt: payload.expires_at,
+        validForDate: payload.valid_for_date || '',
         accent: 'indigo',
         meta: payload.gym || {},
       });
@@ -1717,6 +1726,7 @@ function AttendancePage({ appRuntime, isActive = true, onOpenRfidSetup, focusSec
                     <p><span className="text-slate-400">Gym:</span> {qrModalState.meta?.name || 'Your gym'}</p>
                     <p><span className="text-slate-400">Use:</span> Member app self check-in</p>
                     <p><span className="text-slate-400">Gate rule:</span> Expired or unpaid members are still blocked by backend validation.</p>
+                    <p><span className="text-slate-400">Valid for:</span> {formatDateOnly(qrModalState.validForDate)}</p>
                   </>
                 )}
                 <p><span className="text-slate-400">Expires:</span> {formatDateTime(qrModalState.expiresAt)}</p>
