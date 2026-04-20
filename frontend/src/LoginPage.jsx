@@ -175,16 +175,6 @@ function GoogleIcon() {
   );
 }
 
-// ─── Apple SVG icon ───────────────────────────────────────────────────────────
-function AppleIcon() {
-  return (
-    <svg width="15" height="18" viewBox="0 0 814 1000" fill="white" aria-hidden>
-      <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 790.9 0 694.5 0 604.5 0 450.9 100.9 266.7 234.4 200.71c39.9-20.1 83.5-31.4 128.7-31.4 90 0 136.4 39.5 247.2 39.5 97.4 0 156.1-39.5 243.3-39.5 30.7 0 108.4 6.5 158.5 55.7z"/>
-      <path d="M449.7 156.5C478.5 117.6 500.1 63.2 500.1 8.8c0-8.1-.6-16.2-2.5-23.7-55.9 2.5-121.9 37.1-159.6 83.3-30.7 37.1-56.5 94.7-56.5 152.9 0 8.1 1.3 16.2 1.9 18.7 3.1.6 8.1 1.3 13.1 1.3 50.3 0 113.8-33.2 152.2-84.8z"/>
-    </svg>
-  );
-}
-
 // ─── Reusable social button ───────────────────────────────────────────────────
 function SocialBtn({ icon, label, onClick }) {
   return (
@@ -1610,26 +1600,6 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
     window.location.href = buildApiUrl('/api/auth/google?mode=login');
   };
 
-  const handleApple = () => {
-    setNotice('');
-    if (!window.AppleID) {
-      setError('Apple Sign-In is not configured. Use email or Google instead.');
-      return;
-    }
-    window.AppleID.auth.signIn()
-      .then(async (resp) => {
-        const id_token = resp?.authorization?.id_token;
-        const name     = [resp?.user?.name?.firstName, resp?.user?.name?.lastName].filter(Boolean).join(' ');
-        try {
-          const res = await axios.post('/api/auth/apple', { id_token, full_name: name });
-          rememberOwnerPortalMode();
-          setToken(res.data.token, res.data.user);
-          window.history.pushState({}, '', '/dashboard');
-        } catch (err) { setError(err?.response?.data?.message || 'Apple Sign-In failed.'); }
-      })
-      .catch((err) => { if (err?.error !== 'popup_closed_by_user') setError('Apple Sign-In failed. Please try again.'); });
-  };
-
   // ── Member phone login ─────────────────────────────────────────────────────
   const requestMemberOtpForProfile = useCallback(async ({ phoneValue = phone, memberId = selectedMemberProfileId, skipLoading = false } = {}) => {
     const normalizedPhone = normalizeMemberPhoneInput(phoneValue);
@@ -2118,7 +2088,6 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
             <>
               <div className="space-y-2.5 mb-6">
                 <SocialBtn icon={<GoogleIcon />} label="Continue with Google" onClick={handleGoogle} />
-                <SocialBtn icon={<AppleIcon />}  label="Continue with Apple"  onClick={handleApple}  />
               </div>
 
               <div className="flex items-center gap-3 mb-6">
@@ -2174,7 +2143,7 @@ export default function LoginPage({ setToken, onShowSignup, authErrorCode = '', 
                   {showForgotEmailHint && (
                     <div className="px-3.5 py-3 rounded-xl text-[11px] font-medium text-slate-300 leading-relaxed"
                       style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                      If you originally signed up with Google or Apple, use that provider. Otherwise ask your gym owner or GymVault support to confirm the email registered on your account.
+                      If you originally signed up with Google, use that provider. Otherwise ask your gym owner or GymVault support to confirm the email registered on your account.
                     </div>
                   )}
                 </div>
