@@ -23,6 +23,7 @@ import {
 const API = getApiOrigin();
 const STAFF_TASK_MAX_PHOTOS = 4;
 const STAFF_DASHBOARD_REQUEST_TIMEOUT_MS = 12000;
+const STAFF_MEMBER_CREATE_ROLES = new Set(['MANAGER', 'RECEPTION', 'TRAINER', 'WORKER', 'ACCOUNTANT', 'STAFF']);
 
 const unwrapApiData = (payload) => {
   if (payload && typeof payload === 'object' && 'data' in payload) {
@@ -174,12 +175,32 @@ function StaffDashboard({ appRuntime, isActive = true }) {
   const canLeads = canAccessPage?.('Leads') ?? true;
   const canClasses = canAccessPage?.('Classes') ?? true;
   const authHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
+  const canCreateMembers = canMembers && (hasPerm('members:write') || hasPerm('members:create') || STAFF_MEMBER_CREATE_ROLES.has(staffRole));
   const canMessageMembers = useMemo(() => (
     ['MANAGER', 'RECEPTION', 'TRAINER', 'ACCOUNTANT'].includes(staffRole)
     || hasPerm('members:write')
     || hasPerm('attendance:write')
     || hasPerm('payments:write')
   ), [hasPerm, staffRole]);
+  const isAnyStaffModalOpen = showBroadcastModal || Boolean(activeTask);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncModalClass = () => {
+      root.classList.toggle('app-modal-open', Boolean(isActive && isAnyStaffModalOpen));
+    };
+
+    syncModalClass();
+
+    window.addEventListener('pageshow', syncModalClass);
+    window.addEventListener('gymvault:app-resumed', syncModalClass);
+
+    return () => {
+      window.removeEventListener('pageshow', syncModalClass);
+      window.removeEventListener('gymvault:app-resumed', syncModalClass);
+      root.classList.remove('app-modal-open');
+    };
+  }, [isActive, isAnyStaffModalOpen]);
 
   const fetchStats = useCallback(async () => {
     if (!token) return;
@@ -586,14 +607,14 @@ function StaffDashboard({ appRuntime, isActive = true }) {
   const quickActions = useMemo(() => {
     const actions = [];
     if (canAttendance) actions.push({ label: 'Check-In', icon: CheckCircle, gradient: 'linear-gradient(135deg, #10b981, #059669)', action: () => navigateTo('Attendance') });
-    if ((isReception || hasPerm('members:write')) && canMembers) actions.push({ label: 'Add Member', icon: UserPlus, gradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)', action: () => navigateTo('Members', 'All', { action: 'add' }) });
+    if (canCreateMembers) actions.push({ label: 'Add Member', icon: UserPlus, gradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)', action: () => navigateTo('Members', 'All', { action: 'add' }) });
     if (canPayments) actions.push({ label: 'Collect Due', icon: DollarSign, gradient: 'linear-gradient(135deg, #f59e0b, #d97706)', action: () => navigateTo('Payments') });
     if (canMessageMembers) actions.push({ label: 'Broadcast', icon: MessageSquare, gradient: 'linear-gradient(135deg, #059669, #10b981)', action: () => openBroadcastDraft('All') });
     if (canPayments) actions.push({ label: 'Payroll', icon: Wallet, gradient: 'linear-gradient(135deg, #ec4899, #db2777)', action: () => navigateTo('Payments', 'All', { section: 'payroll-list' }) });
     if (canLeads) actions.push({ label: 'Leads', icon: Target, gradient: 'linear-gradient(135deg, #f97316, #ea580c)', action: () => navigateTo('Leads') });
     if (canMembers) actions.push({ label: 'Members', icon: Users, gradient: 'linear-gradient(135deg, #3b82f6, #2563eb)', action: () => navigateTo('Members') });
     return actions.slice(0, 4);
-  }, [canAttendance, canLeads, canMembers, canMessageMembers, canPayments, hasPerm, isReception, navigateTo, openBroadcastDraft]);
+  }, [canAttendance, canCreateMembers, canLeads, canMembers, canMessageMembers, canPayments, navigateTo, openBroadcastDraft]);
 
   const taskCounts = useMemo(() => {
     return tasks.reduce((counts, task) => {
@@ -928,20 +949,9 @@ function StaffDashboard({ appRuntime, isActive = true }) {
               boxShadow: '0 24px 60px -28px rgba(15,23,42,0.55)',
             }}>
             <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-200">Need Attention</p>
-                <p className="mt-1 text-sm font-black text-white">Shared member actions</p>
-                <p className="mt-1 text-[11px] font-semibold text-white/55">These actions use the same broadcast history as the owner dashboard, so completed rows disappear in both places.</p>
-              </div>
+              <h3 className="text-base font-black text-white">Need Attention</h3>
               <div className="text-right shrink-0">
                 <p className="text-[10px] font-black uppercase tracking-widest text-rose-500">{urgentActionCount} urgent</p>
-                <button
-                  type="button"
-                  onClick={() => openBroadcastDraft('All')}
-                  className="mt-2 inline-flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/12 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-100 transition-colors hover:bg-emerald-500/18"
-                >
-                  <MessageSquare size={12} /> Open Modal
-                </button>
               </div>
             </div>
 

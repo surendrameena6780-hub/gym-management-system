@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../config/db');
 const auth = require('../middleware/authMiddleware');
 const saasMiddleware = require('../middleware/saasMiddleware');
-const { hasPermission, requirePermission } = require('../middleware/rbac');
+const { hasPermission, requireAnyPermission, requirePermission } = require('../middleware/rbac');
 const {
     createProfileUploadMiddleware,
     cleanupUploadedFile,
@@ -630,7 +630,7 @@ router.get('/:id', auth, saasMiddleware, requirePermission('members:read'), asyn
 });
 
 // --- 3. ADD MEMBER ---
-router.post('/add', auth, saasMiddleware, requirePermission('members:write'), uploadProfilePic, async (req, res) => {
+router.post('/add', auth, saasMiddleware, requireAnyPermission(['members:create', 'members:write']), uploadProfilePic, async (req, res) => {
     let client;
     try {
         const payload = req.body && typeof req.body === 'object' ? req.body : {};

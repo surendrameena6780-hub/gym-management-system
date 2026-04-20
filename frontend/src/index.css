@@ -250,8 +250,8 @@ html.gv-compact-ui main.app-scroll-shell > div {
   position: fixed;
   left: 0.75rem;
   right: 0.75rem;
-  bottom: calc(var(--app-keyboard-inset) + 0.5rem);
-  max-height: min(76vh, calc(var(--app-viewport-height) - var(--app-keyboard-inset) - 0.75rem));
+  bottom: calc(var(--safe-area-bottom) + var(--app-keyboard-inset) + 0.5rem);
+  max-height: min(76vh, calc(var(--app-viewport-height) - var(--safe-area-top) - var(--safe-area-bottom) - var(--app-keyboard-inset) - 1rem));
   display: flex;
   flex-direction: column;
   overflow: hidden;

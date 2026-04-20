@@ -3,6 +3,7 @@ const { pool } = require('../config/db');
 const { getRequestCookie, OWNER_AUTH_COOKIE } = require('../utils/authCookies');
 const { DEFAULT_BRANCH_ID, ensureBranchScopeSchema } = require('../utils/branchAccess');
 const { cacheGet, cacheSet, buildCacheKey } = require('../utils/cache');
+const { getDefaultPermissionsByStaffRole } = require('./rbac');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const AUTH_SESSION_CACHE_TTL = 60; // seconds
@@ -105,6 +106,12 @@ module.exports = async (req, res, next) => {
             });
         }
 
+        const resolvedPermissions = Array.isArray(session.permissions)
+            ? session.permissions
+            : String(session.role || decodedUser.role || '').toUpperCase() === 'OWNER'
+                ? ['*']
+                : getDefaultPermissionsByStaffRole(session.staff_role || decodedUser.staff_role);
+
         req.user = {
             ...decodedUser,
             id: session.id,
@@ -113,7 +120,7 @@ module.exports = async (req, res, next) => {
             role: session.role || decodedUser.role,
             staff_role: session.staff_role || decodedUser.staff_role,
             branch_id: session.branch_id || decodedUser.branch_id || DEFAULT_BRANCH_ID,
-            permissions: Array.isArray(session.permissions) ? session.permissions : decodedUser.permissions,
+            permissions: resolvedPermissions,
             is_active: session.user_is_active,
         };
         req.authToken = token;

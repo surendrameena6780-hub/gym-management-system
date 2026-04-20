@@ -1,5 +1,6 @@
 const STAFF_ROLE_PERMISSIONS = {
     MANAGER: [
+        'members:create',
         'members:read',
         'members:write',
         'attendance:read',
@@ -9,6 +10,7 @@ const STAFF_ROLE_PERMISSIONS = {
         'support:write',
     ],
     RECEPTION: [
+        'members:create',
         'members:read',
         'members:write',
         'attendance:read',
@@ -19,6 +21,7 @@ const STAFF_ROLE_PERMISSIONS = {
         'support:write',
     ],
     TRAINER: [
+        'members:create',
         'members:read',
         'attendance:read',
         'attendance:write',
@@ -26,6 +29,7 @@ const STAFF_ROLE_PERMISSIONS = {
         'support:write',
     ],
     WORKER: [
+        'members:create',
         'members:read',
         'attendance:read',
         'support:read',
@@ -37,6 +41,7 @@ const STAFF_ROLE_PERMISSIONS = {
         'support:write',
     ],
     ACCOUNTANT: [
+        'members:create',
         'members:read',
         'payments:read',
         'payments:write',
@@ -44,6 +49,7 @@ const STAFF_ROLE_PERMISSIONS = {
         'support:write',
     ],
     STAFF: [
+        'members:create',
         'members:read',
         'attendance:read',
         'support:read',
@@ -80,6 +86,11 @@ const hasPermission = (user, permission) => {
     return false;
 };
 
+const hasAnyPermission = (user, permissions = []) => {
+    if (normalizeString(user?.role) === 'OWNER') return true;
+    return permissions.some((permission) => hasPermission(user, permission));
+};
+
 const requireOwner = (req, res, next) => {
     if (normalizeString(req.user?.role) === 'OWNER') return next();
     return res.status(403).json({
@@ -101,11 +112,25 @@ const requirePermission = (permission) => (req, res, next) => {
     });
 };
 
+const requireAnyPermission = (permissions = []) => (req, res, next) => {
+    if (normalizeString(req.user?.role) === 'OWNER') return next();
+    if (hasAnyPermission(req.user, permissions)) return next();
+
+    return res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN_PERMISSION',
+        error: 'You do not have permission to perform this action.',
+        required_permission: permissions,
+    });
+};
+
 module.exports = {
     STAFF_ROLE_PERMISSIONS,
     getDefaultPermissionsByStaffRole,
     resolvePermissions,
     hasPermission,
+    hasAnyPermission,
     requireOwner,
     requirePermission,
+    requireAnyPermission,
 };

@@ -292,6 +292,8 @@ const hasPermission = (user, permission) => {
   return Boolean(scope && permissions.includes(`${scope}:*`));
 };
 
+const MEMBER_CREATE_STAFF_ROLES = new Set(['MANAGER', 'RECEPTION', 'TRAINER', 'WORKER', 'ACCOUNTANT', 'STAFF']);
+
 const normalizeMemberRecord = (member) => {
   const normalized = {
     ...member,
@@ -534,6 +536,9 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   const [editFile, setEditFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const canWriteMembers = hasPermission(currentUser, 'members:write');
+  const canCreateMembers = canWriteMembers
+    || hasPermission(currentUser, 'members:create')
+    || MEMBER_CREATE_STAFF_ROLES.has(String(currentUser?.staff_role || '').toUpperCase());
   const canWritePayments = hasPermission(currentUser, 'payments:write');
   const canWriteAttendance = hasPermission(currentUser, 'attendance:write');
 
@@ -932,13 +937,13 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
   }, [fetchMemberDocs, fetchMemberNotes, fetchMemberWaivers, loadMemberDetails, selectedMember?.id, showDetailsModal]);
 
   const openAddMemberModal = useCallback(() => {
-    if (!canWriteMembers) {
+    if (!canCreateMembers) {
       toast?.('You do not have permission to add members.', 'warning');
       return;
     }
     resetAddMemberForm();
     setShowAddModal(true);
-  }, [canWriteMembers, resetAddMemberForm, toast]);
+  }, [canCreateMembers, resetAddMemberForm, toast]);
 
   const openActivateModalForMember = useCallback((member) => {
     if (!canWritePayments) {
@@ -2132,7 +2137,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
 
   const handleAddMember = async (e) => {
     e.preventDefault();
-    if (!canWriteMembers) {
+    if (!canCreateMembers) {
       toast?.('You do not have permission to add members.', 'warning');
       return;
     }
@@ -2349,7 +2354,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
           </div>
           <div className="flex gap-2.5 w-full md:w-auto">
             <button type="button" aria-pressed={isBulkMode} onClick={() => { setIsBulkMode(!isBulkMode); setSelectedIds([]); }} className={`flex-1 desktop:flex-none px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 border text-sm transition-all ${isBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><ListChecks size={16} /> {isBulkMode ? 'Exit' : 'Bulk Select'}</button>
-            {canWriteMembers && <button onClick={openAddMemberModal} className="flex-1 desktop:flex-none text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-95 text-sm" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}><Plus size={16} /> Add Member</button>}
+            {canCreateMembers && <button onClick={openAddMemberModal} className="flex-1 desktop:flex-none text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-95 text-sm" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 4px 16px rgba(99,102,241,0.35)' }}><Plus size={16} /> Add Member</button>}
           </div>
         </div>
 
@@ -2376,7 +2381,7 @@ const MembersPage = ({ appRuntime, defaultFilter = 'All', focusMemberId = null, 
               <div className="w-20 h-20 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-6 text-slate-300"><Users size={40} /></div>
               <h2 className="text-2xl font-black text-slate-900 mb-2">Build Your Community!</h2>
               <p className="text-slate-500 font-bold mb-8 text-center max-w-xs">Your gym looks quiet. Start by adding your very first member.</p>
-              {canWriteMembers && <button onClick={openAddMemberModal} className="text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 transition-all active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 32px rgba(99,102,241,0.4)' }}><UserPlus size={20} /> Add First Member</button>}
+              {canCreateMembers && <button onClick={openAddMemberModal} className="text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 transition-all active:scale-95" style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', boxShadow: '0 8px 32px rgba(99,102,241,0.4)' }}><UserPlus size={20} /> Add First Member</button>}
             </div>
           ) : (
             <>
