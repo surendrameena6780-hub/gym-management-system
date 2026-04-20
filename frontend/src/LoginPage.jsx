@@ -128,6 +128,26 @@ const readStoredPermissionState = (storageKey) => {
   }
 };
 
+const isAppleMobileDevice = () => {
+  if (typeof navigator === 'undefined') return false;
+
+  const userAgent = String(navigator.userAgent || '');
+  const platform = String(navigator.platform || '');
+  const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+
+  return /iphone|ipad|ipod/i.test(userAgent) || (/mac/i.test(platform) && maxTouchPoints > 1);
+};
+
+const isStandalonePortalApp = () => {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return Boolean(window.matchMedia?.('(display-mode: standalone)')?.matches) || window.navigator?.standalone === true;
+  } catch {
+    return false;
+  }
+};
+
 const writeStoredPermissionState = (storageKey, state) => {
   if (typeof window === 'undefined') return;
 
@@ -426,6 +446,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
   const [memberQrLoading, setMemberQrLoading] = useState(true);
   const [memberQrModalOpen, setMemberQrModalOpen] = useState(false);
   const [scanModalOpen, setScanModalOpen] = useState(false);
+  const [scanActivationRequested, setScanActivationRequested] = useState(false);
   const [scannerBooting, setScannerBooting] = useState(false);
   const [selfCheckinBusy, setSelfCheckinBusy] = useState(false);
   const [geoCheckinBusy, setGeoCheckinBusy] = useState(false);
@@ -441,6 +462,11 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
   const [portalNotice, setPortalNotice] = useState(null);
   const [cameraPermissionState, setCameraPermissionState] = useState(() => readStoredPermissionState(MEMBER_CAMERA_PERMISSION_STORAGE_KEY));
   const [locationPermissionState, setLocationPermissionState] = useState(() => readStoredPermissionState(MEMBER_LOCATION_PERMISSION_STORAGE_KEY));
+  const [cameraPermissionHydrated, setCameraPermissionHydrated] = useState(false);
+  const [cameraPermissionSessionGranted, setCameraPermissionSessionGranted] = useState(false);
+
+  const appleMobileDevice = useMemo(() => isAppleMobileDevice(), []);
+  const standalonePortalApp = useMemo(() => isStandalonePortalApp(), []);
 
   const memberHeaders = useMemo(() => ({ headers: { 'x-auth-token': token } }), [token]);
 
@@ -457,6 +483,32 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
     writeStoredPermissionState(MEMBER_LOCATION_PERMISSION_STORAGE_KEY, normalized);
     return normalized;
   }, []);
+
+  const closeScanModal = useCallback(() => {
+    setScanActivationRequested(false);
+    setScanModalOpen(false);
+  }, []);
+
+  const refreshCameraPermissionState = useCallback(async () => {
+    let resolvedState = cameraPermissionState;
+    let resolvedViaQuery = false;
+
+    if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+      try {
+        const status = await navigator.permissions.query({ name: 'camera' });
+        resolvedState = updateCameraPermissionState(status.state);
+        resolvedViaQuery = true;
+      } catch {
+        resolvedState = normalizeStoredPermissionState(cameraPermissionState);
+      }
+    }
+
+    setCameraPermissionHydrated(true);
+    return {
+      state: normalizeStoredPermissionState(resolvedState),
+      resolvedViaQuery,
+    };
+  }, [cameraPermissionState, updateCameraPermissionState]);
 
   const loadAttendance = useCallback(async () => {
     setLoadingAtt(true);
@@ -526,8 +578,17 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
       }
     };
 
-    watchPermission('camera', updateCameraPermissionState);
+    watchPermission('camera', (nextState) => {
+      updateCameraPermissionState(nextState);
+      setCameraPermissionHydrated(true);
+    });
     watchPermission('geolocation', updateLocationPermissionState);
+
+    window.setTimeout(() => {
+      if (!cancelled) {
+        setCameraPermissionHydrated(true);
+      }
+    }, 0);
 
     return () => {
       cancelled = true;
@@ -571,13 +632,21 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
       return;
     }
 
-    if (cameraPermissionState === 'denied') {
+    const { state: livePermissionState, resolvedViaQuery } = await refreshCameraPermissionState();
+
+    if (livePermissionState === 'denied') {
       setPortalNotice({ type: 'error', message: 'Camera permission is blocked. Enable it once in browser settings to use QR self check-in.' });
       return;
     }
 
+    setScanActivationRequested(livePermissionState === 'granted' && (resolvedViaQuery || cameraPermissionSessionGranted));
     setScanModalOpen(true);
-  }, [cameraPermissionState, geoCheckinBusy, selfCheckinBusy]);
+  }, [cameraPermissionSessionGranted, geoCheckinBusy, refreshCameraPermissionState, selfCheckinBusy]);
+
+  const startScanCamera = useCallback(() => {
+    if (scannerBooting || selfCheckinBusy || geoCheckinBusy) return;
+    setScanActivationRequested(true);
+  }, [geoCheckinBusy, scannerBooting, selfCheckinBusy]);
 
   const submitGymQr = useCallback(async (decodedText) => {
     setSelfCheckinBusy(true);
@@ -708,7 +777,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
   }, [attendanceOptions?.gym?.id, member?.gym_id, member?.id, token]);
 
   useEffect(() => {
-    if (!scanModalOpen) return undefined;
+    if (!scanModalOpen || !scanActivationRequested) return undefined;
 
     let cancelled = false;
     let scanner = null;
@@ -747,7 +816,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
             await stopScanner();
             if (!cancelled) {
               setScannerBooting(false);
-              setScanModalOpen(false);
+              closeScanModal();
             }
             await submitGymQr(decodedText);
             qrScannerBusyRef.current = false;
@@ -757,6 +826,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
 
         if (!cancelled) {
           updateCameraPermissionState('granted');
+          setCameraPermissionSessionGranted(true);
           setScannerBooting(false);
         }
       } catch (_err) {
@@ -767,7 +837,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
             updateCameraPermissionState('denied');
           }
           setScannerBooting(false);
-          setScanModalOpen(false);
+          closeScanModal();
           setPortalNotice({ type: 'error', message: 'Could not start the camera. Please check permission and try again.' });
         }
       }
@@ -781,7 +851,17 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
       setScannerBooting(false);
       stopScanner();
     };
-  }, [scanModalOpen, submitGymQr, updateCameraPermissionState]);
+  }, [closeScanModal, scanActivationRequested, scanModalOpen, submitGymQr, updateCameraPermissionState]);
+
+  const repeatPromptHint = useMemo(() => {
+    if (!appleMobileDevice) return '';
+
+    if (standalonePortalApp) {
+      return 'If this iPhone still asks every time you reopen the app, the camera is likely set to Ask. Web apps cannot override that. Change the Safari/PWA camera access from Ask to Allow to reduce repeat prompts.';
+    }
+
+    return 'If this iPhone still asks every time, the site camera access is likely set to Ask. Web apps cannot override that. Change the browser site camera access to Allow to reduce repeat prompts.';
+  }, [appleMobileDevice, standalonePortalApp]);
 
   const copyMemberQr = async () => {
     if (!memberQr?.token) return;
@@ -1228,7 +1308,7 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
               </div>
               <button
                 type="button"
-                onClick={() => setScanModalOpen(false)}
+                onClick={closeScanModal}
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-300"
                 style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
                 <X size={16} />
@@ -1237,7 +1317,38 @@ function MemberPortalDashboard({ member, token, onSignOut, onSwitchGym, onMember
 
             <div className="rounded-[24px] overflow-hidden"
               style={{ background: '#020617', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <div id="member-gym-qr-reader" className="min-h-[320px]" />
+              {scanActivationRequested ? (
+                <div id="member-gym-qr-reader" className="min-h-[320px]" />
+              ) : (
+                <div className="min-h-[320px] px-5 py-6 flex flex-col items-center justify-center text-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                    style={{ background: 'rgba(99,102,241,0.14)', border: '1px solid rgba(99,102,241,0.22)' }}>
+                    <ScanLine size={24} className="text-indigo-300" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-white text-base font-black">
+                      {cameraPermissionHydrated && cameraPermissionState === 'granted' ? 'Camera ready to start' : 'Start camera when you are ready'}
+                    </p>
+                    <p className="text-slate-400 text-xs font-medium leading-relaxed">
+                      {cameraPermissionHydrated && cameraPermissionState === 'granted'
+                        ? 'This device already shows camera access as granted, so GymVault will try to start scanning directly.'
+                        : 'GymVault will request camera access only when you tap the button below.'}
+                    </p>
+                    {repeatPromptHint ? (
+                      <p className="text-[11px] font-semibold leading-relaxed text-amber-300/90">{repeatPromptHint}</p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={startScanCamera}
+                    disabled={scannerBooting || selfCheckinBusy}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black text-white transition-all disabled:opacity-60"
+                    style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 12px 30px rgba(99,102,241,0.35)' }}
+                  >
+                    <ScanLine size={16} /> Start Camera
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 p-3 rounded-2xl"
