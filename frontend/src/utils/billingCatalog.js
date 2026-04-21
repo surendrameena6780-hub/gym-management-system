@@ -2,12 +2,33 @@ export const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
 export const BILLING_CORE_PLAN_IDS = ['basic', 'growth', 'pro'];
 export const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1'];
 export const BILLING_CAPABILITY_KEYS = ['custom_templates'];
-const BILLING_CYCLE_KEYS = ['monthly', 'annual'];
+export const BILLING_CYCLE_KEYS = ['monthly', 'semiannual', 'annual'];
 const BILLING_COUPON_TYPES = ['PERCENT', 'AMOUNT'];
 const BRANCH_SCALING_LIMIT_KEYS = new Set();
 
 const BILLING_LIMIT_KEYS = ['members', 'staff', 'storage', 'branches', 'whatsapp', 'hello'];
-const BILLING_CYCLE_DAYS = { monthly: 30, annual: 365 };
+export const BILLING_CYCLE_DAYS = { monthly: 30, semiannual: 183, annual: 365 };
+const BILLING_CYCLE_PRICE_FIELDS = { monthly: 'monthly_price', semiannual: 'semiannual_price', annual: 'annual_price' };
+const BILLING_CYCLE_META = {
+  monthly: {
+    label: 'Monthly',
+    planLabel: 'Monthly Plan',
+    shortUnit: 'mo',
+    subscriptionLabel: 'Monthly Software Subscription',
+  },
+  semiannual: {
+    label: '6 Months',
+    planLabel: '6-Month Plan',
+    shortUnit: '6 mo',
+    subscriptionLabel: '6-Month Software Subscription',
+  },
+  annual: {
+    label: 'Annual',
+    planLabel: 'Annual Plan',
+    shortUnit: 'yr',
+    subscriptionLabel: 'Annual Software Subscription',
+  },
+};
 const BILLING_DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_BILLING_CREDIT_STATUSES = new Set(['ACTIVE']);
 const MIN_CHECKOUT_PAISE = 100;
@@ -20,6 +41,7 @@ export const defaultBillingCatalog = {
       id: 'test',
       name: 'Test Drive',
       monthly_price: 1,
+      semiannual_price: 1,
       annual_price: 1,
       popular: false,
       features: [
@@ -37,6 +59,7 @@ export const defaultBillingCatalog = {
       id: 'basic',
       name: 'Basic',
       monthly_price: 1,
+      semiannual_price: 5,
       annual_price: 10,
       popular: false,
       features: [
@@ -58,6 +81,7 @@ export const defaultBillingCatalog = {
       id: 'growth',
       name: 'Growth',
       monthly_price: 2,
+      semiannual_price: 10,
       annual_price: 20,
       popular: true,
       features: [
@@ -81,6 +105,7 @@ export const defaultBillingCatalog = {
       id: 'pro',
       name: 'Pro',
       monthly_price: 3,
+      semiannual_price: 15,
       annual_price: 30,
       popular: false,
       features: [
@@ -401,6 +426,7 @@ const normalizePlan = (planId, value) => {
     id: planId,
     name: readText(raw.name, fallback.name),
     monthly_price: readNumber(raw.monthly_price, fallback.monthly_price, { min: 0, max: 100000 }),
+    semiannual_price: readNumber(raw.semiannual_price, fallback.semiannual_price, { min: 0, max: 100000 }),
     annual_price: readNumber(raw.annual_price, fallback.annual_price, { min: 0, max: 100000 }),
     popular: raw.popular === undefined ? fallback.popular : Boolean(raw.popular),
     features: normalizePlanFeatures(planId, raw.features, fallback.features, normalizedLimits),
@@ -457,7 +483,27 @@ export const normalizePlanId = (value, fallback = 'basic') => {
 
 export const normalizeCycle = (value) => {
   const normalized = String(value || 'monthly').trim().toLowerCase();
-  return normalized === 'annual' ? 'annual' : 'monthly';
+  return BILLING_CYCLE_KEYS.includes(normalized) ? normalized : 'monthly';
+};
+
+export const getBillingCycleMeta = (cycle) => BILLING_CYCLE_META[normalizeCycle(cycle)] || BILLING_CYCLE_META.monthly;
+
+export const getBillingCycleLabel = (cycle) => getBillingCycleMeta(cycle).label;
+
+export const getBillingCyclePlanLabel = (cycle) => getBillingCycleMeta(cycle).planLabel;
+
+export const getBillingCycleShortUnit = (cycle) => getBillingCycleMeta(cycle).shortUnit;
+
+export const getBillingCycleSubscriptionLabel = (cycle) => getBillingCycleMeta(cycle).subscriptionLabel;
+
+export const getBillingCycleDays = (cycle, { planId } = {}) => {
+  if (normalizePlanId(planId, 'basic') === 'test') return 1;
+  return BILLING_CYCLE_DAYS[normalizeCycle(cycle)] || 30;
+};
+
+export const getPlanCyclePriceInr = (plan, cycle) => {
+  const priceField = BILLING_CYCLE_PRICE_FIELDS[normalizeCycle(cycle)] || BILLING_CYCLE_PRICE_FIELDS.monthly;
+  return Number(plan?.[priceField] || 0) || 0;
 };
 
 export const formatCurrencyInr = (amount) => `₹${new Intl.NumberFormat('en-IN', {
@@ -473,7 +519,7 @@ export const formatLimitValue = (value, unit = '') => {
 export const getPlanChargeInr = (billingCatalog, planId, cycle) => {
   const catalog = normalizeBillingCatalog(billingCatalog);
   const resolvedPlan = catalog.plans[normalizePlanId(planId)] || catalog.plans.basic;
-  return Number(normalizeCycle(cycle) === 'annual' ? resolvedPlan.annual_price : resolvedPlan.monthly_price) || 0;
+  return getPlanCyclePriceInr(resolvedPlan, cycle);
 };
 
 export const hasBillingCapability = (billingCatalog, planId, capabilityKey) => {
@@ -514,7 +560,7 @@ export const getBillingQuotePreview = ({
   const resolvedCurrentCycle = normalizeCycle(currentCycle);
   const fullPricePaise = Math.round(getPlanChargeInr(billingCatalog, resolvedTargetPlan, resolvedTargetCycle) * 100);
   const currentPricePaise = Math.round(getPlanChargeInr(billingCatalog, resolvedCurrentPlan, resolvedCurrentCycle) * 100);
-  const renewalDays = resolvedTargetPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[resolvedTargetCycle] || 30;
+  const renewalDays = getBillingCycleDays(resolvedTargetCycle, { planId: resolvedTargetPlan });
   const preview = {
     kind: 'fresh_purchase',
     fullPricePaise,
@@ -541,7 +587,7 @@ export const getBillingQuotePreview = ({
     return preview;
   }
 
-  const currentCycleDays = resolvedCurrentPlan === 'test' ? 1 : BILLING_CYCLE_DAYS[resolvedCurrentCycle] || 30;
+  const currentCycleDays = getBillingCycleDays(resolvedCurrentCycle, { planId: resolvedCurrentPlan });
   const remainingRatio = clampBillingValue((expiryMs - Date.now()) / (currentCycleDays * BILLING_DAY_MS), 0, 1);
   const currentRemainingCreditPaise = Math.floor(currentPricePaise * remainingRatio);
 

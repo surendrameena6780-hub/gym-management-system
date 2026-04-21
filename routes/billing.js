@@ -111,7 +111,8 @@ const ensureBillingCouponRedemptionSchema = async () => {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const CYCLE_DAYS = { monthly: 30, annual: 365 };
+const CYCLE_DAYS = { monthly: 30, semiannual: 183, annual: 365 };
+const SUPPORTED_BILLING_CYCLES = new Set(['monthly', 'semiannual', 'annual']);
 const ACTIVE_CREDIT_STATUSES = new Set(['ACTIVE']);
 const MIN_RAZORPAY_AMOUNT_PAISE = 100;
 const PLAN_SETUP_MODES = new Set(['balanced', 'flexible']);
@@ -150,7 +151,7 @@ const normalizePayablePaise = (value) => {
 const resolveSaasPrice = (billingConfig, planTier, cycle) => {
     const normalizedCycle = normalizeCycle(cycle);
     const normalizedPlan = normalizePlanTier(planTier);
-    if (!['monthly', 'annual'].includes(normalizedCycle)) {
+    if (!SUPPORTED_BILLING_CYCLES.has(normalizedCycle)) {
         return null;
     }
     return {

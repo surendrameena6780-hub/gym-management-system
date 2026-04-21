@@ -30,7 +30,9 @@ import {
 import PaginationControls from './components/PaginationControls';
 import {
   BILLING_ADDON_ORDER,
+  BILLING_CYCLE_KEYS,
   BILLING_PLAN_ORDER,
+  getBillingCycleLabel,
   normalizeBillingCatalog as normalizeFrontendBillingCatalog,
 } from './utils/billingCatalog';
 
@@ -163,7 +165,13 @@ const BILLING_PLAN_TINTS = {
   pro: 'border-rose-500/20 bg-rose-500/10',
 };
 
-const BILLING_COUPON_CYCLES = ['monthly', 'annual'];
+const BILLING_COUPON_CYCLES = BILLING_CYCLE_KEYS;
+
+const BILLING_PRICE_FIELDS = [
+  { key: 'monthly_price', label: 'Monthly Price' },
+  { key: 'semiannual_price', label: '6-Month Price' },
+  { key: 'annual_price', label: 'Annual Price' },
+];
 
 const normalizeCouponEditorCode = (value) => String(value || '')
   .trim()
@@ -1706,7 +1714,7 @@ function SuperAdminDashboard({ token, onLogout }) {
               </div>
 
               <p className="text-sm text-slate-400 max-w-3xl">
-                Edit plan names, monthly and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
+                Edit plan names, monthly, 6-month, and annual pricing, runtime limits, visible feature bullets, and add-on pricing here. These values feed signup, owner billing, checkout, and backend capacity enforcement.
               </p>
               <p className="text-xs text-slate-500 max-w-3xl">
                 Runtime limits are the exact enforced totals for each plan. Core capacity bullets shown to owners stay aligned with these values automatically, while the remaining feature bullets stay editable here.
@@ -1762,7 +1770,7 @@ function SuperAdminDashboard({ token, onLogout }) {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                             <div className="md:col-span-1">
                               <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Plan Name</p>
                               <input
@@ -1772,26 +1780,18 @@ function SuperAdminDashboard({ token, onLogout }) {
                                 onChange={(e) => updateBillingPlanField(planId, 'name', e.target.value)}
                               />
                             </div>
-                            <div>
-                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Monthly Price</p>
-                              <input
-                                type="number"
-                                min="0"
-                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
-                                value={plan.monthly_price}
-                                onChange={(e) => updateBillingPlanField(planId, 'monthly_price', Number.parseInt(e.target.value, 10) || 0)}
-                              />
-                            </div>
-                            <div>
-                              <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">Annual Price</p>
-                              <input
-                                type="number"
-                                min="0"
-                                className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
-                                value={plan.annual_price}
-                                onChange={(e) => updateBillingPlanField(planId, 'annual_price', Number.parseInt(e.target.value, 10) || 0)}
-                              />
-                            </div>
+                            {BILLING_PRICE_FIELDS.map((priceField) => (
+                              <div key={`${planId}-${priceField.key}`}>
+                                <p className="text-[10px] uppercase tracking-widest font-black text-slate-500 mb-1.5">{priceField.label}</p>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm"
+                                  value={plan[priceField.key]}
+                                  onChange={(e) => updateBillingPlanField(planId, priceField.key, Number.parseInt(e.target.value, 10) || 0)}
+                                />
+                              </div>
+                            ))}
                           </div>
 
                           <div>
@@ -2089,12 +2089,12 @@ function SuperAdminDashboard({ token, onLogout }) {
                                       onClick={() => toggleBillingCouponCycle(couponIndex, cycleKey)}
                                       className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${active ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40' : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'}`}
                                     >
-                                      {cycleKey}
+                                      {getBillingCycleLabel(cycleKey)}
                                     </button>
                                   );
                                 })}
                                 {(coupon.applies_to_cycles || []).length === 0 && (
-                                  <span className="text-[11px] font-bold text-slate-500">Applies to monthly and annual checkout.</span>
+                                  <span className="text-[11px] font-bold text-slate-500">Applies to every checkout cycle.</span>
                                 )}
                               </div>
                             </div>

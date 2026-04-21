@@ -16,11 +16,18 @@ import { apiFetch } from './utils/apiFetch';
 import { reportClientError } from './utils/clientErrorReporter';
 import {
   computeEffectiveLimits as computeCatalogEffectiveLimits,
+  getBillingCycleDays,
+  getBillingCycleLabel,
+  getBillingCyclePlanLabel,
+  getBillingCycleShortUnit,
+  getBillingCycleSubscriptionLabel,
   formatPaiseAmount as formatBillingPaise,
   getBillingQuotePreview as getCatalogBillingQuotePreview,
   hasBillingCapability,
   isAddonAllowedForPlan,
+  normalizeCycle as normalizeBillingCycle,
   normalizeBillingCatalog as normalizeFrontendBillingCatalog,
+  getPlanCyclePriceInr,
 } from './utils/billingCatalog';
 
 const TABS = [
@@ -64,6 +71,12 @@ const BILLING_ADDON_ICONS = {
   extra_members_100: User,
   extra_branch_1: Building2,
 };
+
+const BILLING_CYCLE_OPTIONS = [
+  { key: 'monthly', label: 'Monthly' },
+  { key: 'semiannual', label: '6 Months', badge: 'Balanced pricing' },
+  { key: 'annual', label: 'Annually', badge: 'Best value' },
+];
 
 const STAFF_ROLE_OPTIONS = [
   'MANAGER',
@@ -851,11 +864,12 @@ const loadRazorpayScript = () => {
     () => planCardOrder.map((planId) => {
       const plan = normalizedBillingCatalog.plans[planId];
       const theme = BILLING_PLAN_THEME[planId] || BILLING_PLAN_THEME.basic;
+      const cyclePrice = getPlanCyclePriceInr(plan, billingCycle);
       return {
         ...plan,
         ...theme,
-        price: billingCycle === 'annual' ? Number(plan.annual_price || 0) : Number(plan.monthly_price || 0),
-        billed: billingCycle === 'annual' ? Number(plan.annual_price || 0) : Number(plan.monthly_price || 0),
+        price: cyclePrice,
+        billed: cyclePrice,
         test: planId === 'test',
         desc: plan.features?.[0] || '',
       };
@@ -1041,7 +1055,7 @@ const loadRazorpayScript = () => {
           saas_status: res.data.gym.saas_status || 'FREE_TRIAL',
           saas_valid_until: res.data.gym.saas_valid_until || '',
           current_plan: res.data.gym.current_plan || 'basic',
-          saas_billing_cycle: res.data.gym.saas_billing_cycle || 'monthly',
+          saas_billing_cycle: normalizeBillingCycle(res.data.gym.saas_billing_cycle || 'monthly'),
           grace_period_days: Number(res.data.gym.grace_period_days || prev.grace_period_days || 3),
           branches_count: resolvedBranchesCount,
           addon_extra_whatsapp: Number(res.data.gym.addon_extra_whatsapp || 0),
@@ -1068,7 +1082,7 @@ const loadRazorpayScript = () => {
         saveInterfacePreferencesLocal(nextInterfacePreferences);
 
         if (res.data.gym.saas_billing_cycle) {
-          setBillingCycle(res.data.gym.saas_billing_cycle);
+          setBillingCycle(normalizeBillingCycle(res.data.gym.saas_billing_cycle));
         }
       }
 
@@ -2538,12 +2552,12 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                 ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCouponDiscountPaise)} coupon discount applied`
                 : previewCreditPaise > 0
                   ? `${selectedPlan.name} subscription • ₹${formatBillingPaise(previewCreditPaise)} credit applied`
-                  : `${checkoutCycle === 'annual' ? 'Annual' : 'Monthly'} Software Subscription`,
+                  : getBillingCycleSubscriptionLabel(checkoutCycle),
               ...(checkoutImageUrl ? { image: checkoutImageUrl } : {}),
               order_id: order.id,
               handler: async function (response) {
                   try {
-                      const optDays = selectedPlan.id === 'test' ? 1 : checkoutCycle === 'annual' ? 365 : 30;
+                    const optDays = getBillingCycleDays(checkoutCycle, { planId: selectedPlan.id });
                       setGymData(prev => ({
                           ...prev,
                           saas_status: 'ACTIVE',
@@ -2575,7 +2589,7 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                           id: response.razorpay_payment_id,
                           date: new Date().toISOString(),
                           amount: Number(order?.amount || 0) / 100 || selectedPlan.billed,
-                          plan: `GymVault ${selectedPlan.name} (${checkoutCycle})`
+                          plan: `GymVault ${selectedPlan.name} (${getBillingCycleLabel(checkoutCycle)})`
                       });
 
                       toast(
@@ -3511,7 +3525,7 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                                       {gymData.current_plan === 'test' ? 'Dev Test' : 'Enterprise License'}
                                   </span>
                                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                                      {gymData.saas_billing_cycle === 'annual' ? 'Annual Plan' : 'Monthly Plan'}
+                                      {getBillingCyclePlanLabel(gymData.saas_billing_cycle)}
                                   </span>
                               </div>
                               <h3 className="text-3xl font-black text-white">Vault Active</h3>
@@ -3551,7 +3565,7 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                             {gymData.current_plan === 'test' ? 'Dev Test' : 'Enterprise License'}
                         </span>
                         <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                            {gymData.saas_billing_cycle === 'annual' ? 'Annual' : 'Monthly'}
+                          {getBillingCycleLabel(gymData.saas_billing_cycle)}
                         </span>
                       </div>
                     </div>
@@ -3569,18 +3583,24 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                   <h2 className="text-2xl font-black text-slate-900 mb-1">Billing &amp; Subscription</h2>
                   <p className="text-sm font-medium text-slate-500">Upgrade to unlock your gym's full potential.</p>
                 </div>
-                <div className="bg-slate-100 p-1 rounded-xl inline-flex shadow-inner shrink-0">
-                  <button
-                    onClick={() => setBillingCycle('monthly')}
-                    className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${billingCycle === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                  >Monthly</button>
-                  <button
-                    onClick={() => setBillingCycle('annual')}
-                    className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${billingCycle === 'annual' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    Annually
-                    <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">Flexible pricing</span>
-                  </button>
+                <div className="bg-slate-100 p-1 rounded-xl inline-flex flex-wrap shadow-inner shrink-0 gap-1">
+                  {BILLING_CYCLE_OPTIONS.map((cycleOption) => {
+                    const isActiveCycle = billingCycle === cycleOption.key;
+                    return (
+                      <button
+                        key={cycleOption.key}
+                        onClick={() => setBillingCycle(cycleOption.key)}
+                        className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${isActiveCycle ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        {cycleOption.label}
+                        {cycleOption.badge && (
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider ${cycleOption.key === 'annual' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {cycleOption.badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -3614,7 +3634,7 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                     if (isActive) btnLabel = 'Currently Active';
                     else if (isTrial) btnLabel = 'Activate Now — Avoid Interruption';
                     else if (needsRenewal) btnLabel = 'Renew Subscription';
-                    else if (isSamePlanDifferentCycle) btnLabel = `Switch to ${billingCycle === 'annual' ? 'Annual' : 'Monthly'}`;
+                    else if (isSamePlanDifferentCycle) btnLabel = `Switch to ${getBillingCycleLabel(billingCycle)}`;
                     else if (plan.test) btnLabel = 'Pay \u20B91 \u2014 Test';
                     else if (planPreview?.kind === 'prorated_upgrade') btnLabel = `Upgrade for ₹${formatBillingPaise(planPreview.payablePaise)}`;
                     else if (planPreview?.creditPaise > 0 && !planPreview?.error) btnLabel = `Switch for ₹${formatBillingPaise(planPreview.payablePaise)}`;
@@ -3668,7 +3688,7 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                         <h3 className={`text-lg font-black mb-0.5 ${isActive || isTrial ? 'text-white' : 'text-slate-900'}`}>{plan.name}</h3>
                         <div className={`flex items-baseline gap-1 mb-2 ${isActive || isTrial ? 'text-white' : 'text-slate-900'}`}>
                           <span className="text-3xl font-black">&#8377;{plan.price}</span>
-                          <span className="text-sm font-medium text-slate-500">/{billingCycle === 'annual' ? 'yr' : 'mo'}</span>
+                          <span className="text-sm font-medium text-slate-500">/{getBillingCycleShortUnit(billingCycle)}</span>
                         </div>
                         {!isActive && !plan.test && planPreview?.creditPaise > 0 && !planPreview?.error && (
                           <p className="mb-5 text-xs font-bold text-emerald-600">
@@ -5225,7 +5245,7 @@ td{font-size:11.5px;padding:10px 8px;border:1px solid #bbb;text-align:center;fon
                           </div>
                           <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-right">
                             <p className="text-[10px] font-black uppercase tracking-widest text-white/50">Cycle</p>
-                            <p className="text-sm font-black">{billingCheckout.cycle === 'annual' ? 'Annual' : 'Monthly'}</p>
+                            <p className="text-sm font-black">{getBillingCycleLabel(billingCheckout.cycle)}</p>
                           </div>
                         </div>
 

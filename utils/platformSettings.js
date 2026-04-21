@@ -36,7 +36,8 @@ const BILLING_PLAN_ORDER = ['test', 'basic', 'growth', 'pro'];
 const BILLING_CORE_PLAN_IDS = ['basic', 'growth', 'pro'];
 const BILLING_ADDON_ORDER = ['extra_whatsapp_250', 'extra_staff_1', 'extra_members_100', 'extra_branch_1'];
 const BILLING_CAPABILITY_KEYS = ['custom_templates'];
-const BILLING_CYCLE_KEYS = ['monthly', 'annual'];
+const BILLING_CYCLE_KEYS = ['monthly', 'semiannual', 'annual'];
+const BILLING_CYCLE_PRICE_FIELDS = { monthly: 'monthly_price', semiannual: 'semiannual_price', annual: 'annual_price' };
 const BILLING_COUPON_TYPES = ['PERCENT', 'AMOUNT'];
 const BRANCH_SCALING_LIMIT_KEYS = new Set();
 
@@ -63,6 +64,7 @@ const defaultBillingConfig = {
             id: 'test',
             name: 'Test Drive',
             monthly_price: 1,
+            semiannual_price: 1,
             annual_price: 1,
             popular: false,
             features: [
@@ -87,6 +89,7 @@ const defaultBillingConfig = {
             id: 'basic',
             name: 'Basic',
             monthly_price: 1,
+            semiannual_price: 5,
             annual_price: 10,
             popular: false,
             features: [
@@ -115,6 +118,7 @@ const defaultBillingConfig = {
             id: 'growth',
             name: 'Growth',
             monthly_price: 2,
+            semiannual_price: 10,
             annual_price: 20,
             popular: true,
             features: [
@@ -145,6 +149,7 @@ const defaultBillingConfig = {
             id: 'pro',
             name: 'Pro',
             monthly_price: 3,
+            semiannual_price: 15,
             annual_price: 30,
             popular: false,
             features: [
@@ -493,6 +498,7 @@ const normalizeBillingPlan = (planId, value) => {
         id: planId,
         name: readText(raw.name) || defaults.name,
         monthly_price: readNumber(raw.monthly_price, defaults.monthly_price, { min: 0, max: 100000 }),
+        semiannual_price: readNumber(raw.semiannual_price, defaults.semiannual_price, { min: 0, max: 100000 }),
         annual_price: readNumber(raw.annual_price, defaults.annual_price, { min: 0, max: 100000 }),
         popular: raw.popular === undefined ? defaults.popular : Boolean(raw.popular),
         features: normalizePlanFeatures(planId, raw.features, defaults.features, normalizedLimits),
@@ -636,6 +642,11 @@ const ensurePlatformSettingsBase = async () => {
 
 const readText = (value) => String(value == null ? '' : value).trim();
 
+const normalizeBillingCycle = (value) => {
+    const normalized = readText(value).toLowerCase();
+    return BILLING_CYCLE_KEYS.includes(normalized) ? normalized : 'monthly';
+};
+
 const normalizeSupportProfile = (value) => {
     const raw = value && typeof value === 'object' ? value : {};
     const phone = readText(raw.phone);
@@ -699,7 +710,9 @@ const getBillingPlan = (billingConfig, planId, fallback = 'basic') => {
 
 const getBillingPlanPrice = (billingConfig, planId, cycle = 'monthly') => {
     const plan = getBillingPlan(billingConfig, planId);
-    return Number(cycle === 'annual' ? plan.annual_price : plan.monthly_price) || 0;
+    const cycleKey = normalizeBillingCycle(cycle);
+    const priceField = BILLING_CYCLE_PRICE_FIELDS[cycleKey] || BILLING_CYCLE_PRICE_FIELDS.monthly;
+    return Number(plan?.[priceField] || 0) || 0;
 };
 
 const hasBillingCapability = (billingConfig, planId, capabilityKey) => {
